@@ -13,15 +13,23 @@ datasource db {
 
 model Member {
   id           String   @id @default(cuid())
+  legacyId     Int?     @unique
+  code         String?  @unique
   email        String   @unique
   username     String?  @unique
   phone        String?  @unique
+  phoneCode    String?
   fullName     String?
+  firstName    String?
+  lastName     String?
   passwordHash String
+  passwordAlgo String   @default("bcrypt")
   avatarUrl    String?
+  coverUrl     String?
   bio          String?
   isActive     Boolean  @default(true)
   isVerified   Boolean  @default(false)
+  isPhoneVerified Boolean @default(false)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -34,6 +42,9 @@ model Member {
   topicSubs     TopicSubscription[]
   postLikes     PostLike[]
   commentLikes  CommentLike[]
+  affiliateRequests   AffiliateRequest[]    @relation("AffiliateRequestMember")
+  memberAffiliators   MemberAffiliator[]    @relation("MemberAffiliatorMember")
+  affiliateCommissions AffiliateCommission[] @relation("AffiliateCommissionRecipient")
 
   @@map("members")
 }
@@ -106,6 +117,7 @@ model OtpCode {
 
 model Country {
   id        String     @id @default(cuid())
+  legacyId  Int?       @unique
   name      String
   code      String?    @unique
   provinces Province[]
@@ -116,6 +128,7 @@ model Country {
 
 model Province {
   id        String  @id @default(cuid())
+  legacyId  Int?    @unique
   countryId String
   name      String
   cities    City[]
@@ -128,6 +141,7 @@ model Province {
 
 model City {
   id         String     @id @default(cuid())
+  legacyId   Int?       @unique
   provinceId String
   name       String
   districts  District[]
@@ -140,6 +154,7 @@ model City {
 
 model District {
   id       String @id @default(cuid())
+  legacyId Int?   @unique
   cityId   String
   name     String
   city     City   @relation(fields: [cityId], references: [id])
@@ -155,6 +170,7 @@ model District {
 
 model Banner {
   id        String   @id @default(cuid())
+  legacyId  Int?     @unique
   title     String
   imageUrl  String
   linkUrl   String?
@@ -167,6 +183,7 @@ model Banner {
 
 model Product {
   id          String   @id @default(cuid())
+  legacyId    Int?     @unique
   type        String
   title       String
   description String?
@@ -177,6 +194,8 @@ model Product {
   updatedAt   DateTime @updatedAt
 
   course Course?
+  affiliatePrograms    AffiliateProgram[]
+  affiliateCommissions AffiliateCommission[]
 
   @@map("products")
 }
@@ -199,15 +218,20 @@ model Course {
 
 model Topic {
   id          String   @id @default(cuid())
-  name        String   @unique
+  legacyId    Int?     @unique
+  networkId   String?
+  name        String
   description String?
   iconUrl     String?
   isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
 
+  network       Network? @relation(fields: [networkId], references: [id], onDelete: Cascade)
   posts         Post[]
   subscriptions TopicSubscription[]
 
+  @@index([networkId])
+  @@index([name])
   @@map("topics")
 }
 
@@ -226,10 +250,21 @@ model TopicSubscription {
 
 model Post {
   id        String   @id @default(cuid())
+  legacyId  Int?     @unique
   authorId  String
   topicId   String?
+  networkId String?
+  title     String?
   content   String
+  excerpt   String?
+  postType  String?
   imageUrls String[]
+  videoUrl  String?
+  embedUrl  String?
+  countLike    Int @default(0)
+  countComment Int @default(0)
+  countReplies Int @default(0)
+  viewCount    Int @default(0)
   isDeleted Boolean  @default(false)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -274,10 +309,14 @@ model PostReport {
 
 model Comment {
   id        String   @id @default(cuid())
+  legacyId  Int?     @unique
   postId    String
   authorId  String
   parentId  String?
   content   String
+  imageUrls String[]
+  countLike    Int @default(0)
+  countReplies Int @default(0)
   isDeleted Boolean  @default(false)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -308,19 +347,27 @@ model CommentLike {
 
 model Network {
   id          String   @id @default(cuid())
-  name        String   @unique
+  legacyId    Int?     @unique
+  name        String
   description String?
   iconUrl     String?
+  bannerUrl   String?
+  countMember Int      @default(0)
+  isPaid      Boolean  @default(false)
   createdAt   DateTime @default(now())
 
   members NetworkMember[]
   tags    NetworkTag[]
+  topics  Topic[]
+  affiliatePrograms AffiliateProgram[]
 
+  @@index([name])
   @@map("networks")
 }
 
 model NetworkMember {
   id        String   @id @default(cuid())
+  legacyId  Int?     @unique
   networkId String
   memberId  String
   joinedAt  DateTime @default(now())
@@ -348,6 +395,7 @@ model NetworkTag {
 
 model ReportCategory {
   id        String   @id @default(cuid())
+  legacyId  Int?     @unique
   name      String   @unique
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
@@ -405,6 +453,152 @@ model CommissionEntry {
 
   @@index([memberId])
   @@map("commission_entries")
+}
+
+// ============================================================================
+// Affiliate
+// ============================================================================
+
+enum AffiliateRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+model AffiliateProgramCategory {
+  id        String   @id @default(cuid())
+  legacyId  Int?     @unique
+  name      String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  programs AffiliateProgram[]
+
+  @@map("affiliate_program_categories")
+}
+
+/// Affiliate program a network account offers for a product.
+/// Source: legacy `network_account_product_affiliator`.
+model AffiliateProgram {
+  id                 String   @id @default(cuid())
+  legacyId           Int?     @unique
+  networkId          String?
+  productId          String?
+  categoryId         String?
+  name               String?
+  commissionType     String   @default("percent")
+  commissionAmount   Int      @default(0)
+  // Per-affiliator level overrides (legacy `pbs_*` columns)
+  pbsCommissionType  String   @default("PERCENT")
+  pbsAff1            Int      @default(20)
+  pbsAff2            Int      @default(30)
+  pbsAff3            Int      @default(40)
+  isActive           Boolean  @default(true)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  network    Network?                  @relation(fields: [networkId], references: [id])
+  product    Product?                  @relation(fields: [productId], references: [id])
+  category   AffiliateProgramCategory? @relation(fields: [categoryId], references: [id])
+
+  affiliators MemberAffiliator[]
+  requests    AffiliateRequest[]
+  commissions AffiliateCommission[]
+
+  @@index([networkId])
+  @@index([productId])
+  @@map("affiliate_programs")
+}
+
+/// Member application to join an affiliate program.
+/// Source: legacy `affiliate_request`.
+model AffiliateRequest {
+  id          String                 @id @default(cuid())
+  legacyId    Int?                   @unique
+  programId   String?
+  memberId    String?
+  inviterId   String?
+  email       String?
+  name        String?
+  phone       String?
+  fromSource  String?
+  invitedType String?
+  tags        String?
+  reqStatus   AffiliateRequestStatus @default(PENDING)
+  actionAt    DateTime?
+  actionBy    String?
+  createdAt   DateTime               @default(now())
+  updatedAt   DateTime               @updatedAt
+
+  program AffiliateProgram? @relation(fields: [programId], references: [id])
+  member  Member?           @relation("AffiliateRequestMember", fields: [memberId], references: [id])
+
+  @@index([programId])
+  @@index([memberId])
+  @@index([email])
+  @@map("affiliate_requests")
+}
+
+/// Active affiliator record (member is approved promoter for a program).
+/// Source: legacy `member_product_affiliator`.
+model MemberAffiliator {
+  id         String    @id @default(cuid())
+  legacyId   Int?      @unique
+  memberId   String
+  programId  String
+  requestId  String?
+  exitState  String?
+  exitAt     DateTime?
+  fbPixelId  String?
+  ttPixelId  String?
+  isActive   Boolean   @default(true)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  member  Member           @relation("MemberAffiliatorMember", fields: [memberId], references: [id], onDelete: Cascade)
+  program AffiliateProgram @relation(fields: [programId], references: [id], onDelete: Cascade)
+
+  commissions AffiliateCommission[]
+
+  @@unique([memberId, programId])
+  @@index([programId])
+  @@map("member_affiliators")
+}
+
+/// Commission earnings ledger.
+/// Source: legacy `affiliator_commision`.
+model AffiliateCommission {
+  id              String   @id @default(cuid())
+  legacyId        Int?     @unique
+  recipientId     String
+  affiliatorId    String?
+  programId       String?
+  productId       String?
+  level           Int      @default(1)
+  productPrice    Int      @default(0)
+  commissionType  String   @default("percent")
+  commissionAmount Int     @default(0)
+  amount          Int      @default(0)
+  feePercent      Int      @default(0)
+  feeAmount       Int      @default(0)
+  isPending       Boolean  @default(false)
+  isExpired       Boolean  @default(false)
+  isSuper         Boolean  @default(false)
+  source          String?
+  paymentLegacyId Int?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  recipient  Member            @relation("AffiliateCommissionRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
+  affiliator MemberAffiliator? @relation(fields: [affiliatorId], references: [id])
+  program    AffiliateProgram? @relation(fields: [programId], references: [id])
+  product    Product?          @relation(fields: [productId], references: [id])
+
+  @@index([recipientId])
+  @@index([programId])
+  @@index([productId])
+  @@map("affiliate_commissions")
 }
 
 // ============================================================================

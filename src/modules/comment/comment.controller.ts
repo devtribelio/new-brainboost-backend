@@ -1,14 +1,72 @@
-import type { Request, Response } from 'express';
+import type { Response } from 'express';
 import { CommentService } from './comment.service';
-import { notImplemented } from '@/common/utils/response.util';
+import { ok } from '@/common/utils/response.util';
+import { BadRequestException, UnauthorizedException } from '@/common/exceptions';
+import { buildPageMeta, parsePagination } from '@/common/utils/pagination.util';
+import { serializeComment } from '@/common/serializers';
+import type { AuthenticatedRequest } from '@/common/interfaces/authenticated-request';
 
 export class CommentController {
-  constructor(private readonly _commentService: CommentService) {}
+  constructor(private readonly commentService: CommentService) {}
 
-  list = async (_req: Request, res: Response) => notImplemented(res, 'comment.list');
-  detail = async (_req: Request, res: Response) => notImplemented(res, 'comment.detail');
-  like = async (_req: Request, res: Response) => notImplemented(res, 'comment.like');
-  create = async (_req: Request, res: Response) => notImplemented(res, 'comment.create');
-  update = async (_req: Request, res: Response) => notImplemented(res, 'comment.update');
-  remove = async (_req: Request, res: Response) => notImplemented(res, 'comment.remove');
+  list = async (req: AuthenticatedRequest, res: Response) => {
+    const postId = (req.query.postId as string) ?? '';
+    if (!postId) throw new BadRequestException('postId required');
+    const p = parsePagination(req.query as Record<string, unknown>);
+    const { rows, total } = await this.commentService.listForPost(p, postId);
+    const liked = req.user
+      ? await this.commentService.likedByMember(req.user.id, rows.map((r) => r.id))
+      : new Set<string>();
+    const data = rows.map((row) =>
+      serializeComment(row, liked.has(row.id) ? 'like' : 'dislike'),
+    );
+    return ok(res, data, buildPageMeta(total, p));
+  };
+
+  detail = async (req: AuthenticatedRequest, res: Response) => {
+    const commentId = (req.query.commentId as string) ?? '';
+    if (!commentId) throw new BadRequestException('commentId required');
+    const c = await this.commentService.detail(commentId);
+    const liked = req.user
+      ? await this.commentService.likedByMember(req.user.id, [c.id])
+      : new Set<string>();
+    return ok(res, serializeComment(c, liked.has(c.id) ? 'like' : 'dislike'));
+  };
+
+  like = async (req: AuthenticatedRequest, res: Response) => {
+    if (!req.user) throw new UnauthorizedException();
+    const commentId = (req.body?.commentId as string) ?? '';
+    if (!commentId) throw new BadRequestException('commentId required');
+    return ok(res, await this.commentService.toggleLike(req.user.id, commentId));
+  };
+
+  create = async (req: AuthenticatedRequest, res: Response) => {
+    if (!req.user) throw new UnauthorizedException();
+    const body = req.body ?? {};
+    const c = await this.commentService.create(req.user.id, {
+      postId: body.postId,
+      content: body.content ?? '',
+      parentId: body.replyId ?? body.parentId,
+      imageUrls: Array.isArray(body.images) ? body.images : body.imageUrls,
+    });
+    return ok(res, serializeComment(c), undefined, 201);
+  };
+
+  update = async (req: AuthenticatedRequest, res: Response) => {
+    if (!req.user) throw new UnauthorizedException();
+    const body = req.body ?? {};
+    const commentId = body.commentId as string;
+    const content = body.content as string;
+    if (!commentId || !content) throw new BadRequestException('commentId and content required');
+    const c = await this.commentService.update(req.user.id, commentId, content);
+    return ok(res, serializeComment(c));
+  };
+
+  remove = async (req: AuthenticatedRequest, res: Response) => {
+    if (!req.user) throw new UnauthorizedException();
+    const commentId = (req.body?.commentId as string) ?? (req.query.commentId as string) ?? '';
+    if (!commentId) throw new BadRequestException('commentId required');
+    await this.commentService.remove(req.user.id, commentId);
+    return ok(res, { commentId, deleted: true });
+  };
 }

@@ -1,2 +1,3 @@
+import { CommentService } from '@/modules/comment/comment.service';
 
-export class ReplyService {}
+export class ReplyService extends CommentService {}

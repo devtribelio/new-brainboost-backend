@@ -1,5 +1,5 @@
 import bcrypt from 'bcryptjs';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { prisma } from '@/config/prisma';
 import { env } from '@/config/env';
 import {
@@ -56,9 +56,10 @@ export class AuthService {
       throw new BadRequestException('username and password required for password grant');
     }
 
+    const username = dto.username.trim().toLowerCase();
     const member = await prisma.member.findFirst({
       where: {
-        OR: [{ email: dto.username }, { username: dto.username }, { phone: dto.username }],
+        OR: [{ email: username }, { username: dto.username }, { phone: dto.username }],
       },
     });
 
@@ -66,10 +67,35 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    const matches = await bcrypt.compare(dto.password, member.passwordHash);
+    const matches = await this.verifyPassword(dto.password, member);
     if (!matches) throw new UnauthorizedException('Invalid credentials');
 
     return this.issueTokenBundle(member.id, member.email);
+  }
+
+  /**
+   * Verify password supporting both bcrypt (new) and legacy MD5 (migrated members).
+   * On legacy match, transparently rehashes to bcrypt.
+   */
+  private async verifyPassword(
+    plaintext: string,
+    member: { id: string; passwordHash: string; passwordAlgo: string },
+  ): Promise<boolean> {
+    if (member.passwordAlgo === 'bcrypt') {
+      return bcrypt.compare(plaintext, member.passwordHash);
+    }
+    if (member.passwordAlgo === 'legacy') {
+      const md5 = createHash('md5').update(plaintext).digest('hex');
+      if (md5 !== member.passwordHash) return false;
+      const newHash = await bcrypt.hash(plaintext, 10);
+      await prisma.member.update({
+        where: { id: member.id },
+        data: { passwordHash: newHash, passwordAlgo: 'bcrypt' },
+      });
+      return true;
+    }
+    // Unknown algo — try bcrypt as best effort
+    return bcrypt.compare(plaintext, member.passwordHash);
   }
 
   private async loginWithRefreshToken(dto: LoginDto): Promise<TokenBundle> {

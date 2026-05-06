@@ -16,8 +16,10 @@
     "test:watch": "vitest",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
+    "prisma:deploy": "prisma migrate deploy",
     "prisma:studio": "prisma studio",
-    "seed:admin": "tsx prisma/seed-admin.ts"
+    "seed:admin": "tsx prisma/seed-admin.ts",
+    "migrate:legacy": "tsx scripts/migrate-from-legacy.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",
@@ -53,6 +55,7 @@
     "@typescript-eslint/parser": "^8.13.0",
     "eslint": "^8.57.1",
     "eslint-config-prettier": "^9.1.0",
+    "mysql2": "^3.22.3",
     "pino-pretty": "^11.3.0",
     "prettier": "^3.3.3",
     "prisma": "^5.22.0",

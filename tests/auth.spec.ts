@@ -31,10 +31,11 @@ describe('auth (contract)', () => {
     expect(res.status).toBe(401);
   });
 
-  it('GET /api/member/data/banner (stubbed, public) → 501', async () => {
+  it('GET /api/member/data/banner (public) → 200 with data array', async () => {
     const app = buildApp();
     const res = await request(app).get('/api/member/data/banner');
-    expect(res.status).toBe(501);
-    expect(res.body.error.message).toContain('Not Implemented');
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(Array.isArray(res.body.data)).toBe(true);
   });
 });
