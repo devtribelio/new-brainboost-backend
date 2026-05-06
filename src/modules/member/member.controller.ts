@@ -4,10 +4,21 @@ import { ok } from '@/common/utils/response.util';
 import type { AuthenticatedRequest } from '@/common/interfaces/authenticated-request';
 import { UnauthorizedException } from '@/common/exceptions';
 import { serializeMemberFull } from '@/common/serializers';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiResponse,
+  ApiTags,
+} from '@/common/openapi/decorators';
 
+@ApiTags('Member')
+@ApiBearerAuth()
 export class MemberController {
   constructor(private readonly memberService: MemberService) {}
 
+  @ApiOperation({ summary: 'Authenticated member info (with profile)' })
+  @ApiResponse({ status: 200 })
+  @ApiResponse({ status: 401, description: 'Missing/invalid bearer token' })
   info = async (req: AuthenticatedRequest, res: Response) => {
     if (!req.user) throw new UnauthorizedException();
     const member = await this.memberService.findById(req.user.id);

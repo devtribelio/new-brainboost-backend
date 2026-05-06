@@ -3,10 +3,19 @@ import { ReportService } from './report.service';
 import { ok } from '@/common/utils/response.util';
 import { BadRequestException, UnauthorizedException } from '@/common/exceptions';
 import type { AuthenticatedRequest } from '@/common/interfaces/authenticated-request';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiResponse,
+  ApiTags,
+} from '@/common/openapi/decorators';
 
+@ApiTags('Report')
 export class ReportController {
   constructor(private readonly reportService: ReportService) {}
 
+  @ApiOperation({ summary: 'List active report categories' })
+  @ApiResponse({ status: 200 })
   categories = async (_req: Request, res: Response) => {
     const rows = await this.reportService.listCategories();
     return ok(
@@ -20,6 +29,9 @@ export class ReportController {
     );
   };
 
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Report a member' })
+  @ApiResponse({ status: 201 })
   memberReport = async (req: AuthenticatedRequest, res: Response) => {
     if (!req.user) throw new UnauthorizedException();
     const body = req.body ?? {};

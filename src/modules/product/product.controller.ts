@@ -4,10 +4,24 @@ import { ok } from '@/common/utils/response.util';
 import { BadRequestException } from '@/common/exceptions';
 import { buildPageMeta, parsePagination } from '@/common/utils/pagination.util';
 import { serializeProduct } from '@/common/serializers';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiQuery,
+  ApiResponse,
+  ApiTags,
+} from '@/common/openapi/decorators';
 
+@ApiTags('Product')
 export class ProductController {
   constructor(private readonly productService: ProductService) {}
 
+  @ApiOperation({ summary: 'List products' })
+  @ApiQuery({ name: 'page', type: 'integer', required: false })
+  @ApiQuery({ name: 'perPage', type: 'integer', required: false })
+  @ApiQuery({ name: 'keyword', type: 'string', required: false })
+  @ApiQuery({ name: 'type', type: 'string', required: false })
+  @ApiResponse({ status: 200 })
   list = async (req: Request, res: Response) => {
     const p = parsePagination(req.query as Record<string, unknown>);
     const keyword = (req.query.keyword as string) ?? undefined;
@@ -16,6 +30,9 @@ export class ProductController {
     return ok(res, rows.map(serializeProduct), buildPageMeta(total, p));
   };
 
+  @ApiOperation({ summary: 'Course product detail' })
+  @ApiQuery({ name: 'productId', type: 'string', required: true })
+  @ApiResponse({ status: 200 })
   courseDetail = async (req: Request, res: Response) => {
     const productId = (req.query.productId as string) ?? '';
     if (!productId) throw new BadRequestException('productId required');
@@ -33,6 +50,9 @@ export class ProductController {
     });
   };
 
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Generate a share link for a course' })
+  @ApiResponse({ status: 200 })
   shareCourse = async (req: Request, res: Response) => {
     const productId = (req.body?.productId as string) ?? '';
     if (!productId) throw new BadRequestException('productId required');

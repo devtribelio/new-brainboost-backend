@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import type { AppModule } from './module.interface';
 import { logger } from '@/config/logger';
+import { withModulePrefix } from '@/common/openapi/registry';
 
 import { AuthModule } from '@/modules/auth/auth.module';
 import { AccountModule } from '@/modules/account/account.module';
@@ -41,7 +42,8 @@ const modules: AppModule[] = [
 export function registerModules(): Router {
   const root = Router();
   for (const mod of modules) {
-    root.use(mod.prefix, mod.routes());
+    const router = withModulePrefix(mod.prefix, () => mod.routes());
+    root.use(mod.prefix, router);
     logger.debug({ module: mod.name, prefix: mod.prefix }, 'Module registered');
   }
   return root;

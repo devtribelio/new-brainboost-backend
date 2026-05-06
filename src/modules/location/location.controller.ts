@@ -8,6 +8,7 @@ import {
   serializeCity,
   serializeDistrict,
 } from '@/common/serializers';
+import { ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@/common/openapi/decorators';
 
 function intOrUndef(v: unknown): number | undefined {
   if (v === undefined || v === null || v === '') return undefined;
@@ -15,9 +16,15 @@ function intOrUndef(v: unknown): number | undefined {
   return Number.isFinite(n) ? n : undefined;
 }
 
+@ApiTags('Location')
 export class LocationController {
   constructor(private readonly locationService: LocationService) {}
 
+  @ApiOperation({ summary: 'List countries' })
+  @ApiQuery({ name: 'page', type: 'integer', required: false })
+  @ApiQuery({ name: 'perPage', type: 'integer', required: false })
+  @ApiQuery({ name: 'keyword', type: 'string', required: false })
+  @ApiResponse({ status: 200, description: 'Paginated countries' })
   listCountries = async (req: Request, res: Response) => {
     const p = parsePagination(req.query as Record<string, unknown>);
     const keyword = (req.query.keyword as string) ?? undefined;
@@ -25,6 +32,12 @@ export class LocationController {
     return ok(res, rows.map(serializeCountry), buildPageMeta(total, p));
   };
 
+  @ApiOperation({ summary: 'List provinces (optionally filtered by country)' })
+  @ApiQuery({ name: 'page', type: 'integer', required: false })
+  @ApiQuery({ name: 'perPage', type: 'integer', required: false })
+  @ApiQuery({ name: 'keyword', type: 'string', required: false })
+  @ApiQuery({ name: 'countryId', type: 'integer', required: false, description: 'legacyId or cuid' })
+  @ApiResponse({ status: 200 })
   listProvinces = async (req: Request, res: Response) => {
     const p = parsePagination(req.query as Record<string, unknown>);
     const keyword = (req.query.keyword as string) ?? undefined;
@@ -36,6 +49,10 @@ export class LocationController {
     return ok(res, rows.map(serializeProvince), buildPageMeta(total, p));
   };
 
+  @ApiOperation({ summary: 'List cities (optionally filtered by province)' })
+  @ApiQuery({ name: 'provinceId', type: 'integer', required: false })
+  @ApiQuery({ name: 'keyword', type: 'string', required: false })
+  @ApiResponse({ status: 200 })
   listCities = async (req: Request, res: Response) => {
     const p = parsePagination(req.query as Record<string, unknown>);
     const keyword = (req.query.keyword as string) ?? undefined;
@@ -47,6 +64,10 @@ export class LocationController {
     return ok(res, rows.map(serializeCity), buildPageMeta(total, p));
   };
 
+  @ApiOperation({ summary: 'List districts (optionally filtered by city)' })
+  @ApiQuery({ name: 'cityId', type: 'integer', required: false })
+  @ApiQuery({ name: 'keyword', type: 'string', required: false })
+  @ApiResponse({ status: 200 })
   listDistricts = async (req: Request, res: Response) => {
     const p = parsePagination(req.query as Record<string, unknown>);
     const keyword = (req.query.keyword as string) ?? undefined;

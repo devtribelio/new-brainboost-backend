@@ -2,14 +2,14 @@ import { Router } from 'express';
 import { ReportController } from './report.controller';
 import { ReportService } from './report.service';
 import { authGuard } from '@/common/middlewares/auth.middleware';
-import { asyncHandler } from '@/common/utils/async-handler';
+import { bindRoute } from '@/common/openapi/route-binder';
 
 export function reportRoutes(): Router {
   const router = Router();
   const ctrl = new ReportController(new ReportService());
 
-  router.get('/report/category', asyncHandler(ctrl.categories));
-  router.post('/report/memberReport', authGuard, asyncHandler(ctrl.memberReport));
+  bindRoute({ router, controller: ctrl, method: 'get', path: '/report/category', handlerKey: 'categories' });
+  bindRoute({ router, controller: ctrl, method: 'post', path: '/report/memberReport', handlerKey: 'memberReport', middlewares: [authGuard] });
 
   return router;
 }

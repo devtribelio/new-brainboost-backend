@@ -2,15 +2,15 @@ import { Router } from 'express';
 import { NetworkController } from './network.controller';
 import { NetworkService } from './network.service';
 import { authGuard } from '@/common/middlewares/auth.middleware';
-import { asyncHandler } from '@/common/utils/async-handler';
+import { bindRoute } from '@/common/openapi/route-binder';
 
 export function networkRoutes(): Router {
   const router = Router();
   const ctrl = new NetworkController(new NetworkService());
 
-  router.post('/network/join', authGuard, asyncHandler(ctrl.join));
-  router.get('/network/member', asyncHandler(ctrl.members));
-  router.get('/network/tag', asyncHandler(ctrl.tags));
+  bindRoute({ router, controller: ctrl, method: 'post', path: '/network/join', handlerKey: 'join', middlewares: [authGuard] });
+  bindRoute({ router, controller: ctrl, method: 'get', path: '/network/member', handlerKey: 'members' });
+  bindRoute({ router, controller: ctrl, method: 'get', path: '/network/tag', handlerKey: 'tags' });
 
   return router;
 }

@@ -5,10 +5,24 @@ import { BadRequestException, UnauthorizedException } from '@/common/exceptions'
 import { buildPageMeta, parsePagination } from '@/common/utils/pagination.util';
 import { serializeComment } from '@/common/serializers';
 import type { AuthenticatedRequest } from '@/common/interfaces/authenticated-request';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiQuery,
+  ApiResponse,
+  ApiTags,
+} from '@/common/openapi/decorators';
 
+@ApiTags('Comment')
 export class CommentController {
   constructor(private readonly commentService: CommentService) {}
 
+  @ApiOperation({ summary: 'List comments for a post (top-level only)' })
+  @ApiQuery({ name: 'postId', type: 'string', required: true })
+  @ApiQuery({ name: 'page', type: 'integer', required: false })
+  @ApiQuery({ name: 'perPage', type: 'integer', required: false })
+  @ApiResponse({ status: 200 })
+  @ApiResponse({ status: 400, description: 'postId required' })
   list = async (req: AuthenticatedRequest, res: Response) => {
     const postId = (req.query.postId as string) ?? '';
     if (!postId) throw new BadRequestException('postId required');
@@ -23,6 +37,9 @@ export class CommentController {
     return ok(res, data, buildPageMeta(total, p));
   };
 
+  @ApiOperation({ summary: 'Comment detail' })
+  @ApiQuery({ name: 'commentId', type: 'string', required: true })
+  @ApiResponse({ status: 200 })
   detail = async (req: AuthenticatedRequest, res: Response) => {
     const commentId = (req.query.commentId as string) ?? '';
     if (!commentId) throw new BadRequestException('commentId required');
@@ -33,6 +50,9 @@ export class CommentController {
     return ok(res, serializeComment(c, liked.has(c.id) ? 'like' : 'dislike'));
   };
 
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Toggle like on a comment' })
+  @ApiResponse({ status: 200 })
   like = async (req: AuthenticatedRequest, res: Response) => {
     if (!req.user) throw new UnauthorizedException();
     const commentId = (req.body?.commentId as string) ?? '';
@@ -40,6 +60,9 @@ export class CommentController {
     return ok(res, await this.commentService.toggleLike(req.user.id, commentId));
   };
 
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Create a comment (or reply when replyId is set)' })
+  @ApiResponse({ status: 201 })
   create = async (req: AuthenticatedRequest, res: Response) => {
     if (!req.user) throw new UnauthorizedException();
     const body = req.body ?? {};
@@ -52,6 +75,9 @@ export class CommentController {
     return ok(res, serializeComment(c), undefined, 201);
   };
 
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Update comment content' })
+  @ApiResponse({ status: 200 })
   update = async (req: AuthenticatedRequest, res: Response) => {
     if (!req.user) throw new UnauthorizedException();
     const body = req.body ?? {};
@@ -62,6 +88,9 @@ export class CommentController {
     return ok(res, serializeComment(c));
   };
 
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Soft-delete a comment' })
+  @ApiResponse({ status: 200 })
   remove = async (req: AuthenticatedRequest, res: Response) => {
     if (!req.user) throw new UnauthorizedException();
     const commentId = (req.body?.commentId as string) ?? (req.query.commentId as string) ?? '';

@@ -2,19 +2,19 @@ import { Router } from 'express';
 import { PostController } from './post.controller';
 import { PostService } from './post.service';
 import { authGuard } from '@/common/middlewares/auth.middleware';
-import { asyncHandler } from '@/common/utils/async-handler';
+import { bindRoute } from '@/common/openapi/route-binder';
 
 export function postRoutes(): Router {
   const router = Router();
   const ctrl = new PostController(new PostService());
 
-  router.get('/post/list', asyncHandler(ctrl.list));
-  router.get('/post/detail', asyncHandler(ctrl.detail));
-  router.post('/post/like', authGuard, asyncHandler(ctrl.like));
-  // create + update share the same path (`POST /member/post/create`); diferensiasi di service.
-  router.post('/post/create', authGuard, asyncHandler(ctrl.upsert));
-  router.post('/post/delete', authGuard, asyncHandler(ctrl.remove));
-  router.post('/post/report', authGuard, asyncHandler(ctrl.report));
+  bindRoute({ router, controller: ctrl, method: 'get', path: '/post/list', handlerKey: 'list' });
+  bindRoute({ router, controller: ctrl, method: 'get', path: '/post/detail', handlerKey: 'detail' });
+  bindRoute({ router, controller: ctrl, method: 'post', path: '/post/like', handlerKey: 'like', middlewares: [authGuard] });
+  // POST /post/create handles both create + update (matches legacy API contract)
+  bindRoute({ router, controller: ctrl, method: 'post', path: '/post/create', handlerKey: 'upsert', middlewares: [authGuard] });
+  bindRoute({ router, controller: ctrl, method: 'post', path: '/post/delete', handlerKey: 'remove', middlewares: [authGuard] });
+  bindRoute({ router, controller: ctrl, method: 'post', path: '/post/report', handlerKey: 'report', middlewares: [authGuard] });
 
   return router;
 }

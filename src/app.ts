@@ -8,6 +8,7 @@ import cookieParser from 'cookie-parser';
 import { errorHandler, notFoundHandler } from '@/common/middlewares/error.middleware';
 import { registerModules } from '@/core/register-modules';
 import { adminRoutes } from '@/modules/admin/admin.routes';
+import { mountSwagger } from '@/common/openapi/swagger.middleware';
 import { ok } from '@/common/utils/response.util';
 import { env } from '@/config/env';
 
@@ -38,6 +39,10 @@ export function buildApp(): Express {
 
   app.use('/admin', adminRoutes());
   app.use('/api', registerModules());
+
+  // OpenAPI / Swagger UI — mounted AFTER all module routes so the
+  // route registry is fully populated before the document is built.
+  mountSwagger(app, '/api/docs');
 
   app.use(notFoundHandler);
   app.use(errorHandler);

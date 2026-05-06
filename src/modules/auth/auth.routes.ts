@@ -1,7 +1,6 @@
 import { Router } from 'express';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
-import { asyncHandler } from '@/common/utils/async-handler';
 import { validateDto } from '@/common/middlewares/validation.middleware';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
@@ -11,30 +10,68 @@ import {
   RequestForgotPasswordDto,
   ValidateOtpDto,
 } from './dto/forgot-password.dto';
+import { bindRoute } from '@/common/openapi/route-binder';
 
 export function authRoutes(): Router {
   const router = Router();
   const ctrl = new AuthController(new AuthService());
 
-  router.post('/oauth/token', validateDto(LoginDto), asyncHandler(ctrl.login));
-  router.post('/auth/register', validateDto(RegisterDto), asyncHandler(ctrl.register));
-  router.post('/auth/devices', validateDto(RegisterDeviceDto), asyncHandler(ctrl.registerDevice));
-  router.post(
-    '/auth/cloudMessaging',
-    validateDto(CloudMessagingDto),
-    asyncHandler(ctrl.cloudMessaging),
-  );
-  router.post(
-    '/auth/requestForgotPassword',
-    validateDto(RequestForgotPasswordDto),
-    asyncHandler(ctrl.requestForgotPassword),
-  );
-  router.post(
-    '/auth/forgotPasswordVerification',
-    validateDto(ForgotPasswordVerificationDto),
-    asyncHandler(ctrl.forgotPasswordVerification),
-  );
-  router.post('/auth/validateOtp', validateDto(ValidateOtpDto), asyncHandler(ctrl.validateOtp));
+  bindRoute({
+    router,
+    controller: ctrl,
+    method: 'post',
+    path: '/oauth/token',
+    handlerKey: 'login',
+    middlewares: [validateDto(LoginDto)],
+  });
+  bindRoute({
+    router,
+    controller: ctrl,
+    method: 'post',
+    path: '/auth/register',
+    handlerKey: 'register',
+    middlewares: [validateDto(RegisterDto)],
+  });
+  bindRoute({
+    router,
+    controller: ctrl,
+    method: 'post',
+    path: '/auth/devices',
+    handlerKey: 'registerDevice',
+    middlewares: [validateDto(RegisterDeviceDto)],
+  });
+  bindRoute({
+    router,
+    controller: ctrl,
+    method: 'post',
+    path: '/auth/cloudMessaging',
+    handlerKey: 'cloudMessaging',
+    middlewares: [validateDto(CloudMessagingDto)],
+  });
+  bindRoute({
+    router,
+    controller: ctrl,
+    method: 'post',
+    path: '/auth/requestForgotPassword',
+    handlerKey: 'requestForgotPassword',
+    middlewares: [validateDto(RequestForgotPasswordDto)],
+  });
+  bindRoute({
+    router,
+    controller: ctrl,
+    method: 'post',
+    path: '/auth/forgotPasswordVerification',
+    handlerKey: 'forgotPasswordVerification',
+    middlewares: [validateDto(ForgotPasswordVerificationDto)],
+  });
+  bindRoute({
+    router,
+    controller: ctrl,
+    method: 'post',
+    path: '/auth/validateOtp',
+    handlerKey: 'validateOtp',
+    middlewares: [validateDto(ValidateOtpDto)],
+  });
 
   return router;
 }

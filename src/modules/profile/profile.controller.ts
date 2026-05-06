@@ -4,10 +4,20 @@ import { ok } from '@/common/utils/response.util';
 import { UnauthorizedException } from '@/common/exceptions';
 import { serializeMemberFull } from '@/common/serializers';
 import type { AuthenticatedRequest } from '@/common/interfaces/authenticated-request';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiResponse,
+  ApiTags,
+} from '@/common/openapi/decorators';
 
+@ApiTags('Profile')
+@ApiBearerAuth()
 export class ProfileController {
   constructor(private readonly profileService: ProfileService) {}
 
+  @ApiOperation({ summary: 'Get my profile info' })
+  @ApiResponse({ status: 200 })
   getInfo = async (req: AuthenticatedRequest, res: Response) => {
     if (!req.user) throw new UnauthorizedException();
     const member = await this.profileService.getInfo(req.user.id);
@@ -17,6 +27,8 @@ export class ProfileController {
     });
   };
 
+  @ApiOperation({ summary: 'Update my profile fields' })
+  @ApiResponse({ status: 200 })
   update = async (req: AuthenticatedRequest, res: Response) => {
     if (!req.user) throw new UnauthorizedException();
     const body = req.body ?? {};
@@ -33,6 +45,8 @@ export class ProfileController {
     return ok(res, serializeMemberFull(member));
   };
 
+  @ApiOperation({ summary: 'Set my address / location FK chain' })
+  @ApiResponse({ status: 200 })
   updateLocation = async (req: AuthenticatedRequest, res: Response) => {
     if (!req.user) throw new UnauthorizedException();
     const body = req.body ?? {};

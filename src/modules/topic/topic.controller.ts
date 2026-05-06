@@ -5,10 +5,24 @@ import { BadRequestException, UnauthorizedException } from '@/common/exceptions'
 import { buildPageMeta, parsePagination } from '@/common/utils/pagination.util';
 import { serializeTopic } from '@/common/serializers';
 import type { AuthenticatedRequest } from '@/common/interfaces/authenticated-request';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiQuery,
+  ApiResponse,
+  ApiTags,
+} from '@/common/openapi/decorators';
 
+@ApiTags('Topic')
 export class TopicController {
   constructor(private readonly topicService: TopicService) {}
 
+  @ApiOperation({ summary: 'List topics' })
+  @ApiQuery({ name: 'page', type: 'integer', required: false })
+  @ApiQuery({ name: 'perPage', type: 'integer', required: false })
+  @ApiQuery({ name: 'keyword', type: 'string', required: false })
+  @ApiQuery({ name: 'networkId', type: 'string', required: false })
+  @ApiResponse({ status: 200 })
   list = async (req: Request, res: Response) => {
     const p = parsePagination(req.query as Record<string, unknown>);
     const keyword = (req.query.keyword as string) ?? undefined;
@@ -17,6 +31,9 @@ export class TopicController {
     return ok(res, rows.map(serializeTopic), buildPageMeta(total, p));
   };
 
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Subscribe / unsubscribe to a topic' })
+  @ApiResponse({ status: 200 })
   subscribe = async (req: AuthenticatedRequest, res: Response) => {
     if (!req.user) throw new UnauthorizedException();
     const topicId = (req.body?.topicId as string) ?? '';

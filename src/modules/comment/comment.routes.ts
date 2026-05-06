@@ -2,18 +2,18 @@ import { Router } from 'express';
 import { CommentController } from './comment.controller';
 import { CommentService } from './comment.service';
 import { authGuard } from '@/common/middlewares/auth.middleware';
-import { asyncHandler } from '@/common/utils/async-handler';
+import { bindRoute } from '@/common/openapi/route-binder';
 
 export function commentRoutes(): Router {
   const router = Router();
   const ctrl = new CommentController(new CommentService());
 
-  router.get('/comment/list', asyncHandler(ctrl.list));
-  router.get('/comment/detail', asyncHandler(ctrl.detail));
-  router.post('/comment/like', authGuard, asyncHandler(ctrl.like));
-  router.post('/comment/create', authGuard, asyncHandler(ctrl.create));
-  router.post('/comment/update', authGuard, asyncHandler(ctrl.update));
-  router.post('/comment/delete', authGuard, asyncHandler(ctrl.remove));
+  bindRoute({ router, controller: ctrl, method: 'get', path: '/comment/list', handlerKey: 'list' });
+  bindRoute({ router, controller: ctrl, method: 'get', path: '/comment/detail', handlerKey: 'detail' });
+  bindRoute({ router, controller: ctrl, method: 'post', path: '/comment/like', handlerKey: 'like', middlewares: [authGuard] });
+  bindRoute({ router, controller: ctrl, method: 'post', path: '/comment/create', handlerKey: 'create', middlewares: [authGuard] });
+  bindRoute({ router, controller: ctrl, method: 'post', path: '/comment/update', handlerKey: 'update', middlewares: [authGuard] });
+  bindRoute({ router, controller: ctrl, method: 'post', path: '/comment/delete', handlerKey: 'remove', middlewares: [authGuard] });
 
   return router;
 }

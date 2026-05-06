@@ -1,16 +1,16 @@
 import { Router } from 'express';
 import { LocationController } from './location.controller';
 import { LocationService } from './location.service';
-import { asyncHandler } from '@/common/utils/async-handler';
+import { bindRoute } from '@/common/openapi/route-binder';
 
 export function locationRoutes(): Router {
   const router = Router();
   const ctrl = new LocationController(new LocationService());
 
-  router.get('/data/location/country', asyncHandler(ctrl.listCountries));
-  router.get('/data/location/province', asyncHandler(ctrl.listProvinces));
-  router.get('/data/location/city', asyncHandler(ctrl.listCities));
-  router.get('/data/location/district', asyncHandler(ctrl.listDistricts));
+  bindRoute({ router, controller: ctrl, method: 'get', path: '/data/location/country', handlerKey: 'listCountries' });
+  bindRoute({ router, controller: ctrl, method: 'get', path: '/data/location/province', handlerKey: 'listProvinces' });
+  bindRoute({ router, controller: ctrl, method: 'get', path: '/data/location/city', handlerKey: 'listCities' });
+  bindRoute({ router, controller: ctrl, method: 'get', path: '/data/location/district', handlerKey: 'listDistricts' });
 
   return router;
 }
