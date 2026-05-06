@@ -30,6 +30,11 @@ export const env = {
     accessExpiresIn: optional('JWT_ACCESS_EXPIRES_IN', '15m'),
     refreshExpiresIn: optional('JWT_REFRESH_EXPIRES_IN', '30d'),
   },
+  admin: {
+    jwtSecret: required('ADMIN_JWT_SECRET'),
+    jwtTtl: optional('ADMIN_JWT_TTL', '8h'),
+    cookieName: optional('ADMIN_COOKIE_NAME', 'bb_admin'),
+  },
   upload: {
     tempDir: optional('UPLOAD_TEMP_DIR', './tmp/uploads'),
   },

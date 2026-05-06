@@ -406,3 +406,26 @@ model CommissionEntry {
   @@index([memberId])
   @@map("commission_entries")
 }
+
+// ============================================================================
+// Admin (separate from Member — isolated admin panel auth)
+// ============================================================================
+
+enum AdminRole {
+  SUPERADMIN
+  ADMIN
+}
+
+model Admin {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  fullName     String
+  passwordHash String
+  role         AdminRole @default(ADMIN)
+  isActive     Boolean   @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@map("admins")
+}
