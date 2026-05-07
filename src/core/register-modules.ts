@@ -12,6 +12,7 @@ import { UploadModule } from '@/modules/upload/upload.module';
 import { BannerModule } from '@/modules/banner/banner.module';
 import { ProductModule } from '@/modules/product/product.module';
 import { CommissionModule } from '@/modules/commission/commission.module';
+import { AffiliateModule } from '@/modules/affiliate/affiliate.module';
 import { TopicModule } from '@/modules/topic/topic.module';
 import { PostModule } from '@/modules/post/post.module';
 import { CommentModule } from '@/modules/comment/comment.module';
@@ -30,6 +31,7 @@ const modules: AppModule[] = [
   BannerModule,
   ProductModule,
   CommissionModule,
+  AffiliateModule,
   TopicModule,
   PostModule,
   CommentModule,

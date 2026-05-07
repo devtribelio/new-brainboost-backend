@@ -1,0 +1,156 @@
+import type { Request, Response } from 'express';
+import type { AffiliateProgramService } from './program.service';
+import type { AffiliatorService } from './affiliator.service';
+import type { EnrollmentService } from './enrollment.service';
+import { VisitService } from './visit.service';
+import { ok } from '@/common/utils/response.util';
+import { UnauthorizedException, BadRequestException } from '@/common/exceptions';
+import type { AuthenticatedRequest } from '@/common/interfaces/authenticated-request';
+import type { AffiliateBased } from './constants';
+import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@/common/openapi/decorators';
+
+@ApiTags('Affiliate')
+export class AffiliateController {
+  constructor(
+    private readonly programService: AffiliateProgramService,
+    private readonly affiliatorService: AffiliatorService,
+    private readonly enrollmentService: EnrollmentService,
+    private readonly visitService: VisitService,
+  ) {}
+
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get my affiliator profile (auto-generates affiliateCode if missing)' })
+  @ApiResponse({ status: 200 })
+  getMe = async (req: AuthenticatedRequest, res: Response) => {
+    if (!req.user) throw new UnauthorizedException();
+    const profile = await this.affiliatorService.getMe(req.user.id);
+    return ok(res, profile);
+  };
+
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Set my affiliate mode (PERFORMANCE | GROWTH | INACTIVE)' })
+  @ApiResponse({ status: 200 })
+  setMode = async (req: AuthenticatedRequest, res: Response) => {
+    if (!req.user) throw new UnauthorizedException();
+    const mode = (req.body?.mode as AffiliateBased) || (req.body?.affiliateBased as AffiliateBased);
+    if (!mode) throw new BadRequestException('mode required');
+    const updated = await this.affiliatorService.setMode(req.user.id, mode);
+    return ok(res, updated);
+  };
+
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Affiliator dashboard summary (lifetime, balance, pending, current tier)' })
+  @ApiResponse({ status: 200 })
+  getSummary = async (req: AuthenticatedRequest, res: Response) => {
+    if (!req.user) throw new UnauthorizedException();
+    const summary = await this.affiliatorService.getSummary(req.user.id);
+    return ok(res, summary);
+  };
+
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'List my commissions (paginated, optional status/from/to filter)' })
+  @ApiResponse({ status: 200 })
+  listMyCommissions = async (req: AuthenticatedRequest, res: Response) => {
+    if (!req.user) throw new UnauthorizedException();
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const perPage = Math.min(100, Math.max(1, Number(req.query.perPage) || 20));
+    const status = typeof req.query.status === 'string' ? req.query.status : undefined;
+    const from = typeof req.query.from === 'string' ? new Date(req.query.from) : undefined;
+    const to = typeof req.query.to === 'string' ? new Date(req.query.to) : undefined;
+    const { rows, total } = await this.affiliatorService.listCommissions(req.user.id, { status, from, to }, page, perPage);
+    return ok(res, rows, { page, perPage, total });
+  };
+
+  @ApiOperation({ summary: 'List active affiliate programs' })
+  @ApiResponse({ status: 200 })
+  listPrograms = async (_req: Request, res: Response) => {
+    const programs = await this.programService.listActive();
+    return ok(res, programs);
+  };
+
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Enroll in a program by code' })
+  @ApiResponse({ status: 200 })
+  enroll = async (req: AuthenticatedRequest, res: Response) => {
+    if (!req.user) throw new UnauthorizedException();
+    const code = req.params.code;
+    if (!code) throw new BadRequestException('program code required');
+    const enrollment = await this.enrollmentService.joinByCode(req.user.id, code);
+    return ok(res, enrollment);
+  };
+
+  @ApiOperation({ summary: 'Log an affiliate link click. Always returns 200 — never breaks marketing ads.' })
+  @ApiResponse({ status: 200 })
+  logVisit = async (req: AuthenticatedRequest, res: Response) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const programCode = (body.programCode || body.program_code || req.query.program) as string;
+    const affiliatorCode = (body.affiliatorCode || body.affCode || body.aff || req.query.affCode) as string;
+
+    const queryParsed = VisitService.parseQuery({ ...req.query, ...body });
+    const result = await this.visitService.logVisit({
+      programCode,
+      affiliatorCode,
+      memberId: req.user?.id ?? null,
+      utmSource: queryParsed.utmSource ?? (body.utmSource as string | undefined),
+      utmMedium: queryParsed.utmMedium ?? (body.utmMedium as string | undefined),
+      utmCampaign: queryParsed.utmCampaign ?? (body.utmCampaign as string | undefined),
+      utmContent: queryParsed.utmContent ?? (body.utmContent as string | undefined),
+      utmTerm: queryParsed.utmTerm ?? (body.utmTerm as string | undefined),
+      adId: queryParsed.adId ?? (body.adId as string | undefined),
+      adNetwork: queryParsed.adNetwork ?? (body.adNetwork as string | undefined),
+      ipAddress: extractIp(req),
+      userAgent: req.headers['user-agent'],
+      referer: req.headers.referer,
+      deviceId: (req.headers['x-device-id'] as string | undefined) ?? (body.deviceId as string | undefined),
+      platform: (req.headers['x-platform'] as string | undefined) ?? (body.platform as string | undefined),
+      appVersion: (req.headers['x-app-version'] as string | undefined) ?? (body.appVersion as string | undefined),
+      installReferrer: body.installReferrer as string | undefined,
+      rawQueryString: req.url.includes('?') ? req.url.slice(req.url.indexOf('?') + 1) : undefined,
+      rawHeaders: VisitService.sanitizeHeaders(req.headers as Record<string, string | string[] | undefined>),
+      clientEventId: body.clientEventId as string | undefined,
+    });
+
+    return ok(res, result);
+  };
+
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Bind affiliate attribution to logged-in member (deep-link post-login)' })
+  @ApiResponse({ status: 200 })
+  logAttribution = async (req: AuthenticatedRequest, res: Response) => {
+    if (!req.user) throw new UnauthorizedException();
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const programCode = (body.programCode || body.program_code) as string;
+    const affiliatorCode = (body.affiliatorCode || body.affCode || body.aff) as string;
+    if (!programCode || !affiliatorCode) {
+      throw new BadRequestException('programCode and affiliatorCode required');
+    }
+
+    const result = await this.visitService.logAttribution({
+      programCode,
+      affiliatorCode,
+      memberId: req.user.id,
+      utmSource: body.utmSource as string | undefined,
+      utmMedium: body.utmMedium as string | undefined,
+      utmCampaign: body.utmCampaign as string | undefined,
+      utmContent: body.utmContent as string | undefined,
+      utmTerm: body.utmTerm as string | undefined,
+      adId: body.adId as string | undefined,
+      adNetwork: body.adNetwork as string | undefined,
+      deviceId: (req.headers['x-device-id'] as string | undefined) ?? (body.deviceId as string | undefined),
+      platform: (req.headers['x-platform'] as string | undefined) ?? (body.platform as string | undefined),
+      appVersion: (req.headers['x-app-version'] as string | undefined) ?? (body.appVersion as string | undefined),
+      installReferrer: body.installReferrer as string | undefined,
+      ipAddress: extractIp(req),
+      userAgent: req.headers['user-agent'],
+      clientEventId: body.clientEventId as string | undefined,
+    });
+
+    return ok(res, result);
+  };
+}
+
+function extractIp(req: Request): string | undefined {
+  const xff = req.headers['x-forwarded-for'];
+  if (typeof xff === 'string' && xff.length > 0) return xff.split(',')[0]?.trim();
+  return req.socket.remoteAddress ?? undefined;
+}
