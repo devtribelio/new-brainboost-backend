@@ -23,3 +23,28 @@ export function buildPageMeta(total: number, params: PaginationParams) {
     totalPages: Math.max(1, Math.ceil(total / params.perPage)),
   };
 }
+
+export interface LegacyPage<T> {
+  total: number;
+  totalAll?: number;
+  perPage: number;
+  currentPage: number;
+  lastPage: number;
+  items: T[];
+}
+
+export function buildLegacyPage<T>(
+  rows: T[],
+  total: number,
+  params: PaginationParams,
+  totalAll?: number,
+): LegacyPage<T> {
+  return {
+    total,
+    ...(totalAll !== undefined ? { totalAll } : {}),
+    perPage: params.perPage,
+    currentPage: params.page,
+    lastPage: Math.max(1, Math.ceil(total / params.perPage)),
+    items: rows,
+  };
+}

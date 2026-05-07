@@ -1,8 +1,9 @@
 import type { Response } from 'express';
 import { PostService } from './post.service';
+import { ReportService } from '@/modules/report/report.service';
 import { ok } from '@/common/utils/response.util';
 import { BadRequestException, UnauthorizedException } from '@/common/exceptions';
-import { buildPageMeta, parsePagination } from '@/common/utils/pagination.util';
+import { buildLegacyPage, parsePagination } from '@/common/utils/pagination.util';
 import { serializePost } from '@/common/serializers';
 import type { AuthenticatedRequest } from '@/common/interfaces/authenticated-request';
 import {
@@ -15,7 +16,10 @@ import {
 
 @ApiTags('Post')
 export class PostController {
-  constructor(private readonly postService: PostService) {}
+  constructor(
+    private readonly postService: PostService,
+    private readonly reportService: ReportService = new ReportService(),
+  ) {}
 
   @ApiOperation({ summary: 'List posts (feed)' })
   @ApiQuery({ name: 'page', type: 'integer', required: false })
@@ -33,6 +37,7 @@ export class PostController {
       networkId: q.networkId,
       topicId: q.topicId,
       authorId: q.memberId,
+      viewerId: req.user?.id,
     });
 
     const liked = req.user
@@ -40,7 +45,7 @@ export class PostController {
       : new Set<string>();
 
     const data = rows.map((row) => serializePost(row, liked.has(row.id) ? 'like' : 'dislike'));
-    return ok(res, data, buildPageMeta(total, p));
+    return ok(res, buildLegacyPage(data, total, p));
   };
 
   @ApiOperation({ summary: 'Post detail (increments view count)' })
@@ -50,7 +55,7 @@ export class PostController {
   detail = async (req: AuthenticatedRequest, res: Response) => {
     const postId = (req.query.postId as string) ?? '';
     if (!postId) throw new BadRequestException('postId required');
-    const post = await this.postService.detail(postId);
+    const post = await this.postService.detail(postId, req.user?.id);
     const liked = req.user
       ? await this.postService.likedByMember(req.user.id, [post.id])
       : new Set<string>();
@@ -100,8 +105,21 @@ export class PostController {
 
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Report a post' })
-  @ApiResponse({ status: 200 })
-  report = async (_req: AuthenticatedRequest, res: Response) => {
-    return ok(res, { ok: true, note: 'report endpoint accepts payload but persistence pending' });
+  @ApiResponse({ status: 201 })
+  report = async (req: AuthenticatedRequest, res: Response) => {
+    if (!req.user) throw new UnauthorizedException();
+    const body = req.body ?? {};
+    const postId = body.postId as string;
+    const categoryId = (body.categoryId ?? body.reportCategoryId) as string;
+    if (!postId || !categoryId) {
+      throw new BadRequestException('postId and categoryId required');
+    }
+    const r = await this.reportService.reportPost(req.user.id, {
+      postId,
+      categoryId,
+      networkId: body.networkId,
+      reason: body.reason,
+    });
+    return ok(res, r, undefined, 201);
   };
 }

@@ -2,7 +2,7 @@ import type { Request, Response } from 'express';
 import { NetworkService } from './network.service';
 import { ok } from '@/common/utils/response.util';
 import { BadRequestException, UnauthorizedException } from '@/common/exceptions';
-import { buildPageMeta, parsePagination } from '@/common/utils/pagination.util';
+import { buildLegacyPage, parsePagination } from '@/common/utils/pagination.util';
 import { serializeMember } from '@/common/serializers';
 import type { AuthenticatedRequest } from '@/common/interfaces/authenticated-request';
 import {
@@ -46,7 +46,7 @@ export class NetworkController {
       joinedAt: networkMember.joinedAt,
       member: serializeMember(member),
     }));
-    return ok(res, data, buildPageMeta(total, p));
+    return ok(res, buildLegacyPage(data, total, p));
   };
 
   @ApiOperation({ summary: 'List tags of a network' })
@@ -59,8 +59,11 @@ export class NetworkController {
     const { rows, total } = await this.networkService.listTags(p, networkId);
     return ok(
       res,
-      rows.map((t) => ({ id: t.id, networkId: t.networkId, name: t.name })),
-      buildPageMeta(total, p),
+      buildLegacyPage(
+        rows.map((t) => ({ id: t.id, networkId: t.networkId, name: t.name })),
+        total,
+        p,
+      ),
     );
   };
 }

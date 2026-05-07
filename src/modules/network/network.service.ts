@@ -1,5 +1,5 @@
 import { prisma } from '@/config/prisma';
-import { BadRequestException, NotFoundException } from '@/common/exceptions';
+import { BadRequestException, ForbiddenException, NotFoundException } from '@/common/exceptions';
 import type { PaginationParams } from '@/common/utils/pagination.util';
 
 export class NetworkService {
@@ -71,13 +71,50 @@ export class NetworkService {
   }
 
   async join(memberId: string, networkInput: string) {
+    const member = await prisma.member.findUnique({ where: { id: memberId } });
+    if (!member) throw new NotFoundException('Member not found');
+    if (!member.isActive) throw new ForbiddenException('Member is not active');
+
     const networkId = await this.resolveNetworkId(networkInput);
     if (!networkId) throw new NotFoundException('Network not found');
+
+    const network = await prisma.network.findUnique({ where: { id: networkId } });
+    if (!network) throw new NotFoundException('Network not found');
+    if (!network.isActive) throw new ForbiddenException('Network is not active');
+    if (network.isHelpdesk) {
+      throw new BadRequestException('Cannot join helpdesk network directly');
+    }
+
+    const banned = await prisma.networkBannedMember.findUnique({
+      where: { networkId_memberId: { networkId, memberId } },
+    });
+    if (banned) throw new ForbiddenException('Member is banned from this network');
 
     const existing = await prisma.networkMember.findUnique({
       where: { networkId_memberId: { networkId, memberId } },
     });
-    if (existing) return { networkId, alreadyJoined: true };
+    if (existing) {
+      return { networkId, status: 'APPROVED', alreadyJoined: true };
+    }
+
+    if (network.memberQuota && network.countMember >= network.memberQuota) {
+      throw new BadRequestException('Network has reached its member quota');
+    }
+
+    if (!network.isPublic) {
+      const pending = await prisma.networkMemberRequest.findUnique({
+        where: { networkId_memberId: { networkId, memberId } },
+      });
+      if (pending && pending.status === 'PENDING') {
+        return { networkId, status: 'PENDING', alreadyRequested: true };
+      }
+      await prisma.networkMemberRequest.upsert({
+        where: { networkId_memberId: { networkId, memberId } },
+        create: { networkId, memberId, status: 'PENDING' },
+        update: { status: 'PENDING' },
+      });
+      return { networkId, status: 'PENDING' };
+    }
 
     await prisma.$transaction([
       prisma.networkMember.create({ data: { networkId, memberId } }),
@@ -86,7 +123,7 @@ export class NetworkService {
         data: { countMember: { increment: 1 } },
       }),
     ]);
-    return { networkId, joined: true };
+    return { networkId, status: 'APPROVED', joined: true };
   }
 
   async leave(memberId: string, networkInput: string) {

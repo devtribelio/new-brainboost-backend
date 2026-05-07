@@ -2,7 +2,7 @@ import type { Request, Response } from 'express';
 import { TopicService } from './topic.service';
 import { ok } from '@/common/utils/response.util';
 import { BadRequestException, UnauthorizedException } from '@/common/exceptions';
-import { buildPageMeta, parsePagination } from '@/common/utils/pagination.util';
+import { buildLegacyPage, parsePagination } from '@/common/utils/pagination.util';
 import { serializeTopic } from '@/common/serializers';
 import type { AuthenticatedRequest } from '@/common/interfaces/authenticated-request';
 import {
@@ -28,7 +28,7 @@ export class TopicController {
     const keyword = (req.query.keyword as string) ?? undefined;
     const networkId = (req.query.networkId as string) ?? undefined;
     const { rows, total } = await this.topicService.list(p, { keyword, networkId });
-    return ok(res, rows.map(serializeTopic), buildPageMeta(total, p));
+    return ok(res, buildLegacyPage(rows.map(serializeTopic), total, p));
   };
 
   @ApiBearerAuth()
@@ -40,10 +40,10 @@ export class TopicController {
     if (!topicId) throw new BadRequestException('topicId required');
     const action = (req.body?.action as string) ?? 'subscribe';
     if (action === 'unsubscribe') {
-      await this.topicService.unsubscribe(req.user.id, topicId);
-    } else {
-      await this.topicService.subscribe(req.user.id, topicId);
+      const result = await this.topicService.unsubscribe(req.user.id, topicId);
+      return ok(res, { ...result, action });
     }
-    return ok(res, { topicId, action });
+    const result = await this.topicService.subscribe(req.user.id, topicId);
+    return ok(res, { ...result, action });
   };
 }

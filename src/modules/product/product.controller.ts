@@ -2,7 +2,7 @@ import type { Request, Response } from 'express';
 import { ProductService } from './product.service';
 import { ok } from '@/common/utils/response.util';
 import { BadRequestException } from '@/common/exceptions';
-import { buildPageMeta, parsePagination } from '@/common/utils/pagination.util';
+import { buildLegacyPage, parsePagination } from '@/common/utils/pagination.util';
 import { serializeProduct } from '@/common/serializers';
 import {
   ApiBearerAuth,
@@ -27,7 +27,7 @@ export class ProductController {
     const keyword = (req.query.keyword as string) ?? undefined;
     const type = (req.query.type as string) ?? undefined;
     const { rows, total } = await this.productService.list(p, { keyword, type });
-    return ok(res, rows.map(serializeProduct), buildPageMeta(total, p));
+    return ok(res, buildLegacyPage(rows.map(serializeProduct), total, p));
   };
 
   @ApiOperation({ summary: 'Course product detail' })

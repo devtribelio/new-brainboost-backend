@@ -17,7 +17,7 @@ export class ReportController {
   @ApiOperation({ summary: 'List active report categories' })
   @ApiResponse({ status: 200 })
   categories = async (_req: Request, res: Response) => {
-    const rows = await this.reportService.listCategories();
+    const rows = await this.reportService.listCategories({ isActive: true });
     return ok(
       res,
       rows.map((c) => ({
@@ -43,8 +43,29 @@ export class ReportController {
     const r = await this.reportService.reportMember(req.user.id, {
       targetMemberId,
       categoryId,
+      networkId: body.networkId,
       reason: body.reason,
     });
-    return ok(res, { reportId: r.id, createdAt: r.createdAt }, undefined, 201);
+    return ok(res, r, undefined, 201);
+  };
+
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Report a post' })
+  @ApiResponse({ status: 201 })
+  postReport = async (req: AuthenticatedRequest, res: Response) => {
+    if (!req.user) throw new UnauthorizedException();
+    const body = req.body ?? {};
+    const postId = body.postId as string;
+    const categoryId = (body.categoryId ?? body.reportCategoryId) as string;
+    if (!postId || !categoryId) {
+      throw new BadRequestException('postId and categoryId required');
+    }
+    const r = await this.reportService.reportPost(req.user.id, {
+      postId,
+      categoryId,
+      networkId: body.networkId,
+      reason: body.reason,
+    });
+    return ok(res, r, undefined, 201);
   };
 }

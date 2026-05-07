@@ -1,8 +1,17 @@
 import { prisma } from '@/config/prisma';
-import { BadRequestException, NotFoundException } from '@/common/exceptions';
+import { BadRequestException, ForbiddenException, NotFoundException } from '@/common/exceptions';
 import type { PaginationParams } from '@/common/utils/pagination.util';
 
+const MAX_CONTENT_CHARS = 5000;
+
 const commentInclude = { author: true } as const;
+
+function sanitizeContent(input: string): string {
+  return input
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+    .replace(/<\/?[^>]+>/g, '')
+    .trim();
+}
 
 export class CommentService {
   private async resolvePostId(input: string): Promise<string | null> {
@@ -102,23 +111,56 @@ export class CommentService {
     parentId?: string;
     imageUrls?: string[];
   }) {
-    if (!dto.content?.trim()) throw new BadRequestException('Content required');
+    const member = await prisma.member.findUnique({ where: { id: memberId } });
+    if (!member) throw new NotFoundException('Member not found');
+    if (!member.isActive) throw new ForbiddenException('Member is not active');
+    if (member.isMuted) throw new ForbiddenException('Member is muted');
+
+    const sanitized = sanitizeContent(dto.content ?? '');
+    const imageUrls = dto.imageUrls ?? [];
+    if (!sanitized && imageUrls.length === 0) {
+      throw new BadRequestException('Comment must have content or image');
+    }
+    if (sanitized.length > MAX_CONTENT_CHARS) {
+      throw new BadRequestException(`Content exceeds ${MAX_CONTENT_CHARS} characters`);
+    }
+
     const postId = await this.resolvePostId(dto.postId);
     if (!postId) throw new NotFoundException('Post not found');
+
+    const post = await prisma.post.findUnique({
+      where: { id: postId },
+      select: { isDeleted: true, publishStatus: true, networkId: true },
+    });
+    if (!post || post.isDeleted) throw new NotFoundException('Post not found');
+    if (post.publishStatus !== 'PUBLISHED') {
+      throw new BadRequestException('Cannot comment on unpublished post');
+    }
+    if (post.networkId) {
+      const banned = await prisma.networkBannedMember.findUnique({
+        where: { networkId_memberId: { networkId: post.networkId, memberId } },
+      });
+      if (banned) throw new ForbiddenException('Member is banned from network');
+    }
+
     let parentId: string | null = null;
     if (dto.parentId) {
       const parent = await this.resolveCommentByAnyId(dto.parentId);
-      if (!parent) throw new NotFoundException('Parent comment not found');
+      if (!parent || parent.isDeleted) throw new NotFoundException('Parent comment not found');
+      if (parent.postId !== postId) {
+        throw new BadRequestException('Parent comment belongs to a different post');
+      }
       parentId = parent.id;
     }
+
     const comment = await prisma.$transaction(async (tx) => {
       const created = await tx.comment.create({
         data: {
           postId,
           authorId: memberId,
           parentId,
-          content: dto.content,
-          imageUrls: dto.imageUrls ?? [],
+          content: sanitized,
+          imageUrls,
         },
         include: commentInclude,
       });
@@ -129,12 +171,12 @@ export class CommentService {
         });
         await tx.post.update({
           where: { id: postId },
-          data: { countReplies: { increment: 1 } },
+          data: { countReplies: { increment: 1 }, engagedAt: new Date() },
         });
       } else {
         await tx.post.update({
           where: { id: postId },
-          data: { countComment: { increment: 1 } },
+          data: { countComment: { increment: 1 }, engagedAt: new Date() },
         });
       }
       return created;
@@ -145,10 +187,20 @@ export class CommentService {
   async update(memberId: string, commentInput: string, content: string) {
     const c = await this.resolveCommentByAnyId(commentInput);
     if (!c) throw new NotFoundException('Comment not found');
-    if (c.authorId !== memberId) throw new BadRequestException('Not the author');
+    if (c.isDeleted) throw new NotFoundException('Comment was deleted');
+    if (c.authorId !== memberId) throw new ForbiddenException('Not the author');
+
+    const sanitized = sanitizeContent(content ?? '');
+    if (!sanitized && (c.imageUrls?.length ?? 0) === 0) {
+      throw new BadRequestException('Comment must have content or image');
+    }
+    if (sanitized.length > MAX_CONTENT_CHARS) {
+      throw new BadRequestException(`Content exceeds ${MAX_CONTENT_CHARS} characters`);
+    }
+
     return prisma.comment.update({
       where: { id: c.id },
-      data: { content },
+      data: { content: sanitized },
       include: commentInclude,
     });
   }
@@ -156,11 +208,45 @@ export class CommentService {
   async remove(memberId: string, commentInput: string) {
     const c = await this.resolveCommentByAnyId(commentInput);
     if (!c) throw new NotFoundException('Comment not found');
-    if (c.authorId !== memberId) throw new BadRequestException('Not the author');
-    return prisma.comment.update({
-      where: { id: c.id },
-      data: { isDeleted: true },
-      include: commentInclude,
+
+    let allowed = c.authorId === memberId;
+    if (!allowed) {
+      const post = await prisma.post.findUnique({
+        where: { id: c.postId },
+        select: { authorId: true, networkId: true },
+      });
+      if (post?.authorId === memberId) allowed = true;
+      if (!allowed && post?.networkId) {
+        const team = await prisma.networkTeamMember.findUnique({
+          where: { networkId_memberId: { networkId: post.networkId, memberId } },
+        });
+        if (team) allowed = true;
+      }
+    }
+    if (!allowed) throw new ForbiddenException('Not allowed to delete this comment');
+
+    await prisma.$transaction(async (tx) => {
+      await tx.comment.update({
+        where: { id: c.id },
+        data: { isDeleted: true },
+      });
+      if (c.parentId) {
+        await tx.comment.update({
+          where: { id: c.parentId },
+          data: { countReplies: { decrement: 1 } },
+        });
+        await tx.post.update({
+          where: { id: c.postId },
+          data: { countReplies: { decrement: 1 } },
+        });
+      } else {
+        await tx.post.update({
+          where: { id: c.postId },
+          data: { countComment: { decrement: 1 } },
+        });
+      }
     });
+
+    return prisma.comment.findUnique({ where: { id: c.id }, include: commentInclude });
   }
 }

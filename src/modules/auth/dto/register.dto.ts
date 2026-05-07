@@ -1,4 +1,4 @@
-import { IsEmail, IsOptional, IsString, MinLength } from 'class-validator';
+import { IsEmail, IsOptional, IsString, Length, Matches, MinLength } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@/common/openapi/decorators';
 
 export class RegisterDto {
@@ -6,23 +6,67 @@ export class RegisterDto {
   @IsEmail()
   email!: string;
 
-  @ApiProperty({ format: 'password', example: 'secret123', description: 'min 8 chars' })
+  @ApiProperty({ format: 'password', example: 'secret123', description: 'min 6 chars (legacy)' })
   @IsString()
-  @MinLength(8)
+  @MinLength(6)
   password!: string;
 
-  @ApiPropertyOptional({ example: 'Jane Doe' })
-  @IsOptional()
+  @ApiProperty({ format: 'password', description: 'must equal password' })
   @IsString()
-  fullName?: string;
+  @MinLength(6)
+  confirmPassword!: string;
+
+  @ApiProperty({ example: 'Jane Doe', description: '4-100 chars' })
+  @IsString()
+  @Length(4, 100)
+  fullName!: string;
 
   @ApiPropertyOptional({ example: '+628111111111' })
   @IsOptional()
   @IsString()
+  @Matches(/^\+?[0-9]{6,20}$/, { message: 'phone must be 6-20 digits, optional leading +' })
   phone?: string;
+
+  @ApiPropertyOptional({ example: '+62' })
+  @IsOptional()
+  @IsString()
+  phoneCode?: string;
 
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
   username?: string;
+
+  @ApiPropertyOptional({ description: 'Birthdate ISO date string' })
+  @IsOptional()
+  @IsString()
+  birthdate?: string;
+
+  @ApiPropertyOptional({ enum: ['MAN', 'WOMEN'] })
+  @IsOptional()
+  @IsString()
+  gender?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Affiliate code. First 8 chars = inviter member code; remaining chars = network legacy id (optional).',
+  })
+  @IsOptional()
+  @IsString()
+  affiliateCode?: string;
+
+  @ApiPropertyOptional({ enum: ['ios', 'android', 'web'] })
+  @IsOptional()
+  @IsString()
+  registerFrom?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  utmSource?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  utmContent?: string;
 }

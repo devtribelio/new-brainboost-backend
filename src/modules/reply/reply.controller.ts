@@ -2,7 +2,7 @@ import type { Response } from 'express';
 import { ReplyService } from './reply.service';
 import { ok } from '@/common/utils/response.util';
 import { BadRequestException } from '@/common/exceptions';
-import { buildPageMeta, parsePagination } from '@/common/utils/pagination.util';
+import { buildLegacyPage, parsePagination } from '@/common/utils/pagination.util';
 import { serializeComment } from '@/common/serializers';
 import type { AuthenticatedRequest } from '@/common/interfaces/authenticated-request';
 import { ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@/common/openapi/decorators';
@@ -27,6 +27,6 @@ export class ReplyController {
     const data = rows.map((row) =>
       serializeComment(row, liked.has(row.id) ? 'like' : 'dislike'),
     );
-    return ok(res, data, buildPageMeta(total, p));
+    return ok(res, buildLegacyPage(data, total, p));
   };
 }

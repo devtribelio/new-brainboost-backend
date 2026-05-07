@@ -7,15 +7,37 @@ import {
   signRefreshToken,
   verifyRefreshToken,
 } from '@/common/utils/jwt.util';
-import { BadRequestException, UnauthorizedException } from '@/common/exceptions';
+import { BadRequestException, NotFoundException, UnauthorizedException } from '@/common/exceptions';
+import { otpService } from '@/common/services/otp.service';
 import type { LoginDto } from './dto/login.dto';
 import type { RegisterDto } from './dto/register.dto';
+import type { CloudMessagingDto, RegisterDeviceDto } from './dto/device.dto';
+import type {
+  ForgotPasswordVerificationDto,
+  RequestForgotPasswordDto,
+  ValidateOtpDto,
+} from './dto/forgot-password.dto';
 
 interface TokenBundle {
   access_token: string;
   refresh_token: string;
   token_type: 'Bearer';
   expires_in: string;
+}
+
+function mapDtoPurpose(p: string): 'forgot-password' | 'pre-registration' | 'verify-phone' | 'verify-email' {
+  switch (p) {
+    case 'register':
+      return 'pre-registration';
+    case 'forgot_password':
+      return 'forgot-password';
+    case 'verify_phone':
+      return 'verify-phone';
+    case 'verify_email':
+      return 'verify-email';
+    default:
+      throw new BadRequestException(`Unknown OTP purpose: ${p}`);
+  }
 }
 
 export class AuthService {
@@ -34,21 +56,117 @@ export class AuthService {
   }
 
   async register(dto: RegisterDto): Promise<TokenBundle> {
-    const existing = await prisma.member.findUnique({ where: { email: dto.email } });
-    if (existing) throw new BadRequestException('Email already registered');
+    if (dto.password !== dto.confirmPassword) {
+      throw new BadRequestException('password and confirmPassword do not match');
+    }
+
+    const conflicts = await prisma.member.findFirst({
+      where: {
+        OR: [
+          { email: dto.email },
+          dto.phone ? { phone: dto.phone } : undefined,
+          dto.username ? { username: dto.username } : undefined,
+        ].filter((c): c is NonNullable<typeof c> => c !== undefined),
+      },
+      select: { email: true, phone: true, username: true },
+    });
+    if (conflicts) {
+      if (conflicts.email === dto.email) throw new BadRequestException('Email already registered');
+      if (dto.phone && conflicts.phone === dto.phone) {
+        throw new BadRequestException('Phone already registered');
+      }
+      if (dto.username && conflicts.username === dto.username) {
+        throw new BadRequestException('Username already registered');
+      }
+    }
+
+    if (dto.birthdate) {
+      const dob = new Date(dto.birthdate);
+      if (Number.isNaN(dob.getTime())) throw new BadRequestException('Invalid birthdate');
+      const ageMs = Date.now() - dob.getTime();
+      const ageYears = ageMs / (1000 * 60 * 60 * 24 * 365.25);
+      if (ageYears < 13) throw new BadRequestException('Member must be at least 13 years old');
+    }
+
+    let inviterId: string | undefined;
+    let inviterNetworkId: string | undefined;
+    if (dto.affiliateCode) {
+      const codePart = dto.affiliateCode.slice(0, 8);
+      const networkLegacyPart = dto.affiliateCode.slice(8);
+      const inviter = await prisma.member.findUnique({
+        where: { affiliateCode: codePart },
+        select: { id: true },
+      });
+      if (inviter) inviterId = inviter.id;
+      if (networkLegacyPart) {
+        const networkLegacyId = Number.parseInt(networkLegacyPart, 10);
+        if (Number.isFinite(networkLegacyId)) {
+          const net = await prisma.network.findUnique({
+            where: { legacyId: networkLegacyId },
+            select: { id: true },
+          });
+          if (net) inviterNetworkId = net.id;
+        }
+      }
+    }
 
     const passwordHash = await bcrypt.hash(dto.password, 10);
+    const memberCode = await this.generateUniqueMemberCode();
+
     const member = await prisma.member.create({
       data: {
         email: dto.email,
         passwordHash,
         fullName: dto.fullName,
         phone: dto.phone,
+        phoneCode: dto.phoneCode,
         username: dto.username,
+        gender: dto.gender,
+        birthdate: dto.birthdate ? new Date(dto.birthdate) : null,
+        code: memberCode,
+        affiliateCode: memberCode,
+        inviterId,
+        inviterNetworkId,
+        registerFrom: dto.registerFrom,
+        utmSource: dto.utmSource,
+        utmContent: dto.utmContent,
+      },
+    });
+
+    if (inviterNetworkId) {
+      await prisma.networkMember.upsert({
+        where: { networkId_memberId: { networkId: inviterNetworkId, memberId: member.id } },
+        create: { networkId: inviterNetworkId, memberId: member.id },
+        update: {},
+      });
+      await prisma.network.update({
+        where: { id: inviterNetworkId },
+        data: { countMember: { increment: 1 } },
+      });
+    }
+
+    await prisma.praMember.deleteMany({
+      where: {
+        OR: [
+          dto.email ? { email: dto.email } : undefined,
+          dto.phone ? { phone: dto.phone } : undefined,
+        ].filter((c): c is NonNullable<typeof c> => c !== undefined),
       },
     });
 
     return this.issueTokenBundle(member.id, member.email);
+  }
+
+  private async generateUniqueMemberCode(): Promise<string> {
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const code = randomUUID().replace(/-/g, '').slice(0, 8).toUpperCase();
+      const exists = await prisma.member.findFirst({
+        where: { OR: [{ code }, { affiliateCode: code }] },
+        select: { id: true },
+      });
+      if (!exists) return code;
+    }
+    throw new Error('Unable to generate unique member code after 5 attempts');
   }
 
   private async loginWithPassword(dto: LoginDto): Promise<TokenBundle> {
@@ -116,6 +234,73 @@ export class AuthService {
     });
 
     return this.issueTokenBundle(member.id, member.email);
+  }
+
+  async registerDevice(memberId: string, dto: RegisterDeviceDto) {
+    const device = await prisma.device.upsert({
+      where: { memberId_deviceId: { memberId, deviceId: dto.deviceId } },
+      update: {
+        platform: dto.platform,
+        fcmToken: dto.fcmToken,
+        lastSeenAt: new Date(),
+      },
+      create: {
+        memberId,
+        deviceId: dto.deviceId,
+        platform: dto.platform,
+        fcmToken: dto.fcmToken,
+      },
+    });
+    return { deviceId: device.id };
+  }
+
+  async registerCloudMessaging(memberId: string, dto: CloudMessagingDto) {
+    const device = await prisma.device.findUnique({
+      where: { memberId_deviceId: { memberId, deviceId: dto.deviceId } },
+    });
+    if (!device) throw new NotFoundException('Device not registered for this member');
+
+    await prisma.device.update({
+      where: { id: device.id },
+      data: { fcmToken: dto.fcmToken, lastSeenAt: new Date() },
+    });
+    return { deviceId: device.id };
+  }
+
+  async requestForgotPassword(dto: RequestForgotPasswordDto) {
+    const member = await prisma.member.findUnique({ where: { email: dto.email } });
+    if (!member || !member.isActive) {
+      throw new NotFoundException('Email not registered');
+    }
+    const { id } = await otpService.issue({
+      target: dto.email,
+      purpose: 'forgot-password',
+    });
+    return { email: dto.email, requestId: id };
+  }
+
+  async forgotPasswordVerification(dto: ForgotPasswordVerificationDto) {
+    const member = await prisma.member.findUnique({ where: { email: dto.email } });
+    if (!member) throw new NotFoundException('Email not registered');
+
+    await otpService.consume(dto.email, dto.code, 'forgot-password');
+
+    const passwordHash = await bcrypt.hash(dto.newPassword, 10);
+    await prisma.member.update({
+      where: { id: member.id },
+      data: { passwordHash, passwordAlgo: 'bcrypt' },
+    });
+    await prisma.refreshToken.updateMany({
+      where: { memberId: member.id, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+    return { email: dto.email };
+  }
+
+  async validateOtp(dto: ValidateOtpDto) {
+    const purpose = mapDtoPurpose(dto.purpose);
+    await otpService.verify(dto.target, dto.code, purpose);
+    return { target: dto.target, purpose: dto.purpose };
   }
 
   private async issueTokenBundle(memberId: string, email: string): Promise<TokenBundle> {

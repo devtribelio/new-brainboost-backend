@@ -7,39 +7,58 @@ import { serializeMemberFull } from '@/common/serializers';
 import {
   ApiBearerAuth,
   ApiOperation,
+  ApiQuery,
   ApiResponse,
   ApiTags,
 } from '@/common/openapi/decorators';
+
+function floatOrUndef(v: unknown): number | undefined {
+  if (v === undefined || v === null || v === '') return undefined;
+  const n = Number.parseFloat(String(v));
+  return Number.isFinite(n) ? n : undefined;
+}
 
 @ApiTags('Member')
 @ApiBearerAuth()
 export class MemberController {
   constructor(private readonly memberService: MemberService) {}
 
-  @ApiOperation({ summary: 'Authenticated member info (with profile)' })
+  @ApiOperation({ summary: 'Authenticated member info (with profile + system config)' })
+  @ApiQuery({ name: 'latitude', required: false })
+  @ApiQuery({ name: 'longitude', required: false })
   @ApiResponse({ status: 200 })
   @ApiResponse({ status: 401, description: 'Missing/invalid bearer token' })
   info = async (req: AuthenticatedRequest, res: Response) => {
     if (!req.user) throw new UnauthorizedException();
-    const member = await this.memberService.findById(req.user.id);
-    const profile = member.profile
+    const result = await this.memberService.findById(req.user.id, {
+      latitude: floatOrUndef(req.query.latitude),
+      longitude: floatOrUndef(req.query.longitude),
+      touchActivity: true,
+    });
+    const m = result.member;
+    const profile = m.profile
       ? {
-          address: member.profile.address,
-          postalCode: member.profile.postalCode,
-          country: member.profile.country
-            ? { id: member.profile.country.id, name: member.profile.country.name, legacyId: member.profile.country.legacyId }
+          address: m.profile.address,
+          postalCode: m.profile.postalCode,
+          country: m.profile.country
+            ? { id: m.profile.country.id, name: m.profile.country.name, legacyId: m.profile.country.legacyId }
             : null,
-          province: member.profile.province
-            ? { id: member.profile.province.id, name: member.profile.province.name, legacyId: member.profile.province.legacyId }
+          province: m.profile.province
+            ? { id: m.profile.province.id, name: m.profile.province.name, legacyId: m.profile.province.legacyId }
             : null,
-          city: member.profile.city
-            ? { id: member.profile.city.id, name: member.profile.city.name, legacyId: member.profile.city.legacyId }
+          city: m.profile.city
+            ? { id: m.profile.city.id, name: m.profile.city.name, legacyId: m.profile.city.legacyId }
             : null,
-          district: member.profile.district
-            ? { id: member.profile.district.id, name: member.profile.district.name, legacyId: member.profile.district.legacyId }
+          district: m.profile.district
+            ? { id: m.profile.district.id, name: m.profile.district.name, legacyId: m.profile.district.legacyId }
             : null,
         }
       : null;
-    return ok(res, { ...serializeMemberFull(member), profile });
+    return ok(res, {
+      ...serializeMemberFull(m),
+      profile,
+      memberLogin: result.memberLogin,
+      system: result.system,
+    });
   };
 }

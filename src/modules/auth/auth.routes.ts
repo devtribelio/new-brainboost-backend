@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { validateDto } from '@/common/middlewares/validation.middleware';
+import { authGuard } from '@/common/middlewares/auth.middleware';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { CloudMessagingDto, RegisterDeviceDto } from './dto/device.dto';
@@ -38,7 +39,7 @@ export function authRoutes(): Router {
     method: 'post',
     path: '/auth/devices',
     handlerKey: 'registerDevice',
-    middlewares: [validateDto(RegisterDeviceDto)],
+    middlewares: [authGuard, validateDto(RegisterDeviceDto)],
   });
   bindRoute({
     router,
@@ -46,7 +47,7 @@ export function authRoutes(): Router {
     method: 'post',
     path: '/auth/cloudMessaging',
     handlerKey: 'cloudMessaging',
-    middlewares: [validateDto(CloudMessagingDto)],
+    middlewares: [authGuard, validateDto(CloudMessagingDto)],
   });
   bindRoute({
     router,

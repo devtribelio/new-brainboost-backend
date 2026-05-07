@@ -34,6 +34,7 @@ export function buildApp(): Express {
   app.set('view engine', 'ejs');
   app.set('views', path.join(process.cwd(), 'views'));
   app.use('/admin/static', express.static(path.join(process.cwd(), 'public/admin')));
+  app.use('/static/temporary', express.static(path.resolve(process.cwd(), env.upload.tempDir)));
 
   app.get('/health', (_req, res) => ok(res, { status: 'ok', service: env.appName }));
 

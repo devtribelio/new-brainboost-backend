@@ -2,7 +2,7 @@ import type { Response } from 'express';
 import { CommentService } from './comment.service';
 import { ok } from '@/common/utils/response.util';
 import { BadRequestException, UnauthorizedException } from '@/common/exceptions';
-import { buildPageMeta, parsePagination } from '@/common/utils/pagination.util';
+import { buildLegacyPage, parsePagination } from '@/common/utils/pagination.util';
 import { serializeComment } from '@/common/serializers';
 import type { AuthenticatedRequest } from '@/common/interfaces/authenticated-request';
 import {
@@ -34,7 +34,7 @@ export class CommentController {
     const data = rows.map((row) =>
       serializeComment(row, liked.has(row.id) ? 'like' : 'dislike'),
     );
-    return ok(res, data, buildPageMeta(total, p));
+    return ok(res, buildLegacyPage(data, total, p));
   };
 
   @ApiOperation({ summary: 'Comment detail' })

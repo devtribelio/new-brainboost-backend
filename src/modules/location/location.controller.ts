@@ -1,7 +1,7 @@
 import type { Request, Response } from 'express';
 import { LocationService } from './location.service';
 import { ok } from '@/common/utils/response.util';
-import { buildPageMeta, parsePagination } from '@/common/utils/pagination.util';
+import { buildLegacyPage, parsePagination } from '@/common/utils/pagination.util';
 import {
   serializeCountry,
   serializeProvince,
@@ -28,8 +28,9 @@ export class LocationController {
   listCountries = async (req: Request, res: Response) => {
     const p = parsePagination(req.query as Record<string, unknown>);
     const keyword = (req.query.keyword as string) ?? undefined;
-    const { rows, total } = await this.locationService.listCountries(p, { keyword });
-    return ok(res, rows.map(serializeCountry), buildPageMeta(total, p));
+    const countryId = (req.query.countryId as string) ?? undefined;
+    const { rows, total } = await this.locationService.listCountries(p, { keyword, countryId });
+    return ok(res, buildLegacyPage(rows.map(serializeCountry), total, p));
   };
 
   @ApiOperation({ summary: 'List provinces (optionally filtered by country)' })
@@ -46,7 +47,7 @@ export class LocationController {
       keyword,
       countryLegacyId,
     });
-    return ok(res, rows.map(serializeProvince), buildPageMeta(total, p));
+    return ok(res, buildLegacyPage(rows.map(serializeProvince), total, p));
   };
 
   @ApiOperation({ summary: 'List cities (optionally filtered by province)' })
@@ -61,7 +62,7 @@ export class LocationController {
       keyword,
       provinceLegacyId,
     });
-    return ok(res, rows.map(serializeCity), buildPageMeta(total, p));
+    return ok(res, buildLegacyPage(rows.map(serializeCity), total, p));
   };
 
   @ApiOperation({ summary: 'List districts (optionally filtered by city)' })
@@ -76,6 +77,6 @@ export class LocationController {
       keyword,
       cityLegacyId,
     });
-    return ok(res, rows.map(serializeDistrict), buildPageMeta(total, p));
+    return ok(res, buildLegacyPage(rows.map(serializeDistrict), total, p));
   };
 }

@@ -8,7 +8,9 @@ import {
   RequestForgotPasswordDto,
   ValidateOtpDto,
 } from './dto/forgot-password.dto';
-import { ok, notImplemented } from '@/common/utils/response.util';
+import { ok } from '@/common/utils/response.util';
+import type { AuthenticatedRequest } from '@/common/interfaces/authenticated-request';
+import { UnauthorizedException } from '@/common/exceptions';
 import {
   ApiBody,
   ApiOperation,
@@ -46,27 +48,46 @@ export class AuthController {
   @ApiOperation({ summary: 'Register a device for push notifications' })
   @ApiBody({ type: () => RegisterDeviceDto })
   @ApiResponse({ status: 200, type: () => GenericOkDto })
-  registerDevice = async (_req: Request, res: Response) => notImplemented(res, 'auth.registerDevice');
+  registerDevice = async (req: Request, res: Response) => {
+    const user = (req as AuthenticatedRequest).user;
+    if (!user) throw new UnauthorizedException('Authentication required');
+    const result = await this.authService.registerDevice(user.id, req.body as RegisterDeviceDto);
+    return ok(res, result);
+  };
 
   @ApiOperation({ summary: 'Update FCM token for a device' })
   @ApiBody({ type: () => CloudMessagingDto })
   @ApiResponse({ status: 200, type: () => GenericOkDto })
-  cloudMessaging = async (_req: Request, res: Response) => notImplemented(res, 'auth.cloudMessaging');
+  cloudMessaging = async (req: Request, res: Response) => {
+    const user = (req as AuthenticatedRequest).user;
+    if (!user) throw new UnauthorizedException('Authentication required');
+    const result = await this.authService.registerCloudMessaging(user.id, req.body as CloudMessagingDto);
+    return ok(res, result);
+  };
 
   @ApiOperation({ summary: 'Request a forgot-password OTP' })
   @ApiBody({ type: () => RequestForgotPasswordDto })
   @ApiResponse({ status: 200, type: () => GenericOkDto })
-  requestForgotPassword = async (_req: Request, res: Response) =>
-    notImplemented(res, 'auth.requestForgotPassword');
+  requestForgotPassword = async (req: Request, res: Response) => {
+    const result = await this.authService.requestForgotPassword(req.body as RequestForgotPasswordDto);
+    return ok(res, result);
+  };
 
   @ApiOperation({ summary: 'Verify OTP + set new password' })
   @ApiBody({ type: () => ForgotPasswordVerificationDto })
   @ApiResponse({ status: 200, type: () => GenericOkDto })
-  forgotPasswordVerification = async (_req: Request, res: Response) =>
-    notImplemented(res, 'auth.forgotPasswordVerification');
+  forgotPasswordVerification = async (req: Request, res: Response) => {
+    const result = await this.authService.forgotPasswordVerification(
+      req.body as ForgotPasswordVerificationDto,
+    );
+    return ok(res, result);
+  };
 
   @ApiOperation({ summary: 'Validate a generic OTP (registration / phone verify / etc.)' })
   @ApiBody({ type: () => ValidateOtpDto })
   @ApiResponse({ status: 200, type: () => GenericOkDto })
-  validateOtp = async (_req: Request, res: Response) => notImplemented(res, 'auth.validateOtp');
+  validateOtp = async (req: Request, res: Response) => {
+    const result = await this.authService.validateOtp(req.body as ValidateOtpDto);
+    return ok(res, result);
+  };
 }

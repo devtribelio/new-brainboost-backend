@@ -30,6 +30,20 @@ model Member {
   isActive     Boolean  @default(true)
   isVerified   Boolean  @default(false)
   isPhoneVerified Boolean @default(false)
+  isMuted      Boolean  @default(false)
+  isBanned     Boolean  @default(false)
+  gender       String?
+  birthdate    DateTime?
+  affiliateCode String? @unique
+  inviterId    String?
+  inviterNetworkId String?
+  registerFrom String?
+  utmSource    String?
+  utmContent   String?
+  scheduledDeletionAt DateTime?
+  lastActiveAt DateTime?
+  latitude     Float?
+  longitude    Float?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -109,6 +123,21 @@ model OtpCode {
 
   @@index([target, purpose])
   @@map("otp_codes")
+}
+
+model PraMember {
+  id                 String    @id @default(cuid())
+  email              String?
+  phone              String?
+  affiliateMemberId  String?
+  networkId          String?
+  device             Json?
+  expiresAt          DateTime
+  createdAt          DateTime  @default(now())
+
+  @@index([email])
+  @@index([phone])
+  @@map("pra_members")
 }
 
 // ============================================================================
@@ -223,16 +252,40 @@ model Topic {
   name        String
   description String?
   iconUrl     String?
+  type        String   @default("PUBLIC")
   isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
 
   network       Network? @relation(fields: [networkId], references: [id], onDelete: Cascade)
   posts         Post[]
   subscriptions TopicSubscription[]
+  joinRequests  TopicJoinRequest[]
 
   @@index([networkId])
   @@index([name])
   @@map("topics")
+}
+
+enum JoinRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+model TopicJoinRequest {
+  id        String            @id @default(cuid())
+  topicId   String
+  memberId  String
+  status    JoinRequestStatus @default(PENDING)
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+
+  topic Topic @relation(fields: [topicId], references: [id], onDelete: Cascade)
+
+  @@unique([topicId, memberId])
+  @@index([memberId])
+  @@map("topic_join_requests")
 }
 
 model TopicSubscription {
@@ -261,10 +314,14 @@ model Post {
   imageUrls String[]
   videoUrl  String?
   embedUrl  String?
+  publishStatus String @default("PUBLISHED")
+  publishAt   DateTime?
   countLike    Int @default(0)
   countComment Int @default(0)
   countReplies Int @default(0)
   viewCount    Int @default(0)
+  isPinned  Boolean  @default(false)
+  engagedAt DateTime?
   isDeleted Boolean  @default(false)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -294,16 +351,19 @@ model PostLike {
 }
 
 model PostReport {
-  id         String   @id @default(cuid())
-  postId     String
-  reporterId String
-  categoryId String
-  reason     String?
-  createdAt  DateTime @default(now())
+  id           String       @id @default(cuid())
+  postId       String
+  reporterId   String
+  categoryId   String
+  networkId    String?
+  reason       String?
+  reportStatus ReportStatus @default(REPORTED)
+  createdAt    DateTime     @default(now())
 
   post     Post           @relation(fields: [postId], references: [id], onDelete: Cascade)
   category ReportCategory @relation(fields: [categoryId], references: [id])
 
+  @@index([postId])
   @@map("post_reports")
 }
 
@@ -353,16 +413,62 @@ model Network {
   iconUrl     String?
   bannerUrl   String?
   countMember Int      @default(0)
+  memberQuota Int?
   isPaid      Boolean  @default(false)
+  isPublic    Boolean  @default(true)
+  isHelpdesk  Boolean  @default(false)
+  isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
 
-  members NetworkMember[]
-  tags    NetworkTag[]
-  topics  Topic[]
+  members         NetworkMember[]
+  memberRequests  NetworkMemberRequest[]
+  bannedMembers   NetworkBannedMember[]
+  tags            NetworkTag[]
+  topics          Topic[]
   affiliatePrograms AffiliateProgram[]
 
   @@index([name])
   @@map("networks")
+}
+
+model NetworkMemberRequest {
+  id        String            @id @default(cuid())
+  networkId String
+  memberId  String
+  status    JoinRequestStatus @default(PENDING)
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+
+  network Network @relation(fields: [networkId], references: [id], onDelete: Cascade)
+
+  @@unique([networkId, memberId])
+  @@index([memberId])
+  @@map("network_member_requests")
+}
+
+model NetworkBannedMember {
+  id        String   @id @default(cuid())
+  networkId String
+  memberId  String
+  reason    String?
+  bannedAt  DateTime @default(now())
+
+  network Network @relation(fields: [networkId], references: [id], onDelete: Cascade)
+
+  @@unique([networkId, memberId])
+  @@map("network_banned_members")
+}
+
+model NetworkTeamMember {
+  id        String   @id @default(cuid())
+  networkId String
+  memberId  String
+  role      String   @default("MODERATOR")
+  createdAt DateTime @default(now())
+
+  @@unique([networkId, memberId])
+  @@index([memberId])
+  @@map("network_team_members")
 }
 
 model NetworkMember {
@@ -406,16 +512,27 @@ model ReportCategory {
   @@map("report_categories")
 }
 
+enum ReportStatus {
+  REPORTED
+  REVIEWED
+  RESOLVED
+  DISMISSED
+}
+
 model MemberReport {
-  id         String   @id @default(cuid())
-  reporterId String
-  targetId   String
-  categoryId String
-  reason     String?
-  createdAt  DateTime @default(now())
+  id           String       @id @default(cuid())
+  reporterId   String
+  targetId     String
+  categoryId   String
+  networkId    String?
+  reason       String?
+  reportStatus ReportStatus @default(REPORTED)
+  createdAt    DateTime     @default(now())
 
   category ReportCategory @relation(fields: [categoryId], references: [id])
 
+  @@index([targetId])
+  @@index([reporterId])
   @@map("member_reports")
 }
 
@@ -424,18 +541,23 @@ model MemberReport {
 // ============================================================================
 
 model Notification {
-  id        String   @id @default(cuid())
-  memberId  String
-  type      String
-  title     String
-  body      String?
-  payload   Json?
-  seenAt    DateTime?
-  createdAt DateTime @default(now())
+  id           String   @id @default(cuid())
+  memberId     String
+  networkId    String?
+  type         String
+  notifGroup   String?
+  title        String
+  body         String?
+  payload      Json?
+  url          String?
+  seenAt       DateTime?
+  readAt       DateTime?
+  createdAt    DateTime @default(now())
 
   member Member @relation(fields: [memberId], references: [id], onDelete: Cascade)
 
-  @@index([memberId])
+  @@index([memberId, readAt])
+  @@index([memberId, networkId])
   @@map("notifications")
 }
 

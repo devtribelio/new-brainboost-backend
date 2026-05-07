@@ -1,5 +1,5 @@
 import { prisma } from '@/config/prisma';
-import { NotFoundException } from '@/common/exceptions';
+import { BadRequestException, NotFoundException } from '@/common/exceptions';
 
 export class ProfileService {
   async getInfo(memberId: string) {
@@ -12,6 +12,7 @@ export class ProfileService {
       },
     });
     if (!member) throw new NotFoundException('Member not found');
+    if (!member.isActive) throw new NotFoundException('Member is not active');
     return member;
   }
 
@@ -21,10 +22,47 @@ export class ProfileService {
     lastName?: string;
     phone?: string;
     phoneCode?: string;
+    gender?: string;
+    birthdate?: string;
     bio?: string;
     avatarUrl?: string;
     coverUrl?: string;
   }) {
+    const member = await prisma.member.findUnique({ where: { id: memberId } });
+    if (!member) throw new NotFoundException('Member not found');
+    if (!member.isActive) throw new NotFoundException('Member is not active');
+
+    if (dto.fullName !== undefined && (dto.fullName.trim().length < 4 || dto.fullName.length > 100)) {
+      throw new BadRequestException('fullName must be 4-100 chars');
+    }
+
+    if (dto.gender !== undefined && !['MAN', 'WOMEN'].includes(dto.gender)) {
+      throw new BadRequestException('gender must be MAN or WOMEN');
+    }
+
+    let birthdate: Date | null | undefined;
+    if (dto.birthdate !== undefined) {
+      if (dto.birthdate === null || dto.birthdate === '') {
+        birthdate = null;
+      } else {
+        birthdate = new Date(dto.birthdate);
+        if (Number.isNaN(birthdate.getTime())) throw new BadRequestException('Invalid birthdate');
+        const ageYears = (Date.now() - birthdate.getTime()) / (1000 * 60 * 60 * 24 * 365.25);
+        if (ageYears < 13) throw new BadRequestException('Member must be at least 13 years old');
+      }
+    }
+
+    if (dto.phone) {
+      if (!/^\+?[0-9]{6,20}$/.test(dto.phone)) {
+        throw new BadRequestException('phone must be 6-20 digits, optional leading +');
+      }
+      const phoneTaken = await prisma.member.findFirst({
+        where: { phone: dto.phone, NOT: { id: memberId } },
+        select: { id: true },
+      });
+      if (phoneTaken) throw new BadRequestException('Phone already used by another member');
+    }
+
     return prisma.member.update({
       where: { id: memberId },
       data: {
@@ -33,6 +71,8 @@ export class ProfileService {
         lastName: dto.lastName,
         phone: dto.phone,
         phoneCode: dto.phoneCode,
+        gender: dto.gender,
+        ...(birthdate !== undefined ? { birthdate } : {}),
         bio: dto.bio,
         avatarUrl: dto.avatarUrl,
         coverUrl: dto.coverUrl,

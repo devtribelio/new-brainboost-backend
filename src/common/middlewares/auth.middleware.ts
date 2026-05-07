@@ -19,3 +19,17 @@ export const authGuard: RequestHandler = (req, _res: Response, next: NextFunctio
     next(err);
   }
 };
+
+export const optionalAuthGuard: RequestHandler = (req, _res, next) => {
+  const header = req.headers.authorization;
+  if (!header || !header.toLowerCase().startsWith('bearer ')) return next();
+  const token = header.slice(7).trim();
+  if (!token) return next();
+  try {
+    const payload = verifyAccessToken(token);
+    (req as AuthenticatedRequest).user = { id: payload.sub, email: payload.email };
+  } catch {
+    // silently ignore invalid token in optional mode
+  }
+  next();
+};

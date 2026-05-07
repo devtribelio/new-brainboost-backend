@@ -5,8 +5,29 @@ interface LocationQuery {
   keyword?: string;
 }
 
+async function resolveLegacyOrId<T extends { id: string }>(
+  finder: (where: { legacyId: number } | { id: string }) => Promise<T | null>,
+  input: string,
+): Promise<T | null> {
+  const legacyId = Number.parseInt(input, 10);
+  if (Number.isFinite(legacyId) && input === String(legacyId)) {
+    const byLegacy = await finder({ legacyId });
+    if (byLegacy) return byLegacy;
+  }
+  return finder({ id: input });
+}
+
 export class LocationService {
-  async listCountries(p: PaginationParams, q: LocationQuery) {
+  async listCountries(p: PaginationParams, q: LocationQuery & { countryId?: string }) {
+    if (q.countryId) {
+      const single = await resolveLegacyOrId<{ id: string }>(
+        (where) => prisma.country.findUnique({ where: where as any }),
+        q.countryId,
+      );
+      if (!single) return { rows: [], total: 0 };
+      const full = await prisma.country.findUnique({ where: { id: single.id } });
+      return { rows: full ? [full] : [], total: full ? 1 : 0 };
+    }
     const where = q.keyword
       ? { name: { contains: q.keyword, mode: 'insensitive' as const } }
       : {};
@@ -22,7 +43,19 @@ export class LocationService {
     return { rows, total };
   }
 
-  async listProvinces(p: PaginationParams, q: LocationQuery & { countryLegacyId?: number }) {
+  async listProvinces(
+    p: PaginationParams,
+    q: LocationQuery & { countryLegacyId?: number; provinceId?: string },
+  ) {
+    if (q.provinceId) {
+      const single = await resolveLegacyOrId<{ id: string }>(
+        (where) => prisma.province.findUnique({ where: where as any }),
+        q.provinceId,
+      );
+      if (!single) return { rows: [], total: 0 };
+      const full = await prisma.province.findUnique({ where: { id: single.id } });
+      return { rows: full ? [full] : [], total: full ? 1 : 0 };
+    }
     const where: Record<string, unknown> = {};
     if (q.keyword) where.name = { contains: q.keyword, mode: 'insensitive' };
     if (q.countryLegacyId) {
@@ -37,7 +70,19 @@ export class LocationService {
     return { rows, total };
   }
 
-  async listCities(p: PaginationParams, q: LocationQuery & { provinceLegacyId?: number }) {
+  async listCities(
+    p: PaginationParams,
+    q: LocationQuery & { provinceLegacyId?: number; cityId?: string },
+  ) {
+    if (q.cityId) {
+      const single = await resolveLegacyOrId<{ id: string }>(
+        (where) => prisma.city.findUnique({ where: where as any }),
+        q.cityId,
+      );
+      if (!single) return { rows: [], total: 0 };
+      const full = await prisma.city.findUnique({ where: { id: single.id } });
+      return { rows: full ? [full] : [], total: full ? 1 : 0 };
+    }
     const where: Record<string, unknown> = {};
     if (q.keyword) where.name = { contains: q.keyword, mode: 'insensitive' };
     if (q.provinceLegacyId) {
@@ -52,7 +97,19 @@ export class LocationService {
     return { rows, total };
   }
 
-  async listDistricts(p: PaginationParams, q: LocationQuery & { cityLegacyId?: number }) {
+  async listDistricts(
+    p: PaginationParams,
+    q: LocationQuery & { cityLegacyId?: number; districtId?: string },
+  ) {
+    if (q.districtId) {
+      const single = await resolveLegacyOrId<{ id: string }>(
+        (where) => prisma.district.findUnique({ where: where as any }),
+        q.districtId,
+      );
+      if (!single) return { rows: [], total: 0 };
+      const full = await prisma.district.findUnique({ where: { id: single.id } });
+      return { rows: full ? [full] : [], total: full ? 1 : 0 };
+    }
     const where: Record<string, unknown> = {};
     if (q.keyword) where.name = { contains: q.keyword, mode: 'insensitive' };
     if (q.cityLegacyId) {
