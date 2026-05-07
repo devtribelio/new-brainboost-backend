@@ -3,13 +3,13 @@ import { prisma } from '@/config/prisma';
 export class CommissionService {
   async summary(memberId: string) {
     const [agg, recent] = await Promise.all([
-      prisma.commissionEntry.aggregate({
-        where: { memberId },
+      prisma.affiliateCommission.aggregate({
+        where: { recipientId: memberId, status: { in: ['PENDING', 'BALANCE'] } },
         _sum: { amount: true },
         _count: true,
       }),
-      prisma.commissionEntry.findMany({
-        where: { memberId },
+      prisma.affiliateCommission.findMany({
+        where: { recipientId: memberId },
         orderBy: { createdAt: 'desc' },
         take: 10,
       }),
@@ -17,11 +17,11 @@ export class CommissionService {
     return {
       total: agg._sum.amount ?? 0,
       count: agg._count,
-      currency: recent[0]?.currency ?? 'IDR',
+      currency: 'IDR',
       recent: recent.map((e) => ({
         id: e.id,
         amount: e.amount,
-        currency: e.currency,
+        status: e.status,
         source: e.source,
         createdAt: e.createdAt,
       })),

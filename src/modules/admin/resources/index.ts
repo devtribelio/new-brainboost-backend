@@ -532,27 +532,6 @@ const notificationResource: ResourceConfig = {
   ],
 };
 
-const commissionEntryResource: ResourceConfig = {
-  key: 'commission-entries',
-  label: 'Commission Entry',
-  pluralLabel: 'Commission Entries',
-  model: prisma.commissionEntry,
-  defaultOrderBy: { createdAt: 'desc' },
-  listColumns: [
-    { field: 'memberId', label: 'Member' },
-    { field: 'amount', label: 'Amount' },
-    { field: 'currency', label: 'Currency' },
-    { field: 'source', label: 'Source' },
-    { field: 'createdAt', label: 'Created' },
-  ],
-  fields: [
-    { name: 'memberId', label: 'Member', type: 'select', required: true, optionsLoader: loadMembers },
-    { name: 'amount', label: 'Amount', type: 'number', required: true },
-    { name: 'currency', label: 'Currency', type: 'text' },
-    { name: 'source', label: 'Source', type: 'text' },
-  ],
-};
-
 const adminResource: ResourceConfig = {
   key: 'admins',
   label: 'Admin',
@@ -618,6 +597,5 @@ export const resources: ResourceConfig[] = [
   postReportResource,
   memberReportResource,
   notificationResource,
-  commissionEntryResource,
   adminResource,
 ];

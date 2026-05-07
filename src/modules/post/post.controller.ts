@@ -49,7 +49,7 @@ export class PostController {
   };
 
   @ApiOperation({ summary: 'Post detail (increments view count)' })
-  @ApiQuery({ name: 'postId', type: 'string', required: true, description: 'legacyId or cuid' })
+  @ApiQuery({ name: 'postId', type: 'string', required: true, description: 'legacyId or uuid' })
   @ApiResponse({ status: 200 })
   @ApiResponse({ status: 404, description: 'Not found' })
   detail = async (req: AuthenticatedRequest, res: Response) => {

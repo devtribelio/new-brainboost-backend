@@ -7,7 +7,7 @@
   "main": "dist/main.js",
   "scripts": {
     "dev": "tsx watch src/main.ts",
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && tsc-alias -p tsconfig.json",
     "start": "node dist/main.js",
     "lint": "eslint \"src/**/*.ts\" \"tests/**/*.ts\"",
     "lint:fix": "eslint \"src/**/*.ts\" \"tests/**/*.ts\" --fix",
@@ -37,6 +37,7 @@
     "jsonwebtoken": "^9.0.2",
     "morgan": "^1.10.0",
     "multer": "^1.4.5-lts.1",
+    "nanoid": "^5.1.11",
     "nodemailer": "^8.0.7",
     "pino": "^9.5.0",
     "reflect-metadata": "^0.2.2",
@@ -65,6 +66,7 @@
     "prettier": "^3.3.3",
     "prisma": "^5.22.0",
     "supertest": "^7.0.0",
+    "tsc-alias": "^1.8.17",
     "tsx": "^4.19.2",
     "typescript": "^5.6.3",
     "vitest": "^2.1.4"

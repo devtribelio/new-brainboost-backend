@@ -37,7 +37,7 @@ export class LocationController {
   @ApiQuery({ name: 'page', type: 'integer', required: false })
   @ApiQuery({ name: 'perPage', type: 'integer', required: false })
   @ApiQuery({ name: 'keyword', type: 'string', required: false })
-  @ApiQuery({ name: 'countryId', type: 'integer', required: false, description: 'legacyId or cuid' })
+  @ApiQuery({ name: 'countryId', type: 'integer', required: false, description: 'legacyId or uuid' })
   @ApiResponse({ status: 200 })
   listProvinces = async (req: Request, res: Response) => {
     const p = parsePagination(req.query as Record<string, unknown>);
