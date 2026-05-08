@@ -28,6 +28,14 @@ export function accountRoutes(): Router {
     router,
     controller: ctrl,
     method: 'post',
+    path: '/account/affiliateConnect',
+    handlerKey: 'affiliateConnect',
+    middlewares: [authGuard],
+  });
+  bindRoute({
+    router,
+    controller: ctrl,
+    method: 'post',
     path: '/account/logout',
     handlerKey: 'logout',
     middlewares: [authGuard, validateDto(LogoutDto)],

@@ -1,5 +1,6 @@
 import type { Response } from 'express';
 import { ProfileService } from './profile.service';
+import { prisma } from '@/config/prisma';
 import { ok } from '@/common/utils/response.util';
 import { UnauthorizedException } from '@/common/exceptions';
 import { serializeMemberFull } from '@/common/serializers';
@@ -21,8 +22,48 @@ export class ProfileController {
   getInfo = async (req: AuthenticatedRequest, res: Response) => {
     if (!req.user) throw new UnauthorizedException();
     const member = await this.profileService.getInfo(req.user.id);
+
+    // Resolve inviter (affiliate connection) for ProfileModel-compat shape
+    let affiliateConnectedData: Record<string, unknown> | null = null;
+    if (member.inviterId) {
+      const inviter = await prisma.member.findUnique({
+        where: { id: member.inviterId },
+        select: { id: true, legacyId: true, affiliateCode: true },
+      });
+      if (inviter) {
+        affiliateConnectedData = {
+          memberNetworkConnectId: null,
+          memberId: member.legacyId ?? member.id,
+          affiliatorCode: inviter.affiliateCode ?? null,
+          affiliatorMemberId: inviter.legacyId ?? inviter.id,
+        };
+      }
+    }
+
+    const p = member.profile;
     return ok(res, {
       ...serializeMemberFull(member),
+      // ProfileModel-compat fields (mobile account_remote_source.profileInfo())
+      image: member.avatarUrl,
+      phoneNumber: member.phone,
+      phoneCode: member.phoneCode,
+      address: p?.address ?? null,
+      postalCode: p?.postalCode ?? null,
+      countryId: p?.country?.legacyId?.toString() ?? p?.countryId ?? null,
+      countryName: p?.country?.name ?? null,
+      provinceId: p?.province?.legacyId?.toString() ?? p?.provinceId ?? null,
+      provinceName: p?.province?.name ?? null,
+      cityId: p?.city?.legacyId?.toString() ?? p?.cityId ?? null,
+      cityName: p?.city?.name ?? null,
+      districtId: p?.district?.legacyId?.toString() ?? p?.districtId ?? null,
+      districtName: p?.district?.name ?? null,
+      isPreRegister: 0,
+      loginCount: 0,
+      isDeleted: member.scheduledDeletionAt ? 1 : 0,
+      affiliatorCode: member.affiliateCode ?? null,
+      haveAffiliateConnect: member.inviterId !== null,
+      affiliateConnectedData,
+      // legacy raw nested profile (extra, ignored by mobile parser)
       profile: member.profile,
     });
   };

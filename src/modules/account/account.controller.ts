@@ -41,6 +41,19 @@ export class AccountController {
   };
 
   @ApiBearerAuth()
+  @ApiOperation({ summary: 'Connect affiliator code to member (binds inviter, idempotent)' })
+  @ApiResponse({ status: 200 })
+  @ApiResponse({ status: 400, type: () => ApiErrorResponseDto })
+  @ApiResponse({ status: 404, type: () => ApiErrorResponseDto })
+  affiliateConnect = async (req: Request, res: Response) => {
+    const user = requireUser(req);
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const affiliatorCode = (body.affiliatorCode || body.affiliateCode || body.affCode) as string;
+    const result = await this.accountService.affiliateConnect(user.id, affiliatorCode);
+    return ok(res, result);
+  };
+
+  @ApiBearerAuth()
   @ApiOperation({ summary: 'Logout (revoke refresh token)' })
   @ApiBody({ type: () => LogoutDto })
   @ApiResponse({ status: 200, type: () => GenericOkDto })

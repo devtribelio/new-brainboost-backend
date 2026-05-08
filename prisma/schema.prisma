@@ -411,7 +411,9 @@ model CommentLike {
 model Network {
   id          String   @id @default(uuid(7)) @db.Uuid
   legacyId    Int?     @unique
+  code        String?  @unique
   name        String
+  purpose     String? // "timeline" | "education" | null — used by /member/info community list
   description String?
   iconUrl     String?
   bannerUrl   String?

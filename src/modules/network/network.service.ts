@@ -4,6 +4,11 @@ import type { PaginationParams } from '@/common/utils/pagination.util';
 
 export class NetworkService {
   private async resolveNetworkId(input: string): Promise<string | null> {
+    if (!input) return null;
+    // Try by `code` first (mobile sends 8-char alphanumeric code from /info)
+    const byCode = await prisma.network.findUnique({ where: { code: input }, select: { id: true } });
+    if (byCode) return byCode.id;
+    // Try legacyId numeric
     const legacyId = Number.parseInt(input, 10);
     if (Number.isFinite(legacyId) && input === String(legacyId)) {
       const byLegacy = await prisma.network.findUnique({
@@ -12,6 +17,7 @@ export class NetworkService {
       });
       if (byLegacy) return byLegacy.id;
     }
+    // Try uuid
     const byId = await prisma.network.findUnique({ where: { id: input }, select: { id: true } });
     return byId?.id ?? null;
   }

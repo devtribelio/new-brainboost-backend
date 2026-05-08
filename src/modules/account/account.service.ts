@@ -19,6 +19,60 @@ import type { GetPaymentTokenQueryDto } from './dto/payment-token.dto';
 const SCHEDULED_DELETION_DAYS = 15;
 
 export class AccountService {
+  /**
+   * Bind affiliator code to member (mobile post-login flow).
+   * Mirror of legacy `MemberNetworkConnect.findOrCreate` — store inviter linkage
+   * once per member. Idempotent: returns existing if already connected, never
+   * overwrites once set.
+   */
+  async affiliateConnect(memberId: string, affiliatorCode: string) {
+    if (!affiliatorCode) throw new BadRequestException('affiliatorCode required');
+
+    const me = await prisma.member.findUnique({
+      where: { id: memberId },
+      select: { id: true, affiliateCode: true, inviterId: true },
+    });
+    if (!me) throw new NotFoundException('Member not found');
+
+    if (me.affiliateCode && me.affiliateCode === affiliatorCode) {
+      throw new BadRequestException('Cannot connect to your own affiliate code');
+    }
+
+    const inviter = await prisma.member.findUnique({
+      where: { affiliateCode: affiliatorCode },
+      select: { id: true, affiliateCode: true, legacyId: true },
+    });
+    if (!inviter) throw new NotFoundException(`Affiliator code "${affiliatorCode}" not found`);
+
+    // Already connected — return existing without overwriting
+    if (me.inviterId) {
+      const existingInviter = await prisma.member.findUnique({
+        where: { id: me.inviterId },
+        select: { id: true, affiliateCode: true, legacyId: true },
+      });
+      return {
+        memberNetworkConnectId: null,
+        memberId: me.id,
+        affiliatorCode: existingInviter?.affiliateCode ?? null,
+        affiliatorMemberId: existingInviter?.legacyId ?? existingInviter?.id ?? null,
+        alreadyConnected: true,
+      };
+    }
+
+    await prisma.member.update({
+      where: { id: memberId },
+      data: { inviterId: inviter.id },
+    });
+
+    return {
+      memberNetworkConnectId: null,
+      memberId: me.id,
+      affiliatorCode: inviter.affiliateCode,
+      affiliatorMemberId: inviter.legacyId ?? inviter.id,
+      alreadyConnected: false,
+    };
+  }
+
   async preRegistration(dto: PreRegistrationDto) {
     if (!dto.email && !dto.phone) {
       throw new BadRequestException('email or phone required');

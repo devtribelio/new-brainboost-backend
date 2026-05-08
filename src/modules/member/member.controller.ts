@@ -1,5 +1,7 @@
 import type { Response } from 'express';
 import { MemberService } from './member.service';
+import { prisma } from '@/config/prisma';
+import { env } from '@/config/env';
 import { ok } from '@/common/utils/response.util';
 import type { AuthenticatedRequest } from '@/common/interfaces/authenticated-request';
 import { UnauthorizedException } from '@/common/exceptions';
@@ -54,7 +56,29 @@ export class MemberController {
             : null,
         }
       : null;
+    // Mobile expects InfoModel shape (appName, appCode, maintenance, community).
+    // Community list pulled from Network rows with `purpose` set.
+    const communityNetworks = await prisma.network.findMany({
+      where: { purpose: { in: ['timeline', 'education'] }, isActive: true },
+      select: { id: true, legacyId: true, code: true, name: true, purpose: true },
+    });
+    const community = communityNetworks.map((n) => ({
+      page: n.purpose,
+      networkId: n.legacyId ?? null,
+      networkCode: n.code ?? n.id,
+      name: n.name,
+    }));
+
     return ok(res, {
+      // InfoModel-compat fields (mobile auth_remote_source.info())
+      appName: process.env.APP_NAME ?? 'Brainboost',
+      appCode: process.env.APP_CODE ?? 'brainboost',
+      affiliatePlatformUrl: process.env.AFFILIATE_PLATFORM_URL ?? `${env.baseUrl}/affiliate`,
+      maintenance: process.env.MAINTENANCE === 'true' ? 1 : 0,
+      maintenanceMessage: process.env.MAINTENANCE_MESSAGE ?? null,
+      maintenanceEndDateTime: process.env.MAINTENANCE_END ?? null,
+      community,
+      // Bonus member detail (extra keys ignored by mobile InfoModel parser)
       ...serializeMemberFull(m),
       profile,
       memberLogin: result.memberLogin,
