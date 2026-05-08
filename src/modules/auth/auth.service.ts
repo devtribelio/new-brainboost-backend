@@ -192,19 +192,32 @@ export class AuthService {
   }
 
   /**
-   * Verify password supporting both bcrypt (new) and legacy MD5 (migrated members).
-   * On legacy match, transparently rehashes to bcrypt.
+   * Verify password against bcrypt (new) or legacy hash algos (md5/sha1/sha256).
+   * On legacy match, transparently rehashes to bcrypt and updates passwordAlgo.
+   * `legacy` is kept as an alias for `md5` for backward compatibility.
    */
   private async verifyPassword(
     plaintext: string,
     member: { id: string; passwordHash: string; passwordAlgo: string },
   ): Promise<boolean> {
-    if (member.passwordAlgo === 'bcrypt') {
+    const algo = (member.passwordAlgo ?? '').toLowerCase();
+
+    if (algo === 'bcrypt') {
       return bcrypt.compare(plaintext, member.passwordHash);
     }
-    if (member.passwordAlgo === 'legacy') {
-      const md5 = createHash('md5').update(plaintext).digest('hex');
-      if (md5 !== member.passwordHash) return false;
+
+    let computed: string | null = null;
+    if (algo === 'md5' || algo === 'legacy') {
+      computed = createHash('md5').update(plaintext).digest('hex');
+    } else if (algo === 'sha1') {
+      computed = createHash('sha1').update(plaintext).digest('hex');
+    } else if (algo === 'sha256') {
+      computed = createHash('sha256').update(plaintext).digest('hex');
+    }
+
+    if (computed !== null) {
+      if (computed.toLowerCase() !== member.passwordHash.toLowerCase()) return false;
+      // Lazy rehash to bcrypt — transparent upgrade on first successful login.
       const newHash = await bcrypt.hash(plaintext, 10);
       await prisma.member.update({
         where: { id: member.id },
@@ -212,7 +225,8 @@ export class AuthService {
       });
       return true;
     }
-    // Unknown algo — try bcrypt as best effort
+
+    // Unknown algo — best-effort bcrypt
     return bcrypt.compare(plaintext, member.passwordHash);
   }
 
