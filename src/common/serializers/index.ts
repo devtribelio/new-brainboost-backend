@@ -42,6 +42,12 @@ export function serializeMember(m: Member | MemberLite): Record<string, unknown>
   };
 }
 
+/**
+ * Full member shape — legacy NetworkMember/Member fields used by mobile.
+ * Mobile `NetworkMemberModel` expects: memberId, name, provinceId/Name,
+ * cityId/Name, email, phone, gender, isEmailVerified, isPhoneVerified,
+ * postalCode, imageUrl, coverUrl, biography, birthdate, address, dateRegister.
+ */
 export function serializeMemberFull(m: Member): Record<string, unknown> {
   return {
     ...serializeMember(m),
@@ -49,9 +55,14 @@ export function serializeMemberFull(m: Member): Record<string, unknown> {
     phoneCode: m.phoneCode,
     coverUrl: m.coverUrl,
     bio: m.bio,
+    biography: m.bio, // legacy alias
+    gender: m.gender,
+    birthdate: m.birthdate,
     isActive: m.isActive,
     isVerified: m.isVerified,
+    isEmailVerified: m.isVerified, // legacy alias
     isPhoneVerified: m.isPhoneVerified,
+    dateRegister: m.createdAt, // legacy alias
     createdAt: m.createdAt,
   };
 }
@@ -72,12 +83,20 @@ export function serializeNetwork(
   };
 }
 
-export function serializeTopic(t: Topic): Record<string, unknown> {
+export function serializeTopic(t: Topic & { isSubscribed?: boolean; countPost?: number; orderNumber?: number }): Record<string, unknown> {
   return {
+    // Legacy field names (mobile TopicModel)
     topicId: t.legacyId ?? t.id,
+    name: t.name,
+    icon: t.iconUrl,
+    iconType: t.iconUrl ? 'image' : null,
+    type: t.type,
+    countPost: t.countPost ?? 0,
+    orderNumber: t.orderNumber ?? 0,
+    isSubscribeTopic: t.isSubscribed ?? false,
+    // Backend-native (extras)
     id: t.id,
     networkId: t.networkId,
-    name: t.name,
     description: t.description,
     iconUrl: t.iconUrl,
     isActive: t.isActive,
@@ -195,9 +214,51 @@ export function serializeBanner(b: Banner): Record<string, unknown> {
   };
 }
 
+/**
+ * Map product `type` to a human label per legacy convention.
+ * Fallback: capitalize the type itself.
+ */
+function productTypeLabel(type: string | null): string {
+  if (!type) return '';
+  const map: Record<string, string> = {
+    course: 'Course',
+    bundle: 'Bundle',
+    book: 'Book',
+    digital: 'Digital',
+  };
+  return map[type.toLowerCase()] ?? type.charAt(0).toUpperCase() + type.slice(1);
+}
+
+function deriveSlug(title: string | null): string {
+  if (!title) return '';
+  return title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 100);
+}
+
 export function serializeProduct(p: Product): Record<string, unknown> {
+  const productId = p.legacyId ?? p.id;
   return {
-    productId: p.legacyId ?? p.id,
+    // Legacy field names (mobile ProductModel.fromAPIJson expects these)
+    networkAccountProductAffiliatorId: productId,
+    productType: p.type,
+    productTypeLabel: productTypeLabel(p.type),
+    productCode: productId,
+    productSlug: deriveSlug(p.title),
+    productName: p.title,
+    productCategory: [],
+    productPrice: p.price,
+    productImageUrl: p.thumbnail,
+    lastUpdated: p.updatedAt,
+    productPaymentUrl: null,
+    productShareDetailUrl: null,
+    commisionFixAmount: null,
+    productUrl: null,
+    isPurchased: false,
+    // Backend-native fields (extra, harmless to mobile parser)
+    productId,
     id: p.id,
     type: p.type,
     title: p.title,
@@ -211,10 +272,18 @@ export function serializeProduct(p: Product): Record<string, unknown> {
 
 export function serializeNotification(n: Notification): Record<string, unknown> {
   return {
+    // Legacy field names (mobile NotificationModel)
     notificationId: n.id,
-    id: n.id,
-    type: n.type,
     title: n.title,
+    message: n.body,
+    isSeen: n.seenAt !== null,
+    created: n.createdAt,
+    updated: null,
+    refTable: null,
+    refId: null,
+    type: n.type,
+    // Backend-native (extras)
+    id: n.id,
     body: n.body,
     payload: n.payload,
     seenAt: n.seenAt,
