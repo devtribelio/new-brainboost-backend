@@ -31,12 +31,12 @@ export class ProductController {
   };
 
   @ApiOperation({ summary: 'Course product detail' })
-  @ApiQuery({ name: 'productId', type: 'string', required: true })
+  @ApiQuery({ name: 'code', type: 'string', required: true })
   @ApiResponse({ status: 200 })
   courseDetail = async (req: Request, res: Response) => {
-    const productId = (req.query.productId as string) ?? '';
-    if (!productId) throw new BadRequestException('productId required');
-    const product = await this.productService.courseDetail(productId);
+    const code = (req.query.code as string) ?? '';
+    if (!code) throw new BadRequestException('code required');
+    const product = await this.productService.courseDetail(code);
     return ok(res, {
       ...serializeProduct(product),
       course: product.course

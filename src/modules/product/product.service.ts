@@ -30,7 +30,7 @@ export class ProductService {
     }
     if (!product) {
       product = await prisma.product.findUnique({
-        where: { id: productInput },
+        where: { code: productInput },
         include: { course: true },
       });
     }
