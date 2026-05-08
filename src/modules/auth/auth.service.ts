@@ -47,7 +47,9 @@ function timingSafeStringEqual(a: string, b: string): boolean {
   return timingSafeEqual(ab, bb);
 }
 
-function mapDtoPurpose(p: string): 'forgot-password' | 'pre-registration' | 'verify-phone' | 'verify-email' {
+function mapDtoPurpose(
+  p: string,
+): 'forgot-password' | 'pre-registration' | 'verify-phone' | 'verify-email' {
   switch (p) {
     case 'register':
       return 'pre-registration';
@@ -95,7 +97,7 @@ export class AuthService {
     return {
       access_token: signAnonAccessToken(dto.client_id),
       token_type: 'Bearer',
-      expires_in: env.jwt.anonExpiresIn,
+      expires_in: parseExpiresInToSeconds(env.jwt.anonExpiresIn),
       scope: 'anon',
     };
   }
