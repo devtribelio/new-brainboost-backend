@@ -241,30 +241,34 @@ function deriveSlug(title: string | null): string {
 export function serializeProduct(p: Product): Record<string, unknown> {
   const productId = p.legacyId ?? p.id;
   const label = productTypeLabel(p.type);
-  const slug = deriveSlug(p.title);
+  const slug = p.slug ?? deriveSlug(p.title);
+  const code = p.code ?? String(productId);
+  const baseUrl = process.env.PUBLIC_WEB_URL ?? 'https://brainboost.com';
+  const productUrl = p.marketingLink ?? `${baseUrl}/p/${slug}`;
   return {
     // Primary legacy keys (mobile ProductModel.fromAPIJson reads these first)
     networkAccountProductAffiliatorId: productId,
     productType: p.type,
     productTypeLabel: label,
-    productCode: productId,
+    productCode: code,
     productSlug: slug,
     productName: p.title,
-    productCategory: [],
+    productCategory: p.tags ? p.tags.split(',').map((s) => s.trim()).filter(Boolean) : [],
     productPrice: p.price,
     productImageUrl: p.thumbnail,
     lastUpdated: p.updatedAt,
-    productPaymentUrl: null,
-    productShareDetailUrl: null,
+    productPaymentUrl: `${baseUrl}/checkout/${code}`,
+    productShareDetailUrl: productUrl,
     commisionFixAmount: null,
-    productUrl: null,
+    productUrl,
     isPurchased: false,
+    productRatingAvg: p.ratingAvg ?? 0,
     // Fallback aliases for mobile fallback chain
     productId,
     id: p.id,
     type: p.type,
     typeLabel: label,
-    code: productId,
+    code,
     slug,
     title: p.title,
     description: p.description,

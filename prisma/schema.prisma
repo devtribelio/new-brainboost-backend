@@ -214,16 +214,21 @@ model Banner {
 }
 
 model Product {
-  id          String   @id @default(uuid(7)) @db.Uuid
-  legacyId    Int?     @unique
-  type        String
-  title       String
-  description String?
-  thumbnail   String?
-  price       Int      @default(0)
-  isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id            String   @id @default(uuid(7)) @db.Uuid
+  legacyId      Int?     @unique
+  type          String
+  code          String?  @unique // legacy `course.code` — short alphanumeric id
+  slug          String? // SEO-friendly slug from legacy `course.slug`
+  title         String
+  description   String?
+  thumbnail     String? // legacy resource (model_type=TBModel_Course, collection=courseImage)
+  price         Int      @default(0)
+  marketingLink String? // legacy `course.marketing_link`
+  ratingAvg     Float?   @default(0) // legacy `course.product_rating_avg`
+  tags          String? // legacy `course.tags` raw csv
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
   course               Course?
   affiliatePrograms    AffiliateProgram[]
