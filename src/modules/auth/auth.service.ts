@@ -1,9 +1,10 @@
 import bcrypt from 'bcryptjs';
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { prisma } from '@/config/prisma';
 import { env } from '@/config/env';
 import {
   signAccessToken,
+  signAnonAccessToken,
   signRefreshToken,
   verifyRefreshToken,
 } from '@/common/utils/jwt.util';
@@ -20,16 +21,13 @@ import type {
 
 interface TokenBundle {
   access_token: string;
-  refresh_token: string;
+  refresh_token?: string;
   token_type: 'Bearer';
   /** Seconds until access_token expires. Per OAuth2 RFC 6749 §5.1. */
   expires_in: number;
+  scope?: 'member' | 'anon';
 }
 
-/**
- * Convert a JWT-style duration ("15m", "1h", "30d", "900s", or pure seconds)
- * to integer seconds. Matches `jsonwebtoken` library's expiresIn parsing.
- */
 function parseExpiresInToSeconds(input: string): number {
   const trimmed = input.trim();
   const numeric = Number(trimmed);
@@ -40,6 +38,13 @@ function parseExpiresInToSeconds(input: string): number {
   const unit = match[2]!.toLowerCase();
   const multipliers: Record<string, number> = { s: 1, m: 60, h: 3600, d: 86400 };
   return value * multipliers[unit]!;
+}
+
+function timingSafeStringEqual(a: string, b: string): boolean {
+  const ab = Buffer.from(a);
+  const bb = Buffer.from(b);
+  if (ab.length !== bb.length) return false;
+  return timingSafeEqual(ab, bb);
 }
 
 function mapDtoPurpose(p: string): 'forgot-password' | 'pre-registration' | 'verify-phone' | 'verify-email' {
@@ -64,12 +69,35 @@ export class AuthService {
         return this.loginWithPassword(dto);
       case 'refresh_token':
         return this.loginWithRefreshToken(dto);
-      case 'social':
       case 'client_credentials':
-        throw new BadRequestException(`grant_type "${dto.grant_type}" not implemented yet`);
+        return this.loginWithClientCredentials(dto);
+      case 'social':
+        throw new BadRequestException('grant_type "social" not implemented yet');
       default:
         throw new BadRequestException('Unsupported grant_type');
     }
+  }
+
+  private loginWithClientCredentials(dto: LoginDto): TokenBundle {
+    const expectedId = env.oauth.clientId;
+    const expectedSecret = env.oauth.clientSecret;
+    if (!expectedId || !expectedSecret) {
+      throw new BadRequestException('client_credentials grant is disabled');
+    }
+    if (!dto.client_id || !dto.client_secret) {
+      throw new BadRequestException('client_id and client_secret required');
+    }
+    const ok =
+      timingSafeStringEqual(dto.client_id, expectedId) &&
+      timingSafeStringEqual(dto.client_secret, expectedSecret);
+    if (!ok) throw new UnauthorizedException('Invalid client credentials');
+
+    return {
+      access_token: signAnonAccessToken(dto.client_id),
+      token_type: 'Bearer',
+      expires_in: env.jwt.anonExpiresIn,
+      scope: 'anon',
+    };
   }
 
   async register(dto: RegisterDto): Promise<TokenBundle> {

@@ -29,6 +29,11 @@ export const env = {
     refreshSecret: required('JWT_REFRESH_SECRET'),
     accessExpiresIn: optional('JWT_ACCESS_EXPIRES_IN', '15m'),
     refreshExpiresIn: optional('JWT_REFRESH_EXPIRES_IN', '30d'),
+    anonExpiresIn: optional('JWT_ANON_EXPIRES_IN', '1h'),
+  },
+  oauth: {
+    clientId: optional('OAUTH_CLIENT_ID', ''),
+    clientSecret: optional('OAUTH_CLIENT_SECRET', ''),
   },
   admin: {
     jwtSecret: required('ADMIN_JWT_SECRET'),

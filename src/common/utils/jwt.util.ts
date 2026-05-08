@@ -2,9 +2,12 @@ import jwt, { type SignOptions } from 'jsonwebtoken';
 import { env } from '@/config/env';
 import { UnauthorizedException } from '@/common/exceptions';
 
+export type TokenScope = 'member' | 'anon';
+
 export interface AccessTokenPayload {
   sub: string;
   email: string;
+  scope?: TokenScope;
 }
 
 export interface RefreshTokenPayload {
@@ -14,7 +17,12 @@ export interface RefreshTokenPayload {
 
 export function signAccessToken(payload: AccessTokenPayload): string {
   const opts: SignOptions = { expiresIn: env.jwt.accessExpiresIn as SignOptions['expiresIn'] };
-  return jwt.sign(payload, env.jwt.accessSecret, opts);
+  return jwt.sign({ ...payload, scope: payload.scope ?? 'member' }, env.jwt.accessSecret, opts);
+}
+
+export function signAnonAccessToken(clientId: string): string {
+  const opts: SignOptions = { expiresIn: env.jwt.anonExpiresIn as SignOptions['expiresIn'] };
+  return jwt.sign({ sub: clientId, email: '', scope: 'anon' }, env.jwt.accessSecret, opts);
 }
 
 export function signRefreshToken(payload: RefreshTokenPayload): string {

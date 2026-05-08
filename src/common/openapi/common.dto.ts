@@ -6,17 +6,30 @@ import { ApiProperty, ApiPropertyOptional } from './decorators';
  */
 
 export class TokenBundleDto {
-  @ApiProperty({ description: 'JWT access token (member)' })
+  @ApiProperty({ description: 'JWT access token (member or anon scope)' })
   access_token!: string;
 
-  @ApiProperty()
-  refresh_token!: string;
+  @ApiPropertyOptional({
+    description: 'Long-lived refresh token. Omitted for client_credentials grant.',
+  })
+  refresh_token?: string;
 
   @ApiProperty({ enum: ['Bearer'] })
   token_type!: string;
 
-  @ApiProperty({ type: 'integer', example: 900, description: 'Seconds until access_token expires (OAuth2 RFC 6749 §5.1)' })
+  @ApiProperty({
+    type: 'integer',
+    example: 900,
+    description: 'Seconds until access_token expires (OAuth2 RFC 6749 §5.1)',
+  })
   expires_in!: number;
+
+  @ApiPropertyOptional({
+    enum: ['member', 'anon'],
+    description:
+      'Token scope. `anon` is issued by client_credentials and only accepts pre-login endpoints.',
+  })
+  scope?: string;
 }
 
 export class ApiErrorBodyDto {

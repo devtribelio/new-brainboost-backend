@@ -25,7 +25,16 @@ export class AuthController {
 
   @ApiOperation({
     summary: 'OAuth2 token endpoint',
-    description: 'Issue access+refresh tokens. Supports `password` and `refresh_token` grants.',
+    description: [
+      'Issue tokens. Supported grants:',
+      '- `password`: body `{grant_type, username, password}` → access + refresh.',
+      '- `refresh_token`: body `{grant_type, refresh_token}` → new access + refresh.',
+      '  Old refresh_token is revoked atomically; reuse returns 401 (force re-login).',
+      '- `client_credentials`: body `{grant_type, client_id, client_secret}` → access only,',
+      '  scope=`anon`. For pre-login flows (splash banner, version check). Disabled when',
+      '  `OAUTH_CLIENT_ID`/`OAUTH_CLIENT_SECRET` env vars are unset.',
+      '- `social`: not yet implemented.',
+    ].join('\n'),
   })
   @ApiBody({ type: () => LoginDto })
   @ApiResponse({ status: 200, description: 'Tokens issued', type: () => TokenBundleDto })
@@ -45,7 +54,15 @@ export class AuthController {
     return ok(res, tokens, undefined, 201);
   };
 
-  @ApiOperation({ summary: 'Register a device for push notifications' })
+  @ApiOperation({
+    summary: 'Register a device for push notifications',
+    description: [
+      'Enroll-or-update upsert keyed on `(memberId, deviceId)`. Idempotent.',
+      'Use this on app start (and whenever `fcmToken` is first acquired).',
+      'For pure FCM token rotation on an already-enrolled device,',
+      '`POST /auth/cloudMessaging` is a cheaper update-only path.',
+    ].join(' '),
+  })
   @ApiBody({ type: () => RegisterDeviceDto })
   @ApiResponse({ status: 200, type: () => GenericOkDto })
   registerDevice = async (req: Request, res: Response) => {
@@ -55,7 +72,15 @@ export class AuthController {
     return ok(res, result);
   };
 
-  @ApiOperation({ summary: 'Update FCM token for a device' })
+  @ApiOperation({
+    summary: 'Update FCM token for a device (rotation only)',
+    description: [
+      'Update-only path: requires the device to be already enrolled via `/auth/devices`.',
+      'Returns 404 if no matching device row exists.',
+      'Use this for FCM token rotation when re-running enrollment side effects is undesirable.',
+      'For first-time enrollment, call `/auth/devices` instead — that endpoint also accepts `fcmToken`.',
+    ].join(' '),
+  })
   @ApiBody({ type: () => CloudMessagingDto })
   @ApiResponse({ status: 200, type: () => GenericOkDto })
   cloudMessaging = async (req: Request, res: Response) => {
