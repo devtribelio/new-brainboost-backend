@@ -240,13 +240,15 @@ function deriveSlug(title: string | null): string {
 
 export function serializeProduct(p: Product): Record<string, unknown> {
   const productId = p.legacyId ?? p.id;
+  const label = productTypeLabel(p.type);
+  const slug = deriveSlug(p.title);
   return {
-    // Legacy field names (mobile ProductModel.fromAPIJson expects these)
+    // Primary legacy keys (mobile ProductModel.fromAPIJson reads these first)
     networkAccountProductAffiliatorId: productId,
     productType: p.type,
-    productTypeLabel: productTypeLabel(p.type),
+    productTypeLabel: label,
     productCode: productId,
-    productSlug: deriveSlug(p.title),
+    productSlug: slug,
     productName: p.title,
     productCategory: [],
     productPrice: p.price,
@@ -257,14 +259,18 @@ export function serializeProduct(p: Product): Record<string, unknown> {
     commisionFixAmount: null,
     productUrl: null,
     isPurchased: false,
-    // Backend-native fields (extra, harmless to mobile parser)
+    // Fallback aliases for mobile fallback chain
     productId,
     id: p.id,
     type: p.type,
+    typeLabel: label,
+    code: productId,
+    slug,
     title: p.title,
     description: p.description,
     thumbnail: p.thumbnail,
     price: p.price,
+    updatedAt: p.updatedAt,
     isActive: p.isActive,
     createdAt: p.createdAt,
   };
