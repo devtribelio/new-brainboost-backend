@@ -22,7 +22,24 @@ interface TokenBundle {
   access_token: string;
   refresh_token: string;
   token_type: 'Bearer';
-  expires_in: string;
+  /** Seconds until access_token expires. Per OAuth2 RFC 6749 §5.1. */
+  expires_in: number;
+}
+
+/**
+ * Convert a JWT-style duration ("15m", "1h", "30d", "900s", or pure seconds)
+ * to integer seconds. Matches `jsonwebtoken` library's expiresIn parsing.
+ */
+function parseExpiresInToSeconds(input: string): number {
+  const trimmed = input.trim();
+  const numeric = Number(trimmed);
+  if (Number.isFinite(numeric)) return Math.floor(numeric);
+  const match = trimmed.match(/^(\d+)\s*([smhd])$/i);
+  if (!match) throw new Error(`Invalid expires_in format: ${input}`);
+  const value = Number(match[1]);
+  const unit = match[2]!.toLowerCase();
+  const multipliers: Record<string, number> = { s: 1, m: 60, h: 3600, d: 86400 };
+  return value * multipliers[unit]!;
 }
 
 function mapDtoPurpose(p: string): 'forgot-password' | 'pre-registration' | 'verify-phone' | 'verify-email' {
@@ -333,7 +350,7 @@ export class AuthService {
       access_token: accessToken,
       refresh_token: refreshToken,
       token_type: 'Bearer',
-      expires_in: env.jwt.accessExpiresIn,
+      expires_in: parseExpiresInToSeconds(env.jwt.accessExpiresIn),
     };
   }
 }

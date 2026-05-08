@@ -15,8 +15,8 @@ export class TokenBundleDto {
   @ApiProperty({ enum: ['Bearer'] })
   token_type!: string;
 
-  @ApiProperty({ example: '15m' })
-  expires_in!: string;
+  @ApiProperty({ example: 900, description: 'Seconds until access_token expires (OAuth2 RFC 6749 §5.1)' })
+  expires_in!: number;
 }
 
 export class ApiErrorBodyDto {
