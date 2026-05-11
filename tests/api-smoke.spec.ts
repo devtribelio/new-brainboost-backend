@@ -55,6 +55,23 @@ describe('legacy-aligned API smoke', () => {
     expect(r.status).toBe(400);
   });
 
+  it('GET /api/member/network/tag with empty code returns 200 (lists all)', async () => {
+    const r = await request(app).get(
+      '/api/member/network/tag?page=1&perPage=50&keyword=&code=',
+    );
+    expect(r.status).toBe(200);
+    expect(r.body.success).toBe(true);
+    expect(r.body.data.items).toBeDefined();
+    expect(Array.isArray(r.body.data.items)).toBe(true);
+  });
+
+  it('GET /api/member/network/tag with keyword filters case-insensitively', async () => {
+    const r = await request(app).get('/api/member/network/tag?keyword=zzz-no-match-zzz');
+    expect(r.status).toBe(200);
+    expect(r.body.data.items).toEqual([]);
+    expect(r.body.data.total).toBe(0);
+  });
+
   it('GET /api/member/report/category', async () => {
     const r = await request(app).get('/api/member/report/category');
     expect(r.status).toBe(200);

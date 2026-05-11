@@ -4,12 +4,12 @@ export class CommunityEntryDto {
   @ApiProperty({ enum: ['timeline', 'education'], example: 'timeline' })
   page!: string;
 
-  @ApiPropertyOptional({
-    nullable: true,
+  @ApiProperty({
     example: 1,
-    description: 'Network legacy integer id (null if backend-only network)',
+    description:
+      'Network legacy integer id when present; falls back to backend UUID for new-only networks.',
   })
-  networkId?: number | null;
+  networkId!: number | string;
 
   @ApiProperty({ example: 'timeline-main' })
   networkCode!: string;

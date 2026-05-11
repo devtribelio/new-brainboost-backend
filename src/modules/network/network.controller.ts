@@ -7,6 +7,7 @@ import { serializeMember } from '@/common/serializers';
 import type { AuthenticatedRequest } from '@/common/interfaces/authenticated-request';
 import {
   ApiBearerAuth,
+  ApiBody,
   ApiOperation,
   ApiQuery,
   ApiResponse,
@@ -17,13 +18,19 @@ import {
   NetworkMemberPageDto,
   NetworkTagPageDto,
 } from './dto/network.dto';
+import { NetworkJoinBodyDto } from './dto/network-join-body.dto';
 
 @ApiTags('Network')
 export class NetworkController {
   constructor(private readonly networkService: NetworkService) {}
 
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Join / leave a network' })
+  @ApiOperation({
+    summary: 'Join / leave a network',
+    description:
+      'Body must include one of `code`, `networkCode`, or `networkId`. Set `action` to `leave` to remove membership; otherwise defaults to join.',
+  })
+  @ApiBody({ type: () => NetworkJoinBodyDto })
   @ApiResponse({ status: 200, type: () => NetworkJoinResultDto })
   join = async (req: AuthenticatedRequest, res: Response) => {
     if (!req.user) throw new UnauthorizedException();
@@ -68,7 +75,9 @@ export class NetworkController {
     return ok(res, buildLegacyPage(data, total, p));
   };
 
-  @ApiOperation({ summary: 'List tags of a network' })
+  @ApiOperation({
+    summary: 'List tags of a network (or all networks if no code/networkId provided)',
+  })
   @ApiQuery({ name: 'code', type: 'string', required: false, example: 'timeline-main' })
   @ApiQuery({
     name: 'networkId',
@@ -76,15 +85,32 @@ export class NetworkController {
     required: false,
     example: 'network-uuid-1234',
   })
+  @ApiQuery({ name: 'page', type: 'integer', required: false, example: 1 })
+  @ApiQuery({ name: 'perPage', type: 'integer', required: false, example: 50 })
+  @ApiQuery({
+    name: 'keyword',
+    type: 'string',
+    required: false,
+    description: 'Case-insensitive contains-match on tag name.',
+  })
+  @ApiQuery({
+    name: 'sort',
+    type: 'string',
+    required: false,
+    description: 'Reserved; currently ignored (always `name asc`).',
+  })
   @ApiResponse({ status: 200, type: () => NetworkTagPageDto })
   tags = async (req: Request, res: Response) => {
     const networkInput =
       (req.query.code as string) ||
       (req.query.networkId as string) ||
       '';
-    if (!networkInput) throw new BadRequestException('code or networkId required');
+    const keyword =
+      typeof req.query.keyword === 'string' && req.query.keyword.length > 0
+        ? req.query.keyword
+        : undefined;
     const p = parsePagination(req.query as Record<string, unknown>);
-    const { rows, total } = await this.networkService.listTags(p, networkInput);
+    const { rows, total } = await this.networkService.listTags(p, networkInput, keyword);
     return ok(
       res,
       buildLegacyPage(

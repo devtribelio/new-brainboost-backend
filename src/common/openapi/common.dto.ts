@@ -51,7 +51,7 @@ export class ApiErrorBodyDto {
 }
 
 export class ApiErrorResponseDto {
-  @ApiProperty({ example: false })
+  @ApiProperty({ type: 'boolean', example: false })
   success!: boolean;
 
   @ApiProperty({ type: () => ApiErrorBodyDto })
@@ -59,6 +59,6 @@ export class ApiErrorResponseDto {
 }
 
 export class GenericOkDto {
-  @ApiProperty({ example: true })
+  @ApiProperty({ type: 'boolean', example: true })
   ok!: boolean;
 }

@@ -55,5 +55,38 @@ describe('OpenAPI doc — response examples', () => {
     expect(doc.components.schemas.UploadedFileDto.properties.url.example).toBe(
       '/static/temporary/tmp-abc123.jpg',
     );
+
+    // Issue 9: success / ok must be declared as boolean (was defaulting to string).
+    expect(doc.components.schemas.ApiErrorResponseDto.properties.success.type).toBe('boolean');
+    expect(doc.components.schemas.GenericOkDto.properties.ok.type).toBe('boolean');
+
+    // Issue 3: network/join request body documented via NetworkJoinBodyDto.
+    expect(doc.components.schemas.NetworkJoinBodyDto).toBeTruthy();
+    expect(doc.components.schemas.NetworkJoinBodyDto.properties.code).toBeTruthy();
+    expect(doc.components.schemas.NetworkJoinBodyDto.properties.networkCode).toBeTruthy();
+    expect(doc.components.schemas.NetworkJoinBodyDto.properties.networkId).toBeTruthy();
+    expect(doc.components.schemas.NetworkJoinBodyDto.properties.action.enum).toEqual([
+      'join',
+      'leave',
+    ]);
+    const joinBody =
+      doc.paths['/api/member/network/join'].post.requestBody.content['application/json'].schema;
+    expect(joinBody.$ref).toBe('#/components/schemas/NetworkJoinBodyDto');
+
+    // Issue 4: network/tag exposes page/perPage/keyword/sort and none are required.
+    const tagParams = doc.paths['/api/member/network/tag'].get.parameters as {
+      name: string;
+      required: boolean;
+    }[];
+    const tagParamNames = tagParams.map((p) => p.name);
+    expect(tagParamNames).toEqual(
+      expect.arrayContaining(['code', 'networkId', 'page', 'perPage', 'keyword', 'sort']),
+    );
+    expect(tagParams.every((p) => p.required === false)).toBe(true);
+
+    // Issue 5 (PR1 portion): community networkId is no longer nullable.
+    const community = doc.components.schemas.CommunityEntryDto;
+    expect(community.properties.networkId.nullable).toBeUndefined();
+    expect(community.required).toEqual(expect.arrayContaining(['networkId']));
   });
 });

@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { prisma } from '@/config/prisma';
 import { BadRequestException, ForbiddenException, NotFoundException } from '@/common/exceptions';
 import type { PaginationParams } from '@/common/utils/pagination.util';
@@ -61,17 +62,28 @@ export class NetworkService {
     return { rows: enriched, total };
   }
 
-  async listTags(p: PaginationParams, networkInput: string) {
-    const networkId = await this.resolveNetworkId(networkInput);
-    if (!networkId) return { rows: [], total: 0 };
+  async listTags(
+    p: PaginationParams,
+    networkInput: string,
+    keyword?: string,
+  ) {
+    const where: Prisma.NetworkTagWhereInput = {};
+    if (networkInput) {
+      const networkId = await this.resolveNetworkId(networkInput);
+      if (!networkId) return { rows: [], total: 0 };
+      where.networkId = networkId;
+    }
+    if (keyword) {
+      where.name = { contains: keyword, mode: 'insensitive' };
+    }
     const [rows, total] = await Promise.all([
       prisma.networkTag.findMany({
-        where: { networkId },
+        where,
         orderBy: { name: 'asc' },
         skip: p.skip,
         take: p.take,
       }),
-      prisma.networkTag.count({ where: { networkId } }),
+      prisma.networkTag.count({ where }),
     ]);
     return { rows, total };
   }

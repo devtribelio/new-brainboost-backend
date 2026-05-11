@@ -70,7 +70,7 @@ export class MemberController {
     });
     const community = communityNetworks.map((n) => ({
       page: n.purpose,
-      networkId: n.legacyId ?? null,
+      networkId: n.legacyId ?? n.id,
       networkCode: n.code ?? n.id,
       name: n.name,
     }));
