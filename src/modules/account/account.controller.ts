@@ -20,6 +20,7 @@ import {
   VerificationDeleteAccountDto,
 } from './dto/delete-account.dto';
 import { GetPaymentTokenQueryDto } from './dto/payment-token.dto';
+import { AffiliateConnectResultDto } from './dto/affiliate-connect.dto';
 
 function requireUser(req: Request): AuthenticatedRequest['user'] & { id: string; email: string } {
   const user = (req as AuthenticatedRequest).user;
@@ -42,7 +43,7 @@ export class AccountController {
 
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Connect affiliator code to member (binds inviter, idempotent)' })
-  @ApiResponse({ status: 200 })
+  @ApiResponse({ status: 200, type: () => AffiliateConnectResultDto })
   @ApiResponse({ status: 400, type: () => ApiErrorResponseDto })
   @ApiResponse({ status: 404, type: () => ApiErrorResponseDto })
   affiliateConnect = async (req: Request, res: Response) => {

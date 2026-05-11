@@ -12,17 +12,28 @@ import {
   ApiResponse,
   ApiTags,
 } from '@/common/openapi/decorators';
+import { ApiErrorResponseDto } from '@/common/openapi/common.dto';
+import {
+  CommentDeleteResultDto,
+  CommentDto,
+  CommentLikeToggleResultDto,
+  CommentPageDto,
+} from './dto/comment.dto';
 
 @ApiTags('Comment')
 export class CommentController {
   constructor(private readonly commentService: CommentService) {}
 
   @ApiOperation({ summary: 'List comments for a post (top-level only)' })
-  @ApiQuery({ name: 'postId', type: 'string', required: true })
-  @ApiQuery({ name: 'page', type: 'integer', required: false })
-  @ApiQuery({ name: 'perPage', type: 'integer', required: false })
-  @ApiResponse({ status: 200 })
-  @ApiResponse({ status: 400, description: 'postId required' })
+  @ApiQuery({ name: 'postId', type: 'string', required: true, example: 'post-uuid-1234' })
+  @ApiQuery({ name: 'page', type: 'integer', required: false, example: 1 })
+  @ApiQuery({ name: 'perPage', type: 'integer', required: false, example: 20 })
+  @ApiResponse({ status: 200, type: () => CommentPageDto })
+  @ApiResponse({
+    status: 400,
+    description: 'postId required',
+    type: () => ApiErrorResponseDto,
+  })
   list = async (req: AuthenticatedRequest, res: Response) => {
     const postId = (req.query.postId as string) ?? '';
     if (!postId) throw new BadRequestException('postId required');
@@ -38,8 +49,8 @@ export class CommentController {
   };
 
   @ApiOperation({ summary: 'Comment detail' })
-  @ApiQuery({ name: 'commentId', type: 'string', required: true })
-  @ApiResponse({ status: 200 })
+  @ApiQuery({ name: 'commentId', type: 'string', required: true, example: 'comment-uuid-1234' })
+  @ApiResponse({ status: 200, type: () => CommentDto })
   detail = async (req: AuthenticatedRequest, res: Response) => {
     const commentId = (req.query.commentId as string) ?? '';
     if (!commentId) throw new BadRequestException('commentId required');
@@ -52,7 +63,7 @@ export class CommentController {
 
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Toggle like on a comment' })
-  @ApiResponse({ status: 200 })
+  @ApiResponse({ status: 200, type: () => CommentLikeToggleResultDto })
   like = async (req: AuthenticatedRequest, res: Response) => {
     if (!req.user) throw new UnauthorizedException();
     const commentId = (req.body?.commentId as string) ?? '';
@@ -62,7 +73,7 @@ export class CommentController {
 
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Create a comment (or reply when replyId is set)' })
-  @ApiResponse({ status: 201 })
+  @ApiResponse({ status: 201, type: () => CommentDto })
   create = async (req: AuthenticatedRequest, res: Response) => {
     if (!req.user) throw new UnauthorizedException();
     const body = req.body ?? {};
@@ -77,7 +88,7 @@ export class CommentController {
 
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Update comment content' })
-  @ApiResponse({ status: 200 })
+  @ApiResponse({ status: 200, type: () => CommentDto })
   update = async (req: AuthenticatedRequest, res: Response) => {
     if (!req.user) throw new UnauthorizedException();
     const body = req.body ?? {};
@@ -90,7 +101,7 @@ export class CommentController {
 
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Soft-delete a comment' })
-  @ApiResponse({ status: 200 })
+  @ApiResponse({ status: 200, type: () => CommentDeleteResultDto })
   remove = async (req: AuthenticatedRequest, res: Response) => {
     if (!req.user) throw new UnauthorizedException();
     const commentId = (req.body?.commentId as string) ?? (req.query.commentId as string) ?? '';

@@ -12,6 +12,11 @@ import {
   ApiResponse,
   ApiTags,
 } from '@/common/openapi/decorators';
+import {
+  NetworkJoinResultDto,
+  NetworkMemberPageDto,
+  NetworkTagPageDto,
+} from './dto/network.dto';
 
 @ApiTags('Network')
 export class NetworkController {
@@ -19,7 +24,7 @@ export class NetworkController {
 
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Join / leave a network' })
-  @ApiResponse({ status: 200 })
+  @ApiResponse({ status: 200, type: () => NetworkJoinResultDto })
   join = async (req: AuthenticatedRequest, res: Response) => {
     if (!req.user) throw new UnauthorizedException();
     // Mobile sends `code`, legacy stub used `networkId` — accept both
@@ -37,11 +42,16 @@ export class NetworkController {
   };
 
   @ApiOperation({ summary: 'List members of a network' })
-  @ApiQuery({ name: 'code', type: 'string', required: false })
-  @ApiQuery({ name: 'networkId', type: 'string', required: false })
-  @ApiQuery({ name: 'page', type: 'integer', required: false })
-  @ApiQuery({ name: 'perPage', type: 'integer', required: false })
-  @ApiResponse({ status: 200 })
+  @ApiQuery({ name: 'code', type: 'string', required: false, example: 'timeline-main' })
+  @ApiQuery({
+    name: 'networkId',
+    type: 'string',
+    required: false,
+    example: 'network-uuid-1234',
+  })
+  @ApiQuery({ name: 'page', type: 'integer', required: false, example: 1 })
+  @ApiQuery({ name: 'perPage', type: 'integer', required: false, example: 20 })
+  @ApiResponse({ status: 200, type: () => NetworkMemberPageDto })
   members = async (req: Request, res: Response) => {
     const networkInput =
       (req.query.code as string) ||
@@ -59,9 +69,14 @@ export class NetworkController {
   };
 
   @ApiOperation({ summary: 'List tags of a network' })
-  @ApiQuery({ name: 'code', type: 'string', required: false })
-  @ApiQuery({ name: 'networkId', type: 'string', required: false })
-  @ApiResponse({ status: 200 })
+  @ApiQuery({ name: 'code', type: 'string', required: false, example: 'timeline-main' })
+  @ApiQuery({
+    name: 'networkId',
+    type: 'string',
+    required: false,
+    example: 'network-uuid-1234',
+  })
+  @ApiResponse({ status: 200, type: () => NetworkTagPageDto })
   tags = async (req: Request, res: Response) => {
     const networkInput =
       (req.query.code as string) ||

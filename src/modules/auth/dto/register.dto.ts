@@ -11,7 +11,7 @@ export class RegisterDto {
   @MinLength(6)
   password!: string;
 
-  @ApiProperty({ format: 'password', description: 'must equal password' })
+  @ApiProperty({ format: 'password', example: 'secret123', description: 'must equal password' })
   @IsString()
   @MinLength(6)
   confirmPassword!: string;
@@ -32,22 +32,26 @@ export class RegisterDto {
   @IsString()
   phoneCode?: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ example: 'janedoe' })
   @IsOptional()
   @IsString()
   username?: string;
 
-  @ApiPropertyOptional({ description: 'Birthdate ISO date string' })
+  @ApiPropertyOptional({
+    example: '1990-05-12',
+    description: 'Birthdate ISO date string',
+  })
   @IsOptional()
   @IsString()
   birthdate?: string;
 
-  @ApiPropertyOptional({ enum: ['MAN', 'WOMEN'] })
+  @ApiPropertyOptional({ enum: ['MAN', 'WOMEN'], example: 'WOMEN' })
   @IsOptional()
   @IsString()
   gender?: string;
 
   @ApiPropertyOptional({
+    example: 'JD000001-42',
     description:
       'Affiliate code. First 8 chars = inviter member code; remaining chars = network legacy id (optional).',
   })
@@ -55,17 +59,17 @@ export class RegisterDto {
   @IsString()
   affiliateCode?: string;
 
-  @ApiPropertyOptional({ enum: ['ios', 'android', 'web'] })
+  @ApiPropertyOptional({ enum: ['ios', 'android', 'web'], example: 'android' })
   @IsOptional()
   @IsString()
   registerFrom?: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ example: 'google' })
   @IsOptional()
   @IsString()
   utmSource?: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ example: 'summer-promo-2024' })
   @IsOptional()
   @IsString()
   utmContent?: string;

@@ -12,6 +12,10 @@ import {
   ApiResponse,
   ApiTags,
 } from '@/common/openapi/decorators';
+import {
+  NotificationPageDto,
+  NotificationSeenResultDto,
+} from './dto/notification.dto';
 
 @ApiTags('Notification')
 @ApiBearerAuth()
@@ -19,13 +23,24 @@ export class NotificationController {
   constructor(private readonly notificationService: NotificationService) {}
 
   @ApiOperation({ summary: 'List my notifications (with unread count + filters)' })
-  @ApiQuery({ name: 'page', type: 'integer', required: false })
-  @ApiQuery({ name: 'perPage', type: 'integer', required: false })
-  @ApiQuery({ name: 'group', type: 'string', required: false, description: 'general | creator | all' })
-  @ApiQuery({ name: 'networkId', type: 'string', required: false })
-  @ApiQuery({ name: 'isUnreadOnly', type: 'boolean', required: false })
-  @ApiQuery({ name: 'isReadOnly', type: 'boolean', required: false })
-  @ApiResponse({ status: 200 })
+  @ApiQuery({ name: 'page', type: 'integer', required: false, example: 1 })
+  @ApiQuery({ name: 'perPage', type: 'integer', required: false, example: 20 })
+  @ApiQuery({
+    name: 'group',
+    type: 'string',
+    required: false,
+    example: 'general',
+    description: 'general | creator | all',
+  })
+  @ApiQuery({
+    name: 'networkId',
+    type: 'string',
+    required: false,
+    example: 'network-uuid-1234',
+  })
+  @ApiQuery({ name: 'isUnreadOnly', type: 'boolean', required: false, example: false })
+  @ApiQuery({ name: 'isReadOnly', type: 'boolean', required: false, example: false })
+  @ApiResponse({ status: 200, type: () => NotificationPageDto })
   list = async (req: AuthenticatedRequest, res: Response) => {
     if (!req.user) throw new UnauthorizedException();
     const p = parsePagination(req.query as Record<string, unknown>);
@@ -46,7 +61,7 @@ export class NotificationController {
   };
 
   @ApiOperation({ summary: 'Mark notifications as seen (single id, ids array, or markAllRead)' })
-  @ApiResponse({ status: 200 })
+  @ApiResponse({ status: 200, type: () => NotificationSeenResultDto })
   seen = async (req: AuthenticatedRequest, res: Response) => {
     if (!req.user) throw new UnauthorizedException();
     const body = (req.body ?? {}) as Record<string, unknown>;

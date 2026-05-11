@@ -13,6 +13,8 @@ import {
   ApiResponse,
   ApiTags,
 } from '@/common/openapi/decorators';
+import { ApiErrorResponseDto } from '@/common/openapi/common.dto';
+import { MemberInfoDto } from './dto/member-info.dto';
 
 function floatOrUndef(v: unknown): number | undefined {
   if (v === undefined || v === null || v === '') return undefined;
@@ -26,10 +28,14 @@ export class MemberController {
   constructor(private readonly memberService: MemberService) {}
 
   @ApiOperation({ summary: 'Authenticated member info (with profile + system config)' })
-  @ApiQuery({ name: 'latitude', required: false })
-  @ApiQuery({ name: 'longitude', required: false })
-  @ApiResponse({ status: 200 })
-  @ApiResponse({ status: 401, description: 'Missing/invalid bearer token' })
+  @ApiQuery({ name: 'latitude', required: false, example: -6.9024 })
+  @ApiQuery({ name: 'longitude', required: false, example: 107.6186 })
+  @ApiResponse({ status: 200, type: () => MemberInfoDto })
+  @ApiResponse({
+    status: 401,
+    description: 'Missing/invalid bearer token',
+    type: () => ApiErrorResponseDto,
+  })
   info = async (req: AuthenticatedRequest, res: Response) => {
     if (!req.user) throw new UnauthorizedException();
     const result = await this.memberService.findById(req.user.id, {

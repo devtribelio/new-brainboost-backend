@@ -11,17 +11,22 @@ import {
   ApiResponse,
   ApiTags,
 } from '@/common/openapi/decorators';
+import {
+  CourseDetailDto,
+  ProductPageDto,
+  ProductShareDto,
+} from './dto/product.dto';
 
 @ApiTags('Product')
 export class ProductController {
   constructor(private readonly productService: ProductService) {}
 
   @ApiOperation({ summary: 'List products' })
-  @ApiQuery({ name: 'page', type: 'integer', required: false })
-  @ApiQuery({ name: 'perPage', type: 'integer', required: false })
-  @ApiQuery({ name: 'keyword', type: 'string', required: false })
-  @ApiQuery({ name: 'type', type: 'string', required: false })
-  @ApiResponse({ status: 200 })
+  @ApiQuery({ name: 'page', type: 'integer', required: false, example: 1 })
+  @ApiQuery({ name: 'perPage', type: 'integer', required: false, example: 20 })
+  @ApiQuery({ name: 'keyword', type: 'string', required: false, example: 'react' })
+  @ApiQuery({ name: 'type', type: 'string', required: false, example: 'course' })
+  @ApiResponse({ status: 200, type: () => ProductPageDto })
   list = async (req: Request, res: Response) => {
     const p = parsePagination(req.query as Record<string, unknown>);
     const keyword = (req.query.keyword as string) ?? undefined;
@@ -31,8 +36,8 @@ export class ProductController {
   };
 
   @ApiOperation({ summary: 'Course product detail' })
-  @ApiQuery({ name: 'code', type: 'string', required: true })
-  @ApiResponse({ status: 200 })
+  @ApiQuery({ name: 'code', type: 'string', required: true, example: 'react-fundamentals' })
+  @ApiResponse({ status: 200, type: () => CourseDetailDto })
   courseDetail = async (req: Request, res: Response) => {
     const code = (req.query.code as string) ?? '';
     if (!code) throw new BadRequestException('code required');
@@ -52,7 +57,7 @@ export class ProductController {
 
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Generate a share link for a course' })
-  @ApiResponse({ status: 200 })
+  @ApiResponse({ status: 200, type: () => ProductShareDto })
   shareCourse = async (req: Request, res: Response) => {
     const productId = (req.body?.productId as string) ?? '';
     if (!productId) throw new BadRequestException('productId required');

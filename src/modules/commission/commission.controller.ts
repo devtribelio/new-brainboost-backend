@@ -9,6 +9,7 @@ import {
   ApiResponse,
   ApiTags,
 } from '@/common/openapi/decorators';
+import { CommissionSummaryDto } from './dto/commission.dto';
 
 @ApiTags('Commission')
 @ApiBearerAuth()
@@ -16,7 +17,7 @@ export class CommissionController {
   constructor(private readonly commissionService: CommissionService) {}
 
   @ApiOperation({ summary: 'Aggregated commission summary + recent entries' })
-  @ApiResponse({ status: 200 })
+  @ApiResponse({ status: 200, type: () => CommissionSummaryDto })
   summary = async (req: AuthenticatedRequest, res: Response) => {
     if (!req.user) throw new UnauthorizedException();
     return ok(res, await this.commissionService.summary(req.user.id));

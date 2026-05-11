@@ -6,15 +6,20 @@ import { ApiProperty, ApiPropertyOptional } from './decorators';
  */
 
 export class TokenBundleDto {
-  @ApiProperty({ description: 'JWT access token (member or anon scope)' })
+  @ApiProperty({
+    example:
+      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJtZW1iZXItMTIzIiwic2NvcGUiOiJtZW1iZXIifQ.0nAJYx5MzNxNRkH1bGTzPsq2NgxL9X8a',
+    description: 'JWT access token (member or anon scope)',
+  })
   access_token!: string;
 
   @ApiPropertyOptional({
+    example: 'rt_7a3c1a52-9f1b-4f8b-9d2a-1e0a7b1c4d51',
     description: 'Long-lived refresh token. Omitted for client_credentials grant.',
   })
   refresh_token?: string;
 
-  @ApiProperty({ enum: ['Bearer'] })
+  @ApiProperty({ enum: ['Bearer'], example: 'Bearer' })
   token_type!: string;
 
   @ApiProperty({
@@ -26,6 +31,7 @@ export class TokenBundleDto {
 
   @ApiPropertyOptional({
     enum: ['member', 'anon'],
+    example: 'member',
     description:
       'Token scope. `anon` is issued by client_credentials and only accepts pre-login endpoints.',
   })
@@ -33,10 +39,14 @@ export class TokenBundleDto {
 }
 
 export class ApiErrorBodyDto {
-  @ApiProperty({ description: 'Human-readable error message' })
+  @ApiProperty({ example: 'Invalid credentials', description: 'Human-readable error message' })
   message!: string;
 
-  @ApiPropertyOptional({ type: 'object', description: 'Validation details (when applicable)' })
+  @ApiPropertyOptional({
+    type: 'object',
+    example: { field: 'email', constraint: 'isEmail' },
+    description: 'Validation details (when applicable)',
+  })
   details?: unknown;
 }
 

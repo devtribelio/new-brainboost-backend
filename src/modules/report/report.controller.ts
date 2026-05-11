@@ -9,13 +9,14 @@ import {
   ApiResponse,
   ApiTags,
 } from '@/common/openapi/decorators';
+import { ReportCategoryDto, ReportResultDto } from './dto/report.dto';
 
 @ApiTags('Report')
 export class ReportController {
   constructor(private readonly reportService: ReportService) {}
 
   @ApiOperation({ summary: 'List active report categories' })
-  @ApiResponse({ status: 200 })
+  @ApiResponse({ status: 200, type: () => ReportCategoryDto, isArray: true })
   categories = async (_req: Request, res: Response) => {
     const rows = await this.reportService.listCategories({ isActive: true });
     return ok(
@@ -31,7 +32,7 @@ export class ReportController {
 
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Report a member' })
-  @ApiResponse({ status: 201 })
+  @ApiResponse({ status: 201, type: () => ReportResultDto })
   memberReport = async (req: AuthenticatedRequest, res: Response) => {
     if (!req.user) throw new UnauthorizedException();
     const body = req.body ?? {};
@@ -51,7 +52,7 @@ export class ReportController {
 
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Report a post' })
-  @ApiResponse({ status: 201 })
+  @ApiResponse({ status: 201, type: () => ReportResultDto })
   postReport = async (req: AuthenticatedRequest, res: Response) => {
     if (!req.user) throw new UnauthorizedException();
     const body = req.body ?? {};

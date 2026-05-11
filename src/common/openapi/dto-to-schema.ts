@@ -102,10 +102,18 @@ export function dtoToSchema(
 
   for (const [propName, opts] of Object.entries(props)) {
     const { schema: propSchema, nestedRef } = buildPropertySchema(opts);
-    if (nestedRef && typeof opts.type === 'function') {
-      const nested = (opts.type as () => unknown)();
-      if (typeof nested === 'function') {
-        dtoToSchema(nested as { new (): unknown; name: string }, collected);
+    if (nestedRef) {
+      const nestedFactory =
+        typeof opts.type === 'function'
+          ? (opts.type as () => unknown)
+          : typeof opts.itemType === 'function'
+            ? (opts.itemType as () => unknown)
+            : undefined;
+      if (nestedFactory) {
+        const nested = nestedFactory();
+        if (typeof nested === 'function') {
+          dtoToSchema(nested as { new (): unknown; name: string }, collected);
+        }
       }
     }
     schema.properties![propName] = propSchema;

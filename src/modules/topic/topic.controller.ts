@@ -12,17 +12,18 @@ import {
   ApiResponse,
   ApiTags,
 } from '@/common/openapi/decorators';
+import { TopicPageDto, TopicSubscribeResultDto } from './dto/topic.dto';
 
 @ApiTags('Topic')
 export class TopicController {
   constructor(private readonly topicService: TopicService) {}
 
   @ApiOperation({ summary: 'List topics' })
-  @ApiQuery({ name: 'page', type: 'integer', required: false })
-  @ApiQuery({ name: 'perPage', type: 'integer', required: false })
-  @ApiQuery({ name: 'keyword', type: 'string', required: false })
-  @ApiQuery({ name: 'networkId', type: 'string', required: false })
-  @ApiResponse({ status: 200 })
+  @ApiQuery({ name: 'page', type: 'integer', required: false, example: 1 })
+  @ApiQuery({ name: 'perPage', type: 'integer', required: false, example: 20 })
+  @ApiQuery({ name: 'keyword', type: 'string', required: false, example: 'tech' })
+  @ApiQuery({ name: 'networkId', type: 'string', required: false, example: 'network-uuid-1234' })
+  @ApiResponse({ status: 200, type: () => TopicPageDto })
   list = async (req: Request, res: Response) => {
     const p = parsePagination(req.query as Record<string, unknown>);
     const keyword = (req.query.keyword as string) ?? undefined;
@@ -33,7 +34,7 @@ export class TopicController {
 
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Subscribe / unsubscribe to a topic' })
-  @ApiResponse({ status: 200 })
+  @ApiResponse({ status: 200, type: () => TopicSubscribeResultDto })
   subscribe = async (req: AuthenticatedRequest, res: Response) => {
     if (!req.user) throw new UnauthorizedException();
     const topicId = (req.body?.topicId as string) ?? '';

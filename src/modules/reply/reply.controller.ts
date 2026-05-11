@@ -6,16 +6,17 @@ import { buildLegacyPage, parsePagination } from '@/common/utils/pagination.util
 import { serializeComment } from '@/common/serializers';
 import type { AuthenticatedRequest } from '@/common/interfaces/authenticated-request';
 import { ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@/common/openapi/decorators';
+import { CommentPageDto } from '@/modules/comment/dto/comment.dto';
 
 @ApiTags('Comment')
 export class ReplyController {
   constructor(private readonly replyService: ReplyService) {}
 
   @ApiOperation({ summary: 'List replies of a comment' })
-  @ApiQuery({ name: 'commentId', type: 'string', required: true })
-  @ApiQuery({ name: 'page', type: 'integer', required: false })
-  @ApiQuery({ name: 'perPage', type: 'integer', required: false })
-  @ApiResponse({ status: 200 })
+  @ApiQuery({ name: 'commentId', type: 'string', required: true, example: 'comment-uuid-parent' })
+  @ApiQuery({ name: 'page', type: 'integer', required: false, example: 1 })
+  @ApiQuery({ name: 'perPage', type: 'integer', required: false, example: 20 })
+  @ApiResponse({ status: 200, type: () => CommentPageDto })
   list = async (req: AuthenticatedRequest, res: Response) => {
     const parent = (req.query.commentId as string) ?? (req.query.replyId as string) ?? '';
     if (!parent) throw new BadRequestException('commentId required');

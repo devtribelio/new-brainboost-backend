@@ -11,6 +11,8 @@ import {
   ApiResponse,
   ApiTags,
 } from '@/common/openapi/decorators';
+import { MemberFullDto } from '@/common/openapi/member.dto';
+import { MemberLocationDto, MemberProfileDto } from './dto/profile.dto';
 
 @ApiTags('Profile')
 @ApiBearerAuth()
@@ -18,7 +20,7 @@ export class ProfileController {
   constructor(private readonly profileService: ProfileService) {}
 
   @ApiOperation({ summary: 'Get my profile info' })
-  @ApiResponse({ status: 200 })
+  @ApiResponse({ status: 200, type: () => MemberProfileDto })
   getInfo = async (req: AuthenticatedRequest, res: Response) => {
     if (!req.user) throw new UnauthorizedException();
     const member = await this.profileService.getInfo(req.user.id);
@@ -69,7 +71,7 @@ export class ProfileController {
   };
 
   @ApiOperation({ summary: 'Update my profile fields' })
-  @ApiResponse({ status: 200 })
+  @ApiResponse({ status: 200, type: () => MemberFullDto })
   update = async (req: AuthenticatedRequest, res: Response) => {
     if (!req.user) throw new UnauthorizedException();
     const body = req.body ?? {};
@@ -87,7 +89,7 @@ export class ProfileController {
   };
 
   @ApiOperation({ summary: 'Set my address / location FK chain' })
-  @ApiResponse({ status: 200 })
+  @ApiResponse({ status: 200, type: () => MemberLocationDto })
   updateLocation = async (req: AuthenticatedRequest, res: Response) => {
     if (!req.user) throw new UnauthorizedException();
     const body = req.body ?? {};
