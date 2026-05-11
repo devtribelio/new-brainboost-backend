@@ -3,7 +3,7 @@ import { ProductService } from './product.service';
 import { ok } from '@/common/utils/response.util';
 import { BadRequestException } from '@/common/exceptions';
 import { buildLegacyPage, parsePagination } from '@/common/utils/pagination.util';
-import { serializeProduct } from '@/common/serializers';
+import { serializeProduct, serializeCourseDetailLegacy } from '@/common/serializers';
 import {
   ApiBearerAuth,
   ApiOperation,
@@ -11,11 +11,7 @@ import {
   ApiResponse,
   ApiTags,
 } from '@/common/openapi/decorators';
-import {
-  CourseDetailDto,
-  ProductPageDto,
-  ProductShareDto,
-} from './dto/product.dto';
+import { CourseDetailDto, ProductPageDto, ProductShareDto } from './dto/product.dto';
 
 @ApiTags('Product')
 export class ProductController {
@@ -31,8 +27,18 @@ export class ProductController {
     const p = parsePagination(req.query as Record<string, unknown>);
     const keyword = (req.query.keyword as string) ?? undefined;
     const type = (req.query.type as string) ?? undefined;
-    const { rows, total } = await this.productService.list(p, { keyword, type });
-    return ok(res, buildLegacyPage(rows.map(serializeProduct), total, p));
+    const { rows, total, ratingAvgByProduct } = await this.productService.list(p, {
+      keyword,
+      type,
+    });
+    return ok(
+      res,
+      buildLegacyPage(
+        rows.map((r) => serializeProduct(r, { ratingAvg: ratingAvgByProduct.get(r.id) ?? 0 })),
+        total,
+        p,
+      ),
+    );
   };
 
   @ApiOperation({ summary: 'Course product detail' })
@@ -41,18 +47,8 @@ export class ProductController {
   courseDetail = async (req: Request, res: Response) => {
     const code = (req.query.code as string) ?? '';
     if (!code) throw new BadRequestException('code required');
-    const product = await this.productService.courseDetail(code);
-    return ok(res, {
-      ...serializeProduct(product),
-      course: product.course
-        ? {
-            id: product.course.id,
-            durationMin: product.course.durationMin,
-            level: product.course.level,
-            contentRef: product.course.contentRef,
-          }
-        : null,
-    });
+    const { product, reviewAggregate } = await this.productService.courseDetail(code);
+    return ok(res, serializeCourseDetailLegacy(product, reviewAggregate));
   };
 
   @ApiBearerAuth()

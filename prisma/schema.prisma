@@ -214,23 +214,26 @@ model Banner {
 }
 
 model Product {
-  id            String   @id @default(uuid(7)) @db.Uuid
-  legacyId      Int?     @unique
-  type          String
-  code          String?  @unique // legacy `course.code` — short alphanumeric id
-  slug          String? // SEO-friendly slug from legacy `course.slug`
-  title         String
-  description   String?
-  thumbnail     String? // legacy resource (model_type=TBModel_Course, collection=courseImage)
-  price         Int      @default(0)
-  marketingLink String? // legacy `course.marketing_link`
-  ratingAvg     Float?   @default(0) // legacy `course.product_rating_avg`
-  tags          String? // legacy `course.tags` raw csv
-  isActive      Boolean  @default(true)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id              String   @id @default(uuid(7)) @db.Uuid
+  legacyId        Int?     @unique
+  type            String
+  code            String?  @unique // legacy `course.code` — short alphanumeric id
+  slug            String? // SEO-friendly slug from legacy `course.slug`
+  title           String
+  description     String?
+  descriptionHtml String? // legacy `course.description_html` — rich HTML
+  thumbnail       String? // legacy resource (model_type=TBModel_Course, collection=courseImage)
+  price           Int      @default(0)
+  marketingLink   String? // legacy `course.marketing_link`
+  sellingPoints   Json? // legacy `course.selling_point` — JSONB string[]
+  status          String   @default("active") // legacy: active|inactive|draft|archived
+  tags            String? // legacy `course.tags` raw csv
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   course               Course?
+  reviews              Review[]
   affiliatePrograms    AffiliateProgram[]
   affiliateCommissions AffiliateCommission[]
 
@@ -238,15 +241,62 @@ model Product {
 }
 
 model Course {
-  id          String  @id @default(uuid(7)) @db.Uuid
-  productId   String  @unique @db.Uuid
-  durationMin Int     @default(0)
-  level       String?
-  contentRef  String?
+  id             String  @id @default(uuid(7)) @db.Uuid
+  productId      String  @unique @db.Uuid
+  legacyCourseId Int?    @unique // legacy `course.id` int — emitted as `courseId` in response
+  durationMin    Int     @default(0)
+  level          String?
+  contentRef     String?
+
+  product  Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  sections CourseSection[]
+
+  @@map("courses")
+}
+
+model CourseSection {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  courseId  String   @db.Uuid
+  name      String
+  order     Int      @default(0)
+  createdAt DateTime @default(now())
+
+  course  Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  lessons Lesson[]
+
+  @@index([courseId, order])
+  @@map("course_sections")
+}
+
+model Lesson {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  sectionId   String   @db.Uuid
+  name        String // legacy `lessonName`
+  description String? // legacy `lessonDescription`
+  slidesData  Json? // legacy `course_lesson.slides_data` — array of slide objects (Audio/Video/Greeting/ThankYou/Document)
+  order       Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  section CourseSection @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+
+  @@index([sectionId, order])
+  @@map("course_lessons")
+}
+
+model Review {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  productId String   @db.Uuid
+  memberId  String   @db.Uuid
+  stars     Int // 1..5, validated in service
+  comment   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
 
-  @@map("courses")
+  @@unique([productId, memberId])
+  @@index([productId, stars])
+  @@map("reviews")
 }
 
 // ============================================================================

@@ -83,7 +83,9 @@ export function serializeNetwork(
   };
 }
 
-export function serializeTopic(t: Topic & { isSubscribed?: boolean; countPost?: number; orderNumber?: number }): Record<string, unknown> {
+export function serializeTopic(
+  t: Topic & { isSubscribed?: boolean; countPost?: number; orderNumber?: number },
+): Record<string, unknown> {
   return {
     // Legacy field names (mobile TopicModel)
     topicId: t.legacyId ?? t.id,
@@ -238,7 +240,10 @@ function deriveSlug(title: string | null): string {
     .slice(0, 100);
 }
 
-export function serializeProduct(p: Product): Record<string, unknown> {
+export function serializeProduct(
+  p: Product,
+  opts: { ratingAvg?: number } = {},
+): Record<string, unknown> {
   const productId = p.legacyId ?? p.id;
   const label = productTypeLabel(p.type);
   const slug = p.slug ?? deriveSlug(p.title);
@@ -253,7 +258,12 @@ export function serializeProduct(p: Product): Record<string, unknown> {
     productCode: code,
     productSlug: slug,
     productName: p.title,
-    productCategory: p.tags ? p.tags.split(',').map((s) => s.trim()).filter(Boolean) : [],
+    productCategory: p.tags
+      ? p.tags
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean)
+      : [],
     productPrice: p.price,
     productImageUrl: p.thumbnail,
     lastUpdated: p.updatedAt,
@@ -262,7 +272,7 @@ export function serializeProduct(p: Product): Record<string, unknown> {
     commisionFixAmount: null,
     productUrl,
     isPurchased: false,
-    productRatingAvg: p.ratingAvg ?? 0,
+    productRatingAvg: opts.ratingAvg ?? 0,
     // Fallback aliases for mobile fallback chain
     productId,
     id: p.id,
@@ -277,6 +287,105 @@ export function serializeProduct(p: Product): Record<string, unknown> {
     updatedAt: p.updatedAt,
     isActive: p.isActive,
     createdAt: p.createdAt,
+  };
+}
+
+interface LessonLite {
+  name: string;
+  description: string | null;
+  order: number;
+  slidesData: unknown;
+}
+
+interface SectionLite {
+  name: string;
+  order: number;
+  lessons: LessonLite[];
+}
+
+interface CourseLite {
+  legacyCourseId: number | null;
+  sections: SectionLite[];
+}
+
+interface ProductWithCourseDetail extends Product {
+  course: CourseLite | null;
+}
+
+function normalizeSellingPoints(raw: unknown): string[] {
+  if (Array.isArray(raw)) return raw.filter((v): v is string => typeof v === 'string');
+  return [];
+}
+
+function normalizeSlidesData(raw: unknown): unknown[] {
+  return Array.isArray(raw) ? raw : [];
+}
+
+export interface ReviewAggregateInput {
+  avg: number;
+  total: number;
+  distribution: Record<string, number>;
+}
+
+function buildStarSummary(
+  aggregate: ReviewAggregateInput,
+): Record<string, { star: number; percentage: number }> {
+  const out: Record<string, { star: number; percentage: number }> = {};
+  for (let s = 1; s <= 5; s += 1) {
+    const count = aggregate.distribution[String(s)] ?? 0;
+    const percentage = aggregate.total > 0 ? Math.round((count / aggregate.total) * 100) : 0;
+    out[String(s)] = { star: s, percentage };
+  }
+  return out;
+}
+
+/**
+ * Legacy `/api/member/product/course/detail` shape — 1:1 with tribelio-platform.
+ * `ratingSummary` is computed live from the `reviews` table (passed in via
+ * `reviewAggregate`); the Product row no longer carries denormalised rating
+ * columns.
+ */
+export function serializeCourseDetailLegacy(
+  p: ProductWithCourseDetail,
+  reviewAggregate: ReviewAggregateInput,
+  opts: { isPurchase?: boolean } = {},
+): Record<string, unknown> {
+  const baseUrl = process.env.PUBLIC_WEB_URL ?? 'https://brainboost.com';
+  const code = p.code ?? String(p.legacyId ?? p.id);
+  const slug = p.slug ?? deriveSlug(p.title);
+  const productUrl = p.marketingLink ?? `${baseUrl}/p/${slug}`;
+  const lessonsData = (p.course?.sections ?? [])
+    .slice()
+    .sort((a, b) => a.order - b.order)
+    .map((sec) => ({
+      name: sec.name,
+      courseLessonData: sec.lessons
+        .slice()
+        .sort((a, b) => a.order - b.order)
+        .map((l) => ({
+          lessonName: l.name,
+          lessonDescription: l.description,
+          slidesData: normalizeSlidesData(l.slidesData),
+        })),
+    }));
+  return {
+    courseId: p.course?.legacyCourseId ?? p.legacyId ?? null,
+    code,
+    name: p.title,
+    description: p.description,
+    descriptionHtml: p.descriptionHtml,
+    imageUrl: p.thumbnail,
+    price: p.price,
+    status: p.status,
+    isPurchase: opts.isPurchase ?? false,
+    productPaymentUrl: `${baseUrl}/checkout/${code}`,
+    productShareDetailUrl: productUrl,
+    sellingPoint: normalizeSellingPoints(p.sellingPoints),
+    lessonsData,
+    ratingSummary: {
+      avgReviewStart: reviewAggregate.avg,
+      star: buildStarSummary(reviewAggregate),
+    },
   };
 }
 

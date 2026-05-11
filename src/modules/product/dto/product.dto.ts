@@ -127,106 +127,88 @@ export class ProductPageDto {
   items!: ProductDto[];
 }
 
-export class CourseInfoDto {
-  @ApiProperty({ format: 'uuid', example: 'course-uuid-1234' })
-  id!: string;
+export class CourseLessonItemDto {
+  @ApiProperty({ example: 'Intro to Hooks' })
+  lessonName!: string;
 
-  @ApiProperty({ type: 'integer', example: 540, description: 'Duration in minutes' })
-  durationMin!: number;
-
-  @ApiProperty({ enum: ['beginner', 'intermediate', 'advanced'], example: 'beginner' })
-  level!: string;
-
-  @ApiPropertyOptional({
-    nullable: true,
-    example: 'lms://courses/react-fundamentals',
-    description: 'Internal content reference (CDN path or LMS handle)',
-  })
-  contentRef?: string | null;
-}
-
-/**
- * Wire shape for GET /member/product/course/detail — Product fields + nested course block.
- * Fields duplicated from ProductDto rather than via `extends` because the homegrown
- * @ApiProperty decorator stores metadata per-class and inheritance would mutate the
- * parent's map.
- */
-export class CourseDetailDto {
-  @ApiProperty({ example: 456 })
-  networkAccountProductAffiliatorId!: number | string;
-
-  @ApiPropertyOptional({ nullable: true, example: 'course' })
-  productType?: string | null;
-
-  @ApiProperty({ example: 'Course' })
-  productTypeLabel!: string;
-
-  @ApiProperty({ example: 'react-fundamentals' })
-  productCode!: string;
-
-  @ApiProperty({ example: 'react-fundamentals' })
-  productSlug!: string;
-
-  @ApiPropertyOptional({ nullable: true, example: 'React Fundamentals' })
-  productName?: string | null;
+  @ApiPropertyOptional({ nullable: true, example: 'useState and useEffect basics' })
+  lessonDescription?: string | null;
 
   @ApiProperty({
     type: 'array',
-    itemType: 'string',
-    example: ['frontend', 'react', 'javascript'],
+    description:
+      'Slide objects per lesson — shape per type (AudioTemplate/VideoTemplate/GreetingTemplate/ThankYouTemplate/DocumentTemplate). Pass-through from JSONB column. Empty array when null.',
+    example: [
+      {
+        id: 'ABC123XYZ',
+        type: 'AudioTemplate',
+        name: 'Intro Audio',
+        duration: '120',
+        data: {
+          title: 'Intro',
+          description: '<p>Audio narration</p>',
+          audio: {
+            guid: 'bunny-guid-xxx',
+            videoLibraryId: '152957',
+            storageSize: 1048576,
+            availableResolutions: [],
+          },
+          platform: 'files',
+        },
+      },
+    ],
   })
-  productCategory!: string[];
+  slidesData!: unknown[];
+}
 
-  @ApiPropertyOptional({ nullable: true, type: 'number', example: 299000 })
-  productPrice?: number | null;
+export class CourseSectionDto {
+  @ApiProperty({ example: 'Getting Started' })
+  name!: string;
 
-  @ApiPropertyOptional({
-    nullable: true,
-    example: 'https://cdn.brainboost.com/products/react-fundamentals.jpg',
-  })
-  productImageUrl?: string | null;
+  @ApiProperty({ type: 'array', itemType: () => CourseLessonItemDto })
+  courseLessonData!: CourseLessonItemDto[];
+}
 
-  @ApiProperty({ format: 'date-time', example: '2024-03-10T11:20:00.000Z' })
-  lastUpdated!: string;
+export class RatingStarBucketDto {
+  @ApiProperty({ type: 'integer', example: 5 })
+  star!: number;
 
-  @ApiProperty({ example: 'https://brainboost.com/checkout/react-fundamentals' })
-  productPaymentUrl!: string;
+  @ApiProperty({ type: 'integer', example: 80, description: '0..100 (rounded)' })
+  percentage!: number;
+}
 
-  @ApiProperty({ example: 'https://brainboost.com/p/react-fundamentals' })
-  productShareDetailUrl!: string;
-
-  @ApiPropertyOptional({ nullable: true, example: null })
-  commisionFixAmount?: number | null;
-
-  @ApiProperty({ example: 'https://brainboost.com/p/react-fundamentals' })
-  productUrl!: string;
-
-  @ApiProperty({ type: 'boolean', example: false })
-  isPurchased!: boolean;
-
+export class RatingSummaryDto {
   @ApiProperty({ type: 'number', example: 4.8 })
-  productRatingAvg!: number;
+  avgReviewStart!: number;
 
-  @ApiProperty({ example: 456 })
-  productId!: number | string;
+  @ApiProperty({
+    description: 'Keyed by stars "1".."5"',
+    example: {
+      '1': { star: 1, percentage: 0 },
+      '2': { star: 2, percentage: 0 },
+      '3': { star: 3, percentage: 0 },
+      '4': { star: 4, percentage: 20 },
+      '5': { star: 5, percentage: 80 },
+    },
+  })
+  star!: Record<string, RatingStarBucketDto>;
+}
 
-  @ApiProperty({ format: 'uuid', example: 'aaaa1111-bbbb-2222-cccc-3333dddd4444' })
-  id!: string;
-
-  @ApiPropertyOptional({ nullable: true, example: 'course' })
-  type?: string | null;
-
-  @ApiProperty({ example: 'Course' })
-  typeLabel!: string;
+/**
+ * Legacy 1:1 shape for GET /member/product/course/detail.
+ * Mirrors tribelio-platform response. Do NOT add modern fields here — mobile
+ * legacy parser tolerates extras but field naming, order, and nested structure
+ * must remain stable.
+ */
+export class CourseDetailDto {
+  @ApiPropertyOptional({ nullable: true, type: 'integer', example: 123 })
+  courseId?: number | null;
 
   @ApiProperty({ example: 'react-fundamentals' })
   code!: string;
 
-  @ApiProperty({ example: 'react-fundamentals' })
-  slug!: string;
-
   @ApiPropertyOptional({ nullable: true, example: 'React Fundamentals' })
-  title?: string | null;
+  name?: string | null;
 
   @ApiPropertyOptional({
     nullable: true,
@@ -236,24 +218,43 @@ export class CourseDetailDto {
 
   @ApiPropertyOptional({
     nullable: true,
+    example: '<p>Hands-on course covering <strong>hooks</strong>...</p>',
+  })
+  descriptionHtml?: string | null;
+
+  @ApiPropertyOptional({
+    nullable: true,
     example: 'https://cdn.brainboost.com/products/react-fundamentals.jpg',
   })
-  thumbnail?: string | null;
+  imageUrl?: string | null;
 
-  @ApiPropertyOptional({ nullable: true, type: 'number', example: 299000 })
-  price?: number | null;
+  @ApiProperty({ type: 'integer', example: 299000 })
+  price!: number;
 
-  @ApiProperty({ format: 'date-time', example: '2024-03-10T11:20:00.000Z' })
-  updatedAt!: string;
+  @ApiProperty({ example: 'active', description: 'active|inactive|draft|archived' })
+  status!: string;
 
-  @ApiProperty({ type: 'boolean', example: true })
-  isActive!: boolean;
+  @ApiProperty({ type: 'boolean', example: false })
+  isPurchase!: boolean;
 
-  @ApiProperty({ format: 'date-time', example: '2023-06-01T00:00:00.000Z' })
-  createdAt!: string;
+  @ApiProperty({ example: 'https://brainboost.com/checkout/react-fundamentals' })
+  productPaymentUrl!: string;
 
-  @ApiPropertyOptional({ nullable: true, type: () => CourseInfoDto })
-  course?: CourseInfoDto | null;
+  @ApiProperty({ example: 'https://brainboost.com/p/react-fundamentals' })
+  productShareDetailUrl!: string;
+
+  @ApiProperty({
+    type: 'array',
+    itemType: 'string',
+    example: ['Lifetime access', 'Certificate of completion', 'Project-based'],
+  })
+  sellingPoint!: string[];
+
+  @ApiProperty({ type: 'array', itemType: () => CourseSectionDto })
+  lessonsData!: CourseSectionDto[];
+
+  @ApiProperty({ type: () => RatingSummaryDto })
+  ratingSummary!: RatingSummaryDto;
 }
 
 export class ProductShareDto {
