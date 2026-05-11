@@ -75,17 +75,21 @@ ON CONFLICT ("productId") DO UPDATE SET
 -- ---------------------------------------------------------------------------
 DELETE FROM course_sections WHERE "courseId" = '22222222-2222-4222-8222-222222222222';
 
-INSERT INTO course_sections (id, "courseId", name, "order", "createdAt") VALUES
-  ('33333333-3333-4333-8333-333333333301', '22222222-2222-4222-8222-222222222222', 'Getting Started', 0, NOW()),
-  ('33333333-3333-4333-8333-333333333302', '22222222-2222-4222-8222-222222222222', 'Hooks Deep Dive', 1, NOW());
+INSERT INTO course_sections (id, "legacySectionId", "courseId", name, "order", "createdAt") VALUES
+  ('33333333-3333-4333-8333-333333333301', 1001, '22222222-2222-4222-8222-222222222222', 'Getting Started', 0, NOW()),
+  ('33333333-3333-4333-8333-333333333302', 1002, '22222222-2222-4222-8222-222222222222', 'Hooks Deep Dive', 1, NOW());
 
-INSERT INTO course_lessons (id, "sectionId", name, description, "order", "createdAt") VALUES
-  ('44444444-4444-4444-8444-444444444401', '33333333-3333-4333-8333-333333333301', 'Intro to React',   'What is React and why use it',     0, NOW()),
-  ('44444444-4444-4444-8444-444444444402', '33333333-3333-4333-8333-333333333301', 'Setup',            'Project scaffolding with Vite',    1, NOW()),
-  ('44444444-4444-4444-8444-444444444403', '33333333-3333-4333-8333-333333333301', 'First Component',  'Hello-world component',            2, NOW()),
-  ('44444444-4444-4444-8444-444444444404', '33333333-3333-4333-8333-333333333302', 'useState',         'Local state management',           0, NOW()),
-  ('44444444-4444-4444-8444-444444444405', '33333333-3333-4333-8333-333333333302', 'useEffect',        'Side effects and cleanup',         1, NOW()),
-  ('44444444-4444-4444-8444-444444444406', '33333333-3333-4333-8333-333333333302', 'Custom Hooks',     'Reusable hook patterns',           2, NOW());
+INSERT INTO course_lessons (
+  id, "legacyLessonId", "sectionId", name, description,
+  code, slug, "lessonStatus", "isPreview", duration,
+  "order", "createdAt"
+) VALUES
+  ('44444444-4444-4444-8444-444444444401', 5001, '33333333-3333-4333-8333-333333333301', 'Intro to React',   'What is React and why use it',     'LESSON-001', 'intro-to-react',   'ACTIVE',  true,  0, 0, NOW()),
+  ('44444444-4444-4444-8444-444444444402', 5002, '33333333-3333-4333-8333-333333333301', 'Setup',            'Project scaffolding with Vite',    'LESSON-002', 'setup',            'ACTIVE',  false, 0, 1, NOW()),
+  ('44444444-4444-4444-8444-444444444403', 5003, '33333333-3333-4333-8333-333333333301', 'First Component',  'Hello-world component',            'LESSON-003', 'first-component',  'ACTIVE',  false, 0, 2, NOW()),
+  ('44444444-4444-4444-8444-444444444404', 5004, '33333333-3333-4333-8333-333333333302', 'useState',         'Local state management',           'LESSON-004', 'usestate',         'ACTIVE',  false, 0, 0, NOW()),
+  ('44444444-4444-4444-8444-444444444405', 5005, '33333333-3333-4333-8333-333333333302', 'useEffect',        'Side effects and cleanup',         'LESSON-005', 'useeffect',        'ACTIVE',  false, 0, 1, NOW()),
+  ('44444444-4444-4444-8444-444444444406', 5006, '33333333-3333-4333-8333-333333333302', 'Custom Hooks',     'Reusable hook patterns',           'LESSON-006', 'custom-hooks',     'ACTIVE',  false, 0, 2, NOW());
 
 -- ---------------------------------------------------------------------------
 -- Reviewer members (placeholder password hash — seed only)

@@ -295,12 +295,19 @@ interface LessonLite {
   description: string | null;
   order: number;
   slidesData: unknown;
+  legacyLessonId: number;
+  code: string | null;
+  slug: string | null;
+  lessonStatus: string;
+  isPreview: boolean;
+  duration: number;
 }
 
 interface SectionLite {
   name: string;
   order: number;
   lessons: LessonLite[];
+  legacySectionId: number;
 }
 
 interface CourseLite {
@@ -321,6 +328,32 @@ function normalizeSlidesData(raw: unknown): unknown[] {
   return Array.isArray(raw) ? raw : [];
 }
 
+function legacyDescriptionExcerpt(html: string | null, plain: string | null): string {
+  const raw = (plain ?? (html ?? '').replace(/<[^>]+>/g, '')).trim();
+  return raw.slice(0, 50);
+}
+
+function stripBrainboostLabel(title: string): string {
+  return title
+    .replace(/\s*\bBrainboost\b\s*/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function legacyStatus(s: string): string {
+  const m: Record<string, string> = {
+    active: 'PUBLISH',
+    inactive: 'INACTIVE',
+    draft: 'DRAFT',
+    archived: 'ARCHIVED',
+  };
+  return m[s.toLowerCase()] ?? s.toUpperCase();
+}
+
+function roundOneDecimal(n: number): number {
+  return Math.round(n * 10) / 10;
+}
+
 export interface ReviewAggregateInput {
   avg: number;
   total: number;
@@ -329,61 +362,87 @@ export interface ReviewAggregateInput {
 
 function buildStarSummary(
   aggregate: ReviewAggregateInput,
-): Record<string, { star: number; percentage: number }> {
-  const out: Record<string, { star: number; percentage: number }> = {};
+): Record<string, { total: number; star: number; percentage: number }> {
+  const out: Record<string, { total: number; star: number; percentage: number }> = {};
   for (let s = 1; s <= 5; s += 1) {
-    const count = aggregate.distribution[String(s)] ?? 0;
-    const percentage = aggregate.total > 0 ? Math.round((count / aggregate.total) * 100) : 0;
-    out[String(s)] = { star: s, percentage };
+    const total = aggregate.distribution[String(s)] ?? 0;
+    const percentage = aggregate.total > 0 ? roundOneDecimal((total / aggregate.total) * 100) : 0;
+    out[String(s)] = { total, star: s, percentage };
   }
   return out;
 }
 
 /**
  * Legacy `/api/member/product/course/detail` shape — 1:1 with tribelio-platform.
- * `ratingSummary` is computed live from the `reviews` table (passed in via
- * `reviewAggregate`); the Product row no longer carries denormalised rating
- * columns.
+ * `ratingSummary` is computed live from the `reviews` table; section/lesson
+ * legacy int IDs come from `legacySectionId`/`legacyLessonId` autoincrement
+ * sequences. Multi-tenant fields (`networkAccountId`, `memberId`) are hardcoded
+ * to 0 because this backend is single-tenant.
  */
 export function serializeCourseDetailLegacy(
   p: ProductWithCourseDetail,
   reviewAggregate: ReviewAggregateInput,
-  opts: { isPurchase?: boolean } = {},
+  opts: { isPurchase?: boolean; affiliateCode?: string | null } = {},
 ): Record<string, unknown> {
   const baseUrl = process.env.PUBLIC_WEB_URL ?? 'https://brainboost.com';
   const code = p.code ?? String(p.legacyId ?? p.id);
   const slug = p.slug ?? deriveSlug(p.title);
   const productUrl = p.marketingLink ?? `${baseUrl}/p/${slug}`;
+  const shareUrl = opts.affiliateCode ? `${productUrl}?affCode=${opts.affiliateCode}` : productUrl;
+  const courseLegacyId = p.course?.legacyCourseId ?? p.legacyId ?? 0;
+
   const lessonsData = (p.course?.sections ?? [])
     .slice()
     .sort((a, b) => a.order - b.order)
     .map((sec) => ({
+      courseSectionId: sec.legacySectionId,
+      courseId: courseLegacyId,
+      networkAccountId: 0,
+      memberId: 0,
       name: sec.name,
+      orderColumn: sec.order,
       courseLessonData: sec.lessons
         .slice()
         .sort((a, b) => a.order - b.order)
-        .map((l) => ({
-          lessonName: l.name,
-          lessonDescription: l.description,
-          slidesData: normalizeSlidesData(l.slidesData),
-        })),
+        .map((l) => {
+          const slides = normalizeSlidesData(l.slidesData);
+          return {
+            courseLessonId: l.legacyLessonId,
+            courseId: courseLegacyId,
+            lessonName: l.name,
+            lessonDescription: l.description,
+            joined: 0,
+            slideCount: slides.length,
+            duration: l.duration,
+            code: l.code ?? '',
+            orderColumn: l.order,
+            title: l.name,
+            lessonStatus: l.lessonStatus,
+            slug: l.slug ?? '',
+            courseSectionId: sec.legacySectionId,
+            isPreview: l.isPreview ? 1 : 0,
+            slidesData: slides,
+          };
+        }),
     }));
+
   return {
-    courseId: p.course?.legacyCourseId ?? p.legacyId ?? null,
+    courseId: courseLegacyId,
     code,
-    name: p.title,
-    description: p.description,
+    name: stripBrainboostLabel(p.title),
+    description: legacyDescriptionExcerpt(p.descriptionHtml, p.description),
     descriptionHtml: p.descriptionHtml,
-    imageUrl: p.thumbnail,
-    price: p.price,
-    status: p.status,
-    isPurchase: opts.isPurchase ?? false,
-    productPaymentUrl: `${baseUrl}/checkout/${code}`,
-    productShareDetailUrl: productUrl,
     sellingPoint: normalizeSellingPoints(p.sellingPoints),
+    imageUrl: p.thumbnail,
+    isPurchase: opts.isPurchase ?? false,
+    productShareDetailUrl: shareUrl,
+    productPaymentUrl: `${baseUrl}/checkout/${code}`,
+    price: p.price,
+    status: legacyStatus(p.status),
     lessonsData,
     ratingSummary: {
-      avgReviewStart: reviewAggregate.avg,
+      totalReview: reviewAggregate.total,
+      avgReviewStart: roundOneDecimal(reviewAggregate.avg),
       star: buildStarSummary(reviewAggregate),
     },
   };

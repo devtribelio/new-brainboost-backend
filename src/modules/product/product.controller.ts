@@ -4,6 +4,7 @@ import { ok } from '@/common/utils/response.util';
 import { BadRequestException } from '@/common/exceptions';
 import { buildLegacyPage, parsePagination } from '@/common/utils/pagination.util';
 import { serializeProduct, serializeCourseDetailLegacy } from '@/common/serializers';
+import { prisma } from '@/config/prisma';
 import {
   ApiBearerAuth,
   ApiOperation,
@@ -48,7 +49,16 @@ export class ProductController {
     const code = (req.query.code as string) ?? '';
     if (!code) throw new BadRequestException('code required');
     const { product, reviewAggregate } = await this.productService.courseDetail(code);
-    return ok(res, serializeCourseDetailLegacy(product, reviewAggregate));
+    const memberId = (req as { user?: { id?: string } }).user?.id;
+    let affiliateCode: string | null = null;
+    if (memberId) {
+      const m = await prisma.member.findUnique({
+        where: { id: memberId },
+        select: { affiliateCode: true },
+      });
+      affiliateCode = m?.affiliateCode ?? null;
+    }
+    return ok(res, serializeCourseDetailLegacy(product, reviewAggregate, { affiliateCode }));
   };
 
   @ApiBearerAuth()

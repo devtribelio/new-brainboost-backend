@@ -255,11 +255,12 @@ model Course {
 }
 
 model CourseSection {
-  id        String   @id @default(uuid(7)) @db.Uuid
-  courseId  String   @db.Uuid
-  name      String
-  order     Int      @default(0)
-  createdAt DateTime @default(now())
+  id              String   @id @default(uuid(7)) @db.Uuid
+  legacySectionId Int      @unique @default(autoincrement()) // emit as `courseSectionId` int legacy
+  courseId        String   @db.Uuid
+  name            String
+  order           Int      @default(0)
+  createdAt       DateTime @default(now())
 
   course  Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
   lessons Lesson[]
@@ -269,13 +270,19 @@ model CourseSection {
 }
 
 model Lesson {
-  id          String   @id @default(uuid(7)) @db.Uuid
-  sectionId   String   @db.Uuid
-  name        String // legacy `lessonName`
-  description String? // legacy `lessonDescription`
-  slidesData  Json? // legacy `course_lesson.slides_data` — array of slide objects (Audio/Video/Greeting/ThankYou/Document)
-  order       Int      @default(0)
-  createdAt   DateTime @default(now())
+  id             String   @id @default(uuid(7)) @db.Uuid
+  legacyLessonId Int      @unique @default(autoincrement()) // emit as `courseLessonId` int legacy
+  sectionId      String   @db.Uuid
+  name           String // legacy `lessonName`
+  description    String? // legacy `lessonDescription`
+  slidesData     Json? // legacy `course_lesson.slides_data` — array of slide objects
+  code           String?  @unique // legacy `code`
+  slug           String? // legacy `slug`
+  lessonStatus   String   @default("ACTIVE") // legacy `lesson_status`
+  isPreview      Boolean  @default(false) // legacy `is_preview` (emit as int 0/1)
+  duration       Int      @default(0) // legacy `duration` seconds
+  order          Int      @default(0)
+  createdAt      DateTime @default(now())
 
   section CourseSection @relation(fields: [sectionId], references: [id], onDelete: Cascade)
 

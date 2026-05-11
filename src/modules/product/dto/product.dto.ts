@@ -128,11 +128,47 @@ export class ProductPageDto {
 }
 
 export class CourseLessonItemDto {
+  @ApiProperty({ type: 'integer', example: 5001 })
+  courseLessonId!: number;
+
+  @ApiProperty({ type: 'integer', example: 123 })
+  courseId!: number;
+
   @ApiProperty({ example: 'Intro to Hooks' })
   lessonName!: string;
 
   @ApiPropertyOptional({ nullable: true, example: 'useState and useEffect basics' })
   lessonDescription?: string | null;
+
+  @ApiProperty({ type: 'integer', example: 0 })
+  joined!: number;
+
+  @ApiProperty({ type: 'integer', example: 3 })
+  slideCount!: number;
+
+  @ApiProperty({ type: 'integer', example: 0 })
+  duration!: number;
+
+  @ApiProperty({ example: 'LESSON-001' })
+  code!: string;
+
+  @ApiProperty({ type: 'integer', example: 0 })
+  orderColumn!: number;
+
+  @ApiProperty({ example: 'Intro to Hooks' })
+  title!: string;
+
+  @ApiProperty({ example: 'ACTIVE' })
+  lessonStatus!: string;
+
+  @ApiProperty({ example: 'intro-to-hooks' })
+  slug!: string;
+
+  @ApiProperty({ type: 'integer', example: 1001 })
+  courseSectionId!: number;
+
+  @ApiProperty({ type: 'integer', example: 0, description: '0|1 — legacy emit as int' })
+  isPreview!: number;
 
   @ApiProperty({
     type: 'array',
@@ -162,33 +198,54 @@ export class CourseLessonItemDto {
 }
 
 export class CourseSectionDto {
+  @ApiProperty({ type: 'integer', example: 1001 })
+  courseSectionId!: number;
+
+  @ApiProperty({ type: 'integer', example: 123 })
+  courseId!: number;
+
+  @ApiProperty({ type: 'integer', example: 0, description: 'Hardcoded 0 (single-tenant)' })
+  networkAccountId!: number;
+
+  @ApiProperty({ type: 'integer', example: 0, description: 'Hardcoded 0 (single-tenant)' })
+  memberId!: number;
+
   @ApiProperty({ example: 'Getting Started' })
   name!: string;
+
+  @ApiProperty({ type: 'integer', example: 0 })
+  orderColumn!: number;
 
   @ApiProperty({ type: 'array', itemType: () => CourseLessonItemDto })
   courseLessonData!: CourseLessonItemDto[];
 }
 
 export class RatingStarBucketDto {
+  @ApiProperty({ type: 'integer', example: 4 })
+  total!: number;
+
   @ApiProperty({ type: 'integer', example: 5 })
   star!: number;
 
-  @ApiProperty({ type: 'integer', example: 80, description: '0..100 (rounded)' })
+  @ApiProperty({ type: 'number', example: 80.0, description: '0..100 (1-decimal float)' })
   percentage!: number;
 }
 
 export class RatingSummaryDto {
-  @ApiProperty({ type: 'number', example: 4.8 })
+  @ApiProperty({ type: 'integer', example: 5 })
+  totalReview!: number;
+
+  @ApiProperty({ type: 'number', example: 4.8, description: '1-decimal float' })
   avgReviewStart!: number;
 
   @ApiProperty({
     description: 'Keyed by stars "1".."5"',
     example: {
-      '1': { star: 1, percentage: 0 },
-      '2': { star: 2, percentage: 0 },
-      '3': { star: 3, percentage: 0 },
-      '4': { star: 4, percentage: 20 },
-      '5': { star: 5, percentage: 80 },
+      '1': { total: 0, star: 1, percentage: 0 },
+      '2': { total: 0, star: 2, percentage: 0 },
+      '3': { total: 0, star: 3, percentage: 0 },
+      '4': { total: 1, star: 4, percentage: 20.0 },
+      '5': { total: 4, star: 5, percentage: 80.0 },
     },
   })
   star!: Record<string, RatingStarBucketDto>;
@@ -207,12 +264,17 @@ export class CourseDetailDto {
   @ApiProperty({ example: 'react-fundamentals' })
   code!: string;
 
-  @ApiPropertyOptional({ nullable: true, example: 'React Fundamentals' })
+  @ApiPropertyOptional({
+    nullable: true,
+    example: 'React Fundamentals',
+    description: '"Brainboost" label stripped',
+  })
   name?: string | null;
 
   @ApiPropertyOptional({
     nullable: true,
-    example: 'Hands-on course covering hooks, state, and testing.',
+    example: 'Hands-on course covering hooks, st',
+    description: 'Plain-text excerpt (max 50 chars). Use descriptionHtml for full rich text.',
   })
   description?: string | null;
 
@@ -231,7 +293,7 @@ export class CourseDetailDto {
   @ApiProperty({ type: 'integer', example: 299000 })
   price!: number;
 
-  @ApiProperty({ example: 'active', description: 'active|inactive|draft|archived' })
+  @ApiProperty({ example: 'PUBLISH', description: 'PUBLISH|INACTIVE|DRAFT|ARCHIVED (uppercase)' })
   status!: string;
 
   @ApiProperty({ type: 'boolean', example: false })
@@ -240,7 +302,11 @@ export class CourseDetailDto {
   @ApiProperty({ example: 'https://brainboost.com/checkout/react-fundamentals' })
   productPaymentUrl!: string;
 
-  @ApiProperty({ example: 'https://brainboost.com/p/react-fundamentals' })
+  @ApiProperty({
+    example: 'https://brainboost.com/p/react-fundamentals?affCode=ABC',
+    description:
+      'Appends ?affCode=<member.affiliateCode> when request is authenticated; bare URL otherwise.',
+  })
   productShareDetailUrl!: string;
 
   @ApiProperty({
