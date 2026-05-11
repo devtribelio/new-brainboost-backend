@@ -50,9 +50,11 @@ describe('legacy-aligned API smoke', () => {
     expect(r.status).toBe(400);
   });
 
-  it('GET /api/member/network/member requires networkId', async () => {
-    const r = await request(app).get('/api/member/network/member');
-    expect(r.status).toBe(400);
+  it('GET /api/member/network/member with empty input returns 200 (lists all)', async () => {
+    const r = await request(app).get('/api/member/network/member?page=1&perPage=20');
+    expect(r.status).toBe(200);
+    expect(r.body.success).toBe(true);
+    expect(Array.isArray(r.body.data.items)).toBe(true);
   });
 
   it('GET /api/member/network/tag with empty code returns 200 (lists all)', async () => {

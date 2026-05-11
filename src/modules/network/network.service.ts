@@ -24,16 +24,20 @@ export class NetworkService {
   }
 
   async listMembers(p: PaginationParams, networkInput: string) {
-    const networkId = await this.resolveNetworkId(networkInput);
-    if (!networkId) return { rows: [], total: 0 };
+    const where: Prisma.NetworkMemberWhereInput = {};
+    if (networkInput) {
+      const networkId = await this.resolveNetworkId(networkInput);
+      if (!networkId) return { rows: [], total: 0 };
+      where.networkId = networkId;
+    }
     const [rows, total] = await Promise.all([
       prisma.networkMember.findMany({
-        where: { networkId },
+        where,
         orderBy: { joinedAt: 'desc' },
         skip: p.skip,
         take: p.take,
       }),
-      prisma.networkMember.count({ where: { networkId } }),
+      prisma.networkMember.count({ where }),
     ]);
 
     const memberIds = rows.map((r) => r.memberId);

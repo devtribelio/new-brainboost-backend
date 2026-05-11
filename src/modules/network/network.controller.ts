@@ -48,7 +48,9 @@ export class NetworkController {
     return ok(res, await this.networkService.join(req.user.id, networkInput));
   };
 
-  @ApiOperation({ summary: 'List members of a network' })
+  @ApiOperation({
+    summary: 'List members of a network (or all networks if no code/networkId provided)',
+  })
   @ApiQuery({ name: 'code', type: 'string', required: false, example: 'timeline-main' })
   @ApiQuery({
     name: 'networkId',
@@ -64,7 +66,6 @@ export class NetworkController {
       (req.query.code as string) ||
       (req.query.networkId as string) ||
       '';
-    if (!networkInput) throw new BadRequestException('code or networkId required');
     const p = parsePagination(req.query as Record<string, unknown>);
     const { rows, total } = await this.networkService.listMembers(p, networkInput);
     const data = rows.map(({ networkMember, member }) => ({
