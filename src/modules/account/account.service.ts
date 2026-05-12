@@ -74,16 +74,13 @@ export class AccountService {
   }
 
   async preRegistration(dto: PreRegistrationDto) {
-    if (!dto.email && !dto.phone) {
-      throw new BadRequestException('email or phone required');
+    if (dto.password !== dto.confirmation) {
+      throw new BadRequestException('password and confirmation do not match');
     }
 
     const existing = await prisma.member.findFirst({
       where: {
-        OR: [
-          dto.email ? { email: dto.email } : undefined,
-          dto.phone ? { phone: dto.phone } : undefined,
-        ].filter((c): c is NonNullable<typeof c> => c !== undefined),
+        OR: [{ email: dto.email }, { phone: dto.phone }],
       },
     });
     if (existing) throw new BadRequestException('Email or phone already registered');
@@ -96,6 +93,9 @@ export class AccountService {
       if (inviter) affiliateMemberId = inviter.id;
     }
 
+    // `name` + `phoneCode` + `password` are not yet persisted (PraMember has no
+    // columns for them). FE re-sends them on the final register step. Validated
+    // here so a bad payload fails fast at the pre-registration boundary.
     const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
     await prisma.praMember.create({
       data: {
@@ -107,11 +107,9 @@ export class AccountService {
       },
     });
 
-    if (dto.email) {
-      await otpService.issue({ target: dto.email, purpose: 'pre-registration' });
-    }
+    await otpService.issue({ target: dto.email, purpose: 'pre-registration' });
 
-    return { email: dto.email ?? null, phone: dto.phone ?? null };
+    return { email: dto.email, phone: dto.phone };
   }
 
   async logout(memberId: string, dto: LogoutDto) {

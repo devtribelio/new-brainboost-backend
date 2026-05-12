@@ -12,20 +12,18 @@ import {
   ApiTags,
 } from '@/common/openapi/decorators';
 import { MemberFullDto } from '@/common/openapi/member.dto';
-import { MemberLocationDto, MemberProfileDto } from './dto/profile.dto';
+import { MemberProfileDto } from './dto/profile.dto';
 
 @ApiTags('Profile')
 @ApiBearerAuth()
 export class ProfileController {
   constructor(private readonly profileService: ProfileService) {}
 
-  @ApiOperation({ summary: 'Get my profile info' })
-  @ApiResponse({ status: 200, type: () => MemberProfileDto })
-  getInfo = async (req: AuthenticatedRequest, res: Response) => {
-    if (!req.user) throw new UnauthorizedException();
-    const member = await this.profileService.getInfo(req.user.id);
+  // Builds the FE ProfileModel-compat envelope shared by /profile/info and
+  // /profile/location. Loads inviter row when an affiliate connection exists.
+  private async serializeProfileLegacy(memberId: string) {
+    const member = await this.profileService.getInfo(memberId);
 
-    // Resolve inviter (affiliate connection) for ProfileModel-compat shape
     let affiliateConnectedData: Record<string, unknown> | null = null;
     if (member.inviterId) {
       const inviter = await prisma.member.findUnique({
@@ -43,9 +41,8 @@ export class ProfileController {
     }
 
     const p = member.profile;
-    return ok(res, {
+    return {
       ...serializeMemberFull(member),
-      // ProfileModel-compat fields (mobile account_remote_source.profileInfo())
       image: member.avatarUrl,
       phoneNumber: member.phone,
       phoneCode: member.phoneCode,
@@ -65,9 +62,15 @@ export class ProfileController {
       affiliatorCode: member.affiliateCode ?? null,
       haveAffiliateConnect: member.inviterId !== null,
       affiliateConnectedData,
-      // legacy raw nested profile (extra, ignored by mobile parser)
       profile: member.profile,
-    });
+    };
+  }
+
+  @ApiOperation({ summary: 'Get my profile info' })
+  @ApiResponse({ status: 200, type: () => MemberProfileDto })
+  getInfo = async (req: AuthenticatedRequest, res: Response) => {
+    if (!req.user) throw new UnauthorizedException();
+    return ok(res, await this.serializeProfileLegacy(req.user.id));
   };
 
   @ApiOperation({ summary: 'Update my profile fields' })
@@ -89,11 +92,11 @@ export class ProfileController {
   };
 
   @ApiOperation({ summary: 'Set my address / location FK chain' })
-  @ApiResponse({ status: 200, type: () => MemberLocationDto })
+  @ApiResponse({ status: 200, type: () => MemberProfileDto })
   updateLocation = async (req: AuthenticatedRequest, res: Response) => {
     if (!req.user) throw new UnauthorizedException();
     const body = req.body ?? {};
-    const profile = await this.profileService.updateLocation(req.user.id, {
+    await this.profileService.updateLocation(req.user.id, {
       countryId: body.countryId,
       provinceId: body.provinceId,
       cityId: body.cityId,
@@ -101,6 +104,7 @@ export class ProfileController {
       address: body.address,
       postalCode: body.postalCode,
     });
-    return ok(res, profile);
+    // FE legacy parser expects ProfileModel — same shape as /profile/info.
+    return ok(res, await this.serializeProfileLegacy(req.user.id));
   };
 }

@@ -223,6 +223,39 @@ Legacy PageRank is dominated by demo/starter controllers (e.g. `Controller_Demo`
 
 ---
 
+## 8.1 FE coercion history (mobile defensive layers)
+
+The Flutter app added defensive converters over time to absorb backend
+flakiness. Each entry below documents the **original failure** so we can
+decide when FE can safely drop the coercion. See `docs/api-fe.md` §3.2-3.3
+for the full type/shape drift table.
+
+- **InfoModel maintenance / community[].networkId** (FE commit `dbc63de`, 2026-05-12).
+  Symptom: every `/member/info` call hung indefinitely (splash, login, app
+  resume). Root cause: backend returned `maintenance` and `networkId` as
+  strings; `_$InfoModelFromJson` threw `TypeError` casting to int.
+  `TypeError` doesn't extend `Exception`, so the `on Exception` handlers in
+  the repo layer didn't catch it — the future never resolved.
+  Fix in FE: `InfoModel.fromJson` now coerces string→int defensively.
+  Backend side cleaned by **T3.11** (community legacyId backfill + emit int).
+  Can drop FE coercion once verified across rolling deploy.
+
+- **`/auth/devices` cloudMessagingId** (same FE commit `dbc63de`).
+  Symptom: intermittent logout hangs. Root cause: backend returned
+  `{deviceId}` only; FE's `data.data.cloudMessagingId` was undefined →
+  `.toString()` produced the literal `"null"` string → stored in
+  SharedPreferences → sent back on logout body as
+  `{cloudMessagingId: "null"}` → backend tried to match a device with
+  `fcmToken = "null"` (no rows) → fell into the "clear all FCM" branch,
+  with downstream side effects we never fully pinned.
+  Fix in FE: client now handles nullable cloudMessagingId without
+  `.toString()`-coercing null.
+  Backend side cleaned by **T2.12** (emit `cloudMessagingId` in
+  `/auth/devices` + `/auth/cloudMessaging` response). Combined with **P2**
+  (logout filters FCM by token value not deviceId), the loop is closed.
+
+---
+
 ## 9. How to extend this doc
 
 When you discover something non-obvious during a session, add it here under the closest section. Keep entries short and cite the legacy file:line so the next session can verify. Don't paste long source — link via the file path; jcodemunch will fetch it on demand.

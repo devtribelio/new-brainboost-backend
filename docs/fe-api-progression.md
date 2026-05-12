@@ -61,10 +61,11 @@ One PR per module.
 
 ### Auth/Account
 
-- [ ] **T2.1** Fix preRegistration body (#7)
-  - Current: `{email, phone?, affiliateCode?, networkId?}`.
-  - Need: `{name, phone, email, phoneCode, password, confirmation}` all required.
-  - File: `src/modules/account/dto/pre-registration.dto.ts`, `account.service.ts`.
+- [x] **T2.1** Fix preRegistration body (#7) — done 2026-05-12
+  - DTO requires `name, phone, email, phoneCode, password, confirmation` (plus optional affiliateCode/networkId).
+  - Service validates password == confirmation. `name`/`phoneCode`/`password` not persisted yet (PraMember has no columns) — FE re-sends on register step. Validated at boundary so bad payload fails fast.
+  - Follow-up if needed: add columns to PraMember to persist these between pre-register and final register.
+  - Files: `src/modules/account/dto/pre-registration.dto.ts`, `account.service.ts:76-115`.
 
 - [x] **T2.2** Fix `auth/cloudMessaging` body (#40) — done 2026-05-12 (paired with T2.12)
   - `CloudMessagingDto` body: `{cloudMessagingId, deviceId?}`. cloudMessagingId stored as device.fcmToken.
@@ -182,8 +183,10 @@ Single sweep PR — minimal logic change, mostly field renames.
   - FE legacy register flow `{name, email, password, phoneCode, phone?}` now works without backend change request.
   - File: `src/modules/auth/dto/register.dto.ts`.
 
-- [ ] **T3.9** Profile location response → full ProfileModel (#53)
-  - File: `src/modules/account/account.controller.ts:profileLocation`. Return same shape as `/profile/info`.
+- [x] **T3.9** Profile location response → full ProfileModel (#53) — done 2026-05-12
+  - `updateLocation` now returns same shape as `/profile/info` (FE legacy parser reuses `ProfileModel`).
+  - Extracted shared `serializeProfileLegacy` private method on controller — single source of truth.
+  - File: `src/modules/profile/profile.controller.ts`.
 
 - [ ] **T3.10** Product list legacy envelope + raise perPage default (#55)
   - Default perPage 100 (current 20). FE legacy parser expects `{meta, data}` envelope.
@@ -214,11 +217,8 @@ PostDto + CommentDto + ProfileDto have 20-30 fields each with fallback chains. V
 - [ ] **T4.4** ProductDto / ProductDetailModel fallback canonicalization
   - Same as T4.3 but for product fields. 14 fields with `??` chains.
 
-- [ ] **T4.5** Flatten course detail `dataContent` (#56) — *promoted to P5*
-  - FE expects top-level `dataContent: [{id, type:'AudioTemplate'|'VideoTemplate', title, description, audio?, video?}]` flattened from `lessonsData[].courseLessonData[].slidesData[]`.
-  - Audio shape: `{id, title, description, duration, videoLibraryId, guid, audioName, availableRes}`.
-  - Video shape: `{id, title, description, platform, url, duration}`.
-  - File: `serializeCourseDetailLegacy` in `src/modules/product/`. Reference legacy `TBCourse::dataContent`.
+- [x] **T4.5** Flatten course detail `dataContent` (#56) — shipped 2026-05-12 as **P5**
+  - See P5 entry above. `buildDataContent` helper in `src/common/serializers/index.ts` flattens lessonsData→courseLessonData→slidesData filtering to Audio/Video templates.
 
 ---
 
@@ -234,11 +234,8 @@ PostDto + CommentDto + ProfileDto have 20-30 fields each with fallback chains. V
 - [ ] **T5.3** Audit naming typos (audit §3.5)
   - Backend already mirrors `commisionSummary`, `commisionFixAmount`. Decide: keep typo for compat (FE depends on key) OR rename + add alias.
 
-- [ ] **T5.4** Historical bug log
-  - Capture context that drove FE coercion layers — informs which strictness can be reclaimed once backend stable:
-    - FE `dbc63de` (2026-05-12): `/member/info` maintenance/networkId string-emit → `TypeError` → unhandled `Future` → splash/login/resume hung indefinitely. FE patched with string→int coercion.
-    - FE `dbc63de` cont.: `/auth/devices` cloudMessagingId nullable → `.toString()` produced `"null"` literal → stored → logout body `{cloudMessagingId: "null"}` suspected cause of logout hangs. T2.12 covers backend side.
-  - File: `docs/legacy-analysis.md` (append under "FE coercion history" section, new).
+- [x] **T5.4** Historical bug log — done 2026-05-12
+  - Appended `§8.1 FE coercion history` section to `docs/legacy-analysis.md`. Captures the two `dbc63de` failure modes (InfoModel TypeError hang + cloudMessagingId "null" literal loop) and notes which backend tasks (T3.11, T2.12, P2) closed each loop.
 
 ---
 

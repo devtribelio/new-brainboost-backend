@@ -1,15 +1,39 @@
-import { IsEmail, IsOptional, IsString } from 'class-validator';
+import { IsEmail, IsNotEmpty, IsOptional, IsString, Length, MinLength } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@/common/openapi/decorators';
 
 export class PreRegistrationDto {
+  @ApiProperty({ example: 'Jane Doe', description: '4-100 chars' })
+  @IsString()
+  @Length(4, 100)
+  name!: string;
+
+  @ApiProperty({ example: '8111111111', description: 'Phone number without country code' })
+  @IsString()
+  @IsNotEmpty()
+  phone!: string;
+
   @ApiProperty({ format: 'email', example: 'jane.doe@example.com' })
   @IsEmail()
   email!: string;
 
-  @ApiPropertyOptional({ example: '+628111111111' })
-  @IsOptional()
+  @ApiProperty({ example: '+62', description: 'Country dial code' })
   @IsString()
-  phone?: string;
+  @IsNotEmpty()
+  phoneCode!: string;
+
+  @ApiProperty({ format: 'password', example: 'secret123', description: 'min 6 chars' })
+  @IsString()
+  @MinLength(6)
+  password!: string;
+
+  @ApiProperty({
+    format: 'password',
+    example: 'secret123',
+    description: 'must equal password (wire-level alias name: confirmation)',
+  })
+  @IsString()
+  @MinLength(6)
+  confirmation!: string;
 
   @ApiPropertyOptional({ example: 'JD000001', description: 'Affiliate code of inviting member' })
   @IsOptional()
