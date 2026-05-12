@@ -29,6 +29,7 @@ export class PostController {
     private readonly reportService: ReportService = new ReportService(),
   ) {}
 
+  @ApiBearerAuth()
   @ApiOperation({ summary: 'List posts (feed)' })
   @ApiQuery({ name: 'page', type: 'integer', required: false, example: 1 })
   @ApiQuery({ name: 'perPage', type: 'integer', required: false, example: 20 })
@@ -44,6 +45,7 @@ export class PostController {
   })
   @ApiResponse({ status: 200, type: () => PostPageDto })
   list = async (req: AuthenticatedRequest, res: Response) => {
+    if (!req.user) throw new UnauthorizedException();
     const p = parsePagination(req.query as Record<string, unknown>);
     const q = req.query as Record<string, string | undefined>;
     const { rows, total } = await this.postService.list(p, {
@@ -51,17 +53,19 @@ export class PostController {
       networkId: q.networkId,
       topicId: q.topicId,
       authorId: q.memberId,
-      viewerId: req.user?.id,
+      viewerId: req.user.id,
     });
 
-    const liked = req.user
-      ? await this.postService.likedByMember(req.user.id, rows.map((r) => r.id))
-      : new Set<string>();
+    const liked = await this.postService.likedByMember(
+      req.user.id,
+      rows.map((r) => r.id),
+    );
 
     const data = rows.map((row) => serializePost(row, liked.has(row.id) ? 'like' : 'dislike'));
     return ok(res, buildLegacyPage(data, total, p));
   };
 
+  @ApiBearerAuth()
   @ApiOperation({ summary: 'Post detail (increments view count)' })
   @ApiQuery({
     name: 'postId',
@@ -73,12 +77,11 @@ export class PostController {
   @ApiResponse({ status: 200, type: () => PostDto })
   @ApiResponse({ status: 404, description: 'Not found', type: () => ApiErrorResponseDto })
   detail = async (req: AuthenticatedRequest, res: Response) => {
+    if (!req.user) throw new UnauthorizedException();
     const postId = (req.query.postId as string) ?? '';
     if (!postId) throw new BadRequestException('postId required');
-    const post = await this.postService.detail(postId, req.user?.id);
-    const liked = req.user
-      ? await this.postService.likedByMember(req.user.id, [post.id])
-      : new Set<string>();
+    const post = await this.postService.detail(postId, req.user.id);
+    const liked = await this.postService.likedByMember(req.user.id, [post.id]);
     return ok(res, serializePost(post, liked.has(post.id) ? 'like' : 'dislike'));
   };
 
