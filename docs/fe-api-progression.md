@@ -219,9 +219,25 @@ Single sweep PR — minimal logic change, mostly field renames.
 
 PostDto + CommentDto + ProfileDto have 20-30 fields each with fallback chains. Verify field-by-field against contract.
 
-- [ ] **T4.1** PostDto vs PostModel parity check
-  - Contract: 32 fields incl. `postContentData{plain, linkData, attributeData[{index,type,data,text}], excerpt, excerptIndex}`, `embedData`, `topic`, `creator`, `video`, `havePolling`, `postUrl`, `postOriginalUrl`.
-  - Compare to current `serializePost` in `src/modules/post/serializers/*`.
+- [x] **T4.1** PostDto vs PostModel parity — done 2026-05-12
+  - Added all 32 FE PostModel fields. Net additions to `serializePost`:
+    - `postContentData` (rich): `{plain, linkData:[], attributeData:[], excerptIndex:null, excerpt}` — placeholder until rich-content stored in schema.
+    - `contentTitle` (alias of title), `embed` (alias of embedUrl), `fullContent` (= content), `embedData` (null — no OG parser).
+    - `attachments:[]`, `audios:[]` (schema gaps — null/empty).
+    - `memberIdPost` = author legacyId, `video` = `{url, platform: youtube|bunnycdn|other}` via URL detection, `videoThumbnailUrl: null`.
+    - `starred: null`, `havePolling: 0` (schema gaps).
+    - `timeAgo`/`dateAgo` via T4.2 helpers, `pinned` 0/1 from `isPinned` bool.
+    - `topic` reshaped to FE PostTopicModel `{topicId, topicName, topicType, topicIcon}` (was full TopicDto).
+    - `creator` new PostCreatorModel `{memberId, name, profileImage, profileCoverImage}`.
+    - `canEdit`/`canDelete` viewer-driven (true when `req.user.id === post.authorId`).
+    - `isJoined` caller-controlled (set by post.controller per viewer membership; null if not provided).
+    - `postUrl`/`postOriginalUrl` built from `PUBLIC_WEB_URL`.
+    - `publishStatus` surfaced (was missing).
+  - `serializePost(p, statusLike, { viewerId, isJoined })` signature extended.
+  - Backend extras retained (`id`, `memberId` int, `networkId`, `topicId`, `countReplies`, `viewCount`, `videoUrl`, `isDeleted`, `createdAt`, `updatedAt`, `member`).
+  - Helpers reused: `timeAgoString`, `dateAgoString` (from T4.2).
+  - PostDto schema fully rewritten with nested `PostContentDataDto`, `PostTopicDto`, `PostCreatorDto`, `PostVideoDto`.
+  - Files: `src/common/serializers/index.ts`, `src/modules/post/dto/post.dto.ts`.
 
 - [x] **T4.2** CommentDto vs CommentModel parity — done 2026-05-12
   - Added 14 missing FE fields: `memberName`, `memberProfileImage`, `embed`, `embedUrl`, `embedData`, `fullContent`, `image`, `audio`, `timeAgo`, `dateAgo`, `countLikeInKilo`, `replyCount`, `mentions[]`, plus `replyId`/`postId`/`memberId` as int (legacyId).
