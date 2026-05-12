@@ -38,20 +38,25 @@ Verified: `pnpm tsc --noEmit` clean. `pnpm test` 48/49 pass (1 unrelated pre-exi
 
 Phone-register flow exists on FE but backend has zero endpoints. Without these, register UX broken.
 
-- [ ] **T1.1** Implement `POST /api/member/auth/registerByPhone` (#2)
-  - Body: `phone`, `phoneCode`, `name`, `password`. All required.
-  - Response: `BaseResponse<dynamic>`.
-  - Files: `src/modules/auth/auth.controller.ts`, `auth.service.ts`, `auth.routes.ts`, new DTO `dto/register-by-phone.dto.ts`.
-  - Reuse: existing `authService.register` for password hash + member create. Spawn OTP record via `requestVerificationPhone` next step.
+- [x] **T1.1** POST /api/member/auth/registerByPhone (#2) — done 2026-05-12
+  - Creates unverified member from `{phone, phoneCode, name, password}`. Synthesizes placeholder `email = "phone-<code>-<num>@phone.brainboost.local"` (Member.email is NOT NULL; relax to nullable as follow-up).
+  - Issues `verify-phone` OTP, target `phoneCode+phone`. SMS/WA dispatcher not wired — OTP logged via pino for dev. Returns `{member_id, phone, expired_date}`.
+  - Files: `src/modules/auth/dto/register-by-phone.dto.ts` (new + `PhoneVerificationResponseDto`), `auth.service.ts:registerByPhone`, `auth.controller.ts`, `auth.routes.ts`.
 
-- [ ] **T1.2** Implement `POST /api/member/auth/requestVerificationPhone` (#3)
-  - Body: `memberId`, `channel`. Response: `{member_id, phone, expired_date}`.
-  - Files: same module + new `dto/request-verification-phone.dto.ts`.
-  - Reuse: forgot-password OTP infrastructure in `auth.service.ts`. Channel field new (sms/whatsapp).
+- [x] **T1.2** POST /api/member/auth/requestVerificationPhone (#3) — done 2026-05-12
+  - Body `{memberId, channel?}`. Resolves member by legacyId int OR UUID. Issues new `verify-phone` OTP. Returns `{member_id, phone, expired_date}`.
+  - `channel` (sms/whatsapp) logged for future dispatcher integration.
+  - 400 if member has no phone OR is already phone-verified.
+  - Files: `dto/request-verification-phone.dto.ts` (new), `auth.service.ts:requestVerificationPhone`, controller/routes.
 
-- [ ] **T1.3** Implement `POST /api/member/auth/validateOtpPhone` (#4)
-  - Body: `memberId`, `verifyCode`. Response: `BaseResponse<dynamic>`.
-  - Mirror legacy `validateOtp` (forgot-pw) — same OTP store, different field name (`memberId` not `email`).
+- [x] **T1.3** POST /api/member/auth/validateOtpPhone (#4) — done 2026-05-12
+  - Body `{memberId, verifyCode}`. Consumes OTP via `otpService.consume(target, code, 'verify-phone')` (atomic — marks `usedAt`). Sets `member.isPhoneVerified=true`.
+  - Files: `dto/validate-otp-phone.dto.ts` (new), `auth.service.ts:validateOtpPhone`, controller/routes.
+
+- ⚠️ **T1.x follow-ups (not blocking ship):**
+  - SMS/WhatsApp dispatcher (Twilio/Vonage/Fonnte) — OTPs currently logged-only.
+  - `Member.email` relax to nullable (migration) OR add a `pendingEmail` column — drop synthetic placeholder.
+  - `Notification.legacyId` and similar — separate follow-up.
 
 ---
 

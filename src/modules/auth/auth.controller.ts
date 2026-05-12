@@ -8,6 +8,12 @@ import {
   RequestForgotPasswordDto,
   ValidateOtpDto,
 } from './dto/forgot-password.dto';
+import {
+  PhoneVerificationResponseDto,
+  RegisterByPhoneDto,
+} from './dto/register-by-phone.dto';
+import { RequestVerificationPhoneDto } from './dto/request-verification-phone.dto';
+import { ValidateOtpPhoneDto } from './dto/validate-otp-phone.dto';
 import { ok } from '@/common/utils/response.util';
 import type { AuthenticatedRequest } from '@/common/interfaces/authenticated-request';
 import { UnauthorizedException } from '@/common/exceptions';
@@ -113,6 +119,43 @@ export class AuthController {
   @ApiResponse({ status: 200, type: () => GenericOkDto })
   validateOtp = async (req: Request, res: Response) => {
     const result = await this.authService.validateOtp(req.body as ValidateOtpDto);
+    return ok(res, result);
+  };
+
+  @ApiOperation({
+    summary: 'Register a new member by phone (FE legacy phone-register flow)',
+    description: [
+      'Creates an unverified member from `{phone, phoneCode, name, password}`.',
+      'Email column is filled with a synthetic placeholder (`phone-<code>-<num>@phone.brainboost.local`)',
+      'until the user sets a real email. Issues a `verify-phone` OTP — caller must follow up',
+      'with `/auth/validateOtpPhone` to mark `isPhoneVerified=true`.',
+    ].join(' '),
+  })
+  @ApiBody({ type: () => RegisterByPhoneDto })
+  @ApiResponse({ status: 200, type: () => PhoneVerificationResponseDto })
+  @ApiResponse({ status: 400, type: () => ApiErrorResponseDto })
+  registerByPhone = async (req: Request, res: Response) => {
+    const result = await this.authService.registerByPhone(req.body as RegisterByPhoneDto);
+    return ok(res, result);
+  };
+
+  @ApiOperation({
+    summary: 'Re-issue phone verification OTP (resend on FE register step)',
+  })
+  @ApiBody({ type: () => RequestVerificationPhoneDto })
+  @ApiResponse({ status: 200, type: () => PhoneVerificationResponseDto })
+  requestVerificationPhone = async (req: Request, res: Response) => {
+    const result = await this.authService.requestVerificationPhone(
+      req.body as RequestVerificationPhoneDto,
+    );
+    return ok(res, result);
+  };
+
+  @ApiOperation({ summary: 'Validate phone OTP and mark member.isPhoneVerified=true' })
+  @ApiBody({ type: () => ValidateOtpPhoneDto })
+  @ApiResponse({ status: 200, type: () => GenericOkDto })
+  validateOtpPhone = async (req: Request, res: Response) => {
+    const result = await this.authService.validateOtpPhone(req.body as ValidateOtpPhoneDto);
     return ok(res, result);
   };
 }

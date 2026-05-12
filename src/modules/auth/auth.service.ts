@@ -18,6 +18,10 @@ import type {
   RequestForgotPasswordDto,
   ValidateOtpDto,
 } from './dto/forgot-password.dto';
+import type { RegisterByPhoneDto } from './dto/register-by-phone.dto';
+import type { RequestVerificationPhoneDto } from './dto/request-verification-phone.dto';
+import type { ValidateOtpPhoneDto } from './dto/validate-otp-phone.dto';
+import { logger } from '@/config/logger';
 
 interface TokenBundle {
   access_token: string;
@@ -373,6 +377,112 @@ export class AuthService {
     const purpose = mapDtoPurpose(dto.purpose);
     await otpService.verify(dto.target, dto.code, purpose);
     return { target: dto.target, purpose: dto.purpose };
+  }
+
+  // --------------------------------------------------------------------------
+  // Phone-register flow (audit #2/#3/#4). FE legacy register-by-phone path.
+  // --------------------------------------------------------------------------
+
+  private phoneTarget(phoneCode: string, phone: string): string {
+    // Composite key avoids collision between same local-number across dial
+    // codes (e.g. +62 8111... vs +1 8111...).
+    return `${phoneCode}${phone}`;
+  }
+
+  private async resolveMemberByAnyId(input: string) {
+    const legacyId = Number.parseInt(input, 10);
+    if (Number.isFinite(legacyId) && input === String(legacyId)) {
+      const byLegacy = await prisma.member.findUnique({ where: { legacyId } });
+      if (byLegacy) return byLegacy;
+    }
+    return prisma.member.findUnique({ where: { id: input } });
+  }
+
+  async registerByPhone(dto: RegisterByPhoneDto) {
+    const target = this.phoneTarget(dto.phoneCode, dto.phone);
+
+    const existing = await prisma.member.findUnique({ where: { phone: dto.phone } });
+    if (existing) throw new BadRequestException('Phone already registered');
+
+    const passwordHash = await bcrypt.hash(dto.password, 10);
+    const memberCode = await this.generateUniqueMemberCode();
+
+    // Member.email is `String @unique` (NOT NULL). Phone-register has no email
+    // — synthesize a placeholder so the row is creatable. FE prompts the user
+    // to set a real email in the post-OTP profile step. Tracker follow-up:
+    // relax email to nullable, or add a separate sentinel column.
+    const syntheticEmail = `phone-${dto.phoneCode.replace(/[^0-9]/g, '')}-${dto.phone}@phone.brainboost.local`;
+
+    const member = await prisma.member.create({
+      data: {
+        email: syntheticEmail,
+        passwordHash,
+        fullName: dto.name,
+        phone: dto.phone,
+        phoneCode: dto.phoneCode,
+        code: memberCode,
+        affiliateCode: memberCode,
+        isVerified: false,
+        isPhoneVerified: false,
+      },
+      select: { id: true, legacyId: true, phone: true, phoneCode: true },
+    });
+
+    const otp = await otpService.issue({ target, purpose: 'verify-phone' });
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+    logger.info(
+      { memberId: member.id, target, otpCode: otp.code },
+      'phone-register OTP issued — SMS/WA dispatcher not yet wired',
+    );
+
+    return {
+      member_id: member.legacyId ?? member.id,
+      phone: target,
+      expired_date: expiresAt.toISOString(),
+    };
+  }
+
+  async requestVerificationPhone(dto: RequestVerificationPhoneDto) {
+    const member = await this.resolveMemberByAnyId(dto.memberId);
+    if (!member) throw new NotFoundException('Member not found');
+    if (!member.phone || !member.phoneCode) {
+      throw new BadRequestException('Member has no phone on file');
+    }
+    if (member.isPhoneVerified) {
+      throw new BadRequestException('Phone already verified');
+    }
+
+    const target = this.phoneTarget(member.phoneCode, member.phone);
+    const otp = await otpService.issue({ target, purpose: 'verify-phone' });
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+    logger.info(
+      { memberId: member.id, channel: dto.channel ?? 'sms', target, otpCode: otp.code },
+      'verify-phone OTP issued — SMS/WA dispatcher not yet wired',
+    );
+
+    return {
+      member_id: member.legacyId ?? member.id,
+      phone: target,
+      expired_date: expiresAt.toISOString(),
+    };
+  }
+
+  async validateOtpPhone(dto: ValidateOtpPhoneDto) {
+    const member = await this.resolveMemberByAnyId(dto.memberId);
+    if (!member) throw new NotFoundException('Member not found');
+    if (!member.phone || !member.phoneCode) {
+      throw new BadRequestException('Member has no phone on file');
+    }
+
+    const target = this.phoneTarget(member.phoneCode, member.phone);
+    await otpService.consume(target, dto.verifyCode, 'verify-phone');
+
+    await prisma.member.update({
+      where: { id: member.id },
+      data: { isPhoneVerified: true },
+    });
+
+    return { member_id: member.legacyId ?? member.id, verified: true };
   }
 
   private async issueTokenBundle(memberId: string, email: string): Promise<TokenBundle> {

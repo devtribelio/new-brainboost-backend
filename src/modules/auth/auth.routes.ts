@@ -11,6 +11,9 @@ import {
   RequestForgotPasswordDto,
   ValidateOtpDto,
 } from './dto/forgot-password.dto';
+import { RegisterByPhoneDto } from './dto/register-by-phone.dto';
+import { RequestVerificationPhoneDto } from './dto/request-verification-phone.dto';
+import { ValidateOtpPhoneDto } from './dto/validate-otp-phone.dto';
 import { bindRoute } from '@/common/openapi/route-binder';
 
 export function authRoutes(): Router {
@@ -72,6 +75,32 @@ export function authRoutes(): Router {
     path: '/auth/validateOtp',
     handlerKey: 'validateOtp',
     middlewares: [validateDto(ValidateOtpDto)],
+  });
+
+  // Phone-register flow (T1.1-T1.3, audit #2/#3/#4).
+  bindRoute({
+    router,
+    controller: ctrl,
+    method: 'post',
+    path: '/auth/registerByPhone',
+    handlerKey: 'registerByPhone',
+    middlewares: [validateDto(RegisterByPhoneDto)],
+  });
+  bindRoute({
+    router,
+    controller: ctrl,
+    method: 'post',
+    path: '/auth/requestVerificationPhone',
+    handlerKey: 'requestVerificationPhone',
+    middlewares: [validateDto(RequestVerificationPhoneDto)],
+  });
+  bindRoute({
+    router,
+    controller: ctrl,
+    method: 'post',
+    path: '/auth/validateOtpPhone',
+    handlerKey: 'validateOtpPhone',
+    middlewares: [validateDto(ValidateOtpPhoneDto)],
   });
 
   return router;
