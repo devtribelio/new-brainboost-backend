@@ -271,3 +271,61 @@ Each task should:
 - Commerce/purchase/disbursement (per `docs/rewrite-progress.md` — not started).
 - Mobile-side type drift fixes (FE pinned per audit).
 - Affiliate payout compute (separate workstream).
+
+---
+
+## Session Log — 2026-05-12
+
+11 commits this session. tsc clean + tests 54/55 (1 unrelated pre-existing empty-DB country failure) maintained throughout.
+
+### Commits
+
+| SHA | Scope | Summary |
+|---|---|---|
+| `4a3349f` | G1 | response envelope → `{errCode, errMessage, data}`; oauth/token unwrap |
+| `9e5a5d9` | P1-P5 | /info authguard drop, logout body, product/share, product/list legacy envelope, dataContent flatten |
+| `7a345c0` | docs | api-fe.md + fe-api-progression.md |
+| `1633b72` | T3.11 | /info community networkId int canonicalize + backfill migration |
+| `de8d3b9` | T3.6 | like response → `{status, commentId, countLike}` (post + comment) |
+| `cd3db7e` | T3.8 | auth register accepts `name` alias for `fullName` |
+| `b2015ca` | T3.3 | topic subscribe response → FE SubscribeModel shape + int-id resolver bonus |
+| `106a98c` | T3.2 | verified backend already emits `null` correctly (no code change) |
+| `e1d2a53` | T3.4 | topic list accepts `?code=` query alias |
+| `99b9181` | T2.5 | report category fields → `{memberReportMemberCategoryId, category, description}` |
+| `aa77487` | T2.8 | commission summary emits legacy `totalCommision` + `totalTransactionSales` |
+
+### Tracker state after session
+
+| Status | Count | Items |
+|---|---|---|
+| ✅ Shipped | 13 | G1, P1-P5, T3.11, T3.2, T3.3, T3.4, T3.6, T3.8, T2.5, T2.8 |
+| 🔴 Missing | 3 | T1.1-T1.3 phone register/OTP |
+| ❌ Wrong | 7 | T2.1, T2.2, T2.3, T2.4, T2.7, T2.10, T2.11, T2.12 |
+| ⚠️ Partial | 4 | T3.5, T3.7, T3.9, T4.x DTO audits |
+| Gated | 3 | T5.1, T5.2, T5.3 (PM/FE) |
+
+### Required ops action
+
+- `pnpm prisma:migrate` — apply `20260512100000_backfill_community_network_legacyid` to dev/staging/prod. Without it, T3.11 fix leaves `/info` `community` empty in any env where rows existed pre-backfill.
+
+### FE-usable endpoints after this session
+
+- All Retrofit endpoints: G1 envelope correct (`{errCode, errMessage, data}`)
+- `oauth/token`: bare TokenBundleDto (no envelope) per contract
+- `/member/info`: callable pre-login; anon/no-token returns base; `community[].networkId` always int
+- `/account/logout`: body `{cloudMessagingId?}`
+- `/product/course/share`: body `{code}`, real share URL
+- `/product/list`: legacy `{meta, data}` envelope, perPage 100 default
+- `/product/course/detail`: top-level `dataContent[]` flattened
+- `/post/like` + `/comment/like`: emit `{status: 'like'\|'dislike', commentId: int\|null, countLike}`
+- `/auth/register`: accepts `{name}` alias for `fullName`
+- `/topic/subscribe`: emits `{memberId, topicId, isSubscribeTopic, status, action}`; legacy int IDs work
+- `/topic/list?code=`: network code resolution
+- `/report/category`: FE field names
+- `/data/commisionSummary`: legacy `totalCommision` + `totalTransactionSales`
+
+### Next priority candidates
+
+Low-medium: T2.1 (preRegistration body), T2.2 (auth cloudMessaging body), T2.12 (cloudMessagingId response emit), T3.5, T3.7, T3.9.
+
+Bigger: T1.1-T1.3 phone register flow, T2.3 network/member flatten, T2.4 network/tag count+created, T2.7 notification renames, T2.10 location envelope, T2.11 banner shape.
