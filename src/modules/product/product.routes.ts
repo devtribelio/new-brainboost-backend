@@ -14,7 +14,7 @@ export function productRoutes(): Router {
     method: 'get',
     path: '/product/list',
     handlerKey: 'list',
-    middlewares: [optionalAuthGuard],
+    middlewares: [authGuard],
   });
   bindRoute({
     router,
@@ -22,7 +22,7 @@ export function productRoutes(): Router {
     method: 'get',
     path: '/product/course/detail',
     handlerKey: 'courseDetail',
-    middlewares: [optionalAuthGuard],
+    middlewares: [authGuard],
   });
   bindRoute({
     router,
