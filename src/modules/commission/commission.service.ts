@@ -5,7 +5,7 @@ export class CommissionService {
     const [agg, recent] = await Promise.all([
       prisma.affiliateCommission.aggregate({
         where: { recipientId: memberId, status: { in: ['PENDING', 'BALANCE'] } },
-        _sum: { amount: true },
+        _sum: { amount: true, productPrice: true },
         _count: true,
       }),
       prisma.affiliateCommission.findMany({
@@ -14,8 +14,16 @@ export class CommissionService {
         take: 10,
       }),
     ]);
+    const totalAmount = agg._sum.amount ?? 0;
+    const totalSales = agg._sum.productPrice ?? 0;
     return {
-      total: agg._sum.amount ?? 0,
+      // Legacy field names (FE legacy CommisionModel — typos preserved).
+      // FE maps `totalCommision`→totalSales (commission earned),
+      // `totalTransactionSales`→totalTransaction (gross sale value).
+      totalCommision: totalAmount,
+      totalTransactionSales: totalSales,
+      // Modern aliases
+      total: totalAmount,
       count: agg._count,
       currency: 'IDR',
       recent: recent.map((e) => ({

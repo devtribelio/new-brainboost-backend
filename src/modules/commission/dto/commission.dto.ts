@@ -28,7 +28,23 @@ export class CommissionSummaryDto {
   @ApiProperty({
     type: 'number',
     example: 5000000,
-    description: 'Sum of PENDING + BALANCE commissions',
+    description:
+      'Sum of PENDING + BALANCE commission amounts (commission earned). FE legacy alias of `total`.',
+  })
+  totalCommision!: number;
+
+  @ApiProperty({
+    type: 'number',
+    example: 25000000,
+    description:
+      'Sum of productPrice across PENDING + BALANCE commissions (gross transaction sales).',
+  })
+  totalTransactionSales!: number;
+
+  @ApiProperty({
+    type: 'number',
+    example: 5000000,
+    description: 'Modern alias of `totalCommision`',
   })
   total!: number;
 

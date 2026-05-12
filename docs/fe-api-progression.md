@@ -115,9 +115,11 @@ One PR per module.
 
 ### Commission
 
-- [ ] **T2.8** Add legacy commission summary fields (#46)
-  - Current: `{total, count, currency, recent[]}`. Need: `{totalSales, totalTransaction}` (mapped from `totalCommision`/`totalTransactionSales` in legacy).
-  - File: `src/modules/commission/commission.service.ts::summary`, DTO.
+- [x] **T2.8** Commission summary legacy fields (#46) — done 2026-05-12
+  - Added `totalCommision` (= commission amount sum) + `totalTransactionSales` (= productPrice sum). FE legacy `CommisionModel` reads typo-preserved keys.
+  - Modern `total`, `count`, `currency`, `recent` retained as extras.
+  - Aggregation extended to sum `productPrice` alongside `amount` (single query).
+  - Files: `src/modules/commission/commission.service.ts`, `dto/commission.dto.ts`.
 
 ### Location/Banner (legacy http envelope)
 
