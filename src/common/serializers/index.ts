@@ -168,51 +168,72 @@ export function serializeComment(
   };
 }
 
+// FE legacy http layer expects `{id: int, parent legacyIds, name}` per audit
+// §49-52. `id` = legacyId, parent ids = parent's legacyId. Falls back to UUID
+// string when legacyId is null (shouldn't happen in production data).
+
 export function serializeCountry(c: Country): Record<string, unknown> {
   return {
-    countryId: c.legacyId ?? c.id,
-    id: c.id,
+    id: c.legacyId ?? c.id,
     name: c.name,
     code: c.code,
   };
 }
 
-export function serializeProvince(p: Province): Record<string, unknown> {
+interface ProvinceWithCountry extends Province {
+  country?: { legacyId: number | null } | null;
+}
+
+export function serializeProvince(p: ProvinceWithCountry): Record<string, unknown> {
   return {
-    provinceId: p.legacyId ?? p.id,
-    id: p.id,
-    countryId: p.countryId,
+    id: p.legacyId ?? p.id,
+    countryId: p.country?.legacyId ?? null,
     name: p.name,
   };
 }
 
-export function serializeCity(c: City): Record<string, unknown> {
+interface CityWithParents extends City {
+  province?: ({ legacyId: number | null; country?: { legacyId: number | null } | null }) | null;
+}
+
+export function serializeCity(c: CityWithParents): Record<string, unknown> {
   return {
-    cityId: c.legacyId ?? c.id,
-    id: c.id,
-    provinceId: c.provinceId,
+    id: c.legacyId ?? c.id,
+    countryId: c.province?.country?.legacyId ?? null,
+    provinceId: c.province?.legacyId ?? null,
     name: c.name,
   };
 }
 
-export function serializeDistrict(d: District): Record<string, unknown> {
+interface DistrictWithParents extends District {
+  city?:
+    | ({
+        legacyId: number | null;
+        province?:
+          | ({ legacyId: number | null; country?: { legacyId: number | null } | null })
+          | null;
+      })
+    | null;
+}
+
+export function serializeDistrict(d: DistrictWithParents): Record<string, unknown> {
   return {
-    districtId: d.legacyId ?? d.id,
-    id: d.id,
-    cityId: d.cityId,
+    id: d.legacyId ?? d.id,
+    countryId: d.city?.province?.country?.legacyId ?? null,
+    provinceId: d.city?.province?.legacyId ?? null,
+    cityId: d.city?.legacyId ?? null,
     name: d.name,
   };
 }
 
 export function serializeBanner(b: Banner): Record<string, unknown> {
+  // FE BannerModel: `{id:int, client, link, image:List<String>}`. Aliased from
+  // `legacyId` (= tribeversityBannerId), `title`, `linkUrl`, `[imageUrl]`.
   return {
-    bannerId: b.legacyId ?? b.id,
-    id: b.id,
-    title: b.title,
-    imageUrl: b.imageUrl,
-    linkUrl: b.linkUrl,
-    position: b.position,
-    isActive: b.isActive,
+    id: b.legacyId ?? b.id,
+    client: b.title,
+    link: b.linkUrl ?? '',
+    image: [b.imageUrl],
   };
 }
 

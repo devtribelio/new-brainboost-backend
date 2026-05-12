@@ -1,23 +1,27 @@
 import type { Request, Response } from 'express';
 import { BannerService } from './banner.service';
-import { ok } from '@/common/utils/response.util';
+import { okLegacy } from '@/common/utils/response.util';
+import { parsePagination } from '@/common/utils/pagination.util';
 import { serializeBanner } from '@/common/serializers';
-import { ApiOperation, ApiResponse, ApiTags } from '@/common/openapi/decorators';
+import { ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@/common/openapi/decorators';
 import { BannerDto } from './dto/banner.dto';
 
 @ApiTags('Banner')
 export class BannerController {
   constructor(private readonly bannerService: BannerService) {}
 
-  @ApiOperation({ summary: 'List active banners' })
+  @ApiOperation({ summary: 'List active banners (FE legacy http envelope)' })
+  @ApiQuery({ name: 'page', type: 'integer', required: false, example: 1 })
+  @ApiQuery({ name: 'perPage', type: 'integer', required: false, example: 3 })
   @ApiResponse({
     status: 200,
-    description: 'Active banners (ordered by position)',
+    description: 'Active banners (paginated, ordered by position)',
     type: () => BannerDto,
     isArray: true,
   })
-  list = async (_req: Request, res: Response) => {
-    const banners = await this.bannerService.listActive();
-    return ok(res, banners.map(serializeBanner));
+  list = async (req: Request, res: Response) => {
+    const p = parsePagination(req.query as Record<string, unknown>, { perPage: 3 });
+    const { rows, total } = await this.bannerService.listActive(p);
+    return okLegacy(res, rows.map(serializeBanner), total, p.page, p.perPage);
   };
 }

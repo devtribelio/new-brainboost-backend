@@ -31,17 +31,19 @@ describe('legacy-aligned API smoke', () => {
     await prisma.$disconnect();
   });
 
-  it('GET /api/member/data/banner', async () => {
+  it('GET /api/member/data/banner (legacy http envelope)', async () => {
     const r = await request(app).get('/api/member/data/banner');
     expect(r.status).toBe(200);
-    expect(r.body.errCode).toBe(0);
+    expect(r.body.meta).toBeDefined();
+    expect(Array.isArray(r.body.data)).toBe(true);
   });
 
-  it('GET /api/member/data/location/country pagination', async () => {
+  it('GET /api/member/data/location/country pagination (legacy http envelope)', async () => {
     const r = await request(app).get('/api/member/data/location/country?page=1&perPage=5');
     expect(r.status).toBe(200);
-    expect(r.body.data.items.length).toBeLessThanOrEqual(5);
-    expect(r.body.data.total).toBeGreaterThan(0);
+    expect(r.body.meta).toBeDefined();
+    expect(Array.isArray(r.body.data)).toBe(true);
+    expect(r.body.data.length).toBeLessThanOrEqual(5);
   });
 
   it('GET /api/member/topic/list', async () => {

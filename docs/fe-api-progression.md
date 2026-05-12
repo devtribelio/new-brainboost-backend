@@ -130,15 +130,16 @@ These 5 endpoints use FE legacy `http` layer. Envelope is `{meta:{total,page,las
 - [ ] **T2.9** Add legacy `{meta,data}` envelope helper
   - New: `src/common/utils/response.util.ts::okLegacy(res, rows, total, page, perPage)` emits `{meta: {total, page, lastPage}, data: rows}` directly (no `errCode` wrapper). FE legacy parser doesn't read BaseResponse for these.
 
-- [ ] **T2.10** Convert location/country/province/city/district to legacy envelope (#49-52)
-  - Items need int `id` (use `legacyId`), not UUID.
-  - Add missing parent filters: city needs `countryId`+`provinceId`; district needs `countryId`+`provinceId`+`cityId`.
-  - File: `src/modules/location/location.controller.ts` (lines 43, 66, 81, 96), serializers.
+- [x] **T2.10** Location 4 endpoints → legacy envelope (#49-52) — done 2026-05-12
+  - All 4 endpoints (country/province/city/district) emit `okLegacy` envelope `{meta:{total,page,lastPage}, data:[]}`.
+  - Items shape: `{id: legacyId, [parent legacyIds], name}` per FE legacy spec. Serializers updated with proper relation includes (province→country, city→province→country, district→city→province→country).
+  - Added parent filter plumbing: city accepts `countryId`+`provinceId`; district accepts `countryId`+`provinceId`+`cityId`.
+  - Files: `src/modules/location/location.controller.ts`, `location.service.ts`, `src/common/serializers/index.ts` (4 serializers).
 
-- [ ] **T2.11** Fix banner shape (#54)
-  - Add `page`(default 1) + `perPage`(default 3) query parsing.
-  - Field rename: `imageUrl` → `image: List<String>`, `linkUrl` → `link`, `id` = `tribeversityBannerId` int.
-  - File: `src/modules/banner/banner.controller.ts:21`, serializer.
+- [x] **T2.11** Banner shape + pagination (#54) — done 2026-05-12
+  - Pagination added (default perPage 3). Switched to `okLegacy` envelope.
+  - Serializer emits FE BannerModel: `{id: legacyId int, client: title, link: linkUrl, image: [imageUrl]}`. Dropped position/isActive extras.
+  - Files: `src/modules/banner/banner.controller.ts`, `banner.service.ts`, `src/common/serializers/index.ts`.
 
 ---
 

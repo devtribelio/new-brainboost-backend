@@ -86,11 +86,12 @@ describe('auth (contract)', () => {
     expect(res.status).toBe(401);
   });
 
-  it('GET /api/member/data/banner (public) → 200 with data array', async () => {
+  it('GET /api/member/data/banner (public, FE legacy http envelope) → 200', async () => {
     const app = buildApp();
     const res = await request(app).get('/api/member/data/banner');
     expect(res.status).toBe(200);
-    expect(res.body.errCode).toBe(0);
+    // Banner uses okLegacy: {meta:{total,page,lastPage}, data:[...]}.
+    expect(res.body.meta).toBeDefined();
     expect(Array.isArray(res.body.data)).toBe(true);
   });
 });

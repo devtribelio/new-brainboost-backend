@@ -1,7 +1,7 @@
 import type { Request, Response } from 'express';
 import { LocationService } from './location.service';
-import { ok } from '@/common/utils/response.util';
-import { buildLegacyPage, parsePagination } from '@/common/utils/pagination.util';
+import { okLegacy } from '@/common/utils/response.util';
+import { parsePagination } from '@/common/utils/pagination.util';
 import {
   serializeCountry,
   serializeProvince,
@@ -28,11 +28,11 @@ export class LocationController {
 
   @ApiOperation({ summary: 'List countries' })
   @ApiQuery({ name: 'page', type: 'integer', required: false, example: 1 })
-  @ApiQuery({ name: 'perPage', type: 'integer', required: false, example: 50 })
+  @ApiQuery({ name: 'perPage', type: 'integer', required: false, example: 20 })
   @ApiQuery({ name: 'keyword', type: 'string', required: false, example: 'indo' })
   @ApiResponse({
     status: 200,
-    description: 'Paginated countries',
+    description: 'Paginated countries (FE legacy http envelope)',
     type: () => CountryPageDto,
   })
   listCountries = async (req: Request, res: Response) => {
@@ -40,19 +40,19 @@ export class LocationController {
     const keyword = (req.query.keyword as string) ?? undefined;
     const countryId = (req.query.countryId as string) ?? undefined;
     const { rows, total } = await this.locationService.listCountries(p, { keyword, countryId });
-    return ok(res, buildLegacyPage(rows.map(serializeCountry), total, p));
+    return okLegacy(res, rows.map(serializeCountry), total, p.page, p.perPage);
   };
 
   @ApiOperation({ summary: 'List provinces (optionally filtered by country)' })
   @ApiQuery({ name: 'page', type: 'integer', required: false, example: 1 })
-  @ApiQuery({ name: 'perPage', type: 'integer', required: false, example: 50 })
+  @ApiQuery({ name: 'perPage', type: 'integer', required: false, example: 20 })
   @ApiQuery({ name: 'keyword', type: 'string', required: false, example: 'java' })
   @ApiQuery({
     name: 'countryId',
     type: 'integer',
     required: false,
     example: 101,
-    description: 'legacyId or uuid',
+    description: 'Parent country legacyId',
   })
   @ApiResponse({ status: 200, type: () => ProvincePageDto })
   listProvinces = async (req: Request, res: Response) => {
@@ -63,36 +63,45 @@ export class LocationController {
       keyword,
       countryLegacyId,
     });
-    return ok(res, buildLegacyPage(rows.map(serializeProvince), total, p));
+    return okLegacy(res, rows.map(serializeProvince), total, p.page, p.perPage);
   };
 
-  @ApiOperation({ summary: 'List cities (optionally filtered by province)' })
+  @ApiOperation({ summary: 'List cities (optionally filtered by country/province)' })
+  @ApiQuery({ name: 'countryId', type: 'integer', required: false, example: 101 })
   @ApiQuery({ name: 'provinceId', type: 'integer', required: false, example: 102 })
   @ApiQuery({ name: 'keyword', type: 'string', required: false, example: 'band' })
   @ApiResponse({ status: 200, type: () => CityPageDto })
   listCities = async (req: Request, res: Response) => {
     const p = parsePagination(req.query as Record<string, unknown>);
     const keyword = (req.query.keyword as string) ?? undefined;
+    const countryLegacyId = intOrUndef(req.query.countryId);
     const provinceLegacyId = intOrUndef(req.query.provinceId);
     const { rows, total } = await this.locationService.listCities(p, {
       keyword,
+      countryLegacyId,
       provinceLegacyId,
     });
-    return ok(res, buildLegacyPage(rows.map(serializeCity), total, p));
+    return okLegacy(res, rows.map(serializeCity), total, p.page, p.perPage);
   };
 
-  @ApiOperation({ summary: 'List districts (optionally filtered by city)' })
+  @ApiOperation({ summary: 'List districts (optionally filtered by country/province/city)' })
+  @ApiQuery({ name: 'countryId', type: 'integer', required: false, example: 101 })
+  @ApiQuery({ name: 'provinceId', type: 'integer', required: false, example: 102 })
   @ApiQuery({ name: 'cityId', type: 'integer', required: false, example: 103 })
   @ApiQuery({ name: 'keyword', type: 'string', required: false, example: 'coblong' })
   @ApiResponse({ status: 200, type: () => DistrictPageDto })
   listDistricts = async (req: Request, res: Response) => {
     const p = parsePagination(req.query as Record<string, unknown>);
     const keyword = (req.query.keyword as string) ?? undefined;
+    const countryLegacyId = intOrUndef(req.query.countryId);
+    const provinceLegacyId = intOrUndef(req.query.provinceId);
     const cityLegacyId = intOrUndef(req.query.cityId);
     const { rows, total } = await this.locationService.listDistricts(p, {
       keyword,
+      countryLegacyId,
+      provinceLegacyId,
       cityLegacyId,
     });
-    return ok(res, buildLegacyPage(rows.map(serializeDistrict), total, p));
+    return okLegacy(res, rows.map(serializeDistrict), total, p.page, p.perPage);
   };
 }
