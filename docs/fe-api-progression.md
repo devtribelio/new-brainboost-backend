@@ -77,10 +77,8 @@ One PR per module.
   - When `deviceId` omitted: target most-recently-seen device for member (FE legacy single-device assumption).
   - 404 with explicit message when no device exists (points at /auth/devices).
 
-- [ ] **T2.2-bis** Fix `account/logout` body (#6) — *promoted to P2*
-  - Current: `{deviceId?, refresh_token?}`. FE sends: `{cloudMessagingId?}`.
-  - Rename LogoutDto field; keep refresh-revoke + FCM-clear-by-token behavior.
-  - File: `src/modules/account/dto/logout.dto.ts`, `account.service.ts:117-143`.
+- [x] **T2.2-bis** Fix `account/logout` body (#6) — shipped as **P2** (2026-05-12)
+  - See P2 entry above. LogoutDto.deviceId → cloudMessagingId; FCM clear filters by token value.
 
 - [x] **T2.12** Emit `cloudMessagingId` in `/auth/devices` + `/auth/cloudMessaging` response (#36, #40) — done 2026-05-12
   - Both endpoints now emit `{cloudMessagingId, deviceId}`. `cloudMessagingId: string | null` (null when fcmToken absent on device row).
@@ -113,9 +111,8 @@ One PR per module.
 
 ### Product
 
-- [ ] **T2.6** Switch product/course/share body key (#31)
-  - Current: body `{productId}`. Need: body `{code}` (product code, not UUID).
-  - File: `src/modules/product/product.controller.ts:share`, resolve product by code.
+- [x] **T2.6** Switch product/course/share body key (#31) — shipped as **P3** (2026-05-12)
+  - See P3 entry above. Body `{code}`, real share URL with optional affCode.
 
 ### Notification
 
@@ -140,8 +137,8 @@ One PR per module.
 
 These 5 endpoints use FE legacy `http` layer. Envelope is `{meta:{total,page,lastPage}, data:[]}`, NOT G1 `{errCode, errMessage, data}`. Need branch in `ok()` or per-endpoint custom emission.
 
-- [ ] **T2.9** Add legacy `{meta,data}` envelope helper
-  - New: `src/common/utils/response.util.ts::okLegacy(res, rows, total, page, perPage)` emits `{meta: {total, page, lastPage}, data: rows}` directly (no `errCode` wrapper). FE legacy parser doesn't read BaseResponse for these.
+- [x] **T2.9** Add legacy `{meta,data}` envelope helper — shipped as **P4** (2026-05-12)
+  - See P4 entry above. `okLegacy()` lives in `src/common/utils/response.util.ts`; consumed by location/banner/product-list.
 
 - [x] **T2.10** Location 4 endpoints → legacy envelope (#49-52) — done 2026-05-12
   - All 4 endpoints (country/province/city/district) emit `okLegacy` envelope `{meta:{total,page,lastPage}, data:[]}`.
@@ -160,8 +157,8 @@ These 5 endpoints use FE legacy `http` layer. Envelope is `{meta:{total,page,las
 
 Single sweep PR — minimal logic change, mostly field renames.
 
-- [ ] **T3.1** Drop authGuard on `/member/info` (#5)
-  - FE calls splash pre-login. File: `src/modules/auth/auth.routes.ts` (or wherever `/info` route bound).
+- [x] **T3.1** Drop authGuard on `/member/info` (#5) — shipped as **P1** (2026-05-12)
+  - See P1 entry above. authGuard → optionalAuthGuard; anon/no-token returns base info.
 
 - [x] **T3.2** Profile affiliateConnectedData null (#9) — verified 2026-05-12, no change needed
   - Audit `[]`-emit case was legacy tribelio backend behavior. New backend (`src/modules/profile/profile.controller.ts:29-43`) already emits `null` when `member.inviterId` is null; object `{memberNetworkConnectId, memberId, affiliatorCode, affiliatorMemberId}` when inviter present.
@@ -207,9 +204,8 @@ Single sweep PR — minimal logic change, mostly field renames.
   - Extracted shared `serializeProfileLegacy` private method on controller — single source of truth.
   - File: `src/modules/profile/profile.controller.ts`.
 
-- [ ] **T3.10** Product list legacy envelope + raise perPage default (#55)
-  - Default perPage 100 (current 20). FE legacy parser expects `{meta, data}` envelope.
-  - File: `src/modules/product/product.controller.ts:list`. Reuse T2.9 helper.
+- [x] **T3.10** Product list legacy envelope + raise perPage default (#55) — shipped as **P4** (2026-05-12)
+  - See P4 entry above. `okLegacy` envelope, perPage 100 default.
 
 - [x] **T3.11** Canonicalize `/member/info` `community[].networkId` type — *P1 follow-up* (2026-05-12)
   - New migration `20260512100000_backfill_community_network_legacyid` sets legacyId on BB-TIMELINE (999000001) + BB-EDUCATION (999000002). High reserved ints to avoid legacy collision.
@@ -317,16 +313,20 @@ Each task should:
 | `93397bc` | T2.10 + T2.11 | tier 4 — location envelope + parent filters + banner shape |
 | `3e5a71c` | T2.3 + T2.4 | tier 5 — network/member flatten + network/tag count + created (with migration) |
 | `2943ad2` | T2.7 | notification list → FE NotificationModel shape |
+| `ea46e71` | docs | session log v2 |
+| `1250ad5` | T1.1 + T1.2 + T1.3 | phone-register / OTP trio — closes last 🔴 |
+| `82b0645` | docs | legacy-providers.md — external integration follow-up tracker |
 
 ### Tracker state after session
 
 | Status | Count | Items |
 |---|---|---|
-| ✅ Shipped | 26 | G1, P1-P5, T2.1, T2.2, T2.2-bis(=P2), T2.3, T2.4, T2.5, T2.6(=P3), T2.7, T2.8, T2.9(=P4), T2.10, T2.11, T2.12, T3.1(=P1), T3.2, T3.3, T3.4, T3.5, T3.6, T3.7, T3.8, T3.9, T3.10(=P4), T3.11, T4.5(=P5), T5.4 |
-| 🔴 Missing | 3 | T1.1, T1.2, T1.3 phone register/OTP |
+| ✅ Shipped | 29 | G1, P1-P5, T1.1, T1.2, T1.3, T2.1-T2.12, T3.1-T3.11, T4.5, T5.4 |
+| 🔴 Missing | 0 | — all phone-register/OTP shipped this session |
 | ❌ Wrong | 0 | — all ❌ items closed this session |
 | ⚠️ Partial | 4 | T4.1, T4.2, T4.3, T4.4 (DTO parity audits — FE-gated for canonicalization) |
 | Gated | 3 | T5.1, T5.2, T5.3 (PM/FE decisions) |
+| T1.x follow-ups | 2 | Qontak dispatcher + Member.email relax-to-nullable (logged in `docs/legacy-providers.md`) |
 
 ### Required ops action
 
@@ -342,6 +342,9 @@ Two migrations created this session — apply on dev/staging/prod via `pnpm pris
 - `/member/info`: callable pre-login (anon/no-token → base; member-scope adds profile + system); `community[].networkId` int
 - `/auth/devices`, `/auth/cloudMessaging`: emit `{cloudMessagingId, deviceId}`; body accepts `{cloudMessagingId}`
 - `/auth/register`: accepts `{name}` alias for `fullName`
+- `/auth/registerByPhone`: `{phone, phoneCode, name, password}` → creates unverified Member + issues `verify-phone` OTP (logged via pino — no SMS/WA dispatcher yet)
+- `/auth/requestVerificationPhone`: `{memberId, channel?}` → re-issues OTP; returns `{member_id, phone, expired_date}`
+- `/auth/validateOtpPhone`: `{memberId, verifyCode}` → marks `isPhoneVerified=true`
 - `/account/preRegistration`: requires `{name, phone, email, phoneCode, password, confirmation}`
 - `/account/logout`: body `{cloudMessagingId?}`
 - `/account/profile/location`: returns full ProfileModel (same as `/profile/info`)
@@ -365,8 +368,10 @@ Two migrations created this session — apply on dev/staging/prod via `pnpm pris
 
 ### Next priority candidates
 
-**Ship-blocking:**
-- T1.1-T1.3 phone register/OTP trio — only 🔴 left. Schema may need PraMember columns or new `phone_verifications` table.
+**T1.x follow-ups (production-readiness for phone-register):**
+- **T1.4** Qontak WhatsApp dispatcher — wire `qontak.service.ts`, hook into `otpService.issue` for phone targets. Details + hardcoded IDs documented in `docs/legacy-providers.md`.
+- **T1.5** TTL tighten (10 → 2 min) + resend cooldown + 5/day rate limit for parity with legacy Qontak constraints.
+- **T1.6** Relax `Member.email` to nullable (migration) — drop synthetic placeholder.
 
 **Phase 4 DTO audits (FE-coordination required for fallback choices):**
 - T4.1 PostDto vs PostModel (32 fields)
@@ -378,3 +383,9 @@ Two migrations created this session — apply on dev/staging/prod via `pnpm pris
 - T5.1 (drop 4 unused community CRUD endpoints)
 - T5.2 (formalize /network/join body)
 - T5.3 (naming typo decisions)
+
+### Related docs
+
+- `docs/api-fe.md` — frozen FE contract (61 endpoints).
+- `docs/legacy-providers.md` — external integrations not yet wired (Qontak, Bunny, S3, FCM, etc.).
+- `docs/legacy-analysis.md` — symbol-level legacy mapping + §8.1 FE coercion history.
