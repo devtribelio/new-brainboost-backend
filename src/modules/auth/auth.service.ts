@@ -313,20 +313,30 @@ export class AuthService {
         fcmToken: dto.fcmToken,
       },
     });
-    return { deviceId: device.id };
+    // FE legacy reads `data.data.cloudMessagingId`; emit null cleanly when fcmToken absent.
+    return { cloudMessagingId: device.fcmToken, deviceId: device.id };
   }
 
   async registerCloudMessaging(memberId: string, dto: CloudMessagingDto) {
-    const device = await prisma.device.findUnique({
-      where: { memberId_deviceId: { memberId, deviceId: dto.deviceId } },
-    });
-    if (!device) throw new NotFoundException('Device not registered for this member');
+    const device = dto.deviceId
+      ? await prisma.device.findUnique({
+          where: { memberId_deviceId: { memberId, deviceId: dto.deviceId } },
+        })
+      : await prisma.device.findFirst({
+          where: { memberId },
+          orderBy: { lastSeenAt: 'desc' },
+        });
+    if (!device) {
+      throw new NotFoundException(
+        'No device registered for this member — call /auth/devices first',
+      );
+    }
 
     await prisma.device.update({
       where: { id: device.id },
-      data: { fcmToken: dto.fcmToken, lastSeenAt: new Date() },
+      data: { fcmToken: dto.cloudMessagingId, lastSeenAt: new Date() },
     });
-    return { deviceId: device.id };
+    return { cloudMessagingId: dto.cloudMessagingId, deviceId: device.id };
   }
 
   async requestForgotPassword(dto: RequestForgotPasswordDto) {

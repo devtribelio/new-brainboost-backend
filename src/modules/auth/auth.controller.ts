@@ -2,7 +2,7 @@ import type { Request, Response } from 'express';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
-import { CloudMessagingDto, RegisterDeviceDto } from './dto/device.dto';
+import { CloudMessagingDto, DeviceEnrollmentResultDto, RegisterDeviceDto } from './dto/device.dto';
 import {
   ForgotPasswordVerificationDto,
   RequestForgotPasswordDto,
@@ -64,7 +64,7 @@ export class AuthController {
     ].join(' '),
   })
   @ApiBody({ type: () => RegisterDeviceDto })
-  @ApiResponse({ status: 200, type: () => GenericOkDto })
+  @ApiResponse({ status: 200, type: () => DeviceEnrollmentResultDto })
   registerDevice = async (req: Request, res: Response) => {
     const user = (req as AuthenticatedRequest).user;
     if (!user) throw new UnauthorizedException('Authentication required');
@@ -82,7 +82,7 @@ export class AuthController {
     ].join(' '),
   })
   @ApiBody({ type: () => CloudMessagingDto })
-  @ApiResponse({ status: 200, type: () => GenericOkDto })
+  @ApiResponse({ status: 200, type: () => DeviceEnrollmentResultDto })
   cloudMessaging = async (req: Request, res: Response) => {
     const user = (req as AuthenticatedRequest).user;
     if (!user) throw new UnauthorizedException('Authentication required');

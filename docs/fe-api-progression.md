@@ -66,20 +66,21 @@ One PR per module.
   - Need: `{name, phone, email, phoneCode, password, confirmation}` all required.
   - File: `src/modules/account/dto/pre-registration.dto.ts`, `account.service.ts`.
 
-- [ ] **T2.2** Fix `auth/cloudMessaging` body (#40)
-  - Current: `{deviceId, fcmToken}`. FE sends: `{cloudMessagingId}`.
-  - File: `src/modules/auth/dto/device.dto.ts` `CloudMessagingDto`, route handler.
-  - Pair with T2.12 below — same null-semantics concern for response.
+- [x] **T2.2** Fix `auth/cloudMessaging` body (#40) — done 2026-05-12 (paired with T2.12)
+  - `CloudMessagingDto` body: `{cloudMessagingId, deviceId?}`. cloudMessagingId stored as device.fcmToken.
+  - When `deviceId` omitted: target most-recently-seen device for member (FE legacy single-device assumption).
+  - 404 with explicit message when no device exists (points at /auth/devices).
 
 - [ ] **T2.2-bis** Fix `account/logout` body (#6) — *promoted to P2*
   - Current: `{deviceId?, refresh_token?}`. FE sends: `{cloudMessagingId?}`.
   - Rename LogoutDto field; keep refresh-revoke + FCM-clear-by-token behavior.
   - File: `src/modules/account/dto/logout.dto.ts`, `account.service.ts:117-143`.
 
-- [ ] **T2.12** Emit `cloudMessagingId` in `/auth/devices` + `/auth/cloudMessaging` response (#36, #40)
-  - **Current bug**: `registerDevice` (`auth.service.ts:316`) + `registerCloudMessaging` (`auth.service.ts:329`) return `{deviceId: device.id}` only. FE reads `data.data.cloudMessagingId` (String?) — always `undefined` → client `.toString()` → literal `"null"` stored in SharedPrefs → sent back on logout body → suspected cause of intermittent logout hangs (FE commit `dbc63de` historical note).
-  - **Fix**: emit `cloudMessagingId: device.fcmToken` (or `dto.fcmToken`) in both endpoints' response. Document null semantics — if fcmToken missing, return `null` explicitly (not absent key).
-  - Files: `src/modules/auth/auth.service.ts:301-330`, response DTO.
+- [x] **T2.12** Emit `cloudMessagingId` in `/auth/devices` + `/auth/cloudMessaging` response (#36, #40) — done 2026-05-12
+  - Both endpoints now emit `{cloudMessagingId, deviceId}`. `cloudMessagingId: string | null` (null when fcmToken absent on device row).
+  - Closes FE historical "null" literal hang root cause (FE commit `dbc63de`). FE can now drop defensive `.toString()` coercion once stable.
+  - New `DeviceEnrollmentResultDto` declares wire shape for Swagger.
+  - Files: `src/modules/auth/auth.service.ts:301-340`, `dto/device.dto.ts`, `auth.controller.ts` ApiResponse decorators.
 
 ### Network
 
