@@ -147,8 +147,11 @@ Single sweep PR — minimal logic change, mostly field renames.
 - [ ] **T3.2** Profile affiliateConnectedData: empty=`null`, not `[]` (#9)
   - File: `src/modules/account/account.controller.ts` profile serializer.
 
-- [ ] **T3.3** Topic subscribe rename `action`→`isSubscribeTopic` (bool) (#11)
-  - File: `src/modules/topic/topic.controller.ts:45,48`.
+- [x] **T3.3** Topic subscribe FE-shape response (#11) — done 2026-05-12
+  - Response now `{memberId, topicId, isSubscribeTopic}` + extras `{status, action}` (FE-tolerant).
+  - Bonus: service gained `resolveTopicByAnyId` (legacyId int OR UUID) — was broken when FE sent legacy int.
+  - `memberId`/`topicId` emit `legacyId` int (nullable for new-only rows).
+  - Files: `src/modules/topic/topic.service.ts`, `topic.controller.ts`, `dto/topic.dto.ts`.
 
 - [ ] **T3.4** Topic list: accept `code` alias for network code (#10)
   - Already uses `networkId` UUID. Add `code` query param mapped via `network.service::resolveNetworkId`.

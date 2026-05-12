@@ -7,6 +7,17 @@ interface TopicListQuery {
   networkId?: string;
 }
 
+export interface TopicSubscribeResult {
+  topicId: string;
+  topicLegacyId: number | null;
+  memberLegacyId: number | null;
+  isSubscribeTopic: boolean;
+  status: 'APPROVED' | 'PENDING' | 'UNSUBSCRIBED';
+  alreadySubscribed?: boolean;
+  alreadyRequested?: boolean;
+  unsubscribed?: boolean;
+}
+
 export class TopicService {
   async list(p: PaginationParams, q: TopicListQuery) {
     const where: Record<string, unknown> = { isActive: true };
@@ -25,13 +36,27 @@ export class TopicService {
     return { rows, total };
   }
 
-  async subscribe(memberId: string, topicId: string) {
-    const member = await prisma.member.findUnique({ where: { id: memberId } });
+  // Topics carry `legacyId Int? @unique` (mobile-compat). FE may send either
+  // the int legacyId or the UUID. Match comment/post pattern.
+  private async resolveTopicByAnyId(input: string) {
+    const asInt = Number.parseInt(input, 10);
+    if (Number.isFinite(asInt) && input === String(asInt)) {
+      const byLegacy = await prisma.topic.findUnique({ where: { legacyId: asInt } });
+      if (byLegacy) return byLegacy;
+    }
+    return prisma.topic.findUnique({ where: { id: input } });
+  }
+
+  async subscribe(memberId: string, topicInput: string): Promise<TopicSubscribeResult> {
+    const member = await prisma.member.findUnique({
+      where: { id: memberId },
+      select: { id: true, legacyId: true, isActive: true },
+    });
     if (!member || !member.isActive) {
       throw new BadRequestException('Member is not active');
     }
 
-    const topic = await prisma.topic.findUnique({ where: { id: topicId } });
+    const topic = await this.resolveTopicByAnyId(topicInput);
     if (!topic) throw new NotFoundException('Topic not found');
     if (!topic.isActive) throw new BadRequestException('Topic is not active');
 
@@ -44,45 +69,67 @@ export class TopicService {
       }
     }
 
+    const base = {
+      topicId: topic.id,
+      topicLegacyId: topic.legacyId,
+      memberLegacyId: member.legacyId,
+    };
+
     if (topic.type === 'PRIVATE') {
       const existing = await prisma.topicSubscription.findUnique({
-        where: { memberId_topicId: { memberId, topicId } },
+        where: { memberId_topicId: { memberId, topicId: topic.id } },
       });
-      if (existing) return { topicId, status: 'APPROVED', alreadySubscribed: true };
+      if (existing) {
+        return { ...base, isSubscribeTopic: true, status: 'APPROVED', alreadySubscribed: true };
+      }
 
       const pendingOrApproved = await prisma.topicJoinRequest.findUnique({
-        where: { topicId_memberId: { topicId, memberId } },
+        where: { topicId_memberId: { topicId: topic.id, memberId } },
       });
       if (pendingOrApproved) {
         if (pendingOrApproved.status === 'PENDING') {
-          return { topicId, status: 'PENDING', alreadyRequested: true };
+          return { ...base, isSubscribeTopic: false, status: 'PENDING', alreadyRequested: true };
         }
         if (pendingOrApproved.status === 'APPROVED') {
-          return { topicId, status: 'APPROVED', alreadySubscribed: true };
+          return { ...base, isSubscribeTopic: true, status: 'APPROVED', alreadySubscribed: true };
         }
       }
       await prisma.topicJoinRequest.upsert({
-        where: { topicId_memberId: { topicId, memberId } },
-        create: { topicId, memberId, status: 'PENDING' },
+        where: { topicId_memberId: { topicId: topic.id, memberId } },
+        create: { topicId: topic.id, memberId, status: 'PENDING' },
         update: { status: 'PENDING' },
       });
-      return { topicId, status: 'PENDING' };
+      return { ...base, isSubscribeTopic: false, status: 'PENDING' };
     }
 
     await prisma.topicSubscription.upsert({
-      where: { memberId_topicId: { memberId, topicId } },
-      create: { memberId, topicId },
+      where: { memberId_topicId: { memberId, topicId: topic.id } },
+      create: { memberId, topicId: topic.id },
       update: {},
     });
-    return { topicId, status: 'APPROVED' };
+    return { ...base, isSubscribeTopic: true, status: 'APPROVED' };
   }
 
-  async unsubscribe(memberId: string, topicId: string) {
-    await prisma.topicSubscription.deleteMany({ where: { memberId, topicId } });
+  async unsubscribe(memberId: string, topicInput: string): Promise<TopicSubscribeResult> {
+    const member = await prisma.member.findUnique({
+      where: { id: memberId },
+      select: { id: true, legacyId: true },
+    });
+    const topic = await this.resolveTopicByAnyId(topicInput);
+    if (!topic) throw new NotFoundException('Topic not found');
+
+    await prisma.topicSubscription.deleteMany({ where: { memberId, topicId: topic.id } });
     await prisma.topicJoinRequest.updateMany({
-      where: { topicId, memberId, status: 'PENDING' },
+      where: { topicId: topic.id, memberId, status: 'PENDING' },
       data: { status: 'CANCELLED' },
     });
-    return { topicId, unsubscribed: true };
+    return {
+      topicId: topic.id,
+      topicLegacyId: topic.legacyId,
+      memberLegacyId: member?.legacyId ?? null,
+      isSubscribeTopic: false,
+      status: 'UNSUBSCRIBED',
+      unsubscribed: true,
+    };
   }
 }

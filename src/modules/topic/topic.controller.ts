@@ -40,11 +40,18 @@ export class TopicController {
     const topicId = (req.body?.topicId as string) ?? '';
     if (!topicId) throw new BadRequestException('topicId required');
     const action = (req.body?.action as string) ?? 'subscribe';
-    if (action === 'unsubscribe') {
-      const result = await this.topicService.unsubscribe(req.user.id, topicId);
-      return ok(res, { ...result, action });
-    }
-    const result = await this.topicService.subscribe(req.user.id, topicId);
-    return ok(res, { ...result, action });
+    const result =
+      action === 'unsubscribe'
+        ? await this.topicService.unsubscribe(req.user.id, topicId)
+        : await this.topicService.subscribe(req.user.id, topicId);
+    // FE SubscribeModel: {memberId, topicId, isSubscribeTopic}. Status + action
+    // kept as extras (FE parser tolerates unknown keys).
+    return ok(res, {
+      memberId: result.memberLegacyId,
+      topicId: result.topicLegacyId,
+      isSubscribeTopic: result.isSubscribeTopic,
+      status: result.status,
+      action,
+    });
   };
 }

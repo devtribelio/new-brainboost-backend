@@ -76,24 +76,26 @@ export class TopicPageDto {
 }
 
 export class TopicSubscribeResultDto {
-  @ApiProperty({ format: 'uuid', example: 'topic-uuid-1234' })
-  topicId!: string;
+  @ApiProperty({ type: 'integer', nullable: true, example: 42 })
+  memberId!: number | null;
+
+  @ApiProperty({ type: 'integer', nullable: true, example: 7 })
+  topicId!: number | null;
 
   @ApiProperty({
-    enum: ['APPROVED', 'PENDING'],
+    type: 'boolean',
+    example: true,
+    description: 'New subscription state. False for PENDING (PRIVATE topic) and unsubscribe.',
+  })
+  isSubscribeTopic!: boolean;
+
+  @ApiProperty({
+    enum: ['APPROVED', 'PENDING', 'UNSUBSCRIBED'],
     example: 'APPROVED',
-    description: 'APPROVED for PUBLIC topics; PENDING when a PRIVATE topic requires admin approval',
+    description:
+      'APPROVED for PUBLIC subscribe; PENDING for PRIVATE topic awaiting admin; UNSUBSCRIBED on unsubscribe.',
   })
   status!: string;
-
-  @ApiPropertyOptional({ type: 'boolean', example: false })
-  alreadySubscribed?: boolean;
-
-  @ApiPropertyOptional({ type: 'boolean', example: false })
-  alreadyRequested?: boolean;
-
-  @ApiPropertyOptional({ type: 'boolean', example: false })
-  unsubscribed?: boolean;
 
   @ApiProperty({ enum: ['subscribe', 'unsubscribe'], example: 'subscribe' })
   action!: string;
