@@ -24,7 +24,7 @@ function distributionFromGroupBy(
 }
 
 export class ProductService {
-  async list(p: PaginationParams, q: { keyword?: string; type?: string }) {
+  async list(p: PaginationParams, q: { keyword?: string; type?: string; memberId?: string }) {
     const where: Record<string, unknown> = { isActive: true };
     if (q.keyword) where.title = { contains: q.keyword, mode: 'insensitive' };
     if (q.type) where.type = q.type;
@@ -38,7 +38,24 @@ export class ProductService {
       prisma.product.count({ where }),
     ]);
     const ratingAvgByProduct = await this.batchRatingAvg(rows.map((r) => r.id));
-    return { rows, total, ratingAvgByProduct };
+    const purchasedProductIds = await this.batchPurchased(q.memberId, rows);
+    return { rows, total, ratingAvgByProduct, purchasedProductIds };
+  }
+
+  private async batchPurchased(
+    memberId: string | undefined,
+    rows: { id: string; type: string }[],
+  ): Promise<Set<string>> {
+    const set = new Set<string>();
+    if (!memberId) return set;
+    const courseProductIds = rows.filter((r) => r.type === 'course').map((r) => r.id);
+    if (courseProductIds.length === 0) return set;
+    const enrollments = await prisma.courseEnrollment.findMany({
+      where: { memberId, course: { productId: { in: courseProductIds } } },
+      select: { course: { select: { productId: true } } },
+    });
+    for (const e of enrollments) set.add(e.course.productId);
+    return set;
   }
 
   private async batchRatingAvg(productIds: string[]): Promise<Map<string, number>> {

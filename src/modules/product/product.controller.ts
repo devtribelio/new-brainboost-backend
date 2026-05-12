@@ -28,12 +28,14 @@ export class ProductController {
     const p = parsePagination(req.query as Record<string, unknown>, { perPage: 100 });
     const keyword = (req.query.keyword as string) ?? undefined;
     const type = (req.query.type as string) ?? undefined;
-    const { rows, total, ratingAvgByProduct } = await this.productService.list(p, {
-      keyword,
-      type,
-    });
+    const memberId = (req as { user?: { id?: string } }).user?.id;
+    const { rows, total, ratingAvgByProduct, purchasedProductIds } =
+      await this.productService.list(p, { keyword, type, memberId });
     const items = rows.map((r) =>
-      serializeProduct(r, { ratingAvg: ratingAvgByProduct.get(r.id) ?? 0 }),
+      serializeProduct(r, {
+        ratingAvg: ratingAvgByProduct.get(r.id) ?? 0,
+        isPurchased: purchasedProductIds.has(r.id),
+      }),
     );
     return okLegacy(res, items, total, p.page, p.perPage);
   };
@@ -47,14 +49,25 @@ export class ProductController {
     const { product, reviewAggregate } = await this.productService.courseDetail(code);
     const memberId = (req as { user?: { id?: string } }).user?.id;
     let affiliateCode: string | null = null;
+    let isPurchase = false;
     if (memberId) {
       const m = await prisma.member.findUnique({
         where: { id: memberId },
         select: { affiliateCode: true },
       });
       affiliateCode = m?.affiliateCode ?? null;
+      if (product.course) {
+        const enrollment = await prisma.courseEnrollment.findUnique({
+          where: { memberId_courseId: { memberId, courseId: product.course.id } },
+          select: { id: true },
+        });
+        isPurchase = !!enrollment;
+      }
     }
-    return ok(res, serializeCourseDetailLegacy(product, reviewAggregate, { affiliateCode }));
+    return ok(
+      res,
+      serializeCourseDetailLegacy(product, reviewAggregate, { affiliateCode, isPurchase }),
+    );
   };
 
   @ApiBearerAuth()

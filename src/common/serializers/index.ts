@@ -242,7 +242,7 @@ function deriveSlug(title: string | null): string {
 
 export function serializeProduct(
   p: Product,
-  opts: { ratingAvg?: number } = {},
+  opts: { ratingAvg?: number; isPurchased?: boolean } = {},
 ): Record<string, unknown> {
   const productId = p.legacyId ?? p.id;
   const label = productTypeLabel(p.type);
@@ -271,7 +271,7 @@ export function serializeProduct(
     productShareDetailUrl: productUrl,
     commisionFixAmount: null,
     productUrl,
-    isPurchased: false,
+    isPurchased: opts.isPurchased ?? false,
     productRatingAvg: opts.ratingAvg ?? 0,
     // Fallback aliases for mobile fallback chain
     productId,
