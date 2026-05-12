@@ -282,8 +282,14 @@ export class AuthService {
 
     const payload = verifyRefreshToken(dto.refresh_token);
     const stored = await prisma.refreshToken.findUnique({ where: { token: dto.refresh_token } });
-    if (!stored || stored.revokedAt || stored.expiresAt < new Date()) {
-      throw new UnauthorizedException('Refresh token revoked or expired');
+    if (!stored) {
+      throw new UnauthorizedException('invalid_refresh_token');
+    }
+    if (stored.revokedAt) {
+      throw new UnauthorizedException('session_revoked');
+    }
+    if (stored.expiresAt < new Date()) {
+      throw new UnauthorizedException('refresh_token_expired');
     }
 
     const member = await prisma.member.findUnique({ where: { id: payload.sub } });

@@ -42,6 +42,36 @@ export const authGuard: RequestHandler = async (req, _res: Response, next: NextF
   }
 };
 
+/**
+ * Like `authGuard` but skips the session-active DB check. Use only for endpoints
+ * that must remain callable after the member's session was revoked (e.g. logout
+ * cleanup: FCM deregister, refresh-row revocation, local-state confirmation).
+ * Still requires valid JWT signature and member scope.
+ */
+export const authGuardLenient: RequestHandler = (req, _res: Response, next: NextFunction) => {
+  try {
+    const header = req.headers.authorization;
+    if (!header || !header.toLowerCase().startsWith('bearer ')) {
+      throw new UnauthorizedException('Missing bearer token');
+    }
+    const token = header.slice(7).trim();
+    if (!token) throw new UnauthorizedException('Missing bearer token');
+
+    const payload = verifyAccessToken(token);
+    const scope = payload.scope ?? 'member';
+    if (scope !== 'member') throw new UnauthorizedException('Member access token required');
+    (req as AuthenticatedRequest).user = {
+      id: payload.sub,
+      email: payload.email,
+      scope,
+      sessionId: payload.sid,
+    };
+    next();
+  } catch (err) {
+    next(err);
+  }
+};
+
 export const optionalAuthGuard: RequestHandler = async (req, _res, next) => {
   const header = req.headers.authorization;
   if (!header || !header.toLowerCase().startsWith('bearer ')) return next();

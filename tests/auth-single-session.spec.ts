@@ -119,4 +119,40 @@ describe('auth single-session enforcement', () => {
       .set('Authorization', `Bearer ${c.access_token}`);
     expect(meC.status).toBe(200);
   });
+
+  it('POST /account/logout still works (200) after session revoked by another login', async () => {
+    const a = await loginPassword();
+    await loginPassword(); // device B login → revokes A's session
+
+    const meA = await request(app)
+      .get('/api/member/account/profile/info')
+      .set('Authorization', `Bearer ${a.access_token}`);
+    expect(meA.status).toBe(401);
+
+    const logoutA = await request(app)
+      .post('/api/member/account/logout')
+      .set('Authorization', `Bearer ${a.access_token}`)
+      .send({});
+    expect(logoutA.status).toBe(200);
+    expect(logoutA.body.errCode).toBe(0);
+    expect(logoutA.body.data.loggedOut).toBe(true);
+  });
+
+  it('refresh grant on a revoked token returns session_revoked discriminator', async () => {
+    const a = await loginPassword();
+    await loginPassword(); // revokes A
+
+    const res = await refresh(a.refresh_token);
+    expect(res.status).toBe(401);
+    expect(res.body.errMessage).toBe('session_revoked');
+  });
+
+  it('refresh grant on a tampered/unknown token returns invalid_refresh_token', async () => {
+    const fake = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ4Iiwidg9rZW5JZCI6InkifQ.invalidsig';
+    const res = await refresh(fake);
+    expect(res.status).toBe(401);
+    expect(['invalid_refresh_token', 'Invalid or expired refresh token']).toContain(
+      res.body.errMessage,
+    );
+  });
 });

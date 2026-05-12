@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { AccountController } from './account.controller';
 import { AccountService } from './account.service';
-import { authGuard } from '@/common/middlewares/auth.middleware';
+import { authGuard, authGuardLenient } from '@/common/middlewares/auth.middleware';
 import { validateDto } from '@/common/middlewares/validation.middleware';
 import { bindRoute } from '@/common/openapi/route-binder';
 import { PreRegistrationDto } from './dto/pre-registration.dto';
@@ -38,7 +38,7 @@ export function accountRoutes(): Router {
     method: 'post',
     path: '/account/logout',
     handlerKey: 'logout',
-    middlewares: [authGuard, validateDto(LogoutDto)],
+    middlewares: [authGuardLenient, validateDto(LogoutDto)],
   });
   bindRoute({
     router,
