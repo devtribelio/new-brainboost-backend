@@ -289,11 +289,6 @@ export class AuthService {
     const member = await prisma.member.findUnique({ where: { id: payload.sub } });
     if (!member || !member.isActive) throw new UnauthorizedException('Member not active');
 
-    await prisma.refreshToken.update({
-      where: { id: stored.id },
-      data: { revokedAt: new Date() },
-    });
-
     return this.issueTokenBundle(member.id, member.email);
   }
 
@@ -372,9 +367,17 @@ export class AuthService {
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + 30);
 
-    await prisma.refreshToken.create({
-      data: { id: tokenId, memberId, token: refreshToken, expiresAt },
-    });
+    // Single-session: revoke all prior live refresh tokens for this member, then mint.
+    // Atomic so a concurrent login can't slip a token between revoke and insert.
+    await prisma.$transaction([
+      prisma.refreshToken.updateMany({
+        where: { memberId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      }),
+      prisma.refreshToken.create({
+        data: { id: tokenId, memberId, token: refreshToken, expiresAt },
+      }),
+    ]);
 
     return {
       access_token: accessToken,
