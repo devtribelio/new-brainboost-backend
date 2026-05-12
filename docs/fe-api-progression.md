@@ -288,7 +288,7 @@ Each task should:
 
 ## Session Log — 2026-05-12
 
-11 commits this session. tsc clean + tests 54/55 (1 unrelated pre-existing empty-DB country failure) maintained throughout.
+19 commits this session. tsc clean + `pnpm test` 55/55 (pre-existing empty-DB country test cleared once envelope shape change in T2.10 made the assertion logical).
 
 ### Commits
 
@@ -305,39 +305,71 @@ Each task should:
 | `e1d2a53` | T3.4 | topic list accepts `?code=` query alias |
 | `99b9181` | T2.5 | report category fields → `{memberReportMemberCategoryId, category, description}` |
 | `aa77487` | T2.8 | commission summary emits legacy `totalCommision` + `totalTransactionSales` |
+| `40da277` | docs | session log v1 |
+| `a8c5f77` | T3.9 + T2.1 + T4.5 + T5.4 | tier 3 sweep — profile/location response, preRegistration body, bookkeeping, historical bug log |
+| `31d1705` | T3.7 + T3.5 | tier 6 — upload response wrap + post list query params |
+| `c7f180e` | T2.2 + T2.12 | auth/FCM cloudMessagingId pair (body + response) |
+| `93397bc` | T2.10 + T2.11 | tier 4 — location envelope + parent filters + banner shape |
+| `3e5a71c` | T2.3 + T2.4 | tier 5 — network/member flatten + network/tag count + created (with migration) |
+| `2943ad2` | T2.7 | notification list → FE NotificationModel shape |
 
 ### Tracker state after session
 
 | Status | Count | Items |
 |---|---|---|
-| ✅ Shipped | 13 | G1, P1-P5, T3.11, T3.2, T3.3, T3.4, T3.6, T3.8, T2.5, T2.8 |
-| 🔴 Missing | 3 | T1.1-T1.3 phone register/OTP |
-| ❌ Wrong | 7 | T2.1, T2.2, T2.3, T2.4, T2.7, T2.10, T2.11, T2.12 |
-| ⚠️ Partial | 4 | T3.5, T3.7, T3.9, T4.x DTO audits |
-| Gated | 3 | T5.1, T5.2, T5.3 (PM/FE) |
+| ✅ Shipped | 26 | G1, P1-P5, T2.1, T2.2, T2.2-bis(=P2), T2.3, T2.4, T2.5, T2.6(=P3), T2.7, T2.8, T2.9(=P4), T2.10, T2.11, T2.12, T3.1(=P1), T3.2, T3.3, T3.4, T3.5, T3.6, T3.7, T3.8, T3.9, T3.10(=P4), T3.11, T4.5(=P5), T5.4 |
+| 🔴 Missing | 3 | T1.1, T1.2, T1.3 phone register/OTP |
+| ❌ Wrong | 0 | — all ❌ items closed this session |
+| ⚠️ Partial | 4 | T4.1, T4.2, T4.3, T4.4 (DTO parity audits — FE-gated for canonicalization) |
+| Gated | 3 | T5.1, T5.2, T5.3 (PM/FE decisions) |
 
 ### Required ops action
 
-- `pnpm prisma:migrate` — apply `20260512100000_backfill_community_network_legacyid` to dev/staging/prod. Without it, T3.11 fix leaves `/info` `community` empty in any env where rows existed pre-backfill.
+Two migrations created this session — apply on dev/staging/prod via `pnpm prisma:migrate`:
+
+1. `20260512100000_backfill_community_network_legacyid` — backfills BB-TIMELINE/BB-EDUCATION legacyId. Required for T3.11 (/info `community[].networkId` int). Without it, `/info` `community` is empty in envs with the pre-fix seed.
+2. `20260512200000_network_tag_created_at` — adds `NetworkTag.createdAt`. Required for T2.4 (/network/tag emits `created`). Without it, `/network/tag` 500s.
 
 ### FE-usable endpoints after this session
 
-- All Retrofit endpoints: G1 envelope correct (`{errCode, errMessage, data}`)
+**Retrofit layer (G1 envelope `{errCode, errMessage, data}`):**
 - `oauth/token`: bare TokenBundleDto (no envelope) per contract
-- `/member/info`: callable pre-login; anon/no-token returns base; `community[].networkId` always int
-- `/account/logout`: body `{cloudMessagingId?}`
-- `/product/course/share`: body `{code}`, real share URL
-- `/product/list`: legacy `{meta, data}` envelope, perPage 100 default
-- `/product/course/detail`: top-level `dataContent[]` flattened
-- `/post/like` + `/comment/like`: emit `{status: 'like'\|'dislike', commentId: int\|null, countLike}`
+- `/member/info`: callable pre-login (anon/no-token → base; member-scope adds profile + system); `community[].networkId` int
+- `/auth/devices`, `/auth/cloudMessaging`: emit `{cloudMessagingId, deviceId}`; body accepts `{cloudMessagingId}`
 - `/auth/register`: accepts `{name}` alias for `fullName`
-- `/topic/subscribe`: emits `{memberId, topicId, isSubscribeTopic, status, action}`; legacy int IDs work
-- `/topic/list?code=`: network code resolution
+- `/account/preRegistration`: requires `{name, phone, email, phoneCode, password, confirmation}`
+- `/account/logout`: body `{cloudMessagingId?}`
+- `/account/profile/location`: returns full ProfileModel (same as `/profile/info`)
+- `/topic/list?code=BB-TIMELINE`: network code resolution
+- `/topic/subscribe`: `{memberId, topicId, isSubscribeTopic, status, action}`, accepts int IDs
+- `/post/list`: query params `tag` / `sortBy` / `filter` supported
+- `/post/like` + `/comment/like`: emit `{status: 'like'|'dislike', commentId: int|null, countLike}`
+- `/network/member`: flat FE NetworkMemberModel (16 fields)
+- `/network/tag`: `{tag, count, created}`
+- `/notification/list`: FE NotificationModel `{notificationId, title, message, isSeen 0/1, created, updated, refTable, refId, type}`; perPage default 50
 - `/report/category`: FE field names
+- `/upload/temporary`: `{image: [{...status:bool}]}`
+- `/product/course/share`: body `{code}`, real share URL
+- `/product/course/detail`: top-level `dataContent[]` flattened
+
+**Legacy http layer (bare `{meta:{total,page,lastPage}, data:[]}`):**
+- `/product/list`: perPage 100 default, ProductModel field aliases
+- `/data/location/country|province|city|district`: int `id`, parent filters supported
+- `/data/banner`: `{id:int, client, link, image:[url]}`, pagination
 - `/data/commisionSummary`: legacy `totalCommision` + `totalTransactionSales`
 
 ### Next priority candidates
 
-Low-medium: T2.1 (preRegistration body), T2.2 (auth cloudMessaging body), T2.12 (cloudMessagingId response emit), T3.5, T3.7, T3.9.
+**Ship-blocking:**
+- T1.1-T1.3 phone register/OTP trio — only 🔴 left. Schema may need PraMember columns or new `phone_verifications` table.
 
-Bigger: T1.1-T1.3 phone register flow, T2.3 network/member flatten, T2.4 network/tag count+created, T2.7 notification renames, T2.10 location envelope, T2.11 banner shape.
+**Phase 4 DTO audits (FE-coordination required for fallback choices):**
+- T4.1 PostDto vs PostModel (32 fields)
+- T4.2 CommentDto parity
+- T4.3 ProfileDto canonicalization
+- T4.4 ProductDto canonicalization
+
+**Phase 5 cleanup gated on PM/FE input:**
+- T5.1 (drop 4 unused community CRUD endpoints)
+- T5.2 (formalize /network/join body)
+- T5.3 (naming typo decisions)
