@@ -325,8 +325,8 @@ export class CourseDetailDto {
 
 export class ProductShareDto {
   @ApiProperty({ example: 'react-fundamentals' })
-  productId!: string;
+  code!: string;
 
-  @ApiProperty({ example: 'https://share.example.com/course/react-fundamentals' })
+  @ApiProperty({ example: 'https://brainboost.com/p/react-fundamentals' })
   shareUrl!: string;
 }

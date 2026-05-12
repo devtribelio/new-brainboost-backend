@@ -1,8 +1,8 @@
 import type { Request, Response } from 'express';
 import { ProductService } from './product.service';
-import { ok } from '@/common/utils/response.util';
+import { ok, okLegacy } from '@/common/utils/response.util';
 import { BadRequestException } from '@/common/exceptions';
-import { buildLegacyPage, parsePagination } from '@/common/utils/pagination.util';
+import { parsePagination } from '@/common/utils/pagination.util';
 import { serializeProduct, serializeCourseDetailLegacy } from '@/common/serializers';
 import { prisma } from '@/config/prisma';
 import {
@@ -18,28 +18,24 @@ import { CourseDetailDto, ProductPageDto, ProductShareDto } from './dto/product.
 export class ProductController {
   constructor(private readonly productService: ProductService) {}
 
-  @ApiOperation({ summary: 'List products' })
+  @ApiOperation({ summary: 'List products (FE legacy http envelope)' })
   @ApiQuery({ name: 'page', type: 'integer', required: false, example: 1 })
-  @ApiQuery({ name: 'perPage', type: 'integer', required: false, example: 20 })
+  @ApiQuery({ name: 'perPage', type: 'integer', required: false, example: 100 })
   @ApiQuery({ name: 'keyword', type: 'string', required: false, example: 'react' })
   @ApiQuery({ name: 'type', type: 'string', required: false, example: 'course' })
   @ApiResponse({ status: 200, type: () => ProductPageDto })
   list = async (req: Request, res: Response) => {
-    const p = parsePagination(req.query as Record<string, unknown>);
+    const p = parsePagination(req.query as Record<string, unknown>, { perPage: 100 });
     const keyword = (req.query.keyword as string) ?? undefined;
     const type = (req.query.type as string) ?? undefined;
     const { rows, total, ratingAvgByProduct } = await this.productService.list(p, {
       keyword,
       type,
     });
-    return ok(
-      res,
-      buildLegacyPage(
-        rows.map((r) => serializeProduct(r, { ratingAvg: ratingAvgByProduct.get(r.id) ?? 0 })),
-        total,
-        p,
-      ),
+    const items = rows.map((r) =>
+      serializeProduct(r, { ratingAvg: ratingAvgByProduct.get(r.id) ?? 0 }),
     );
+    return okLegacy(res, items, total, p.page, p.perPage);
   };
 
   @ApiOperation({ summary: 'Course product detail' })
@@ -65,8 +61,26 @@ export class ProductController {
   @ApiOperation({ summary: 'Generate a share link for a course' })
   @ApiResponse({ status: 200, type: () => ProductShareDto })
   shareCourse = async (req: Request, res: Response) => {
-    const productId = (req.body?.productId as string) ?? '';
-    if (!productId) throw new BadRequestException('productId required');
-    return ok(res, { productId, shareUrl: `https://share.example.com/course/${productId}` });
+    const code = (req.body?.code as string) ?? '';
+    if (!code) throw new BadRequestException('code required');
+    const product = await prisma.product.findUnique({
+      where: { code },
+      select: { id: true, code: true, slug: true, title: true, marketingLink: true },
+    });
+    if (!product) throw new BadRequestException(`Product not found: ${code}`);
+    const memberId = (req as { user?: { id?: string } }).user?.id;
+    let affiliateCode: string | null = null;
+    if (memberId) {
+      const m = await prisma.member.findUnique({
+        where: { id: memberId },
+        select: { affiliateCode: true },
+      });
+      affiliateCode = m?.affiliateCode ?? null;
+    }
+    const baseUrl = process.env.PUBLIC_WEB_URL ?? 'https://brainboost.com';
+    const slug = product.slug ?? product.code ?? product.id;
+    const productUrl = product.marketingLink ?? `${baseUrl}/p/${slug}`;
+    const shareUrl = affiliateCode ? `${productUrl}?affCode=${affiliateCode}` : productUrl;
+    return ok(res, { code: product.code, shareUrl });
   };
 }

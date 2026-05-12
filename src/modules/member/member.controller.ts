@@ -4,7 +4,6 @@ import { prisma } from '@/config/prisma';
 import { env } from '@/config/env';
 import { ok } from '@/common/utils/response.util';
 import type { AuthenticatedRequest } from '@/common/interfaces/authenticated-request';
-import { UnauthorizedException } from '@/common/exceptions';
 import { serializeMemberFull } from '@/common/serializers';
 import {
   ApiBearerAuth,
@@ -37,7 +36,32 @@ export class MemberController {
     type: () => ApiErrorResponseDto,
   })
   info = async (req: AuthenticatedRequest, res: Response) => {
-    if (!req.user) throw new UnauthorizedException();
+    const communityNetworks = await prisma.network.findMany({
+      where: { purpose: { in: ['timeline', 'education'] }, isActive: true },
+      select: { id: true, legacyId: true, code: true, name: true, purpose: true },
+    });
+    const community = communityNetworks.map((n) => ({
+      page: n.purpose,
+      networkId: n.legacyId ?? n.id,
+      networkCode: n.code ?? n.id,
+      name: n.name,
+    }));
+
+    const base = {
+      appName: process.env.APP_NAME ?? 'Brainboost',
+      appCode: process.env.APP_CODE ?? 'brainboost',
+      affiliatePlatformUrl: process.env.AFFILIATE_PLATFORM_URL ?? `${env.baseUrl}/affiliate`,
+      maintenance: process.env.MAINTENANCE === 'true' ? 1 : 0,
+      maintenanceMessage: process.env.MAINTENANCE_MESSAGE ?? null,
+      maintenanceEndDateTime: process.env.MAINTENANCE_END ?? null,
+      community,
+    };
+
+    // No token OR anon-scope token → return base info only (FE splash flow).
+    if (!req.user || req.user.scope !== 'member') {
+      return ok(res, base);
+    }
+
     const result = await this.memberService.findById(req.user.id, {
       latitude: floatOrUndef(req.query.latitude),
       longitude: floatOrUndef(req.query.longitude),
@@ -62,29 +86,9 @@ export class MemberController {
             : null,
         }
       : null;
-    // Mobile expects InfoModel shape (appName, appCode, maintenance, community).
-    // Community list pulled from Network rows with `purpose` set.
-    const communityNetworks = await prisma.network.findMany({
-      where: { purpose: { in: ['timeline', 'education'] }, isActive: true },
-      select: { id: true, legacyId: true, code: true, name: true, purpose: true },
-    });
-    const community = communityNetworks.map((n) => ({
-      page: n.purpose,
-      networkId: n.legacyId ?? n.id,
-      networkCode: n.code ?? n.id,
-      name: n.name,
-    }));
 
     return ok(res, {
-      // InfoModel-compat fields (mobile auth_remote_source.info())
-      appName: process.env.APP_NAME ?? 'Brainboost',
-      appCode: process.env.APP_CODE ?? 'brainboost',
-      affiliatePlatformUrl: process.env.AFFILIATE_PLATFORM_URL ?? `${env.baseUrl}/affiliate`,
-      maintenance: process.env.MAINTENANCE === 'true' ? 1 : 0,
-      maintenanceMessage: process.env.MAINTENANCE_MESSAGE ?? null,
-      maintenanceEndDateTime: process.env.MAINTENANCE_END ?? null,
-      community,
-      // Bonus member detail (extra keys ignored by mobile InfoModel parser)
+      ...base,
       ...serializeMemberFull(m),
       profile,
       memberLogin: result.memberLogin,

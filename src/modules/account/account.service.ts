@@ -127,9 +127,9 @@ export class AccountService {
       });
     }
 
-    if (dto.deviceId) {
+    if (dto.cloudMessagingId) {
       await prisma.device.updateMany({
-        where: { memberId, deviceId: dto.deviceId },
+        where: { memberId, fcmToken: dto.cloudMessagingId },
         data: { fcmToken: null },
       });
     } else {

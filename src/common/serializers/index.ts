@@ -328,6 +328,69 @@ function normalizeSlidesData(raw: unknown): unknown[] {
   return Array.isArray(raw) ? raw : [];
 }
 
+interface RawSlide {
+  id?: unknown;
+  type?: unknown;
+  name?: unknown;
+  duration?: unknown;
+  data?: {
+    title?: unknown;
+    description?: unknown;
+    audio?: Record<string, unknown>;
+    video?: Record<string, unknown>;
+  };
+}
+
+// Flatten `lessonsData[].courseLessonData[].slidesData[]` into a flat list of
+// `{id, type, title, description, audio?, video?}` items (FE ProductDataContent).
+// Mirrors legacy mobile transform — only AudioTemplate / VideoTemplate slides emitted.
+function buildDataContent(
+  lessonsData: { courseLessonData: { slidesData: unknown[] }[] }[],
+): Record<string, unknown>[] {
+  const out: Record<string, unknown>[] = [];
+  for (const section of lessonsData) {
+    for (const lesson of section.courseLessonData) {
+      for (const slide of lesson.slidesData as RawSlide[]) {
+        const type = typeof slide.type === 'string' ? slide.type : '';
+        if (type !== 'AudioTemplate' && type !== 'VideoTemplate') continue;
+        const d = slide.data ?? {};
+        const item: Record<string, unknown> = {
+          id: slide.id ?? null,
+          type,
+          title: (d.title ?? slide.name ?? null) as unknown,
+          description: d.description ?? null,
+        };
+        if (type === 'AudioTemplate' && d.audio) {
+          const a = d.audio;
+          item.audio = {
+            id: a.id ?? null,
+            title: a.title ?? null,
+            description: a.description ?? null,
+            duration: a.duration ?? slide.duration ?? 0,
+            videoLibraryId: a.videoLibraryId ?? null,
+            guid: a.guid ?? null,
+            audioName: a.audioName ?? null,
+            availableRes: a.availableRes ?? null,
+          };
+        }
+        if (type === 'VideoTemplate' && d.video) {
+          const v = d.video;
+          item.video = {
+            id: v.id ?? null,
+            title: v.title ?? null,
+            description: v.description ?? null,
+            platform: v.platform ?? null,
+            url: v.url ?? null,
+            duration: v.duration ?? slide.duration ?? 0,
+          };
+        }
+        out.push(item);
+      }
+    }
+  }
+  return out;
+}
+
 function legacyDescriptionExcerpt(html: string | null, plain: string | null): string {
   const raw = (plain ?? (html ?? '').replace(/<[^>]+>/g, '')).trim();
   return raw.slice(0, 50);
@@ -440,6 +503,7 @@ export function serializeCourseDetailLegacy(
     price: p.price,
     status: legacyStatus(p.status),
     lessonsData,
+    dataContent: buildDataContent(lessonsData),
     ratingSummary: {
       totalReview: reviewAggregate.total,
       avgReviewStart: roundOneDecimal(reviewAggregate.avg),

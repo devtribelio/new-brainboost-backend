@@ -80,9 +80,12 @@ describe('legacy-aligned API smoke', () => {
     expect(Array.isArray(r.body.data)).toBe(true);
   });
 
-  it('GET /api/member/product/list', async () => {
+  it('GET /api/member/product/list (legacy http envelope)', async () => {
     const r = await request(app).get('/api/member/product/list?perPage=5');
     expect(r.status).toBe(200);
-    expect(r.body.data.items.length).toBeLessThanOrEqual(5);
+    // FE legacy envelope: {meta:{total,page,lastPage}, data:[...]}. No errCode wrap.
+    expect(r.body.meta).toBeDefined();
+    expect(Array.isArray(r.body.data)).toBe(true);
+    expect(r.body.data.length).toBeLessThanOrEqual(5);
   });
 });

@@ -12,10 +12,10 @@ export class LogoutDto {
   refresh_token?: string;
 
   @ApiPropertyOptional({
-    example: 'A1B2C3D4-1234-5678-9ABC-DEF012345678',
-    description: 'Device id to clear FCM token for',
+    example: 'fcm-token-value-here',
+    description: 'FCM (cloud messaging) token to deregister for this member',
   })
   @IsOptional()
   @IsString()
-  deviceId?: string;
+  cloudMessagingId?: string;
 }

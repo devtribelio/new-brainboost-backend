@@ -54,7 +54,7 @@ describe('auth (contract)', () => {
       expect(res.body.errMessage).toContain('client_id');
     });
 
-    it('anon access_token rejected by member endpoints', async () => {
+    it('anon access_token rejected by member-protected endpoints', async () => {
       const app = buildApp();
       const tok = await request(app).post('/api/member/oauth/token').send({
         grant_type: 'client_credentials',
@@ -62,18 +62,22 @@ describe('auth (contract)', () => {
         client_secret: 'test-secret',
       });
       const access = tok.body.access_token as string;
+      // /member/info is pre-login splash — anon allowed (returns base only).
+      // Use a strictly member-protected endpoint to verify anon rejection.
       const res = await request(app)
-        .get('/api/member/info')
+        .get('/api/member/account/profile/info')
         .set('Authorization', `Bearer ${access}`);
       expect(res.status).toBe(401);
     });
   });
 
-  it('GET /api/member/info without auth → 401', async () => {
+  it('GET /api/member/info without auth → 200 with base info (pre-login splash)', async () => {
     const app = buildApp();
     const res = await request(app).get('/api/member/info');
-    expect(res.status).toBe(401);
-    expect(res.body.errCode).toBe(401);
+    expect(res.status).toBe(200);
+    expect(res.body.errCode).toBe(0);
+    expect(res.body.data.appName).toBeTruthy();
+    expect(Array.isArray(res.body.data.community)).toBe(true);
   });
 
   it('GET /api/member/notification/list (stubbed) without auth → 401', async () => {
