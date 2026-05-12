@@ -2,16 +2,20 @@ import { ApiProperty, ApiPropertyOptional } from '@/common/openapi/decorators';
 
 export class ReportCategoryDto {
   @ApiProperty({ example: 1, description: 'Legacy id or backend uuid' })
-  reportCategoryId!: number | string;
+  memberReportMemberCategoryId!: number | string;
 
   @ApiProperty({ format: 'uuid', example: 'report-category-uuid-1' })
   id!: string;
 
   @ApiProperty({ example: 'Spam' })
-  name!: string;
+  category!: string;
 
-  @ApiProperty({ type: 'boolean', example: true })
-  isActive!: boolean;
+  @ApiPropertyOptional({
+    nullable: true,
+    example: null,
+    description: 'Currently always null — no description column on report_categories yet.',
+  })
+  description!: string | null;
 }
 
 /**

@@ -94,9 +94,10 @@ One PR per module.
 
 ### Report
 
-- [ ] **T2.5** Rename report/category response fields (#28)
-  - Current: `{reportCategoryId, name, isActive}`. Need: `{memberReportMemberCategoryId, category, description}`.
-  - File: `src/modules/report/report.controller.ts` serializer.
+- [x] **T2.5** Rename report/category response fields (#28) — done 2026-05-12
+  - Emit `{memberReportMemberCategoryId, id, category, description}`. `description` always null (no column yet on report_categories — follow-up migration if FE needs real value).
+  - Body input parsing on `/report/memberReport` + `/post/report` still accepts both `categoryId` and `reportCategoryId` keys (unchanged).
+  - Files: `src/modules/report/report.controller.ts`, `dto/report.dto.ts`.
 
 ### Product
 

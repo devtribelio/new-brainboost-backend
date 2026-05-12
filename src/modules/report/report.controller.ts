@@ -19,13 +19,15 @@ export class ReportController {
   @ApiResponse({ status: 200, type: () => ReportCategoryDto, isArray: true })
   categories = async (_req: Request, res: Response) => {
     const rows = await this.reportService.listCategories({ isActive: true });
+    // FE ReportCategoryModel: {memberReportMemberCategoryId, category, description}.
+    // `description` not yet a column on report_categories — emit null.
     return ok(
       res,
       rows.map((c) => ({
-        reportCategoryId: c.legacyId ?? c.id,
+        memberReportMemberCategoryId: c.legacyId ?? c.id,
         id: c.id,
-        name: c.name,
-        isActive: c.isActive,
+        category: c.name,
+        description: null,
       })),
     );
   };
