@@ -326,7 +326,7 @@ Each task should:
 
 ## Session Log — 2026-05-12
 
-19 commits this session. tsc clean + `pnpm test` 55/55 (pre-existing empty-DB country test cleared once envelope shape change in T2.10 made the assertion logical).
+24 commits this session. tsc clean + `pnpm test` 55/55 maintained throughout. **Phase 4 closed — all DTO parity audits done.**
 
 ### Commits
 
@@ -353,17 +353,23 @@ Each task should:
 | `ea46e71` | docs | session log v2 |
 | `1250ad5` | T1.1 + T1.2 + T1.3 | phone-register / OTP trio — closes last 🔴 |
 | `82b0645` | docs | legacy-providers.md — external integration follow-up tracker |
+| `c112f3d` | docs | session log v3 + flip stale P-promoted checkboxes |
+| `fd91db1` | T4.2 | CommentDto parity — 14 missing FE fields + timeAgo/dateAgo/mentions helpers |
+| `c63d3ed` | T4.1 | PostDto parity — all 32 FE PostModel fields, nested DTOs (PostContentDataDto, PostTopicDto, PostCreatorDto, PostVideoDto) |
+| `9478899` | T4.3 | ProfileDto canonicalization — drops imageUrl/avatarUrl/biography/etc. aliases |
+| `ba180d2` | T4.4 | ProductDto canonicalization — drops 13 fallback aliases |
 
 ### Tracker state after session
 
 | Status | Count | Items |
 |---|---|---|
-| ✅ Shipped | 29 | G1, P1-P5, T1.1, T1.2, T1.3, T2.1-T2.12, T3.1-T3.11, T4.5, T5.4 |
-| 🔴 Missing | 0 | — all phone-register/OTP shipped this session |
-| ❌ Wrong | 0 | — all ❌ items closed this session |
-| ⚠️ Partial | 4 | T4.1, T4.2, T4.3, T4.4 (DTO parity audits — FE-gated for canonicalization) |
+| ✅ Shipped | 33 | G1, P1-P5, T1.1-T1.3, T2.1-T2.12, T3.1-T3.11, T4.1-T4.5, T5.4 |
+| 🔴 Missing | 0 | — all phone-register/OTP shipped |
+| ❌ Wrong | 0 | — all closed |
+| ⚠️ Partial | 0 | — Phase 4 DTO audits all done |
 | Gated | 3 | T5.1, T5.2, T5.3 (PM/FE decisions) |
-| T1.x follow-ups | 2 | Qontak dispatcher + Member.email relax-to-nullable (logged in `docs/legacy-providers.md`) |
+| T1.x follow-ups | 2 | Qontak dispatcher + Member.email relax-to-nullable |
+| Legacy provider gaps | 8 | Per `docs/legacy-providers.md` — FCM outbound, BunnyCDN, S3, IAP, disbursement, queue, search, Qontak |
 
 ### Required ops action
 
@@ -410,16 +416,19 @@ Two migrations created this session — apply on dev/staging/prod via `pnpm pris
 - **T1.5** TTL tighten (10 → 2 min) + resend cooldown + 5/day rate limit for parity with legacy Qontak constraints.
 - **T1.6** Relax `Member.email` to nullable (migration) — drop synthetic placeholder.
 
-**Phase 4 DTO audits (FE-coordination required for fallback choices):**
-- T4.1 PostDto vs PostModel (32 fields)
-- T4.2 CommentDto parity
-- T4.3 ProfileDto canonicalization
-- T4.4 ProductDto canonicalization
-
 **Phase 5 cleanup gated on PM/FE input:**
 - T5.1 (drop 4 unused community CRUD endpoints)
 - T5.2 (formalize /network/join body)
 - T5.3 (naming typo decisions)
+
+**Legacy provider integrations** (full feature work, per `docs/legacy-providers.md`):
+- FCM outbound `send()` — token enrollment wired, server-side push missing
+- BunnyCDN admin uploads
+- S3 / TBAWS asset migration
+- IAP receipt verification (Apple + Google)
+- Disbursement (Xendit / Midtrans / Flip)
+- Task queue (BullMQ / pg-boss)
+- Search (pg_trgm / Meilisearch)
 
 ### Related docs
 
