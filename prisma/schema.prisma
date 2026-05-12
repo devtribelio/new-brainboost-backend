@@ -577,9 +577,10 @@ model NetworkMember {
 }
 
 model NetworkTag {
-  id        String @id @default(uuid(7)) @db.Uuid
-  networkId String @db.Uuid
+  id        String   @id @default(uuid(7)) @db.Uuid
+  networkId String   @db.Uuid
   name      String
+  createdAt DateTime @default(now())
 
   network Network @relation(fields: [networkId], references: [id], onDelete: Cascade)
 

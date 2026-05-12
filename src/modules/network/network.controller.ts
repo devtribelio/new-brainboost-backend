@@ -3,7 +3,7 @@ import { NetworkService } from './network.service';
 import { ok } from '@/common/utils/response.util';
 import { BadRequestException, UnauthorizedException } from '@/common/exceptions';
 import { buildLegacyPage, parsePagination } from '@/common/utils/pagination.util';
-import { serializeMember } from '@/common/serializers';
+import { serializeNetworkMemberLegacy } from '@/common/serializers';
 import type { AuthenticatedRequest } from '@/common/interfaces/authenticated-request';
 import {
   ApiBearerAuth,
@@ -68,11 +68,11 @@ export class NetworkController {
       '';
     const p = parsePagination(req.query as Record<string, unknown>);
     const { rows, total } = await this.networkService.listMembers(p, networkInput);
-    const data = rows.map(({ networkMember, member }) => ({
-      networkMemberId: networkMember.legacyId ?? networkMember.id,
-      joinedAt: networkMember.joinedAt,
-      member: serializeMember(member),
-    }));
+    // FE NetworkMemberModel is a flat shape. Mix `member` + `member.profile`
+    // + `networkMember.joinedAt` into a single row.
+    const data = rows.map(({ networkMember, member }) =>
+      serializeNetworkMemberLegacy(member, networkMember.joinedAt),
+    );
     return ok(res, buildLegacyPage(data, total, p));
   };
 
@@ -111,14 +111,14 @@ export class NetworkController {
         ? req.query.keyword
         : undefined;
     const p = parsePagination(req.query as Record<string, unknown>);
-    const { rows, total } = await this.networkService.listTags(p, networkInput, keyword);
-    return ok(
-      res,
-      buildLegacyPage(
-        rows.map((t) => ({ id: t.id, networkId: t.networkId, name: t.name })),
-        total,
-        p,
-      ),
-    );
+    const { rows, total, countByTag } = await this.networkService.listTags(p, networkInput, keyword);
+    // FE TagModel: `{tag, count, created}`. count = posts referencing
+    // `#<tag>` in content (naive — no PostTag relation, see T3.5 note).
+    const data = rows.map((t) => ({
+      tag: t.name,
+      count: countByTag.get(t.id) ?? 0,
+      created: t.createdAt.toISOString(),
+    }));
+    return ok(res, buildLegacyPage(data, total, p));
   };
 }

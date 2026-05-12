@@ -52,7 +52,23 @@ export class NetworkService {
             firstName: true,
             lastName: true,
             avatarUrl: true,
+            coverUrl: true,
+            bio: true,
+            phone: true,
+            gender: true,
+            birthdate: true,
+            isVerified: true,
+            isPhoneVerified: true,
+            createdAt: true,
             code: true,
+            profile: {
+              select: {
+                address: true,
+                postalCode: true,
+                province: { select: { legacyId: true, name: true } },
+                city: { select: { legacyId: true, name: true } },
+              },
+            },
           },
         })
       : [];
@@ -74,7 +90,7 @@ export class NetworkService {
     const where: Prisma.NetworkTagWhereInput = {};
     if (networkInput) {
       const networkId = await this.resolveNetworkId(networkInput);
-      if (!networkId) return { rows: [], total: 0 };
+      if (!networkId) return { rows: [], total: 0, countByTag: new Map<string, number>() };
       where.networkId = networkId;
     }
     if (keyword) {
@@ -89,7 +105,22 @@ export class NetworkService {
       }),
       prisma.networkTag.count({ where }),
     ]);
-    return { rows, total };
+    // Per-tag post count via naive `#<tag>` content match. No PostTag
+    // relation exists in schema — would need migration to optimize.
+    // O(rows.length) parallel queries; acceptable for default perPage <= 50.
+    const counts = await Promise.all(
+      rows.map((t) =>
+        prisma.post.count({
+          where: {
+            isDeleted: false,
+            publishStatus: 'PUBLISHED',
+            content: { contains: `#${t.name}`, mode: 'insensitive' },
+          },
+        }),
+      ),
+    );
+    const countByTag = new Map(rows.map((t, i) => [t.id, counts[i]]));
+    return { rows, total, countByTag };
   }
 
   async join(memberId: string, networkInput: string) {

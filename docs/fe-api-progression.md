@@ -85,14 +85,19 @@ One PR per module.
 
 ### Network
 
-- [ ] **T2.3** Flatten network/member response (#26)
-  - Current: `[{networkMember, member: {id, legacyId, email, fullName, ...}}]`.
-  - Need flat: `[{memberId, name, provinceId, provinceName, cityId, cityName, email, phone, gender, isEmailVerified, isPhoneVerified, postalCode, imageUrl, coverUrl, biography, birthdate, address, dateRegister}]`.
-  - File: `src/modules/network/network.service.ts:60-65` enrich step + new serializer. Profile join needed (province/city).
+- [x] **T2.3** Flatten network/member response (#26) — done 2026-05-12
+  - Response flat: `{memberId, name, provinceId, provinceName, cityId, cityName, email, phone, gender, isEmailVerified (0/1), isPhoneVerified (0/1), postalCode, imageUrl, coverUrl, biography, birthdate, address, dateRegister}`.
+  - Service includes member.profile with province + city relations (each via legacyId+name).
+  - New `serializeNetworkMemberLegacy(member, joinedAt)` helper in `src/common/serializers/index.ts`.
+  - `NetworkMemberEntryDto` rewritten flat.
+  - Files: `src/modules/network/network.service.ts`, `network.controller.ts`, `dto/network.dto.ts`, `src/common/serializers/index.ts`.
 
-- [ ] **T2.4** Fix network/tag shape (#27)
-  - Current: `{id, networkId, name}`. Need: `{tag, count, created}`.
-  - File: `src/modules/network/network.service.ts:listTags` + DTO. `count` = posts-in-tag aggregate; `created` = tag firstSeenAt.
+- [x] **T2.4** Network/tag shape `{tag, count, created}` (#27) — done 2026-05-12
+  - **Schema change**: `NetworkTag.createdAt DateTime @default(now())` added. Migration `20260512200000_network_tag_created_at` backfills existing rows to current timestamp.
+  - Service: per-tag post count via naive `content contains '#<tag>'` (no PostTag relation; symmetric with T3.5 hashtag-match). O(page-size) parallel counts, acceptable for default perPage <= 50. Returned via `countByTag` Map.
+  - Response items: `{tag: name, count, created: createdAt.toISOString()}`.
+  - NetworkTagDto rewritten.
+  - Files: `prisma/schema.prisma`, `prisma/migrations/20260512200000_*/migration.sql`, `src/modules/network/network.service.ts`, `network.controller.ts`, `dto/network.dto.ts`.
 
 ### Report
 
