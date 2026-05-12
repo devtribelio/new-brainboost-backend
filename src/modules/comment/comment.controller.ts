@@ -68,7 +68,13 @@ export class CommentController {
     if (!req.user) throw new UnauthorizedException();
     const commentId = (req.body?.commentId as string) ?? '';
     if (!commentId) throw new BadRequestException('commentId required');
-    return ok(res, await this.commentService.toggleLike(req.user.id, commentId));
+    const result = await this.commentService.toggleLike(req.user.id, commentId);
+    // FE LikeModel: {status, commentId, countLike}. commentId = comment's legacyId int.
+    return ok(res, {
+      status: result.status,
+      commentId: result.commentLegacyId,
+      countLike: result.countLike,
+    });
   };
 
   @ApiBearerAuth()

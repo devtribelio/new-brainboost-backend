@@ -78,8 +78,20 @@ export class CommentPageDto {
 }
 
 export class CommentLikeToggleResultDto {
-  @ApiProperty({ type: 'boolean', example: true })
-  liked!: boolean;
+  @ApiProperty({
+    enum: ['like', 'dislike'],
+    example: 'like',
+    description: 'New like state after toggle',
+  })
+  status!: 'like' | 'dislike';
+
+  @ApiProperty({
+    type: 'integer',
+    nullable: true,
+    example: 555,
+    description: "Comment's legacyId (int). Null when comment has no legacyId.",
+  })
+  commentId!: number | null;
 
   @ApiProperty({ type: 'integer', example: 6 })
   countLike!: number;

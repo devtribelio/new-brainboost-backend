@@ -156,8 +156,12 @@ Single sweep PR — minimal logic change, mostly field renames.
 - [ ] **T3.5** Post list: surface `tag`, `sortBy`, `filter` query params (#12)
   - File: `src/modules/post/post.controller.ts:list`, service.
 
-- [ ] **T3.6** Like response shape: `liked` (bool) → `{status: string, commentId: int|null, countLike: int}` (#14, #20)
-  - Files: `src/modules/post/post.controller.ts:like`, `src/modules/comment/comment.controller.ts:like`.
+- [x] **T3.6** Like response shape (#14, #20) — done 2026-05-12
+  - Both `/post/like` + `/comment/like` emit `{status: 'like'|'dislike', commentId: int|null, countLike: int}`.
+  - `commentId` is `null` for post-like; `comment.legacyId` for comment-like.
+  - Services return enum status + legacyId; controllers emit FE wire shape.
+  - DTOs `PostLikeToggleResultDto` + `CommentLikeToggleResultDto` updated.
+  - Files: `src/modules/post/post.{service,controller}.ts`, `src/modules/comment/comment.{service,controller}.ts`, both `dto/*.dto.ts`.
 
 - [ ] **T3.7** Upload response wrap under `image` key + status bool (#34)
   - Current: `[UploadedItem]` with `status: 'success'` string. Need: `{image: [...] }` with `status: true|false`.

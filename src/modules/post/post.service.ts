@@ -113,7 +113,10 @@ export class PostService {
     return new Set(rows.map((r) => r.postId));
   }
 
-  async toggleLike(memberId: string, postId: string): Promise<{ liked: boolean; countLike: number }> {
+  async toggleLike(
+    memberId: string,
+    postId: string,
+  ): Promise<{ status: 'like' | 'dislike'; countLike: number }> {
     const post = await this.resolveByAnyId(postId);
     if (!post) throw new NotFoundException('Post not found');
 
@@ -128,7 +131,7 @@ export class PostService {
           data: { countLike: { decrement: 1 } },
         }),
       ]);
-      return { liked: false, countLike: Math.max(0, post.countLike - 1) };
+      return { status: 'dislike', countLike: Math.max(0, post.countLike - 1) };
     }
 
     await prisma.$transaction([
@@ -138,7 +141,7 @@ export class PostService {
         data: { countLike: { increment: 1 } },
       }),
     ]);
-    return { liked: true, countLike: post.countLike + 1 };
+    return { status: 'like', countLike: post.countLike + 1 };
   }
 
   async create(memberId: string, dto: PostCreateDto) {

@@ -99,8 +99,20 @@ export class PostPageDto {
 }
 
 export class PostLikeToggleResultDto {
-  @ApiProperty({ type: 'boolean', example: true, description: 'New like state after toggle' })
-  liked!: boolean;
+  @ApiProperty({
+    enum: ['like', 'dislike'],
+    example: 'like',
+    description: 'New like state after toggle',
+  })
+  status!: 'like' | 'dislike';
+
+  @ApiProperty({
+    type: 'integer',
+    nullable: true,
+    example: null,
+    description: 'Always null for post-like (FE LikeModel parity).',
+  })
+  commentId!: number | null;
 
   @ApiProperty({ type: 'integer', example: 43 })
   countLike!: number;

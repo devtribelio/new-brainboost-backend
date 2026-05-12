@@ -93,7 +93,8 @@ export class PostController {
     const postId = (req.body?.postId as string) ?? '';
     if (!postId) throw new BadRequestException('postId required');
     const result = await this.postService.toggleLike(req.user.id, postId);
-    return ok(res, result);
+    // FE LikeModel: {status, commentId, countLike}. commentId is null for post-like.
+    return ok(res, { status: result.status, commentId: null, countLike: result.countLike });
   };
 
   @ApiBearerAuth()
