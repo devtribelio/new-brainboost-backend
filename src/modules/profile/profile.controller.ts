@@ -5,12 +5,7 @@ import { ok } from '@/common/utils/response.util';
 import { UnauthorizedException } from '@/common/exceptions';
 import { serializeMemberFull } from '@/common/serializers';
 import type { AuthenticatedRequest } from '@/common/interfaces/authenticated-request';
-import {
-  ApiBearerAuth,
-  ApiOperation,
-  ApiResponse,
-  ApiTags,
-} from '@/common/openapi/decorators';
+import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@/common/openapi/decorators';
 import { MemberFullDto } from '@/common/openapi/member.dto';
 import { MemberProfileDto } from './dto/profile.dto';
 
@@ -20,7 +15,13 @@ export class ProfileController {
   constructor(private readonly profileService: ProfileService) {}
 
   // Builds the FE ProfileModel-compat envelope shared by /profile/info and
-  // /profile/location. Loads inviter row when an affiliate connection exists.
+  // /profile/location. Explicit field set — drops legacy aliases (imageUrl,
+  // avatarUrl, biography, isVerified, dateRegister, etc.) so FE can retire
+  // its `??` fallback chains. Canonical names per audit §3.1:
+  // - image (drop imageUrl / memberImageUrl)
+  // - bio (drop biography)
+  // - phoneNumber / phoneCode (string, from Member.phone / Member.phoneCode)
+  // - country/province/city/districtId (string IDs per audit §3.2)
   private async serializeProfileLegacy(memberId: string) {
     const member = await this.profileService.getInfo(memberId);
 
@@ -42,11 +43,14 @@ export class ProfileController {
 
     const p = member.profile;
     return {
-      ...serializeMemberFull(member),
+      // FE ProfileModel — canonical fields only
+      memberId: member.legacyId ?? member.id,
       image: member.avatarUrl,
+      name: member.fullName,
       phoneNumber: member.phone,
       phoneCode: member.phoneCode,
-      address: p?.address ?? null,
+      firstName: member.firstName,
+      lastName: member.lastName,
       postalCode: p?.postalCode ?? null,
       countryId: p?.country?.legacyId?.toString() ?? p?.countryId ?? null,
       countryName: p?.country?.name ?? null,
@@ -56,13 +60,14 @@ export class ProfileController {
       cityName: p?.city?.name ?? null,
       districtId: p?.district?.legacyId?.toString() ?? p?.districtId ?? null,
       districtName: p?.district?.name ?? null,
+      bio: member.bio,
+      address: p?.address ?? null,
       isPreRegister: 0,
       loginCount: 0,
       isDeleted: member.scheduledDeletionAt ? 1 : 0,
       affiliatorCode: member.affiliateCode ?? null,
       haveAffiliateConnect: member.inviterId !== null,
       affiliateConnectedData,
-      profile: member.profile,
     };
   }
 

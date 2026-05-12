@@ -249,8 +249,17 @@ PostDto + CommentDto + ProfileDto have 20-30 fields each with fallback chains. V
   - Backend extras (`id`, `parentId`, `images`, `isDeleted`, `createdAt`, `updatedAt`, `member`) retained — FE ignores unknown keys.
   - Files: `src/common/serializers/index.ts`, `comment.service.ts:commentInclude`, `dto/comment.dto.ts`.
 
-- [ ] **T4.3** ProfileDto fallback canonicalization (per audit §3.1)
-  - Pick ONE canonical name per field; drop fallback once FE stable. Coordinate with FE team — gated on FE confirm.
+- [x] **T4.3** ProfileDto fallback canonicalization (per audit §3.1) — done 2026-05-12
+  - `serializeProfileLegacy` rewritten to emit FE ProfileModel canonical names only:
+    - `image` (drop `imageUrl`, `avatarUrl`, `memberImageUrl`)
+    - `bio` (drop `biography`)
+    - `phoneNumber` / `phoneCode` (string)
+    - `country/province/city/districtId` (string per audit §3.2)
+  - Dropped extras not in FE ProfileModel: `id`, `code`, `email`, `coverUrl`, `gender`, `birthdate`, `isActive`, `isVerified`, `isEmailVerified`, `isPhoneVerified`, `dateRegister`, `createdAt`, raw `profile` nested.
+  - `serializeMemberFull` left untouched — still used by `/profile/update` and network/member elsewhere (different FE models read aliases there).
+  - MemberProfileDto schema rewritten — declares only canonical fields.
+  - FE can retire `??` fallback chains for ProfileModel.image and ProfileModel.bio once tested against this response.
+  - Files: `src/modules/profile/profile.controller.ts:serializeProfileLegacy`, `dto/profile.dto.ts:MemberProfileDto`.
 
 - [ ] **T4.4** ProductDto / ProductDetailModel fallback canonicalization
   - Same as T4.3 but for product fields. 14 fields with `??` chains.
