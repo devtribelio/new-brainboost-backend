@@ -7,7 +7,7 @@ import {
   ApiResponse,
   ApiTags,
 } from '@/common/openapi/decorators';
-import { UploadedFileDto } from './dto/upload.dto';
+import { UploadedFilesWrapperDto } from './dto/upload.dto';
 
 @ApiTags('Upload')
 @ApiBearerAuth()
@@ -18,10 +18,11 @@ export class UploadController {
     summary: 'Upload one or more files to a temporary bucket',
     description: 'Multipart form, field name `image`. Returns transient ids consumed by other endpoints.',
   })
-  @ApiResponse({ status: 200, type: () => UploadedFileDto, isArray: true })
+  @ApiResponse({ status: 200, type: () => UploadedFilesWrapperDto })
   temporary = async (req: Request, res: Response) => {
     const files = (req.files as Express.Multer.File[]) ?? [];
     const result = this.uploadService.uploadTemporary(files);
-    return ok(res, result);
+    // FE FileUploadModel shape: `{image: List<Image>}` — wrap the array.
+    return ok(res, { image: result });
   };
 }

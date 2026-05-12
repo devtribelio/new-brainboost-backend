@@ -8,6 +8,28 @@ interface PostListQuery {
   topicId?: string;
   authorId?: string;
   viewerId?: string;
+  tag?: string;
+  sortBy?: string;
+  filter?: string;
+}
+
+type PostOrderBy =
+  | { createdAt: 'asc' | 'desc' }
+  | { engagedAt: 'desc' }
+  | Array<{ countLike: 'desc' } | { createdAt: 'desc' }>;
+
+function orderByFor(sortBy: string | undefined, filter: string | undefined): PostOrderBy {
+  // Filter takes precedence — `recent-engagement` overrides sortBy.
+  if (filter === 'recent-engagement') return { engagedAt: 'desc' };
+  switch (sortBy) {
+    case 'oldest':
+      return { createdAt: 'asc' };
+    case 'popular':
+      return [{ countLike: 'desc' }, { createdAt: 'desc' }];
+    case 'newest':
+    default:
+      return { createdAt: 'desc' };
+  }
 }
 
 interface PostCreateDto {
@@ -36,9 +58,18 @@ export class PostService {
       isDeleted: false,
       publishStatus: 'PUBLISHED',
     };
-    if (q.keyword) where.content = { contains: q.keyword, mode: 'insensitive' };
+    // `keyword` wins over `tag` when both provided (free-text > hashtag match).
+    if (q.keyword) {
+      where.content = { contains: q.keyword, mode: 'insensitive' };
+    } else if (q.tag) {
+      // No PostTag relation in schema. Naive inline-hashtag match against
+      // post.content. Real tag system would need a join table — out of scope.
+      const tag = q.tag.startsWith('#') ? q.tag : `#${q.tag}`;
+      where.content = { contains: tag, mode: 'insensitive' };
+    }
     if (q.topicId) where.topicId = q.topicId;
     if (q.authorId) where.authorId = q.authorId;
+    if (q.filter === 'pinned') where.isPinned = true;
 
     if (q.networkId) {
       where.networkId = q.networkId;
@@ -59,7 +90,7 @@ export class PostService {
       prisma.post.findMany({
         where,
         include: postInclude,
-        orderBy: { createdAt: 'desc' },
+        orderBy: orderByFor(q.sortBy, q.filter),
         skip: p.skip,
         take: p.take,
       }),

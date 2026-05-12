@@ -164,8 +164,13 @@ Single sweep PR — minimal logic change, mostly field renames.
   - Resolver duplicated from `network.service` rather than cross-module import (services self-contained). TODO: extract to shared util when more modules need it.
   - Files: `src/modules/topic/topic.service.ts`, `topic.controller.ts`.
 
-- [ ] **T3.5** Post list: surface `tag`, `sortBy`, `filter` query params (#12)
-  - File: `src/modules/post/post.controller.ts:list`, service.
+- [x] **T3.5** Post list query params (#12) — done 2026-05-12
+  - Controller parses `tag`, `sortBy`, `filter`. Service applies:
+    - `tag`: naive `#hashtag` contains match against `post.content` (no PostTag relation in schema). `keyword` wins when both set.
+    - `sortBy`: `newest` (default) | `oldest` | `popular`. Unknown → newest.
+    - `filter`: `pinned` → `where.isPinned`, `recent-engagement` → orderBy engagedAt desc. Unknown → no-op.
+  - `@ApiQuery` decorators added for Swagger.
+  - Files: `src/modules/post/post.service.ts`, `post.controller.ts`.
 
 - [x] **T3.6** Like response shape (#14, #20) — done 2026-05-12
   - Both `/post/like` + `/comment/like` emit `{status: 'like'|'dislike', commentId: int|null, countLike: int}`.
@@ -174,9 +179,9 @@ Single sweep PR — minimal logic change, mostly field renames.
   - DTOs `PostLikeToggleResultDto` + `CommentLikeToggleResultDto` updated.
   - Files: `src/modules/post/post.{service,controller}.ts`, `src/modules/comment/comment.{service,controller}.ts`, both `dto/*.dto.ts`.
 
-- [ ] **T3.7** Upload response wrap under `image` key + status bool (#34)
-  - Current: `[UploadedItem]` with `status: 'success'` string. Need: `{image: [...] }` with `status: true|false`.
-  - File: `src/modules/upload/upload.controller.ts:25`, DTO.
+- [x] **T3.7** Upload response wrap (#34) — done 2026-05-12
+  - Response: `{image: [UploadedFileDto[]]}`. `status` now boolean (`true` on success). New `UploadedFilesWrapperDto` for Swagger.
+  - Files: `src/modules/upload/upload.service.ts`, `upload.controller.ts`, `dto/upload.dto.ts`.
 
 - [x] **T3.8** Auth register accept `name` alias (#38) — done 2026-05-12
   - `RegisterDto.fullName` decorated with `@Transform` (class-transformer): falls back to `obj.name` when `fullName` empty/absent.

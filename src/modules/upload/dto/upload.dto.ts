@@ -10,10 +10,10 @@ export class UploadedFileDto {
   @ApiProperty({ example: 'tmp-abc123.jpg', description: 'Server-assigned transient id' })
   fileId!: string;
 
-  @ApiProperty({ enum: ['success'], example: 'success' })
-  status!: string;
+  @ApiProperty({ type: 'boolean', example: true })
+  status!: boolean;
 
-  @ApiProperty({ enum: ['OK'], example: 'OK' })
+  @ApiProperty({ example: 'OK' })
   message!: string;
 
   @ApiProperty({ example: '/static/temporary/tmp-abc123.jpg' })
@@ -24,4 +24,13 @@ export class UploadedFileDto {
 
   @ApiProperty({ example: 'image/jpeg' })
   type!: string;
+}
+
+export class UploadedFilesWrapperDto {
+  @ApiProperty({
+    type: 'array',
+    itemType: () => UploadedFileDto,
+    description: 'Uploaded files. Wrapper matches FE FileUploadModel shape (image: List<Image>).',
+  })
+  image!: UploadedFileDto[];
 }

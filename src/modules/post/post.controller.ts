@@ -43,6 +43,27 @@ export class PostController {
     example: 'member-uuid-1234',
     description: 'Filter by author',
   })
+  @ApiQuery({
+    name: 'tag',
+    type: 'string',
+    required: false,
+    example: 'react',
+    description: 'Naive #hashtag match against post content. Ignored when `keyword` is set.',
+  })
+  @ApiQuery({
+    name: 'sortBy',
+    type: 'string',
+    required: false,
+    example: 'newest',
+    description: 'newest (default) | oldest | popular. Unknown values fall back to newest.',
+  })
+  @ApiQuery({
+    name: 'filter',
+    type: 'string',
+    required: false,
+    example: 'pinned',
+    description: 'pinned | recent-engagement. Unknown values are no-op.',
+  })
   @ApiResponse({ status: 200, type: () => PostPageDto })
   list = async (req: AuthenticatedRequest, res: Response) => {
     if (!req.user) throw new UnauthorizedException();
@@ -54,6 +75,9 @@ export class PostController {
       topicId: q.topicId,
       authorId: q.memberId,
       viewerId: req.user.id,
+      tag: q.tag,
+      sortBy: q.sortBy,
+      filter: q.filter,
     });
 
     const liked = await this.postService.likedByMember(
