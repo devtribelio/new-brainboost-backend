@@ -1,12 +1,29 @@
 import { ApiProperty, ApiPropertyOptional } from '@/common/openapi/decorators';
 
 /**
- * Wire shape for `serializeProduct()` — legacy-heavy ProductModel fields.
+ * Wire shape for `serializeProduct()` per FE legacy ProductModel (audit §1.5
+ * #55). Canonical names only (audit §3.1) — fallback aliases dropped.
+ *
+ * FE legacy parser uses `??` chains; backend picks the leftmost-of-fallback:
+ * - id ← `networkAccountProductAffiliatorId`
+ * - type ← `productType`
+ * - typeLabel ← `productTypeLabel`
+ * - code ← `productCode`
+ * - slug ← `productSlug`
+ * - name ← `productName`
+ * - price ← `productPrice`
+ * - thumbnail ← `productImageUrl`
+ * - lastUpdate ← `lastUpdated`
+ * - shareUrl ← `productShareDetailUrl`
+ * - commission ← `commisionFixAmount` (sic — legacy typo preserved)
+ *
+ * Once FE confirms it reads only these names, drop the `??` fallbacks
+ * client-side.
  */
 export class ProductDto {
   @ApiProperty({
     example: 456,
-    description: 'Legacy primary key — mobile reads this first',
+    description: 'FE id (`?? productId`) — canonical key for ProductModel.id',
   })
   networkAccountProductAffiliatorId!: number | string;
 
@@ -50,7 +67,11 @@ export class ProductDto {
   @ApiProperty({ example: 'https://brainboost.com/p/react-fundamentals' })
   productShareDetailUrl!: string;
 
-  @ApiPropertyOptional({ nullable: true, example: null })
+  @ApiPropertyOptional({
+    nullable: true,
+    example: null,
+    description: 'FE `commission` (typo preserved per legacy wire).',
+  })
   commisionFixAmount?: number | null;
 
   @ApiProperty({ example: 'https://brainboost.com/p/react-fundamentals' })
@@ -61,53 +82,6 @@ export class ProductDto {
 
   @ApiProperty({ type: 'number', example: 4.8 })
   productRatingAvg!: number;
-
-  // Fallback aliases for mobile fallback chain
-
-  @ApiProperty({ example: 456 })
-  productId!: number | string;
-
-  @ApiProperty({ format: 'uuid', example: 'aaaa1111-bbbb-2222-cccc-3333dddd4444' })
-  id!: string;
-
-  @ApiPropertyOptional({ nullable: true, example: 'course' })
-  type?: string | null;
-
-  @ApiProperty({ example: 'Course' })
-  typeLabel!: string;
-
-  @ApiProperty({ example: 'react-fundamentals' })
-  code!: string;
-
-  @ApiProperty({ example: 'react-fundamentals' })
-  slug!: string;
-
-  @ApiPropertyOptional({ nullable: true, example: 'React Fundamentals' })
-  title?: string | null;
-
-  @ApiPropertyOptional({
-    nullable: true,
-    example: 'Hands-on course covering hooks, state, and testing.',
-  })
-  description?: string | null;
-
-  @ApiPropertyOptional({
-    nullable: true,
-    example: 'https://cdn.brainboost.com/products/react-fundamentals.jpg',
-  })
-  thumbnail?: string | null;
-
-  @ApiPropertyOptional({ nullable: true, type: 'number', example: 299000 })
-  price?: number | null;
-
-  @ApiProperty({ format: 'date-time', example: '2024-03-10T11:20:00.000Z' })
-  updatedAt!: string;
-
-  @ApiProperty({ type: 'boolean', example: true })
-  isActive!: boolean;
-
-  @ApiProperty({ format: 'date-time', example: '2023-06-01T00:00:00.000Z' })
-  createdAt!: string;
 }
 
 export class ProductPageDto {

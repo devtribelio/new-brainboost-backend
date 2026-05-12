@@ -462,8 +462,9 @@ export function serializeProduct(
   const code = p.code ?? String(productId);
   const baseUrl = process.env.PUBLIC_WEB_URL ?? 'https://brainboost.com';
   const productUrl = p.marketingLink ?? `${baseUrl}/p/${slug}`;
+  // FE ProductModel reads leftmost-of-fallback. Backend emits only the
+  // canonical (leftmost) name per audit §3.1 — aliases dropped.
   return {
-    // Primary legacy keys (mobile ProductModel.fromAPIJson reads these first)
     networkAccountProductAffiliatorId: productId,
     productType: p.type,
     productTypeLabel: label,
@@ -478,27 +479,13 @@ export function serializeProduct(
       : [],
     productPrice: p.price,
     productImageUrl: p.thumbnail,
-    lastUpdated: p.updatedAt,
+    lastUpdated: p.updatedAt.toISOString(),
     productPaymentUrl: `${baseUrl}/checkout/${code}`,
     productShareDetailUrl: productUrl,
     commisionFixAmount: null,
     productUrl,
     isPurchased: opts.isPurchased ?? false,
     productRatingAvg: opts.ratingAvg ?? 0,
-    // Fallback aliases for mobile fallback chain
-    productId,
-    id: p.id,
-    type: p.type,
-    typeLabel: label,
-    code,
-    slug,
-    title: p.title,
-    description: p.description,
-    thumbnail: p.thumbnail,
-    price: p.price,
-    updatedAt: p.updatedAt,
-    isActive: p.isActive,
-    createdAt: p.createdAt,
   };
 }
 

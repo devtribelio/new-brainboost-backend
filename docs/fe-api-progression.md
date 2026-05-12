@@ -261,8 +261,13 @@ PostDto + CommentDto + ProfileDto have 20-30 fields each with fallback chains. V
   - FE can retire `??` fallback chains for ProfileModel.image and ProfileModel.bio once tested against this response.
   - Files: `src/modules/profile/profile.controller.ts:serializeProfileLegacy`, `dto/profile.dto.ts:MemberProfileDto`.
 
-- [ ] **T4.4** ProductDto / ProductDetailModel fallback canonicalization
-  - Same as T4.3 but for product fields. 14 fields with `??` chains.
+- [x] **T4.4** ProductDto canonicalization (per audit §3.1) — done 2026-05-12
+  - `serializeProduct` (list): dropped 13 fallback aliases (`id`, `productId`, `type`, `typeLabel`, `code`, `slug`, `title`, `description`, `thumbnail`, `price`, `updatedAt`, `isActive`, `createdAt`). Backend now emits **only** canonical (leftmost) names:
+    - `networkAccountProductAffiliatorId` (id), `productType`, `productTypeLabel`, `productCode`, `productSlug`, `productName`, `productCategory`, `productPrice`, `productImageUrl`, `lastUpdated`, `productPaymentUrl`, `productShareDetailUrl`, `commisionFixAmount` (sic), `productUrl`, `isPurchased`, `productRatingAvg`.
+  - `serializeCourseDetailLegacy` (detail): already canonical from earlier P5 commit. No change.
+  - ProductDto schema rewritten — declares only canonical fields. Doc strings note FE-side fallback retire path.
+  - FE can drop `??` chains on ProductModel once tested.
+  - Files: `src/common/serializers/index.ts:serializeProduct`, `src/modules/product/dto/product.dto.ts:ProductDto`.
 
 - [x] **T4.5** Flatten course detail `dataContent` (#56) — shipped 2026-05-12 as **P5**
   - See P5 entry above. `buildDataContent` helper in `src/common/serializers/index.ts` flattens lessonsData→courseLessonData→slidesData filtering to Audio/Video templates.
