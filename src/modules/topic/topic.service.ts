@@ -4,7 +4,8 @@ import type { PaginationParams } from '@/common/utils/pagination.util';
 
 interface TopicListQuery {
   keyword?: string;
-  networkId?: string;
+  // Network code (8-char alphanumeric), legacyId int, or backend UUID.
+  networkInput?: string;
 }
 
 export interface TopicSubscribeResult {
@@ -22,7 +23,11 @@ export class TopicService {
   async list(p: PaginationParams, q: TopicListQuery) {
     const where: Record<string, unknown> = { isActive: true };
     if (q.keyword) where.name = { contains: q.keyword, mode: 'insensitive' };
-    if (q.networkId) where.networkId = q.networkId;
+    if (q.networkInput) {
+      const networkId = await this.resolveNetworkId(q.networkInput);
+      if (!networkId) return { rows: [], total: 0 };
+      where.networkId = networkId;
+    }
 
     const [rows, total] = await Promise.all([
       prisma.topic.findMany({
@@ -34,6 +39,25 @@ export class TopicService {
       prisma.topic.count({ where }),
     ]);
     return { rows, total };
+  }
+
+  // FE sends `code` (8-char alphanumeric from /info). Backend accepts code,
+  // legacyId int, or backend UUID. Mirrors `network.service::resolveNetworkId`
+  // — duplicated rather than cross-module import to keep services self-contained.
+  private async resolveNetworkId(input: string): Promise<string | null> {
+    if (!input) return null;
+    const byCode = await prisma.network.findUnique({ where: { code: input }, select: { id: true } });
+    if (byCode) return byCode.id;
+    const legacyId = Number.parseInt(input, 10);
+    if (Number.isFinite(legacyId) && input === String(legacyId)) {
+      const byLegacy = await prisma.network.findUnique({
+        where: { legacyId },
+        select: { id: true },
+      });
+      if (byLegacy) return byLegacy.id;
+    }
+    const byId = await prisma.network.findUnique({ where: { id: input }, select: { id: true } });
+    return byId?.id ?? null;
   }
 
   // Topics carry `legacyId Int? @unique` (mobile-compat). FE may send either

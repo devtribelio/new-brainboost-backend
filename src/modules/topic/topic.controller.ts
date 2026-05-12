@@ -22,13 +22,22 @@ export class TopicController {
   @ApiQuery({ name: 'page', type: 'integer', required: false, example: 1 })
   @ApiQuery({ name: 'perPage', type: 'integer', required: false, example: 20 })
   @ApiQuery({ name: 'keyword', type: 'string', required: false, example: 'tech' })
+  @ApiQuery({
+    name: 'code',
+    type: 'string',
+    required: false,
+    example: 'BB-TIMELINE',
+    description: 'Network code (FE primary). Falls back to legacyId int / UUID.',
+  })
   @ApiQuery({ name: 'networkId', type: 'string', required: false, example: 'network-uuid-1234' })
   @ApiResponse({ status: 200, type: () => TopicPageDto })
   list = async (req: Request, res: Response) => {
     const p = parsePagination(req.query as Record<string, unknown>);
     const keyword = (req.query.keyword as string) ?? undefined;
-    const networkId = (req.query.networkId as string) ?? undefined;
-    const { rows, total } = await this.topicService.list(p, { keyword, networkId });
+    // FE sends `code` (network code). `networkId` accepted as alias for backwards compat.
+    const networkInput =
+      (req.query.code as string) ?? (req.query.networkId as string) ?? undefined;
+    const { rows, total } = await this.topicService.list(p, { keyword, networkInput });
     return ok(res, buildLegacyPage(rows.map(serializeTopic), total, p));
   };
 

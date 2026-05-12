@@ -154,8 +154,10 @@ Single sweep PR — minimal logic change, mostly field renames.
   - `memberId`/`topicId` emit `legacyId` int (nullable for new-only rows).
   - Files: `src/modules/topic/topic.service.ts`, `topic.controller.ts`, `dto/topic.dto.ts`.
 
-- [ ] **T3.4** Topic list: accept `code` alias for network code (#10)
-  - Already uses `networkId` UUID. Add `code` query param mapped via `network.service::resolveNetworkId`.
+- [x] **T3.4** Topic list accept `code` alias (#10) — done 2026-05-12
+  - `?code=` query (FE primary) resolves via local `resolveNetworkId` (code → legacyId int → UUID). `?networkId=` kept as alias.
+  - Resolver duplicated from `network.service` rather than cross-module import (services self-contained). TODO: extract to shared util when more modules need it.
+  - Files: `src/modules/topic/topic.service.ts`, `topic.controller.ts`.
 
 - [ ] **T3.5** Post list: surface `tag`, `sortBy`, `filter` query params (#12)
   - File: `src/modules/post/post.controller.ts:list`, service.
