@@ -24,6 +24,7 @@ Audit baseline: 24 ✅ · 17 ⚠️ · 14 ❌ · 6 🔴 + 1 global blocker (G1).
 Ordered set of endpoints FE will smoke-test first: `/info`, `/logout`, product flow. Shipped 2026-05-12.
 
 - [x] **P1** GET `/api/member/info` — authGuard → optionalAuthGuard. Anon/no-token returns base info (appName, appCode, maintenance, community). Member token still attaches profile + system extras. Files: `src/modules/member/member.routes.ts:11`, `member.controller.ts`.
+  - ✅ **Follow-up T3.11 resolved (2026-05-12)**: backfill migration sets legacyId on BB-TIMELINE (999000001) + BB-EDUCATION (999000002). Controller drops UUID fallback, filters out null-legacyId rows. CommunityEntryDto.networkId typed `number`. Run `pnpm prisma:migrate` to apply.
 - [x] **P2** POST `/api/member/account/logout` body — LogoutDto.deviceId → cloudMessagingId. FCM clear now filters by `fcmToken: dto.cloudMessagingId`. Files: `src/modules/account/dto/logout.dto.ts`, `account.service.ts:130-140`.
 - [x] **P3** POST `/api/member/product/course/share` body — parse `code` not `productId`. Lookups product by code, emits real share URL (with affCode if member authed). DTO `ProductShareDto.productId → code`. Files: `src/modules/product/product.controller.ts:67-90`, `dto/product.dto.ts:326`.
 - [x] **P4** GET `/api/member/product/list` envelope + perPage 100. New `okLegacy()` helper in `response.util.ts` emits `{meta:{total,page,lastPage}, data:[]}` (FE legacy http). `parsePagination()` now accepts `{perPage, maxPerPage}` defaults. Files: `src/common/utils/response.util.ts`, `pagination.util.ts`, `product.controller.ts:27-43`.
@@ -68,11 +69,17 @@ One PR per module.
 - [ ] **T2.2** Fix `auth/cloudMessaging` body (#40)
   - Current: `{deviceId, fcmToken}`. FE sends: `{cloudMessagingId}`.
   - File: `src/modules/auth/dto/device.dto.ts` `CloudMessagingDto`, route handler.
+  - Pair with T2.12 below — same null-semantics concern for response.
 
 - [ ] **T2.2-bis** Fix `account/logout` body (#6) — *promoted to P2*
   - Current: `{deviceId?, refresh_token?}`. FE sends: `{cloudMessagingId?}`.
   - Rename LogoutDto field; keep refresh-revoke + FCM-clear-by-token behavior.
   - File: `src/modules/account/dto/logout.dto.ts`, `account.service.ts:117-143`.
+
+- [ ] **T2.12** Emit `cloudMessagingId` in `/auth/devices` + `/auth/cloudMessaging` response (#36, #40)
+  - **Current bug**: `registerDevice` (`auth.service.ts:316`) + `registerCloudMessaging` (`auth.service.ts:329`) return `{deviceId: device.id}` only. FE reads `data.data.cloudMessagingId` (String?) — always `undefined` → client `.toString()` → literal `"null"` stored in SharedPrefs → sent back on logout body → suspected cause of intermittent logout hangs (FE commit `dbc63de` historical note).
+  - **Fix**: emit `cloudMessagingId: device.fcmToken` (or `dto.fcmToken`) in both endpoints' response. Document null semantics — if fcmToken missing, return `null` explicitly (not absent key).
+  - Files: `src/modules/auth/auth.service.ts:301-330`, response DTO.
 
 ### Network
 
@@ -167,6 +174,12 @@ Single sweep PR — minimal logic change, mostly field renames.
   - Default perPage 100 (current 20). FE legacy parser expects `{meta, data}` envelope.
   - File: `src/modules/product/product.controller.ts:list`. Reuse T2.9 helper.
 
+- [x] **T3.11** Canonicalize `/member/info` `community[].networkId` type — *P1 follow-up* (2026-05-12)
+  - New migration `20260512100000_backfill_community_network_legacyid` sets legacyId on BB-TIMELINE (999000001) + BB-EDUCATION (999000002). High reserved ints to avoid legacy collision.
+  - Controller (`member.controller.ts:43-48`) filters out null-legacyId networks, emits `networkId: n.legacyId` (typed `number`).
+  - `CommunityEntryDto.networkId` schema: `number | string` → `number`.
+  - `MemberInfoDto.memberId` drift (line 124) deferred to T4.x DTO sweep — member-extended path only, lower-risk.
+
 ---
 
 ## Phase 4 — Deep DTO field audits
@@ -205,6 +218,12 @@ PostDto + CommentDto + ProfileDto have 20-30 fields each with fallback chains. V
 
 - [ ] **T5.3** Audit naming typos (audit §3.5)
   - Backend already mirrors `commisionSummary`, `commisionFixAmount`. Decide: keep typo for compat (FE depends on key) OR rename + add alias.
+
+- [ ] **T5.4** Historical bug log
+  - Capture context that drove FE coercion layers — informs which strictness can be reclaimed once backend stable:
+    - FE `dbc63de` (2026-05-12): `/member/info` maintenance/networkId string-emit → `TypeError` → unhandled `Future` → splash/login/resume hung indefinitely. FE patched with string→int coercion.
+    - FE `dbc63de` cont.: `/auth/devices` cloudMessagingId nullable → `.toString()` produced `"null"` literal → stored → logout body `{cloudMessagingId: "null"}` suspected cause of logout hangs. T2.12 covers backend side.
+  - File: `docs/legacy-analysis.md` (append under "FE coercion history" section, new).
 
 ---
 

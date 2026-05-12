@@ -121,19 +121,20 @@ App-startup probe: returns maintenance state and the community/network the user 
 
 No params.
 **Response (`BaseResponse<InfoModel>`):**
-| Field | Type |
-|---|---|
-| `appName` | String? |
-| `appCode` | String? |
-| `affiliatePlatformUrl` | String? |
-| `maintenance` | int? (0/1) |
-| `maintenanceMessage` | String? |
-| `maintenanceEndDateTime` | String? |
-| `community` | `List<InfoCommunityModel>?` |
+| Field | Type | Notes |
+|---|---|---|
+| `appName` | String? |  |
+| `appCode` | String? |  |
+| `affiliatePlatformUrl` | String? |  |
+| `maintenance` | int? (0/1) | ⚠ **type drift** — `InfoModel.fromJson` coerces string→int because the new backend has been sending it as a string. Once contract stabilizes the coercion can be removed. |
+| `maintenanceMessage` | String? |  |
+| `maintenanceEndDateTime` | String? |  |
+| `community` | `List<InfoCommunityModel>?` |  |
 
-**`InfoCommunityModel`:** `page`, `networkId` (int), `networkCode`, `name`.
+**`InfoCommunityModel`:** `page`, `networkId` (int — ⚠ same type-drift coercion as `maintenance`, backend returns string-encoded int), `networkCode`, `name`.
 
 > Duplicates legacy `appInfoUrl` (commented-out in `auth_service.dart`).
+> Past failure mode (fixed in `dbc63de`, 2026-05-12): backend returned `maintenance`/`networkId` as strings, which threw an uncaught `TypeError` from `_$InfoModelFromJson`. `TypeError` doesn't extend `Exception` so `on Exception` clauses in the repo layer didn't catch it, and the future never resolved — every `/member/info` call (splash, login, app resume) hung indefinitely. Backend should pick one type and stick to it.
 
 ---
 
@@ -516,7 +517,8 @@ Same contract as Retrofit #1, parsed into `TokenModel`:
 ### 36. POST `/member/auth/devices` — `AuthService.updateDevice()`
 Register device for FCM after login.
 **Body:** `deviceId` (String), `platform` (`ios`/`android`), `fcmToken` (String) — all required.
-**Response:** returns `data.data.cloudMessagingId` (String).
+**Response:** returns `data.data.cloudMessagingId` (String?, **nullable** — backend has been observed returning null on some responses).
+> Past failure mode (fixed in `dbc63de`, 2026-05-12): client previously called `.toString()` on a possibly-null `cloudMessagingId`, producing the literal string `"null"`, which was then stored in SharedPreferences and sent back on logout as `{"cloudMessagingId": "null"}` — suspected cause of intermittent backend logout hangs. Backend should clarify whether `cloudMessagingId` can be null and document the semantics.
 
 ### 37. POST `/member/oauth/refresh` (`refreshTokenUrl`) ⚠ **UNUSED**
 Token refresh endpoint declared but never invoked anywhere.
@@ -742,6 +744,10 @@ Per [project memory](memory/project_field_fallbacks.md), these `??` chains are m
 `ProfileModel` location IDs (`countryId`, `provinceId`, `cityId`, `districtId`, `postalCode`, `phoneNumber`, `phoneCode`) currently use a custom `_stringFromDynamic` converter because the backend returns either type. Pick one — **prefer string** for IDs (avoids JSON-number precision issues, future-proof for non-numeric IDs).
 
 `PaginationModel`'s `total` / `lastPage` / `perPage` / `currentPage` / `timestamp` are typed as `dynamic` for the same reason. Standardize to `int` (or `long` for timestamp if epoch-millis).
+
+`InfoModel.maintenance` and `InfoCommunityModel.networkId` (endpoint #5) — coerced from string→int by `InfoModel.fromJson`. Standardize to `int`.
+
+`AuthService.updateDevice()` response `cloudMessagingId` (endpoint #36) — observed as either string or null. Decide intended semantics; if absence is meaningful, document it.
 
 ### 3.3 Shape drift
 - `ProfileModel.affiliateConnectedData` — backend sometimes returns `[]`, sometimes an object. Pick one: `null` when empty, object when present.

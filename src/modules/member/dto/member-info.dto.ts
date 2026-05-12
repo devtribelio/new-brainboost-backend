@@ -5,11 +5,11 @@ export class CommunityEntryDto {
   page!: string;
 
   @ApiProperty({
-    example: 1,
-    description:
-      'Network legacy integer id when present; falls back to backend UUID for new-only networks.',
+    type: 'integer',
+    example: 999000001,
+    description: 'Network legacyId (int). Rows without legacyId are filtered out of /info.',
   })
-  networkId!: number | string;
+  networkId!: number;
 
   @ApiProperty({ example: 'timeline-main' })
   networkCode!: string;
