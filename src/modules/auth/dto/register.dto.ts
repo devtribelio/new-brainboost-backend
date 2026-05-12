@@ -1,4 +1,5 @@
 import { IsEmail, IsOptional, IsString, Length, Matches, MinLength } from 'class-validator';
+import { Transform } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@/common/openapi/decorators';
 
 export class RegisterDto {
@@ -16,9 +17,17 @@ export class RegisterDto {
   @MinLength(6)
   confirmPassword!: string;
 
-  @ApiProperty({ example: 'Jane Doe', description: '4-100 chars' })
+  @ApiProperty({
+    example: 'Jane Doe',
+    description: '4-100 chars. Accepts `name` as alias (FE legacy register sends `name`).',
+  })
   @IsString()
   @Length(4, 100)
+  @Transform(({ value, obj }) =>
+    typeof value === 'string' && value.length > 0
+      ? value
+      : ((obj as { name?: unknown }).name as string | undefined),
+  )
   fullName!: string;
 
   @ApiPropertyOptional({ example: '+628111111111' })

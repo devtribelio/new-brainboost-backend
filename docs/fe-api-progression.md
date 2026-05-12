@@ -167,8 +167,9 @@ Single sweep PR — minimal logic change, mostly field renames.
   - Current: `[UploadedItem]` with `status: 'success'` string. Need: `{image: [...] }` with `status: true|false`.
   - File: `src/modules/upload/upload.controller.ts:25`, DTO.
 
-- [ ] **T3.8** Auth register accept `name` alias (#38)
-  - FE sends `name`, backend wants `fullName`. Accept both.
+- [x] **T3.8** Auth register accept `name` alias (#38) — done 2026-05-12
+  - `RegisterDto.fullName` decorated with `@Transform` (class-transformer): falls back to `obj.name` when `fullName` empty/absent.
+  - FE legacy register flow `{name, email, password, phoneCode, phone?}` now works without backend change request.
   - File: `src/modules/auth/dto/register.dto.ts`.
 
 - [ ] **T3.9** Profile location response → full ProfileModel (#53)
