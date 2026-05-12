@@ -4,7 +4,11 @@ import type { PaginationParams } from '@/common/utils/pagination.util';
 
 const MAX_CONTENT_CHARS = 5000;
 
-const commentInclude = { author: true } as const;
+const commentInclude = {
+  author: true,
+  parent: { select: { legacyId: true } },
+  post: { select: { legacyId: true } },
+} as const;
 
 function sanitizeContent(input: string): string {
   return input

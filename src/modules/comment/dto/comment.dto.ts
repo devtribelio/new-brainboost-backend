@@ -2,50 +2,104 @@ import { ApiProperty, ApiPropertyOptional } from '@/common/openapi/decorators';
 import { MemberLiteDto } from '@/common/openapi/member.dto';
 
 /**
- * Wire shape for `serializeComment()`.
+ * Wire shape for `serializeComment()` per FE CommentModel (audit §1.7).
+ * Plus backend-native extras (id/parentId/images/isDeleted/createdAt/updatedAt/member)
+ * — FE legacy parser tolerates unknown keys.
  */
 export class CommentDto {
   @ApiProperty({ example: 555 })
   commentId!: number | string;
 
-  @ApiProperty({ format: 'uuid', example: 'comment-uuid-1234' })
-  id!: string;
+  @ApiPropertyOptional({ nullable: true, type: 'integer', example: 540 })
+  replyId?: number | string | null;
 
-  @ApiProperty({ format: 'uuid', example: 'post-uuid-1234' })
-  postId!: string;
+  @ApiProperty({ example: 12 })
+  postId!: number | string;
 
-  @ApiProperty({ example: 123 })
-  memberId!: number | string;
+  @ApiPropertyOptional({ nullable: true, type: 'integer', example: 42 })
+  memberId?: number | string | null;
 
-  @ApiPropertyOptional({ nullable: true, format: 'uuid', example: 'comment-uuid-parent' })
-  replyId?: string | null;
+  @ApiPropertyOptional({ nullable: true, example: 'Jane Doe' })
+  memberName?: string | null;
 
   @ApiPropertyOptional({
     nullable: true,
-    format: 'uuid',
-    example: 'comment-uuid-parent',
-    description: 'Same value as replyId',
+    example: 'https://cdn.brainboost.com/avatars/jane.jpg',
   })
-  parentId?: string | null;
+  memberProfileImage?: string | null;
+
+  @ApiPropertyOptional({ nullable: true, example: null })
+  embed?: string | null;
+
+  @ApiPropertyOptional({ nullable: true, example: null, description: 'Currently always null — embed not modeled in Comment schema.' })
+  embedUrl?: unknown;
+
+  @ApiPropertyOptional({ nullable: true, example: null })
+  embedData?: unknown;
 
   @ApiProperty({ example: 'Great post! Saved for later.' })
   content!: string;
 
   @ApiProperty({
-    type: 'array',
-    itemType: 'string',
-    example: [],
+    example: 'Great post! Saved for later.',
+    description: 'Same as `content` — no truncation infrastructure yet.',
   })
-  images!: string[];
+  fullContent!: string;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    example: 'https://cdn.brainboost.com/temp/abc.jpg',
+    description: 'First entry of `images[]` (FE expects singular dynamic).',
+  })
+  image?: string | null;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    example: null,
+    description: 'Currently always null — Comment schema has no audio column.',
+  })
+  audio?: unknown;
+
+  @ApiProperty({ enum: ['like', 'dislike'], example: 'dislike' })
+  statusLike!: string;
+
+  @ApiProperty({ example: '5m', description: 'Relative time string (just now / Xm / Xh / Xd / Xw / Xmo / Xy)' })
+  timeAgo!: string;
+
+  @ApiProperty({ example: 'Today', description: 'Today | Yesterday | "DD Mon" | "DD Mon YYYY"' })
+  dateAgo!: string;
 
   @ApiProperty({ type: 'integer', example: 5 })
   countLike!: number;
 
-  @ApiProperty({ type: 'integer', example: 1 })
-  countReplies!: number;
+  @ApiProperty({
+    type: 'integer',
+    example: 0,
+    description: 'round(countLike / 1000). Convenience for FE display.',
+  })
+  countLikeInKilo!: number;
 
-  @ApiProperty({ enum: ['like', 'dislike'], example: 'dislike' })
-  statusLike!: string;
+  @ApiProperty({ type: 'integer', example: 1 })
+  replyCount!: number;
+
+  @ApiProperty({
+    type: 'array',
+    itemType: 'string',
+    example: ['john', 'mary'],
+    description: 'Usernames mentioned via @handle in content (parsed regex).',
+  })
+  mentions!: string[];
+
+  // ---- Backend-native extras (FE-tolerant; safe to read for debugging) ----
+
+  @ApiProperty({ format: 'uuid', example: 'comment-uuid-1234' })
+  id!: string;
+
+  @ApiPropertyOptional({ nullable: true, format: 'uuid', example: 'comment-uuid-parent' })
+  parentId?: string | null;
+
+  @ApiProperty({ type: 'array', itemType: 'string', example: [] })
+  images!: string[];
 
   @ApiProperty({ type: 'boolean', example: false })
   isDeleted!: boolean;

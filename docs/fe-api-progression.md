@@ -223,8 +223,15 @@ PostDto + CommentDto + ProfileDto have 20-30 fields each with fallback chains. V
   - Contract: 32 fields incl. `postContentData{plain, linkData, attributeData[{index,type,data,text}], excerpt, excerptIndex}`, `embedData`, `topic`, `creator`, `video`, `havePolling`, `postUrl`, `postOriginalUrl`.
   - Compare to current `serializePost` in `src/modules/post/serializers/*`.
 
-- [ ] **T4.2** CommentDto vs CommentModel parity
-  - Confirm `timeAgo` (not `time_ago`), `countLikeInKilo`, `mentions[]`, `embedData` shape (currently `dynamic` FE-side — formalize).
+- [x] **T4.2** CommentDto vs CommentModel parity — done 2026-05-12
+  - Added 14 missing FE fields: `memberName`, `memberProfileImage`, `embed`, `embedUrl`, `embedData`, `fullContent`, `image`, `audio`, `timeAgo`, `dateAgo`, `countLikeInKilo`, `replyCount`, `mentions[]`, plus `replyId`/`postId`/`memberId` as int (legacyId).
+  - `timeAgo` / `dateAgo` computed via new helpers (`timeAgoString`, `dateAgoString`) — formats: `just now`, `Xm/h/d/w/mo/y`, `Today`/`Yesterday`/`DD Mon`/`DD Mon YYYY`.
+  - `mentions` parsed from content via `@[\w]+` regex.
+  - `image` = first of `imageUrls[]` (FE expects singular dynamic). Multi-image legacy extra kept under `images`.
+  - `embed`/`embedUrl`/`embedData`/`audio` emit null — Comment schema has no columns. Follow-up if FE needs.
+  - commentInclude extended: `parent.legacyId` + `post.legacyId` so `replyId`/`postId` are int.
+  - Backend extras (`id`, `parentId`, `images`, `isDeleted`, `createdAt`, `updatedAt`, `member`) retained — FE ignores unknown keys.
+  - Files: `src/common/serializers/index.ts`, `comment.service.ts:commentInclude`, `dto/comment.dto.ts`.
 
 - [ ] **T4.3** ProfileDto fallback canonicalization (per audit §3.1)
   - Pick ONE canonical name per field; drop fallback once FE stable. Coordinate with FE team — gated on FE confirm.
