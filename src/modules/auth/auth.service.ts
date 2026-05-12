@@ -361,7 +361,7 @@ export class AuthService {
 
   private async issueTokenBundle(memberId: string, email: string): Promise<TokenBundle> {
     const tokenId = randomUUID();
-    const accessToken = signAccessToken({ sub: memberId, email });
+    const accessToken = signAccessToken({ sub: memberId, email, sid: tokenId });
     const refreshToken = signRefreshToken({ sub: memberId, tokenId });
 
     const expiresAt = new Date();

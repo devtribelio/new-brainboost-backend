@@ -5,6 +5,7 @@ export interface AuthenticatedUser {
   id: string;
   email: string;
   scope: TokenScope;
+  sessionId?: string;
 }
 
 export interface AuthenticatedRequest extends Request {

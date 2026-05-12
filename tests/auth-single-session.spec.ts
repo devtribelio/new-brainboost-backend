@@ -81,4 +81,42 @@ describe('auth single-session enforcement', () => {
     });
     expect(live).toBe(1);
   });
+
+  it("device A's access token is rejected after device B logs in", async () => {
+    const a = await loginPassword();
+    const meA1 = await request(app)
+      .get('/api/member/account/profile/info')
+      .set('Authorization', `Bearer ${a.access_token}`);
+    expect(meA1.status).toBe(200);
+
+    const b = await loginPassword();
+    expect(b.access_token).not.toBe(a.access_token);
+
+    const meA2 = await request(app)
+      .get('/api/member/account/profile/info')
+      .set('Authorization', `Bearer ${a.access_token}`);
+    expect(meA2.status).toBe(401);
+
+    const meB = await request(app)
+      .get('/api/member/account/profile/info')
+      .set('Authorization', `Bearer ${b.access_token}`);
+    expect(meB.status).toBe(200);
+  });
+
+  it('refresh-token rotation also kills the prior access token', async () => {
+    const a = await loginPassword();
+    const rotated = await refresh(a.refresh_token);
+    expect(rotated.status).toBe(200);
+    const c = rotated.body as { access_token: string };
+
+    const meA = await request(app)
+      .get('/api/member/account/profile/info')
+      .set('Authorization', `Bearer ${a.access_token}`);
+    expect(meA.status).toBe(401);
+
+    const meC = await request(app)
+      .get('/api/member/account/profile/info')
+      .set('Authorization', `Bearer ${c.access_token}`);
+    expect(meC.status).toBe(200);
+  });
 });

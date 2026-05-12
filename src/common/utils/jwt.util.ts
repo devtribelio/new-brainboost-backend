@@ -8,6 +8,8 @@ export interface AccessTokenPayload {
   sub: string;
   email: string;
   scope?: TokenScope;
+  /** Session id = RefreshToken.id. Bound on member-scope tokens; absent on anon. */
+  sid?: string;
 }
 
 export interface RefreshTokenPayload {

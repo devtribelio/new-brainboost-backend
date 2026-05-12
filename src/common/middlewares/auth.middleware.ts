@@ -2,8 +2,22 @@ import type { Response, NextFunction, RequestHandler } from 'express';
 import { UnauthorizedException } from '@/common/exceptions';
 import { verifyAccessToken } from '@/common/utils/jwt.util';
 import type { AuthenticatedRequest } from '@/common/interfaces/authenticated-request';
+import { prisma } from '@/config/prisma';
 
-export const authGuard: RequestHandler = (req, _res: Response, next: NextFunction) => {
+async function assertSessionActive(sid: string | undefined): Promise<void> {
+  if (!sid) {
+    throw new UnauthorizedException('Session terminated — login again');
+  }
+  const row = await prisma.refreshToken.findUnique({
+    where: { id: sid },
+    select: { revokedAt: true },
+  });
+  if (!row || row.revokedAt) {
+    throw new UnauthorizedException('Session terminated — login again');
+  }
+}
+
+export const authGuard: RequestHandler = async (req, _res: Response, next: NextFunction) => {
   try {
     const header = req.headers.authorization;
     if (!header || !header.toLowerCase().startsWith('bearer ')) {
@@ -15,24 +29,35 @@ export const authGuard: RequestHandler = (req, _res: Response, next: NextFunctio
     const payload = verifyAccessToken(token);
     const scope = payload.scope ?? 'member';
     if (scope !== 'member') throw new UnauthorizedException('Member access token required');
-    (req as AuthenticatedRequest).user = { id: payload.sub, email: payload.email, scope };
+    await assertSessionActive(payload.sid);
+    (req as AuthenticatedRequest).user = {
+      id: payload.sub,
+      email: payload.email,
+      scope,
+      sessionId: payload.sid,
+    };
     next();
   } catch (err) {
     next(err);
   }
 };
 
-export const optionalAuthGuard: RequestHandler = (req, _res, next) => {
+export const optionalAuthGuard: RequestHandler = async (req, _res, next) => {
   const header = req.headers.authorization;
   if (!header || !header.toLowerCase().startsWith('bearer ')) return next();
   const token = header.slice(7).trim();
   if (!token) return next();
   try {
     const payload = verifyAccessToken(token);
+    const scope = payload.scope ?? 'member';
+    if (scope === 'member') {
+      await assertSessionActive(payload.sid);
+    }
     (req as AuthenticatedRequest).user = {
       id: payload.sub,
       email: payload.email,
-      scope: payload.scope ?? 'member',
+      scope,
+      sessionId: payload.sid,
     };
   } catch {
     // silently ignore invalid token in optional mode
@@ -40,7 +65,7 @@ export const optionalAuthGuard: RequestHandler = (req, _res, next) => {
   next();
 };
 
-export const anonOrMemberGuard: RequestHandler = (req, _res, next) => {
+export const anonOrMemberGuard: RequestHandler = async (req, _res, next) => {
   try {
     const header = req.headers.authorization;
     if (!header || !header.toLowerCase().startsWith('bearer ')) {
@@ -50,10 +75,15 @@ export const anonOrMemberGuard: RequestHandler = (req, _res, next) => {
     if (!token) throw new UnauthorizedException('Missing bearer token');
 
     const payload = verifyAccessToken(token);
+    const scope = payload.scope ?? 'member';
+    if (scope === 'member') {
+      await assertSessionActive(payload.sid);
+    }
     (req as AuthenticatedRequest).user = {
       id: payload.sub,
       email: payload.email,
-      scope: payload.scope ?? 'member',
+      scope,
+      sessionId: payload.sid,
     };
     next();
   } catch (err) {
