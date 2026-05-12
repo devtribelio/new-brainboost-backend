@@ -4,6 +4,7 @@ import type { AffiliatorService } from './affiliator.service';
 import type { EnrollmentService } from './enrollment.service';
 import { VisitService } from './visit.service';
 import { ok } from '@/common/utils/response.util';
+import { buildLegacyPage } from '@/common/utils/pagination.util';
 import { UnauthorizedException, BadRequestException } from '@/common/exceptions';
 import type { AuthenticatedRequest } from '@/common/interfaces/authenticated-request';
 import type { AffiliateBased } from './constants';
@@ -58,7 +59,7 @@ export class AffiliateController {
     const from = typeof req.query.from === 'string' ? new Date(req.query.from) : undefined;
     const to = typeof req.query.to === 'string' ? new Date(req.query.to) : undefined;
     const { rows, total } = await this.affiliatorService.listCommissions(req.user.id, { status, from, to }, page, perPage);
-    return ok(res, rows, { page, perPage, total });
+    return ok(res, buildLegacyPage(rows, total, { page, perPage, skip: (page - 1) * perPage, take: perPage }));
   };
 
   @ApiOperation({ summary: 'List active affiliate programs' })

@@ -83,7 +83,7 @@ export class CommentController {
       parentId: body.replyId ?? body.parentId,
       imageUrls: Array.isArray(body.images) ? body.images : body.imageUrls,
     });
-    return ok(res, serializeComment(c), undefined, 201);
+    return ok(res, serializeComment(c), 201);
   };
 
   @ApiBearerAuth()

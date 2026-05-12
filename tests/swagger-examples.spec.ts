@@ -17,7 +17,7 @@ describe('OpenAPI doc — response examples', () => {
 
     const postListSchema =
       doc.paths['/api/member/post/list'].get.responses['200'].content['application/json'].schema;
-    expect(postListSchema.properties.success.example).toBe(true);
+    expect(postListSchema.properties.errCode.example).toBe(0);
     expect(postListSchema.properties.data.$ref).toBe('#/components/schemas/PostPageDto');
 
     const postPage = doc.components.schemas.PostPageDto;
@@ -56,8 +56,9 @@ describe('OpenAPI doc — response examples', () => {
       '/static/temporary/tmp-abc123.jpg',
     );
 
-    // Issue 9: success / ok must be declared as boolean (was defaulting to string).
-    expect(doc.components.schemas.ApiErrorResponseDto.properties.success.type).toBe('boolean');
+    // Envelope: errCode integer, errMessage string|null, data null on error.
+    expect(doc.components.schemas.ApiErrorResponseDto.properties.errCode.type).toBe('integer');
+    expect(doc.components.schemas.ApiErrorResponseDto.properties.errMessage.type).toBe('string');
     expect(doc.components.schemas.GenericOkDto.properties.ok.type).toBe('boolean');
 
     // Issue 3: network/join request body documented via NetworkJoinBodyDto.

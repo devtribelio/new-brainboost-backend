@@ -1,28 +1,18 @@
 import type { Response } from 'express';
 
-export interface ApiSuccess<T> {
-  success: true;
-  data: T;
-  meta?: Record<string, unknown>;
+export interface ApiEnvelope<T> {
+  errCode: number;
+  errMessage: string | null;
+  data: T | null;
 }
 
-export interface ApiError {
-  success: false;
-  error: {
-    message: string;
-    details?: unknown;
-  };
-}
-
-export function ok<T>(res: Response, data: T, meta?: Record<string, unknown>, status = 200): Response {
-  const body: ApiSuccess<T> = { success: true, data };
-  if (meta) body.meta = meta;
+export function ok<T>(res: Response, data: T, status = 200): Response {
+  const body: ApiEnvelope<T> = { errCode: 0, errMessage: null, data };
   return res.status(status).json(body);
 }
 
-export function fail(res: Response, status: number, message: string, details?: unknown): Response {
-  const body: ApiError = { success: false, error: { message } };
-  if (details !== undefined) body.error.details = details;
+export function fail(res: Response, status: number, message: string): Response {
+  const body: ApiEnvelope<null> = { errCode: status, errMessage: message, data: null };
   return res.status(status).json(body);
 }
 

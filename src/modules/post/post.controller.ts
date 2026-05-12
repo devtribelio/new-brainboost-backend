@@ -109,7 +109,7 @@ export class PostController {
       videoUrl: body.videoUrl,
       embedUrl: body.embedUrl,
     });
-    return ok(res, serializePost(post), undefined, 201);
+    return ok(res, serializePost(post), 201);
   };
 
   @ApiBearerAuth()
@@ -140,6 +140,6 @@ export class PostController {
       networkId: body.networkId,
       reason: body.reason,
     });
-    return ok(res, r, undefined, 201);
+    return ok(res, r, 201);
   };
 }

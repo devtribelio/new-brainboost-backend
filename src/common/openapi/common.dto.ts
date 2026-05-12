@@ -38,24 +38,29 @@ export class TokenBundleDto {
   scope?: string;
 }
 
-export class ApiErrorBodyDto {
-  @ApiProperty({ example: 'Invalid credentials', description: 'Human-readable error message' })
-  message!: string;
-
-  @ApiPropertyOptional({
-    type: 'object',
-    example: { field: 'email', constraint: 'isEmail' },
-    description: 'Validation details (when applicable)',
-  })
-  details?: unknown;
-}
-
 export class ApiErrorResponseDto {
-  @ApiProperty({ type: 'boolean', example: false })
-  success!: boolean;
+  @ApiProperty({
+    type: 'integer',
+    example: 400,
+    description: 'Error code. `0` on success, HTTP-style status code on failure.',
+  })
+  errCode!: number;
 
-  @ApiProperty({ type: () => ApiErrorBodyDto })
-  error!: ApiErrorBodyDto;
+  @ApiProperty({
+    type: 'string',
+    nullable: true,
+    example: 'Invalid credentials',
+    description: 'Human-readable error message. `null` on success.',
+  })
+  errMessage!: string | null;
+
+  @ApiProperty({
+    type: 'object',
+    nullable: true,
+    example: null,
+    description: 'Always `null` on failure responses.',
+  })
+  data!: null;
 }
 
 export class GenericOkDto {

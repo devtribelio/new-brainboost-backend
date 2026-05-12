@@ -8,28 +8,28 @@ describe('legacy-aligned API smoke', () => {
   it('GET /api/member/data/banner', async () => {
     const r = await request(app).get('/api/member/data/banner');
     expect(r.status).toBe(200);
-    expect(r.body.success).toBe(true);
+    expect(r.body.errCode).toBe(0);
   });
 
   it('GET /api/member/data/location/country pagination', async () => {
     const r = await request(app).get('/api/member/data/location/country?page=1&perPage=5');
     expect(r.status).toBe(200);
-    expect(r.body.data.length).toBeLessThanOrEqual(5);
-    expect(r.body.meta.total).toBeGreaterThan(0);
+    expect(r.body.data.items.length).toBeLessThanOrEqual(5);
+    expect(r.body.data.total).toBeGreaterThan(0);
   });
 
   it('GET /api/member/topic/list', async () => {
     const r = await request(app).get('/api/member/topic/list?perPage=3');
     expect(r.status).toBe(200);
-    expect(r.body.data.length).toBeLessThanOrEqual(3);
+    expect(r.body.data.items.length).toBeLessThanOrEqual(3);
   });
 
   it('GET /api/member/post/list public', async () => {
     const r = await request(app).get('/api/member/post/list?perPage=3');
     expect(r.status).toBe(200);
-    expect(Array.isArray(r.body.data)).toBe(true);
-    if (r.body.data.length > 0) {
-      const p = r.body.data[0];
+    expect(Array.isArray(r.body.data.items)).toBe(true);
+    if (r.body.data.items.length > 0) {
+      const p = r.body.data.items[0];
       expect(p).toHaveProperty('postId');
       expect(p).toHaveProperty('content');
       expect(p).toHaveProperty('countLike');
@@ -38,7 +38,7 @@ describe('legacy-aligned API smoke', () => {
 
   it('GET /api/member/post/detail with legacyId', async () => {
     const list = await request(app).get('/api/member/post/list?perPage=1');
-    const postId = list.body.data[0]?.postId;
+    const postId = list.body.data.items[0]?.postId;
     if (!postId) return;
     const r = await request(app).get('/api/member/post/detail').query({ postId });
     expect(r.status).toBe(200);
@@ -53,7 +53,7 @@ describe('legacy-aligned API smoke', () => {
   it('GET /api/member/network/member with empty input returns 200 (lists all)', async () => {
     const r = await request(app).get('/api/member/network/member?page=1&perPage=20');
     expect(r.status).toBe(200);
-    expect(r.body.success).toBe(true);
+    expect(r.body.errCode).toBe(0);
     expect(Array.isArray(r.body.data.items)).toBe(true);
   });
 
@@ -62,7 +62,7 @@ describe('legacy-aligned API smoke', () => {
       '/api/member/network/tag?page=1&perPage=50&keyword=&code=',
     );
     expect(r.status).toBe(200);
-    expect(r.body.success).toBe(true);
+    expect(r.body.errCode).toBe(0);
     expect(r.body.data.items).toBeDefined();
     expect(Array.isArray(r.body.data.items)).toBe(true);
   });
@@ -83,6 +83,6 @@ describe('legacy-aligned API smoke', () => {
   it('GET /api/member/product/list', async () => {
     const r = await request(app).get('/api/member/product/list?perPage=5');
     expect(r.status).toBe(200);
-    expect(r.body.data.length).toBeLessThanOrEqual(5);
+    expect(r.body.data.items.length).toBeLessThanOrEqual(5);
   });
 });

@@ -42,7 +42,7 @@ export class AuthController {
   @ApiResponse({ status: 401, description: 'Invalid credentials', type: () => ApiErrorResponseDto })
   login = async (req: Request, res: Response) => {
     const tokens = await this.authService.login(req.body as LoginDto);
-    return ok(res, tokens);
+    return res.status(200).json(tokens);
   };
 
   @ApiOperation({ summary: 'Register a new member' })
@@ -51,7 +51,7 @@ export class AuthController {
   @ApiResponse({ status: 400, description: 'Validation error', type: () => ApiErrorResponseDto })
   register = async (req: Request, res: Response) => {
     const tokens = await this.authService.register(req.body as RegisterDto);
-    return ok(res, tokens, undefined, 201);
+    return ok(res, tokens, 201);
   };
 
   @ApiOperation({

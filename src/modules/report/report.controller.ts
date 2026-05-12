@@ -47,7 +47,7 @@ export class ReportController {
       networkId: body.networkId,
       reason: body.reason,
     });
-    return ok(res, r, undefined, 201);
+    return ok(res, r, 201);
   };
 
   @ApiBearerAuth()
@@ -67,6 +67,6 @@ export class ReportController {
       networkId: body.networkId,
       reason: body.reason,
     });
-    return ok(res, r, undefined, 201);
+    return ok(res, r, 201);
   };
 }

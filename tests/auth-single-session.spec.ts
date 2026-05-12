@@ -31,7 +31,7 @@ describe('auth single-session enforcement', () => {
       .post('/api/member/oauth/token')
       .send({ grant_type: 'password', username: email, password });
     expect(res.status).toBe(200);
-    return res.body.data as { access_token: string; refresh_token: string };
+    return res.body as { access_token: string; refresh_token: string };
   }
 
   async function refresh(refreshToken: string) {
@@ -50,14 +50,14 @@ describe('auth single-session enforcement', () => {
 
     const useB = await refresh(b.refresh_token);
     expect(useB.status).toBe(200);
-    expect(useB.body.data.refresh_token).toBeTruthy();
+    expect(useB.body.refresh_token).toBeTruthy();
   });
 
   it('refresh-token grant rotates: prior refresh token becomes unusable after rotation', async () => {
     const a = await loginPassword();
     const rotated = await refresh(a.refresh_token);
     expect(rotated.status).toBe(200);
-    const c = rotated.body.data as { refresh_token: string };
+    const c = rotated.body as { refresh_token: string };
 
     const reuseA = await refresh(a.refresh_token);
     expect(reuseA.status).toBe(401);

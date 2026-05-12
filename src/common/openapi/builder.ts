@@ -137,7 +137,8 @@ function operationFromRoute(
         schemaSpec = {
           type: 'object',
           properties: {
-            success: { type: 'boolean', example: true },
+            errCode: { type: 'integer', example: 0 },
+            errMessage: { type: 'string', nullable: true, example: null },
             data: inner,
           },
         };

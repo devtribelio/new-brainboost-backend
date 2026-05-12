@@ -33,7 +33,7 @@ export const errorHandler: ErrorRequestHandler = (err, req: Request, res: Respon
     return;
   }
 
-  fail(res, status, message, err instanceof HttpException ? err.details : undefined);
+  fail(res, status, message);
 };
 
 export const notFoundHandler: RequestHandler = (req, res) => {
