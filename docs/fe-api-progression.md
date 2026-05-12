@@ -144,8 +144,9 @@ Single sweep PR — minimal logic change, mostly field renames.
 - [ ] **T3.1** Drop authGuard on `/member/info` (#5)
   - FE calls splash pre-login. File: `src/modules/auth/auth.routes.ts` (or wherever `/info` route bound).
 
-- [ ] **T3.2** Profile affiliateConnectedData: empty=`null`, not `[]` (#9)
-  - File: `src/modules/account/account.controller.ts` profile serializer.
+- [x] **T3.2** Profile affiliateConnectedData null (#9) — verified 2026-05-12, no change needed
+  - Audit `[]`-emit case was legacy tribelio backend behavior. New backend (`src/modules/profile/profile.controller.ts:29-43`) already emits `null` when `member.inviterId` is null; object `{memberNetworkConnectId, memberId, affiliatorCode, affiliatorMemberId}` when inviter present.
+  - FE `_objectOrNull` custom converter remains as defensive scaffolding — can be dropped once FE confirms stability (audit §3.3).
 
 - [x] **T3.3** Topic subscribe FE-shape response (#11) — done 2026-05-12
   - Response now `{memberId, topicId, isSubscribeTopic}` + extras `{status, action}` (FE-tolerant).
