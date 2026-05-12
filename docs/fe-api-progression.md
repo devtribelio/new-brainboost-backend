@@ -114,11 +114,14 @@ One PR per module.
 
 ### Notification
 
-- [ ] **T2.7** Fix notification/list shape (#32)
-  - Field renames: `body` → `message`. `isSeen` boolean → int (0/1).
-  - Pagination: default `perPage=50` (was 20).
-  - Drop or hide extras (`notifGroup`, `payload`) — confirm with FE if breaking.
-  - File: `src/modules/notification/dto/*`, `notification.service.ts`.
+- [x] **T2.7** Notification/list shape (#32) — done 2026-05-12
+  - Field shape: `{notificationId, title, message, isSeen (0/1 int), created, updated, refTable, refId, type}`.
+  - `updated` derived from `readAt ?? createdAt` (ISO string).
+  - `refTable` + `refId` derived from `payload` JSON (recognizes `commentId`/`postId`/`replyId`/`memberId` keys).
+  - Default perPage 50 (was 20). Dropped extras (`id`, `body`, `payload`, `seenAt`, `createdAt`, `notifGroup`).
+  - NotificationDto schema rewritten.
+  - `notificationId` stays UUID until `Notification.legacyId` column added (deferred — no current legacy data to migrate).
+  - Files: `src/common/serializers/index.ts`, `src/modules/notification/notification.controller.ts`, `dto/notification.dto.ts`.
 
 ### Commission
 

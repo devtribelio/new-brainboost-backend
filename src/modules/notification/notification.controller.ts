@@ -24,7 +24,7 @@ export class NotificationController {
 
   @ApiOperation({ summary: 'List my notifications (with unread count + filters)' })
   @ApiQuery({ name: 'page', type: 'integer', required: false, example: 1 })
-  @ApiQuery({ name: 'perPage', type: 'integer', required: false, example: 20 })
+  @ApiQuery({ name: 'perPage', type: 'integer', required: false, example: 50 })
   @ApiQuery({
     name: 'group',
     type: 'string',
@@ -43,7 +43,8 @@ export class NotificationController {
   @ApiResponse({ status: 200, type: () => NotificationPageDto })
   list = async (req: AuthenticatedRequest, res: Response) => {
     if (!req.user) throw new UnauthorizedException();
-    const p = parsePagination(req.query as Record<string, unknown>);
+    // FE NotificationQueryRequest defaults perPage to 50.
+    const p = parsePagination(req.query as Record<string, unknown>, { perPage: 50 });
     const group = req.query.group as 'general' | 'creator' | 'all' | undefined;
     const networkId = (req.query.networkId as string) ?? undefined;
     const isUnreadOnly = req.query.isUnreadOnly === '1' || req.query.isUnreadOnly === 'true';
@@ -55,7 +56,7 @@ export class NotificationController {
       { group, networkId, isUnreadOnly, isReadOnly },
     );
 
-    const items = rows.map((r) => ({ ...serializeNotification(r), notifGroup: r.timeBucket }));
+    const items = rows.map(serializeNotification);
     const page = buildLegacyPage(items, total, p, totalAll);
     return ok(res, { ...page, unread });
   };

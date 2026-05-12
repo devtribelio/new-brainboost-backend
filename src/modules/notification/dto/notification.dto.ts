@@ -1,10 +1,15 @@
 import { ApiProperty, ApiPropertyOptional } from '@/common/openapi/decorators';
 
 /**
- * Wire shape for `serializeNotification()` plus the per-row `notifGroup` (time bucket).
+ * Wire shape for `serializeNotification()` per FE NotificationModel (audit #32).
+ * Backend-native extras (id/body/payload/seenAt/createdAt/notifGroup) dropped.
  */
 export class NotificationDto {
-  @ApiProperty({ format: 'uuid', example: 'notification-uuid-1234' })
+  @ApiProperty({
+    format: 'uuid',
+    example: 'notification-uuid-1234',
+    description: 'UUID until Notification gets a legacyId column (follow-up).',
+  })
   notificationId!: string;
 
   @ApiProperty({ example: 'New comment on your post' })
@@ -12,57 +17,36 @@ export class NotificationDto {
 
   @ApiProperty({
     example: 'John replied: "Great insights, thanks for sharing!"',
-    description: 'Legacy alias of `body`',
+    description: 'Notification body (FE field name).',
   })
   message!: string;
 
-  @ApiProperty({ type: 'boolean', example: false })
-  isSeen!: boolean;
+  @ApiProperty({ type: 'integer', enum: [0, 1], example: 0 })
+  isSeen!: number;
 
   @ApiProperty({ format: 'date-time', example: '2026-05-11T12:00:00.000Z' })
   created!: string;
 
-  @ApiPropertyOptional({ nullable: true, example: null })
-  updated?: string | null;
+  @ApiProperty({
+    format: 'date-time',
+    example: '2026-05-11T12:05:00.000Z',
+    description: 'readAt timestamp; falls back to created when not yet read.',
+  })
+  updated!: string;
 
-  @ApiPropertyOptional({ nullable: true, example: null })
+  @ApiPropertyOptional({
+    nullable: true,
+    enum: ['posts', 'comments', 'replies', 'members'],
+    example: 'posts',
+    description: 'Deep-link target table derived from payload.',
+  })
   refTable?: string | null;
 
-  @ApiPropertyOptional({ nullable: true, example: null })
-  refId?: string | null;
+  @ApiPropertyOptional({ nullable: true, type: 'integer', example: 42 })
+  refId?: number | null;
 
   @ApiPropertyOptional({ nullable: true, example: 'comment_reply' })
   type?: string | null;
-
-  @ApiProperty({ format: 'uuid', example: 'notification-uuid-1234' })
-  id!: string;
-
-  @ApiProperty({ example: 'John replied: "Great insights, thanks for sharing!"' })
-  body!: string;
-
-  @ApiPropertyOptional({
-    type: 'object',
-    nullable: true,
-    example: { postId: 'post-uuid', commentId: 'comment-uuid' },
-  })
-  payload?: unknown;
-
-  @ApiPropertyOptional({
-    nullable: true,
-    format: 'date-time',
-    example: '2026-05-11T12:05:00.000Z',
-  })
-  seenAt?: string | null;
-
-  @ApiProperty({ format: 'date-time', example: '2026-05-11T12:00:00.000Z' })
-  createdAt!: string;
-
-  @ApiProperty({
-    enum: ['today', 'yesterday', 'thisWeek', 'earlier'],
-    example: 'today',
-    description: 'UI grouping bucket based on createdAt',
-  })
-  notifGroup!: string;
 }
 
 export class NotificationPageDto {
