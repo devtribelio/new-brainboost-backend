@@ -1,8 +1,17 @@
 import { prisma } from '@/config/prisma';
+import { logger } from '@/config/logger';
 import { NotFoundException, BadRequestException } from '@/common/exceptions';
 import { assignMemberAffiliateCode } from './utils/code-generator';
-import { AFFILIATE_BASED, COMMISSION_STATUS, type AffiliateBased } from './constants';
-import { getPerformanceTier } from './utils/compute-amount';
+import {
+  AFFILIATE_BASED,
+  COMMISSION_STATUS,
+  GROWTH_LEVEL_RATES,
+  GROWTH_MAX_DEPTH,
+  INACTIVE_RATE,
+  type AffiliateBased,
+} from './constants';
+import { computeAmount, getPerformanceTier } from './utils/compute-amount';
+import { walkInviterChain } from './utils/walk-inviter-chain';
 
 export class AffiliatorService {
   /**
@@ -88,6 +97,146 @@ export class AffiliatorService {
       currentRate: tier.rate,
       schemaType: tier.schemaType,
     };
+  }
+
+  /**
+   * Commit affiliate commissions for a successful payment.
+   * Idempotent — unique constraint on (paymentId, recipientId, level) prevents duplicates.
+   *
+   * Walks inviter chain from the buyer, computes priceRecipient per level via
+   * `computeAmount(productPrice, voucherAmount, rate)`. Rate depends on the
+   * RECIPIENT's `affiliateBased`:
+   *  - PERFORMANCE → tier rate (20/30/40 based on lifetimeAmount) — only level 1 paid.
+   *  - GROWTH → multitier L1=20 L2=10 L3=5 L4=5, early-stop on PERFORMANCE ancestor.
+   *  - INACTIVE → flat 20%, only level 1 paid.
+   *
+   * `affiliatorId` here = MemberAffiliator.id (program membership), not Member.id.
+   * Resolution: lookup MemberAffiliator for each ancestor + program.
+   */
+  async commitCommissionsForPayment(input: {
+    paymentId: string;
+    productId: string;
+    productPrice: number;
+    voucherAmount: number;
+    buyerMemberId: string;
+    programId?: string | null;
+  }): Promise<{ committed: number }> {
+    if (!input.programId) {
+      logger.debug({ paymentId: input.paymentId }, '[affiliate] no programId — skip commit');
+      return { committed: 0 };
+    }
+
+    const buyer = await prisma.member.findUnique({
+      where: { id: input.buyerMemberId },
+      select: { inviterId: true },
+    });
+    if (!buyer?.inviterId) {
+      logger.debug({ buyerMemberId: input.buyerMemberId }, '[affiliate] no inviter — skip');
+      return { committed: 0 };
+    }
+
+    // Walk chain starting from the buyer's inviter (level 1 = direct inviter)
+    const chain = await walkInviterChain(buyer.inviterId, {
+      maxDepth: GROWTH_MAX_DEPTH,
+      stopOnPerformance: false,
+    });
+
+    let committed = 0;
+    for (const node of chain) {
+      const level = node.level;
+      const rate = await this.resolveRate(node.id, node.affiliateBased, level);
+      if (rate === null) continue;
+
+      const amount = computeAmount(input.productPrice, input.voucherAmount, rate);
+      if (amount <= 0) continue;
+
+      const affiliator = await prisma.memberAffiliator.findUnique({
+        where: { memberId_programId: { memberId: node.id, programId: input.programId } },
+        select: { id: true },
+      });
+
+      const schemaType =
+        node.affiliateBased === AFFILIATE_BASED.PERFORMANCE
+          ? getPerformanceTier(await this.getLifetimeAmount(node.id)).schemaType
+          : null;
+
+      try {
+        await prisma.affiliateCommission.create({
+          data: {
+            recipientId: node.id,
+            affiliatorId: affiliator?.id ?? null,
+            programId: input.programId,
+            productId: input.productId,
+            paymentId: input.paymentId,
+            buyerMemberId: input.buyerMemberId,
+            level,
+            affiliateBased: node.affiliateBased,
+            schemaType,
+            productPrice: input.productPrice,
+            voucherAmount: input.voucherAmount,
+            commissionRate: rate,
+            amount,
+            status: COMMISSION_STATUS.PENDING,
+          },
+        });
+        committed++;
+      } catch (e) {
+        // unique (paymentId, recipientId, level) — second emit is a no-op
+        const code = (e as { code?: string }).code;
+        if (code !== 'P2002') throw e;
+        logger.debug(
+          { paymentId: input.paymentId, recipientId: node.id, level },
+          '[affiliate] commission already exists — skipping',
+        );
+      }
+
+      // PERFORMANCE / INACTIVE only pays level 1 (legacy parity)
+      if (
+        node.affiliateBased === AFFILIATE_BASED.PERFORMANCE ||
+        node.affiliateBased === AFFILIATE_BASED.INACTIVE
+      ) {
+        break;
+      }
+      // GROWTH: stop chain if any ancestor encountered is PERFORMANCE (handled by check on next iter)
+      const nextNode = chain[chain.indexOf(node) + 1];
+      if (nextNode && nextNode.affiliateBased === AFFILIATE_BASED.PERFORMANCE) {
+        break;
+      }
+    }
+
+    return { committed };
+  }
+
+  private async resolveRate(
+    memberId: string,
+    affiliateBased: string,
+    level: number,
+  ): Promise<number | null> {
+    if (affiliateBased === AFFILIATE_BASED.INACTIVE) {
+      return level === 1 ? INACTIVE_RATE : null;
+    }
+    if (affiliateBased === AFFILIATE_BASED.PERFORMANCE) {
+      if (level !== 1) return null;
+      const lifetime = await this.getLifetimeAmount(memberId);
+      return getPerformanceTier(lifetime).rate;
+    }
+    if (affiliateBased === AFFILIATE_BASED.GROWTH) {
+      if (level > GROWTH_LEVEL_RATES.length) return null;
+      return GROWTH_LEVEL_RATES[level - 1];
+    }
+    return null;
+  }
+
+  private async getLifetimeAmount(memberId: string): Promise<number> {
+    const agg = await prisma.affiliateCommission.aggregate({
+      where: {
+        recipientId: memberId,
+        status: { not: COMMISSION_STATUS.VOIDED },
+        affiliateBased: { not: AFFILIATE_BASED.INACTIVE },
+      },
+      _sum: { amount: true },
+    });
+    return agg._sum.amount ?? 0;
   }
 
   async listCommissions(memberId: string, filter: { status?: string; from?: Date; to?: Date }, page: number, perPage: number) {

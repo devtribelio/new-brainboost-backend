@@ -11,8 +11,15 @@ import { adminRoutes } from '@/modules/admin/admin.routes';
 import { mountSwagger } from '@/common/openapi/swagger.middleware';
 import { ok } from '@/common/utils/response.util';
 import { env } from '@/config/env';
+import { registerCommerceListeners } from '@/modules/commerce/listeners/payment-success.listener';
+
+let listenersRegistered = false;
 
 export function buildApp(): Express {
+  if (!listenersRegistered) {
+    registerCommerceListeners();
+    listenersRegistered = true;
+  }
   const app = express();
 
   app.disable('x-powered-by');
