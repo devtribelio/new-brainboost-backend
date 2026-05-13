@@ -249,7 +249,20 @@ function timeAgoString(d: Date, now: Date = new Date()): string {
   return `${Math.floor(diffDay / 365)}y`;
 }
 
-const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const MONTH_ABBR = [
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
+];
 function dateAgoString(d: Date, now: Date = new Date()): string {
   const sameDay =
     d.getFullYear() === now.getFullYear() &&
@@ -332,7 +345,7 @@ export function serializeProvince(p: ProvinceWithCountry): Record<string, unknow
 }
 
 interface CityWithParents extends City {
-  province?: ({ legacyId: number | null; country?: { legacyId: number | null } | null }) | null;
+  province?: { legacyId: number | null; country?: { legacyId: number | null } | null } | null;
 }
 
 export function serializeCity(c: CityWithParents): Record<string, unknown> {
@@ -345,14 +358,10 @@ export function serializeCity(c: CityWithParents): Record<string, unknown> {
 }
 
 interface DistrictWithParents extends District {
-  city?:
-    | ({
-        legacyId: number | null;
-        province?:
-          | ({ legacyId: number | null; country?: { legacyId: number | null } | null })
-          | null;
-      })
-    | null;
+  city?: {
+    legacyId: number | null;
+    province?: { legacyId: number | null; country?: { legacyId: number | null } | null } | null;
+  } | null;
 }
 
 export function serializeDistrict(d: DistrictWithParents): Record<string, unknown> {
@@ -692,7 +701,7 @@ export function serializeCourseDetailLegacy(
     courseId: courseLegacyId,
     code,
     name: stripBrainboostLabel(p.title),
-    description: legacyDescriptionExcerpt(p.descriptionHtml, p.description),
+    description: p.description,
     descriptionHtml: p.descriptionHtml,
     sellingPoint: normalizeSellingPoints(p.sellingPoints),
     imageUrl: p.thumbnail,

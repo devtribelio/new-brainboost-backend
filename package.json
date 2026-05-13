@@ -23,7 +23,8 @@
     "migrate:reviews": "tsx scripts/migrate-reviews.ts",
     "backfill:course-legacy-id": "tsx scripts/backfill-course-legacy-id.ts",
     "migrate:course-sections": "tsx scripts/migrate-course-sections.ts",
-    "migrate:course-lessons": "tsx scripts/migrate-course-lessons.ts"
+    "migrate:course-lessons": "tsx scripts/migrate-course-lessons.ts",
+    "backfill:product-selling-points": "tsx scripts/backfill-product-selling-points.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",

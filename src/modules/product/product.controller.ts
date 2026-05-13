@@ -29,8 +29,10 @@ export class ProductController {
     const keyword = (req.query.keyword as string) ?? undefined;
     const type = (req.query.type as string) ?? undefined;
     const memberId = (req as { user?: { id?: string } }).user?.id;
-    const { rows, total, ratingAvgByProduct, purchasedProductIds } =
-      await this.productService.list(p, { keyword, type, memberId });
+    const { rows, total, ratingAvgByProduct, purchasedProductIds } = await this.productService.list(
+      p,
+      { keyword, type, memberId },
+    );
     const items = rows.map((r) =>
       serializeProduct(r, {
         ratingAvg: ratingAvgByProduct.get(r.id) ?? 0,
