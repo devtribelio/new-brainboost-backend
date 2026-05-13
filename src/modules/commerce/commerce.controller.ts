@@ -1,12 +1,17 @@
 import type { Request, Response } from 'express';
 import { ok } from '@/common/utils/response.util';
 import { parsePagination } from '@/common/utils/pagination.util';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@/common/openapi/decorators';
+import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@/common/openapi/decorators';
 import type { CheckoutService } from './checkout.service';
 import type { PaymentService } from './payment.service';
 import type { VoucherService } from './voucher.service';
 import type { StartCheckoutDto } from './dto/start-checkout.dto';
 import type { PayDto, CancelTransactionDto, ValidateVoucherDto } from './dto/pay.dto';
+import {
+  CreatePaymentResultDto,
+  StartCheckoutResultDto,
+  VoucherValidateResultDto,
+} from './dto/response.dto';
 
 interface ReqWithUser extends Request {
   user?: { id: string };
@@ -22,6 +27,7 @@ export class CommerceController {
 
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Start checkout — create PENDING transaction' })
+  @ApiResponse({ status: 200, type: () => StartCheckoutResultDto })
   startCheckout = async (req: ReqWithUser, res: Response) => {
     const dto = req.body as StartCheckoutDto;
     const result = await this.checkout.start({
@@ -34,6 +40,7 @@ export class CommerceController {
 
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Create payment for a PENDING transaction' })
+  @ApiResponse({ status: 200, type: () => CreatePaymentResultDto })
   createPayment = async (req: ReqWithUser, res: Response) => {
     const dto = req.body as PayDto;
     const result = await this.payment.create(req.user!.id, dto);
@@ -65,6 +72,7 @@ export class CommerceController {
 
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Validate voucher (dry-run, no redeem)' })
+  @ApiResponse({ status: 200, type: () => VoucherValidateResultDto })
   validateVoucher = async (req: ReqWithUser, res: Response) => {
     const dto = req.body as ValidateVoucherDto;
     const result = await this.voucher.validate(dto.code, dto.productId);

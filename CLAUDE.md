@@ -220,7 +220,7 @@ Module status (one-line summary; details in `docs/rewrite-progress.md`):
 - [x] notification — list, read
 - [x] report — submit
 - [x] admin — auth, dashboard, CRUD scaffolding via `crud-factory`
-- [~] commerce / purchase — planning complete (see `docs/commerce-port.md`); scope locked to Xendit-only (CC + VA + eWallet), no IAP, no cart, no shipping
+- [x] commerce / purchase — Xendit-only (CC + VA + eWallet), 2-step checkout→payment, voucher bypass, webhook + cron expire, event-driven side effects (enrollment + affiliate commission + voucher redeem). See `docs/commerce-port.md`. Pending: manual Xendit sandbox QA
 - [ ] disbursement — payout to bank/e-wallet (NOT STARTED)
 - [ ] chat / broadcast — drop or defer
 - [ ] certificate — drop or defer

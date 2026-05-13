@@ -92,16 +92,19 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` parity met for current s
 
 ---
 
-## Not started ([ ])
-
-### commerce / purchase — Planning ([~] in design, [ ] not implemented)
-- Legacy: `Controller_Commerce` + `Controller_Payment::commerce` + `Controller_Product::checkoutSubmit` + `TBCommerce` + `TBXendit` + `TBVoucher` (TBD).
-- Scope (locked): Xendit-only (CC + VA + eWallet), 2-step (checkout → payment), voucher with bypass-charge path, affiliate commission via existing `walkInviterChain`.
-- **IAP dropped** (Apple/Google receipts not in scope — defer ke subscription module).
+### commerce / purchase — [x] P1-P6 implemented (manual Xendit sandbox QA pending)
+- Legacy: `Controller_Commerce` + `Controller_Payment::commerce` + `Controller_Product::checkoutSubmit` + `TBCommerce` + `TBXendit` + `TBVoucher`.
+- Scope: Xendit-only (CC + VA + eWallet), 2-step (checkout → payment), voucher with bypass-charge path, affiliate commission via existing `walkInviterChain`.
+- **IAP dropped** (Apple/Google receipts not in scope — defer to subscription module).
 - **Cart / shipping dropped** (mobile single-product only).
-- Plan: see `docs/commerce-port.md` (full schema, API, sequences, phasing P1-P6).
-- Blocking before P1: locate Xendit fee table per channel; confirm bank codes; design order code sequence.
-- Blocking before P5 (commission listener): affiliate parity tests should land first so commission writes are trusted.
+- Routes (`/api/member/product/checkout/submit`, `/api/member/payment/commerce*`, `/api/webhook/xendit/{va,ewallet,cc}`) wired + smoke-tested.
+- Side effects (course enrollment, affiliate commission, voucher redeem) idempotent via unique constraints; emitted from PaymentService SUCCESS path + webhook.
+- Cron `expirePendingPayments` (call from external scheduler) flips overdue PENDING → EXPIRED.
+- Tests: 47 commerce + 6 smoke = 53 specs, 125 total project green.
+- Plan + tracker: see `docs/commerce-port.md`.
+- **Open items**: Xendit sandbox manual QA (CC + VA simulate-payment + eWallet OVO/DANA); fee table confirm with finance; refund flow (admin tool, defer).
+
+## Not started ([ ])
 
 ### disbursement
 - Legacy: `Controller_Disbursement` + `TBDisbursement` + `TBBank` + provider integrations.

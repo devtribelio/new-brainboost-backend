@@ -129,4 +129,38 @@ describe('legacy-aligned API smoke', () => {
     expect(Array.isArray(r.body.data)).toBe(true);
     expect(r.body.data.length).toBeLessThanOrEqual(5);
   });
+
+  it('commerce routes require auth (POST /product/checkout/submit → 401)', async () => {
+    const r = await request(app).post('/api/member/product/checkout/submit').send({});
+    expect(r.status).toBe(401);
+  });
+
+  it('commerce routes require auth (POST /payment/commerce → 401)', async () => {
+    const r = await request(app).post('/api/member/payment/commerce').send({});
+    expect(r.status).toBe(401);
+  });
+
+  it('GET /api/member/payment/commerce/list returns 200 with auth', async () => {
+    const r = await request(app)
+      .get('/api/member/payment/commerce/list?perPage=5')
+      .set('Authorization', `Bearer ${accessToken}`);
+    expect(r.status).toBe(200);
+    expect(r.body.errCode).toBe(0);
+    expect(Array.isArray(r.body.data.rows)).toBe(true);
+  });
+
+  it('webhook routes reject without token (POST /webhook/xendit/va → 401)', async () => {
+    const r = await request(app).post('/api/webhook/xendit/va').send({});
+    expect(r.status).toBe(401);
+  });
+
+  it('webhook routes reject without token (POST /webhook/xendit/ewallet → 401)', async () => {
+    const r = await request(app).post('/api/webhook/xendit/ewallet').send({});
+    expect(r.status).toBe(401);
+  });
+
+  it('webhook routes reject without token (POST /webhook/xendit/cc → 401)', async () => {
+    const r = await request(app).post('/api/webhook/xendit/cc').send({});
+    expect(r.status).toBe(401);
+  });
 });

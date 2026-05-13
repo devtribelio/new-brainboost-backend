@@ -1,6 +1,6 @@
 # Commerce / Purchase — Porting Tracker
 
-**Status:** Planning complete, implementation NOT started.
+**Status:** P1-P6 implemented. 47 commerce tests + 6 smoke tests green. Manual sandbox QA pending.
 **Owner:** brainboost@tribelio.com
 **Last updated:** 2026-05-13
 **Scope:** Xendit-only checkout (CC + VA + eWallet). IAP, cart, shipping, subscription, FB pixel — **dropped / deferred**.
@@ -461,14 +461,16 @@ Wired:
 
 ## 6. Phased Implementation
 
-| Phase | PR | Deliverable | Status |
+| Phase | Commit | Deliverable | Status |
 |---|---|---|---|
-| P1 | foundation | Schema + migration + env vars + `XenditService` skeleton + module skeleton | [ ] |
-| P2 | checkout | `startCheckout` + voucher validate + tests compute-totals, voucher | [ ] |
-| P3 | payment | `createPayment` per type + XenditService impl + tests cc/va/ewallet | [ ] |
-| P4 | webhook | Webhook routes + signature middleware + idempotency + tests | [ ] |
-| P5 | side-effects | `OnPaymentSuccess` listener (enrollment + commission) + cron expire + tests | [ ] |
-| P6 | polish | History endpoints + Swagger DTO + smoke tests + parity tests | [ ] |
+| P1 | `f8611e1` | Schema + migration + env vars + `XenditService` skeleton + module skeleton | [x] |
+| P2 | `36d7b90` | `startCheckout` + voucher validate + tests compute-totals/voucher/checkout | [x] |
+| P3 | `839d3ec` | `createPayment` per type + XenditService HTTP via fetch + DI tests cc/va/ewallet | [x] |
+| P4 | `e68a333` | Webhook routes + signature guard + idempotency + tests | [x] |
+| P5 | `f025356` | `OnPaymentSuccess` listener (enrollment + commission + voucher redeem) + cron expire + tests | [x] |
+| P6 | _this commit_ | Swagger response DTOs + smoke routes + docs sync | [x] |
+
+**Note:** xendit-node v7 SDK dropped legacy Card/VirtualAccount/EWallet APIs (unified PaymentRequest only). Pivoted to fetch direct to REST endpoints (`/credit_card_charges`, `/callback_virtual_accounts`, `/ewallets/charges`) for legacy parity + simple capture CC flow.
 
 ---
 
