@@ -1,4 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@/common/openapi/decorators';
+import { LegacyMetaDto } from '@/common/openapi/common.dto';
 
 /**
  * Wire shape for `serializeProduct()` per FE legacy ProductModel (audit §1.5
@@ -84,21 +85,16 @@ export class ProductDto {
   productRatingAvg!: number;
 }
 
+/**
+ * FE legacy http envelope for GET /product/list — emitted by `okLegacy`.
+ * Shape: `{ meta: { total, page, lastPage }, data: ProductDto[] }`.
+ */
 export class ProductPageDto {
-  @ApiProperty({ type: 'integer', example: 137 })
-  total!: number;
-
-  @ApiProperty({ type: 'integer', example: 20 })
-  perPage!: number;
-
-  @ApiProperty({ type: 'integer', example: 1 })
-  currentPage!: number;
-
-  @ApiProperty({ type: 'integer', example: 7 })
-  lastPage!: number;
+  @ApiProperty({ type: () => LegacyMetaDto })
+  meta!: LegacyMetaDto;
 
   @ApiProperty({ type: 'array', itemType: () => ProductDto })
-  items!: ProductDto[];
+  data!: ProductDto[];
 }
 
 export class CourseLessonItemDto {

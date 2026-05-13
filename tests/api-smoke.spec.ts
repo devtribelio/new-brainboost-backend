@@ -120,7 +120,9 @@ describe('legacy-aligned API smoke', () => {
   });
 
   it('GET /api/member/product/list (legacy http envelope)', async () => {
-    const r = await request(app).get('/api/member/product/list?perPage=5');
+    const r = await request(app)
+      .get('/api/member/product/list?perPage=5')
+      .set('Authorization', `Bearer ${accessToken}`);
     expect(r.status).toBe(200);
     // FE legacy envelope: {meta:{total,page,lastPage}, data:[...]}. No errCode wrap.
     expect(r.body.meta).toBeDefined();

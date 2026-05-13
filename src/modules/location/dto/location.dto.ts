@@ -1,4 +1,10 @@
 import { ApiProperty, ApiPropertyOptional } from '@/common/openapi/decorators';
+import { LegacyMetaDto } from '@/common/openapi/common.dto';
+
+/**
+ * Location endpoints emit FE legacy http envelope via `okLegacy`.
+ * Shape: `{ meta: { total, page, lastPage }, data: <Item>Dto[] }`.
+ */
 
 export class CountryDto {
   @ApiProperty({ example: 101 })
@@ -15,20 +21,11 @@ export class CountryDto {
 }
 
 export class CountryPageDto {
-  @ApiProperty({ type: 'integer', example: 250 })
-  total!: number;
-
-  @ApiProperty({ type: 'integer', example: 50 })
-  perPage!: number;
-
-  @ApiProperty({ type: 'integer', example: 1 })
-  currentPage!: number;
-
-  @ApiProperty({ type: 'integer', example: 5 })
-  lastPage!: number;
+  @ApiProperty({ type: () => LegacyMetaDto })
+  meta!: LegacyMetaDto;
 
   @ApiProperty({ type: 'array', itemType: () => CountryDto })
-  items!: CountryDto[];
+  data!: CountryDto[];
 }
 
 export class ProvinceDto {
@@ -46,20 +43,11 @@ export class ProvinceDto {
 }
 
 export class ProvincePageDto {
-  @ApiProperty({ type: 'integer', example: 34 })
-  total!: number;
-
-  @ApiProperty({ type: 'integer', example: 50 })
-  perPage!: number;
-
-  @ApiProperty({ type: 'integer', example: 1 })
-  currentPage!: number;
-
-  @ApiProperty({ type: 'integer', example: 1 })
-  lastPage!: number;
+  @ApiProperty({ type: () => LegacyMetaDto })
+  meta!: LegacyMetaDto;
 
   @ApiProperty({ type: 'array', itemType: () => ProvinceDto })
-  items!: ProvinceDto[];
+  data!: ProvinceDto[];
 }
 
 export class CityDto {
@@ -77,20 +65,11 @@ export class CityDto {
 }
 
 export class CityPageDto {
-  @ApiProperty({ type: 'integer', example: 514 })
-  total!: number;
-
-  @ApiProperty({ type: 'integer', example: 50 })
-  perPage!: number;
-
-  @ApiProperty({ type: 'integer', example: 1 })
-  currentPage!: number;
-
-  @ApiProperty({ type: 'integer', example: 11 })
-  lastPage!: number;
+  @ApiProperty({ type: () => LegacyMetaDto })
+  meta!: LegacyMetaDto;
 
   @ApiProperty({ type: 'array', itemType: () => CityDto })
-  items!: CityDto[];
+  data!: CityDto[];
 }
 
 export class DistrictDto {
@@ -108,18 +87,9 @@ export class DistrictDto {
 }
 
 export class DistrictPageDto {
-  @ApiProperty({ type: 'integer', example: 7128 })
-  total!: number;
-
-  @ApiProperty({ type: 'integer', example: 50 })
-  perPage!: number;
-
-  @ApiProperty({ type: 'integer', example: 1 })
-  currentPage!: number;
-
-  @ApiProperty({ type: 'integer', example: 143 })
-  lastPage!: number;
+  @ApiProperty({ type: () => LegacyMetaDto })
+  meta!: LegacyMetaDto;
 
   @ApiProperty({ type: 'array', itemType: () => DistrictDto })
-  items!: DistrictDto[];
+  data!: DistrictDto[];
 }

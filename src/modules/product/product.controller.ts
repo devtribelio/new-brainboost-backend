@@ -23,7 +23,7 @@ export class ProductController {
   @ApiQuery({ name: 'perPage', type: 'integer', required: false, example: 100 })
   @ApiQuery({ name: 'keyword', type: 'string', required: false, example: 'react' })
   @ApiQuery({ name: 'type', type: 'string', required: false, example: 'course' })
-  @ApiResponse({ status: 200, type: () => ProductPageDto })
+  @ApiResponse({ status: 200, type: () => ProductPageDto, envelope: 'none' })
   list = async (req: Request, res: Response) => {
     const p = parsePagination(req.query as Record<string, unknown>, { perPage: 100 });
     const keyword = (req.query.keyword as string) ?? undefined;

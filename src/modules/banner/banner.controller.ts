@@ -4,7 +4,7 @@ import { okLegacy } from '@/common/utils/response.util';
 import { parsePagination } from '@/common/utils/pagination.util';
 import { serializeBanner } from '@/common/serializers';
 import { ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@/common/openapi/decorators';
-import { BannerDto } from './dto/banner.dto';
+import { BannerPageDto } from './dto/banner.dto';
 
 @ApiTags('Banner')
 export class BannerController {
@@ -16,8 +16,8 @@ export class BannerController {
   @ApiResponse({
     status: 200,
     description: 'Active banners (paginated, ordered by position)',
-    type: () => BannerDto,
-    isArray: true,
+    type: () => BannerPageDto,
+    envelope: 'none',
   })
   list = async (req: Request, res: Response) => {
     const p = parsePagination(req.query as Record<string, unknown>, { perPage: 3 });

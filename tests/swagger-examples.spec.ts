@@ -31,13 +31,18 @@ describe('OpenAPI doc — response examples', () => {
     const memberLite = doc.components.schemas.MemberLiteDto;
     expect(memberLite.properties.email.example).toBe('john.doe@example.com');
 
+    // okLegacy endpoints (banner, product/list, location/*) bypass the errCode
+    // wrap — response schema is the page DTO directly, not the envelope.
     const bannerOp = doc.paths['/api/member/data/banner'].get;
-    const bannerArrayItems =
-      bannerOp.responses['200'].content['application/json'].schema.properties.data.items;
-    expect(bannerArrayItems.$ref).toBe('#/components/schemas/BannerDto');
+    const bannerSchema = bannerOp.responses['200'].content['application/json'].schema;
+    expect(bannerSchema.$ref).toBe('#/components/schemas/BannerPageDto');
+    expect(doc.components.schemas.BannerPageDto.properties.data.items.$ref).toBe(
+      '#/components/schemas/BannerDto',
+    );
 
     const productPage = doc.components.schemas.ProductPageDto;
-    expect(productPage.properties.items.items.$ref).toBe('#/components/schemas/ProductDto');
+    expect(productPage.properties.data.items.$ref).toBe('#/components/schemas/ProductDto');
+    expect(productPage.properties.meta.$ref).toBe('#/components/schemas/LegacyMetaDto');
 
     const productDto = doc.components.schemas.ProductDto;
     expect(productDto.properties.productName.example).toBe('React Fundamentals');

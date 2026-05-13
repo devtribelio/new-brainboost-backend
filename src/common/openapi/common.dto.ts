@@ -67,3 +67,17 @@ export class GenericOkDto {
   @ApiProperty({ type: 'boolean', example: true })
   ok!: boolean;
 }
+
+// Meta block for the FE legacy http envelope emitted by `okLegacy`:
+// `{ meta: LegacyMetaDto, data: T[] }`. Distinct from `buildLegacyPage` which
+// emits a flat `{ total, perPage, currentPage, lastPage, items }` shape.
+export class LegacyMetaDto {
+  @ApiProperty({ type: 'integer', example: 137 })
+  total!: number;
+
+  @ApiProperty({ type: 'integer', example: 1, description: 'Current page (1-based)' })
+  page!: number;
+
+  @ApiProperty({ type: 'integer', example: 7 })
+  lastPage!: number;
+}

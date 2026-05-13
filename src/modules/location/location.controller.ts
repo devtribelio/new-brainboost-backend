@@ -34,6 +34,7 @@ export class LocationController {
     status: 200,
     description: 'Paginated countries (FE legacy http envelope)',
     type: () => CountryPageDto,
+    envelope: 'none',
   })
   listCountries = async (req: Request, res: Response) => {
     const p = parsePagination(req.query as Record<string, unknown>);
@@ -54,7 +55,7 @@ export class LocationController {
     example: 101,
     description: 'Parent country legacyId',
   })
-  @ApiResponse({ status: 200, type: () => ProvincePageDto })
+  @ApiResponse({ status: 200, type: () => ProvincePageDto, envelope: 'none' })
   listProvinces = async (req: Request, res: Response) => {
     const p = parsePagination(req.query as Record<string, unknown>);
     const keyword = (req.query.keyword as string) ?? undefined;
@@ -70,7 +71,7 @@ export class LocationController {
   @ApiQuery({ name: 'countryId', type: 'integer', required: false, example: 101 })
   @ApiQuery({ name: 'provinceId', type: 'integer', required: false, example: 102 })
   @ApiQuery({ name: 'keyword', type: 'string', required: false, example: 'band' })
-  @ApiResponse({ status: 200, type: () => CityPageDto })
+  @ApiResponse({ status: 200, type: () => CityPageDto, envelope: 'none' })
   listCities = async (req: Request, res: Response) => {
     const p = parsePagination(req.query as Record<string, unknown>);
     const keyword = (req.query.keyword as string) ?? undefined;
@@ -89,7 +90,7 @@ export class LocationController {
   @ApiQuery({ name: 'provinceId', type: 'integer', required: false, example: 102 })
   @ApiQuery({ name: 'cityId', type: 'integer', required: false, example: 103 })
   @ApiQuery({ name: 'keyword', type: 'string', required: false, example: 'coblong' })
-  @ApiResponse({ status: 200, type: () => DistrictPageDto })
+  @ApiResponse({ status: 200, type: () => DistrictPageDto, envelope: 'none' })
   listDistricts = async (req: Request, res: Response) => {
     const p = parsePagination(req.query as Record<string, unknown>);
     const keyword = (req.query.keyword as string) ?? undefined;

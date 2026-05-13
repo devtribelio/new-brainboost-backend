@@ -135,14 +135,17 @@ function operationFromRoute(
         collectedDtos.add(ctorRef);
         const ref = `#/components/schemas/${(ctorRef as { name: string }).name}`;
         const inner = r.isArray ? { type: 'array', items: { $ref: ref } } : { $ref: ref };
-        schemaSpec = {
-          type: 'object',
-          properties: {
-            errCode: { type: 'integer', example: 0 },
-            errMessage: { type: 'string', nullable: true, example: null },
-            data: inner,
-          },
-        };
+        schemaSpec =
+          r.envelope === 'none'
+            ? inner
+            : {
+                type: 'object',
+                properties: {
+                  errCode: { type: 'integer', example: 0 },
+                  errMessage: { type: 'string', nullable: true, example: null },
+                  data: inner,
+                },
+              };
       }
     }
     responsesSpec[String(r.status)] = {
