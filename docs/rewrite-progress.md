@@ -94,10 +94,14 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` parity met for current s
 
 ## Not started ([ ])
 
-### commerce / purchase
-- Legacy: `Controller_Commerce` + `TBCommerce` + `TBPlan` (IAP product mapping) + `TBVoucher`.
-- Scope: place order, verify Apple/Google receipts, apply voucher, create Commission rows (drives affiliate payout).
-- Blocking: affiliate parity tests should land first so commission writes are trusted.
+### commerce / purchase — Planning ([~] in design, [ ] not implemented)
+- Legacy: `Controller_Commerce` + `Controller_Payment::commerce` + `Controller_Product::checkoutSubmit` + `TBCommerce` + `TBXendit` + `TBVoucher` (TBD).
+- Scope (locked): Xendit-only (CC + VA + eWallet), 2-step (checkout → payment), voucher with bypass-charge path, affiliate commission via existing `walkInviterChain`.
+- **IAP dropped** (Apple/Google receipts not in scope — defer ke subscription module).
+- **Cart / shipping dropped** (mobile single-product only).
+- Plan: see `docs/commerce-port.md` (full schema, API, sequences, phasing P1-P6).
+- Blocking before P1: locate Xendit fee table per channel; confirm bank codes; design order code sequence.
+- Blocking before P5 (commission listener): affiliate parity tests should land first so commission writes are trusted.
 
 ### disbursement
 - Legacy: `Controller_Disbursement` + `TBDisbursement` + `TBBank` + provider integrations.
