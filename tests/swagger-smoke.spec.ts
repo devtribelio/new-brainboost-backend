@@ -47,4 +47,18 @@ describe('OpenAPI / Swagger', () => {
     const r = await request(app).get('/api/docs/').redirects(0);
     expect([200, 301]).toContain(r.status);
   });
+
+  it('routes guarded by authGuard auto-emit bearerAuth security', async () => {
+    const r = await request(app).get('/api/docs.json');
+    const productList = r.body.paths['/api/member/product/list']?.get;
+    expect(productList).toBeTruthy();
+    expect(productList.security).toEqual([{ bearerAuth: [] }]);
+  });
+
+  it('unauthenticated routes have no security entry', async () => {
+    const r = await request(app).get('/api/docs.json');
+    const oauthToken = r.body.paths['/api/member/oauth/token']?.post;
+    expect(oauthToken).toBeTruthy();
+    expect(oauthToken.security).toBeUndefined();
+  });
 });

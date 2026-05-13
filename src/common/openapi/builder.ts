@@ -77,7 +77,8 @@ function operationFromRoute(
     OPENAPI_KEYS.BEARER,
     ctor,
   );
-  const isBearer = classBearer(ctor) || bearerMap?.[route.methodKey] === true;
+  const isBearer =
+    classBearer(ctor) || bearerMap?.[route.methodKey] === true || route.bearerAuth === true;
 
   const spec: Record<string, unknown> = {
     tags,

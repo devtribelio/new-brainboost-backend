@@ -74,3 +74,11 @@ export const OPENAPI_KEYS = {
   BODY: Symbol('openapi:body'),
   BEARER: Symbol('openapi:bearer'),
 } as const;
+
+/**
+ * Marker property key. Middleware functions that read `Authorization: Bearer …`
+ * tag themselves with this so `bindRoute` can auto-emit
+ * `security: [{ bearerAuth: [] }]` on the OpenAPI operation without needing a
+ * separate `@ApiBearerAuth()` decorator on the controller method.
+ */
+export const REQUIRES_BEARER_AUTH = Symbol('openapi:requires-bearer-auth');

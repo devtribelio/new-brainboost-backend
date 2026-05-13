@@ -3,6 +3,7 @@ import { UnauthorizedException } from '@/common/exceptions';
 import { verifyAccessToken } from '@/common/utils/jwt.util';
 import type { AuthenticatedRequest } from '@/common/interfaces/authenticated-request';
 import { prisma } from '@/config/prisma';
+import { REQUIRES_BEARER_AUTH } from '@/common/openapi/types';
 
 async function assertSessionActive(sid: string | undefined): Promise<void> {
   if (!sid) {
@@ -120,3 +121,8 @@ export const anonOrMemberGuard: RequestHandler = async (req, _res, next) => {
     next(err);
   }
 };
+
+(authGuard as unknown as Record<symbol, boolean>)[REQUIRES_BEARER_AUTH] = true;
+(authGuardLenient as unknown as Record<symbol, boolean>)[REQUIRES_BEARER_AUTH] = true;
+(optionalAuthGuard as unknown as Record<symbol, boolean>)[REQUIRES_BEARER_AUTH] = true;
+(anonOrMemberGuard as unknown as Record<symbol, boolean>)[REQUIRES_BEARER_AUTH] = true;

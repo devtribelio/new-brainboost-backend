@@ -1,7 +1,7 @@
 import type { Router, RequestHandler } from 'express';
 import { asyncHandler } from '@/common/utils/async-handler';
 import { registerRoute } from './registry';
-import type { HttpMethod } from './types';
+import { REQUIRES_BEARER_AUTH, type HttpMethod } from './types';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -28,8 +28,13 @@ export function bindRoute(opts: BindOptions): void {
     );
   }
   const wrapped = asyncHandler(handlerFn.bind(opts.controller) as any);
-  const handlers = [...(opts.middlewares ?? []), wrapped];
+  const middlewares = opts.middlewares ?? [];
+  const handlers = [...middlewares, wrapped];
   opts.router[opts.method](opts.path, ...handlers);
+
+  const bearerAuth = middlewares.some(
+    (m) => (m as unknown as Record<symbol, unknown>)[REQUIRES_BEARER_AUTH] === true,
+  );
 
   registerRoute({
     controller: opts.controller.constructor as new (...args: unknown[]) => unknown,
@@ -37,5 +42,6 @@ export function bindRoute(opts: BindOptions): void {
     httpMethod: opts.method,
     path: opts.path,
     tags: opts.tags,
+    bearerAuth: bearerAuth || undefined,
   });
 }
