@@ -3,6 +3,7 @@ import { env } from '@/config/env';
 import { BadRequestException, NotFoundException } from '@/common/exceptions';
 import { computeTotals } from './utils/compute-totals';
 import { generateOrderCode } from './utils/generate-order-code';
+import { buildFeePreview, type FeePreview } from './utils/fee-preview';
 import { VoucherService } from './voucher.service';
 
 export interface StartCheckoutInput {
@@ -17,6 +18,7 @@ export interface StartCheckoutResult {
   itemTotal: number;
   voucherAmount: number;
   amount: number;
+  feePreview: FeePreview;
   expiredAt: Date;
 }
 
@@ -82,6 +84,7 @@ export class CheckoutService {
       itemTotal: totals.itemTotal,
       voucherAmount: totals.voucherAmount,
       amount: totals.amount,
+      feePreview: buildFeePreview(totals.amount),
       expiredAt,
     };
   }

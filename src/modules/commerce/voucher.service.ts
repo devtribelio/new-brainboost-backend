@@ -49,10 +49,10 @@ export class VoucherService {
       UPDATE vouchers
       SET used = used + 1, "updatedAt" = ${now}
       WHERE id = ${voucherId}::uuid
-        AND is_active = true
+        AND "isActive" = true
         AND (quota IS NULL OR used < quota)
-        AND (starts_at IS NULL OR starts_at <= ${now})
-        AND (ends_at IS NULL OR ends_at > ${now})
+        AND ("startsAt" IS NULL OR "startsAt" <= ${now})
+        AND ("endsAt" IS NULL OR "endsAt" > ${now})
     `;
     if (updated === 0) {
       throw new BadRequestException('Voucher exhausted or no longer redeemable');
