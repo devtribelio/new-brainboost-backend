@@ -63,6 +63,8 @@ model Member {
   affiliateCommissions AffiliateCommission[] @relation("AffiliateCommissionRecipient")
   affiliateVisits      AffiliateVisit[]      @relation("AffiliateVisitAffiliator")
   courseEnrollments    CourseEnrollment[]
+  commerceTransactions CommerceTransaction[]
+  commercePayments     CommercePayment[]
 
   @@map("members")
 }
@@ -237,6 +239,8 @@ model Product {
   reviews              Review[]
   affiliatePrograms    AffiliateProgram[]
   affiliateCommissions AffiliateCommission[]
+  commerceTransactions CommerceTransaction[]
+  vouchers             Voucher[]
 
   @@map("products")
 }
@@ -670,10 +674,11 @@ model AffiliateProgram {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  product     Product?              @relation(fields: [productId], references: [id])
-  affiliators MemberAffiliator[]
-  commissions AffiliateCommission[]
-  visits      AffiliateVisit[]
+  product      Product?              @relation(fields: [productId], references: [id])
+  affiliators  MemberAffiliator[]
+  commissions  AffiliateCommission[]
+  visits       AffiliateVisit[]
+  transactions CommerceTransaction[]
 
   @@index([productId])
   @@map("affiliate_programs")
@@ -695,7 +700,8 @@ model MemberAffiliator {
   member  Member           @relation("MemberAffiliatorMember", fields: [memberId], references: [id], onDelete: Cascade)
   program AffiliateProgram @relation(fields: [programId], references: [id], onDelete: Cascade)
 
-  commissions AffiliateCommission[]
+  commissions  AffiliateCommission[]
+  transactions CommerceTransaction[]
 
   @@unique([memberId, programId])
   @@index([programId])
@@ -782,6 +788,141 @@ model AffiliateVisit {
   @@index([adId])
   @@index([utmCampaign])
   @@map("affiliate_visits")
+}
+
+// ============================================================================
+// Commerce / Purchase (Xendit-only; CC + VA + eWallet; no IAP, no cart, no shipping)
+// See docs/commerce-port.md
+// ============================================================================
+
+enum CommerceTransactionStatus {
+  PENDING
+  PAID
+  EXPIRED
+  FAILED
+  REFUNDED
+  CANCELED
+}
+
+enum CommercePaymentStatus {
+  PENDING
+  SUCCESS
+  EXPIRED
+  FAILED
+  CANCELED
+}
+
+/// Order header. Snapshot price + voucher + attribution at checkout time.
+model CommerceTransaction {
+  id            String                    @id @default(uuid(7)) @db.Uuid
+  legacyId      Int?                      @unique
+  code          String                    @unique // BB-YYYYMMDD-####
+  memberId      String                    @db.Uuid
+  productId     String                    @db.Uuid
+  qty           Int                       @default(1) // reserved; always 1 for course MVP
+  itemTotal     Int                       @default(0)
+  shippingTotal Int                       @default(0) // reserved; 0 for course MVP
+  feeTotal      Int                       @default(0)
+  voucherAmount Int                       @default(0)
+  amount        Int                       @default(0) // grand total
+  voucherCode   String?
+  voucherId     String?                   @db.Uuid
+  affiliatorId  String?                   @db.Uuid
+  programId     String?                   @db.Uuid
+  status        CommerceTransactionStatus @default(PENDING)
+  paidAt        DateTime?
+  canceledAt    DateTime?
+  expiredAt     DateTime?
+  createdAt     DateTime                  @default(now())
+  updatedAt     DateTime                  @updatedAt
+
+  member     Member            @relation(fields: [memberId], references: [id])
+  product    Product           @relation(fields: [productId], references: [id])
+  affiliator MemberAffiliator? @relation(fields: [affiliatorId], references: [id])
+  program    AffiliateProgram? @relation(fields: [programId], references: [id])
+  voucher    Voucher?          @relation(fields: [voucherId], references: [id])
+  payments   CommercePayment[]
+
+  @@index([memberId, createdAt])
+  @@index([status])
+  @@index([expiredAt])
+  @@map("commerce_transactions")
+}
+
+/// Payment attempt. Multi rows per transaction (VA retry possible after expiry).
+model CommercePayment {
+  id               String                @id @default(uuid(7)) @db.Uuid
+  legacyId         Int?                  @unique
+  transactionId    String                @db.Uuid
+  memberId         String                @db.Uuid
+  paymentType      String // "cc" | "va" | "eWallet" | "voucher"
+  bank             String? // BCA / BNI / MANDIRI / BRI / PERMATA
+  ewalletType      String? // OVO / DANA / LINKAJA / GOPAY / SHOPEEPAY
+  amount           Int
+  fee              Int                   @default(0)
+  acceptedAmount   Int                   @default(0)
+  status           CommercePaymentStatus @default(PENDING)
+  vendorStatus     String?
+  externalId       String?
+  xenditId         String?               @unique
+  xenditVaId       String?
+  vaNumber         String?
+  cardTokenId      String?
+  cardMaskedNumber String?
+  cardBrand        String?
+  expiredAt        DateTime?
+  paidAt           DateTime?
+  logRequest       Json?
+  logResponse      Json?
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
+
+  transaction CommerceTransaction    @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  member      Member                 @relation(fields: [memberId], references: [id])
+  events      CommercePaymentEvent[]
+
+  @@index([transactionId])
+  @@index([status, expiredAt])
+  @@map("commerce_payments")
+}
+
+/// Audit trail of payment status transitions. Useful for Xendit re-delivery debugging.
+model CommercePaymentEvent {
+  id         String                 @id @default(uuid(7)) @db.Uuid
+  paymentId  String                 @db.Uuid
+  source     String // "checkout" | "webhook" | "poll" | "manual"
+  fromStatus CommercePaymentStatus?
+  toStatus   CommercePaymentStatus
+  payload    Json?
+  createdAt  DateTime               @default(now())
+
+  payment CommercePayment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+
+  @@index([paymentId, createdAt])
+  @@map("commerce_payment_events")
+}
+
+/// Discount voucher. Legacy `voucher` table parity.
+model Voucher {
+  id        String    @id @default(uuid(7)) @db.Uuid
+  legacyId  Int?      @unique
+  code      String    @unique
+  productId String?   @db.Uuid // null = global
+  type      String // "PERCENT" | "AMOUNT"
+  value     Int
+  maxAmount Int? // cap for PERCENT
+  quota     Int? // null = unlimited
+  used      Int       @default(0)
+  startsAt  DateTime?
+  endsAt    DateTime?
+  isActive  Boolean   @default(true)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  product      Product?              @relation(fields: [productId], references: [id])
+  transactions CommerceTransaction[]
+
+  @@map("vouchers")
 }
 
 // ============================================================================

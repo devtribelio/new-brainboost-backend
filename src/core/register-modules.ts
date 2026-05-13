@@ -20,6 +20,8 @@ import { ReplyModule } from '@/modules/reply/reply.module';
 import { NetworkModule } from '@/modules/network/network.module';
 import { ReportModule } from '@/modules/report/report.module';
 import { NotificationModule } from '@/modules/notification/notification.module';
+import { CommerceModule } from '@/modules/commerce/commerce.module';
+import { WebhookModule } from '@/modules/webhook/webhook.module';
 
 const modules: AppModule[] = [
   AuthModule,
@@ -32,6 +34,7 @@ const modules: AppModule[] = [
   ProductModule,
   CommissionModule,
   AffiliateModule,
+  CommerceModule,
   TopicModule,
   PostModule,
   CommentModule,
@@ -39,6 +42,7 @@ const modules: AppModule[] = [
   NetworkModule,
   ReportModule,
   NotificationModule,
+  WebhookModule,
 ];
 
 export function registerModules(): Router {
