@@ -37,7 +37,7 @@ Status legend: 🔴 not started · ⚠️ partial (legacy-shape consumed but no 
 
 ---
 
-## Media Storage
+## Media Storage 
 
 ### BunnyCDN (Stream + Storage)  🔴
 
