@@ -12,7 +12,6 @@ describe('auth single-session enforcement', () => {
     await request(app).post('/api/member/auth/register').send({
       email,
       password,
-      confirmPassword: password,
       fullName: 'Single Session Tester',
     });
   });

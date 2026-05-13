@@ -13,7 +13,6 @@ describe('legacy-aligned API smoke', () => {
     await request(app).post('/api/member/auth/register').send({
       email,
       password,
-      confirmPassword: password,
       fullName: 'Smoke Tester',
     });
     const res = await request(app)

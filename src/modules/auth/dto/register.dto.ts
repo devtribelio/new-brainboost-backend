@@ -12,11 +12,6 @@ export class RegisterDto {
   @MinLength(6)
   password!: string;
 
-  @ApiProperty({ format: 'password', example: 'secret123', description: 'must equal password' })
-  @IsString()
-  @MinLength(6)
-  confirmPassword!: string;
-
   @ApiProperty({
     example: 'Jane Doe',
     description: '4-100 chars. Accepts `name` as alias (FE legacy register sends `name`).',

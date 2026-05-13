@@ -107,10 +107,6 @@ export class AuthService {
   }
 
   async register(dto: RegisterDto): Promise<TokenBundle> {
-    if (dto.password !== dto.confirmPassword) {
-      throw new BadRequestException('password and confirmPassword do not match');
-    }
-
     const conflicts = await prisma.member.findFirst({
       where: {
         OR: [
