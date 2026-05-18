@@ -3,7 +3,7 @@ import { NotificationService } from './notification.service';
 import { ok } from '@/common/utils/response.util';
 import { UnauthorizedException } from '@/common/exceptions';
 import { buildLegacyPage, parsePagination } from '@/common/utils/pagination.util';
-import { serializeNotification } from '@/common/serializers';
+import { serializeNotification } from './notification.serializer';
 import type { AuthenticatedRequest } from '@/common/interfaces/authenticated-request';
 import {
   ApiBearerAuth,

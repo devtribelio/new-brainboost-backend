@@ -3,7 +3,7 @@ import { ProductService } from './product.service';
 import { ok, okLegacy } from '@/common/utils/response.util';
 import { BadRequestException } from '@/common/exceptions';
 import { parsePagination } from '@/common/utils/pagination.util';
-import { serializeProduct, serializeCourseDetailLegacy } from '@/common/serializers';
+import { serializeProduct, serializeCourseDetailLegacy } from './product.serializer';
 import { prisma } from '@/config/prisma';
 import {
   ApiBearerAuth,

@@ -3,7 +3,7 @@ import { CommentService } from './comment.service';
 import { ok } from '@/common/utils/response.util';
 import { BadRequestException, UnauthorizedException } from '@/common/exceptions';
 import { buildLegacyPage, parsePagination } from '@/common/utils/pagination.util';
-import { serializeComment } from '@/common/serializers';
+import { serializeComment } from './comment.serializer';
 import type { AuthenticatedRequest } from '@/common/interfaces/authenticated-request';
 import {
   ApiBearerAuth,

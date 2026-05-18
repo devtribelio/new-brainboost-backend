@@ -3,7 +3,7 @@ import { NetworkService } from './network.service';
 import { ok } from '@/common/utils/response.util';
 import { BadRequestException, UnauthorizedException } from '@/common/exceptions';
 import { buildLegacyPage, parsePagination } from '@/common/utils/pagination.util';
-import { serializeNetworkMemberLegacy } from '@/common/serializers';
+import { serializeNetworkMemberLegacy } from './network.serializer';
 import type { AuthenticatedRequest } from '@/common/interfaces/authenticated-request';
 import {
   ApiBearerAuth,

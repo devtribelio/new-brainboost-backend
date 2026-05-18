@@ -7,7 +7,7 @@ import {
   serializeProvince,
   serializeCity,
   serializeDistrict,
-} from '@/common/serializers';
+} from './location.serializer';
 import { ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@/common/openapi/decorators';
 import {
   CityPageDto,

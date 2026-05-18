@@ -3,7 +3,7 @@ import { ProfileService } from './profile.service';
 import { prisma } from '@/config/prisma';
 import { ok } from '@/common/utils/response.util';
 import { UnauthorizedException } from '@/common/exceptions';
-import { serializeMemberFull } from '@/common/serializers';
+import { serializeMemberFull } from '@/modules/member/member.serializer';
 import type { AuthenticatedRequest } from '@/common/interfaces/authenticated-request';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@/common/openapi/decorators';
 import { MemberFullDto } from '@/common/openapi/member.dto';

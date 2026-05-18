@@ -4,7 +4,7 @@ import { prisma } from '@/config/prisma';
 import { env } from '@/config/env';
 import { ok } from '@/common/utils/response.util';
 import type { AuthenticatedRequest } from '@/common/interfaces/authenticated-request';
-import { serializeMemberFull } from '@/common/serializers';
+import { serializeMemberFull } from './member.serializer';
 import {
   ApiBearerAuth,
   ApiOperation,

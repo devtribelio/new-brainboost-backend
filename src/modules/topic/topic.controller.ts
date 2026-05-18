@@ -3,7 +3,7 @@ import { TopicService } from './topic.service';
 import { ok } from '@/common/utils/response.util';
 import { BadRequestException, UnauthorizedException } from '@/common/exceptions';
 import { buildLegacyPage, parsePagination } from '@/common/utils/pagination.util';
-import { serializeTopic } from '@/common/serializers';
+import { serializeTopic } from './topic.serializer';
 import type { AuthenticatedRequest } from '@/common/interfaces/authenticated-request';
 import {
   ApiBearerAuth,

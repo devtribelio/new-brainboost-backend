@@ -2,7 +2,7 @@ import type { Request, Response } from 'express';
 import { BannerService } from './banner.service';
 import { okLegacy } from '@/common/utils/response.util';
 import { parsePagination } from '@/common/utils/pagination.util';
-import { serializeBanner } from '@/common/serializers';
+import { serializeBanner } from './banner.serializer';
 import { ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@/common/openapi/decorators';
 import { BannerPageDto } from './dto/banner.dto';
 
