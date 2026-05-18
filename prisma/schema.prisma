@@ -105,16 +105,18 @@ model Device {
 }
 
 model RefreshToken {
-  id        String    @id @default(uuid(7)) @db.Uuid
-  memberId  String    @db.Uuid
-  token     String    @unique
-  expiresAt DateTime
-  revokedAt DateTime?
-  createdAt DateTime  @default(now())
+  id         String    @id @default(uuid(7)) @db.Uuid
+  memberId   String    @db.Uuid
+  token      String    @unique
+  clientType String    @default("mobile")
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
 
   member Member @relation(fields: [memberId], references: [id], onDelete: Cascade)
 
   @@index([memberId])
+  @@index([memberId, clientType, revokedAt])
   @@map("refresh_tokens")
 }
 

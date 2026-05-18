@@ -51,6 +51,18 @@ function timingSafeStringEqual(a: string, b: string): boolean {
   return timingSafeEqual(ab, bb);
 }
 
+type ClientType = 'mobile' | 'web';
+
+/**
+ * Resolve session bucket. `web` only when explicitly signaled; everything else
+ * (including legacy `ios`/`android` from RegisterDto.registerFrom, missing
+ * field, or unknown value) falls into the `mobile` bucket so deployed apps
+ * keep single-login behavior.
+ */
+function normalizeClientType(raw: string | null | undefined): ClientType {
+  return raw === 'web' ? 'web' : 'mobile';
+}
+
 function mapDtoPurpose(
   p: string,
 ): 'forgot-password' | 'pre-registration' | 'verify-phone' | 'verify-email' {
@@ -201,7 +213,7 @@ export class AuthService {
       },
     });
 
-    return this.issueTokenBundle(member.id, member.email);
+    return this.issueTokenBundle(member.id, member.email, normalizeClientType(dto.registerFrom));
   }
 
   private async generateUniqueMemberCode(): Promise<string> {
@@ -235,7 +247,7 @@ export class AuthService {
     const matches = await this.verifyPassword(dto.password, member);
     if (!matches) throw new UnauthorizedException('Invalid credentials');
 
-    return this.issueTokenBundle(member.id, member.email);
+    return this.issueTokenBundle(member.id, member.email, normalizeClientType(dto.clientType));
   }
 
   /**
@@ -295,7 +307,15 @@ export class AuthService {
     const member = await prisma.member.findUnique({ where: { id: payload.sub } });
     if (!member || !member.isActive) throw new UnauthorizedException('Member not active');
 
-    return this.issueTokenBundle(member.id, member.email);
+    // Rotate the specific row only — refresh must not affect other sessions in
+    // the same bucket (web is multi-session) or in the other bucket. Bucket is
+    // inherited from the existing row so a stolen refresh can't switch bucket.
+    return this.rotateRefreshToken(
+      stored.id,
+      member.id,
+      member.email,
+      normalizeClientType(stored.clientType),
+    );
   }
 
   async registerDevice(memberId: string, dto: RegisterDeviceDto) {
@@ -481,7 +501,11 @@ export class AuthService {
     return { member_id: member.legacyId ?? member.id, verified: true };
   }
 
-  private async issueTokenBundle(memberId: string, email: string): Promise<TokenBundle> {
+  private async issueTokenBundle(
+    memberId: string,
+    email: string,
+    clientType: ClientType,
+  ): Promise<TokenBundle> {
     const tokenId = randomUUID();
     const accessToken = signAccessToken({ sub: memberId, email, sid: tokenId });
     const refreshToken = signRefreshToken({ sub: memberId, tokenId });
@@ -489,15 +513,58 @@ export class AuthService {
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + 30);
 
-    // Single-session: revoke all prior live refresh tokens for this member, then mint.
-    // Atomic so a concurrent login can't slip a token between revoke and insert.
+    // Bucket-scoped single-session:
+    //  - mobile login revokes prior live mobile sessions (kicks other phones)
+    //  - web login is multi-session (skip revoke; many browsers may coexist)
+    // Both run atomically so a concurrent login can't slip a row through.
+    const create = prisma.refreshToken.create({
+      data: { id: tokenId, memberId, token: refreshToken, expiresAt, clientType },
+    });
+    if (clientType === 'mobile') {
+      await prisma.$transaction([
+        prisma.refreshToken.updateMany({
+          where: { memberId, clientType: 'mobile', revokedAt: null },
+          data: { revokedAt: new Date() },
+        }),
+        create,
+      ]);
+    } else {
+      await create;
+    }
+
+    return {
+      access_token: accessToken,
+      refresh_token: refreshToken,
+      token_type: 'Bearer',
+      expires_in: parseExpiresInToSeconds(env.jwt.accessExpiresIn),
+    };
+  }
+
+  /**
+   * Per-row rotation on refresh_token grant: revoke the caller's row, mint a
+   * new row in the same bucket. Does not touch sibling sessions — mobile
+   * kicking is the responsibility of password-grant login, not refresh.
+   */
+  private async rotateRefreshToken(
+    oldTokenId: string,
+    memberId: string,
+    email: string,
+    clientType: ClientType,
+  ): Promise<TokenBundle> {
+    const tokenId = randomUUID();
+    const accessToken = signAccessToken({ sub: memberId, email, sid: tokenId });
+    const refreshToken = signRefreshToken({ sub: memberId, tokenId });
+
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + 30);
+
     await prisma.$transaction([
-      prisma.refreshToken.updateMany({
-        where: { memberId, revokedAt: null },
+      prisma.refreshToken.update({
+        where: { id: oldTokenId },
         data: { revokedAt: new Date() },
       }),
       prisma.refreshToken.create({
-        data: { id: tokenId, memberId, token: refreshToken, expiresAt },
+        data: { id: tokenId, memberId, token: refreshToken, expiresAt, clientType },
       }),
     ]);
 
