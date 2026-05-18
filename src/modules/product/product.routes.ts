@@ -27,6 +27,22 @@ export function productRoutes(): Router {
   bindRoute({
     router,
     controller: ctrl,
+    method: 'get',
+    path: '/product/list/public',
+    handlerKey: 'list',
+    middlewares: [optionalAuthGuard],
+  });
+  bindRoute({
+    router,
+    controller: ctrl,
+    method: 'get',
+    path: '/product/course/detail/public',
+    handlerKey: 'courseDetail',
+    middlewares: [optionalAuthGuard],
+  });
+  bindRoute({
+    router,
+    controller: ctrl,
     method: 'post',
     path: '/product/course/share',
     handlerKey: 'shareCourse',
