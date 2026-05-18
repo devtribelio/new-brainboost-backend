@@ -18,6 +18,7 @@ export function mountSwagger(app: Express, prefix = '/api/docs'): void {
   });
 
   app.get(`${prefix}.json`, (_req: Request, res: Response) => {
+    res.set('Cache-Control', 'no-store');
     res.json(document);
   });
 
