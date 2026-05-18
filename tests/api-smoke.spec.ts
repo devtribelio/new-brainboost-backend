@@ -149,18 +149,8 @@ describe('legacy-aligned API smoke', () => {
     expect(Array.isArray(r.body.data.rows)).toBe(true);
   });
 
-  it('webhook routes reject without token (POST /webhook/xendit/va → 401)', async () => {
-    const r = await request(app).post('/api/webhook/xendit/va').send({});
-    expect(r.status).toBe(401);
-  });
-
-  it('webhook routes reject without token (POST /webhook/xendit/ewallet → 401)', async () => {
-    const r = await request(app).post('/api/webhook/xendit/ewallet').send({});
-    expect(r.status).toBe(401);
-  });
-
-  it('webhook routes reject without token (POST /webhook/xendit/cc → 401)', async () => {
-    const r = await request(app).post('/api/webhook/xendit/cc').send({});
+  it('webhook routes reject without token (POST /webhook/xendit/invoice → 401)', async () => {
+    const r = await request(app).post('/api/webhook/xendit/invoice').send({});
     expect(r.status).toBe(401);
   });
 });

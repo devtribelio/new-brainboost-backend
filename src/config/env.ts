@@ -60,19 +60,21 @@ export const env = {
   xendit: {
     secretKey: optional('XENDIT_SECRET_KEY', ''),
     callbackToken: optional('XENDIT_CALLBACK_TOKEN', ''),
-    baseUrl: optional('XENDIT_BASE_URL', 'https://api.xendit.co'),
+    invoiceSuccessUrl: optional(
+      'XENDIT_INVOICE_SUCCESS_URL',
+      'brainboost://payment/result?status=success',
+    ),
+    invoiceFailureUrl: optional(
+      'XENDIT_INVOICE_FAILURE_URL',
+      'brainboost://payment/result?status=failure',
+    ),
   },
   commerce: {
     transactionExpiryHours: Number.parseInt(
       optional('COMMERCE_TRANSACTION_EXPIRY_HOURS', '24'),
       10,
     ),
-    vaExpiryHours: Number.parseInt(optional('COMMERCE_VA_EXPIRY_HOURS', '24'), 10),
-    ewalletExpiryMin: {
-      dana: Number.parseInt(optional('COMMERCE_EWALLET_DANA_EXPIRY_MIN', '30'), 10),
-      linkaja: Number.parseInt(optional('COMMERCE_EWALLET_LINKAJA_EXPIRY_MIN', '5'), 10),
-      default: Number.parseInt(optional('COMMERCE_EWALLET_DEFAULT_EXPIRY_MIN', '2'), 10),
-    },
+    invoiceExpiryHours: Number.parseInt(optional('COMMERCE_INVOICE_EXPIRY_HOURS', '24'), 10),
   },
 } as const;
 

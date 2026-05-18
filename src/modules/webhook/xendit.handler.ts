@@ -1,32 +1,46 @@
 import { prisma } from '@/config/prisma';
 import { logger } from '@/config/logger';
 import { commerceEvents } from '@/common/events/commerce-events';
+import { mapInvoiceStatus } from '@/modules/commerce/payment.service';
 import type { CommercePaymentStatus } from '@prisma/client';
 
-export type XenditChannel = 'va' | 'ewallet' | 'cc';
+type RawPayload = Record<string, unknown>;
 
+export interface HandleResult {
+  noop: boolean;
+  reason?: string;
+}
+
+/**
+ * Xendit Invoice webhook handler. Flat envelope — fields at root (no `data:` wrapper).
+ */
 export class XenditWebhookHandler {
-  async handle(channel: XenditChannel, payload: Record<string, unknown>): Promise<{ noop: boolean }> {
-    const xenditId = this.extractXenditId(channel, payload);
-    if (!xenditId) {
-      logger.warn({ channel, payload }, '[webhook] missing xenditId in payload');
-      return { noop: true };
+  async handle(payload: RawPayload): Promise<HandleResult> {
+    const invoiceId = payload['id'] as string | undefined;
+    const externalId = payload['external_id'] as string | undefined;
+
+    if (!invoiceId && !externalId) {
+      logger.warn({ payload }, '[webhook] missing id/external_id');
+      return { noop: true, reason: 'missing_id' };
     }
 
     const payment = await prisma.commercePayment.findFirst({
-      where: this.lookupClause(channel, xenditId),
+      where: invoiceId ? { xenditId: invoiceId } : { externalId },
     });
     if (!payment) {
-      logger.warn({ channel, xenditId }, '[webhook] no matching CommercePayment');
-      return { noop: true };
+      logger.warn({ invoiceId, externalId }, '[webhook] no matching CommercePayment');
+      return { noop: true, reason: 'unknown_payment' };
     }
 
-    if (this.isTerminal(payment.status)) {
-      logger.info({ paymentId: payment.id, status: payment.status }, '[webhook] noop (terminal)');
-      return { noop: true };
+    if (isTerminal(payment.status)) {
+      logger.info(
+        { paymentId: payment.id, status: payment.status },
+        '[webhook] noop (terminal)',
+      );
+      return { noop: true, reason: 'already_terminal' };
     }
 
-    const nextStatus = this.mapStatus(channel, payload);
+    const nextStatus = mapInvoiceStatus(payload['status'] as string | undefined);
     const now = new Date();
 
     await prisma.$transaction(async (txdb) => {
@@ -35,6 +49,8 @@ export class XenditWebhookHandler {
         data: {
           status: nextStatus,
           vendorStatus: (payload['status'] as string) ?? null,
+          bank: (payload['payment_channel'] as string) ?? payment.bank,
+          vaNumber: (payload['payment_destination'] as string) ?? payment.vaNumber,
           logResponse: payload as unknown as object,
           paidAt: nextStatus === 'SUCCESS' ? now : payment.paidAt,
           updatedAt: now,
@@ -98,46 +114,14 @@ export class XenditWebhookHandler {
       commerceEvents.emit('commerce.payment.failed', {
         paymentId: payment.id,
         transactionId: payment.transactionId,
-        reason: (payload['failure_reason'] as string) ?? undefined,
+        reason: undefined,
       });
     }
 
     return { noop: false };
   }
+}
 
-  private isTerminal(s: CommercePaymentStatus): boolean {
-    return s === 'SUCCESS' || s === 'EXPIRED' || s === 'FAILED' || s === 'CANCELED';
-  }
-
-  private extractXenditId(channel: XenditChannel, payload: Record<string, unknown>): string | null {
-    if (channel === 'va') {
-      return (
-        (payload['callback_virtual_account_id'] as string) ??
-        (payload['id'] as string) ??
-        null
-      );
-    }
-    return (payload['id'] as string) ?? null;
-  }
-
-  private lookupClause(channel: XenditChannel, xenditId: string) {
-    if (channel === 'va') {
-      return { OR: [{ xenditVaId: xenditId }, { xenditId }] };
-    }
-    return { xenditId };
-  }
-
-  private mapStatus(
-    channel: XenditChannel,
-    payload: Record<string, unknown>,
-  ): CommercePaymentStatus {
-    const raw = String(payload['status'] ?? '').toUpperCase();
-    if (raw === 'COMPLETED' || raw === 'PAID' || raw === 'SUCCEEDED' || raw === 'SUCCESS') {
-      return 'SUCCESS';
-    }
-    if (raw === 'EXPIRED') return 'EXPIRED';
-    if (raw === 'FAILED') return 'FAILED';
-    if (channel === 'va' && raw === 'ACTIVE') return 'PENDING';
-    return 'PENDING';
-  }
+function isTerminal(s: CommercePaymentStatus): boolean {
+  return s === 'SUCCESS' || s === 'EXPIRED' || s === 'FAILED' || s === 'CANCELED';
 }

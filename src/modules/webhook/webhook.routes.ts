@@ -8,28 +8,13 @@ export function webhookRoutes(): Router {
   const router = Router();
   const ctrl = new WebhookController(new XenditWebhookHandler());
 
+  // Xendit Invoice callback — Invoice API hosted checkout flow.
   bindRoute({
     router,
     controller: ctrl,
     method: 'post',
-    path: '/xendit/va',
-    handlerKey: 'xenditVa',
-    middlewares: [xenditCallbackGuard],
-  });
-  bindRoute({
-    router,
-    controller: ctrl,
-    method: 'post',
-    path: '/xendit/ewallet',
-    handlerKey: 'xenditEwallet',
-    middlewares: [xenditCallbackGuard],
-  });
-  bindRoute({
-    router,
-    controller: ctrl,
-    method: 'post',
-    path: '/xendit/cc',
-    handlerKey: 'xenditCc',
+    path: '/xendit/invoice',
+    handlerKey: 'xenditInvoice',
     middlewares: [xenditCallbackGuard],
   });
 

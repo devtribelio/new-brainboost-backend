@@ -864,10 +864,12 @@ model CommercePayment {
   status           CommercePaymentStatus @default(PENDING)
   vendorStatus     String?
   externalId       String?
-  xenditId         String?               @unique
-  xenditVaId       String?
+  xenditId         String?               @unique // pr-xxx (PaymentRequest id)
+  xenditPaymentMethodId String?          // pm-xxx (PaymentMethod id from SDK)
+  paymentMethodId  String?               // pm-xxx supplied by mobile for CC charges
   vaNumber         String?
-  cardTokenId      String?
+  checkoutUrl      String?               // eWallet WEB/MOBILE AUTH redirect (webview fallback)
+  deeplinkUrl      String?               // eWallet DEEPLINK AUTH (open native eWallet app)
   cardMaskedNumber String?
   cardBrand        String?
   expiredAt        DateTime?

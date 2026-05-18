@@ -1,32 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@/common/openapi/decorators';
 
-export class FeePreviewBanksDto {
-  @ApiProperty({ example: 4000 }) BCA!: number;
-  @ApiProperty({ example: 4000 }) BNI!: number;
-  @ApiProperty({ example: 4000 }) MANDIRI!: number;
-  @ApiProperty({ example: 5500 }) BRI!: number;
-  @ApiProperty({ example: 4500 }) PERMATA!: number;
-}
-
-export class FeePreviewEwalletDto {
-  @ApiProperty({ example: 9900 }) OVO!: number;
-  @ApiProperty({ example: 6750 }) DANA!: number;
-  @ApiProperty({ example: 6750 }) LINKAJA!: number;
-  @ApiProperty({ example: 9000 }) GOPAY!: number;
-  @ApiProperty({ example: 9000 }) SHOPEEPAY!: number;
-}
-
-export class FeePreviewDto {
-  @ApiProperty({ example: 12500 })
-  cc!: number;
-
-  @ApiProperty({ type: () => FeePreviewBanksDto })
-  va!: FeePreviewBanksDto;
-
-  @ApiProperty({ type: () => FeePreviewEwalletDto })
-  eWallet!: FeePreviewEwalletDto;
-}
-
 export class StartCheckoutResultDto {
   @ApiProperty({ format: 'uuid' })
   transactionId!: string;
@@ -42,9 +15,6 @@ export class StartCheckoutResultDto {
 
   @ApiProperty({ example: 450_000 })
   amount!: number;
-
-  @ApiProperty({ type: () => FeePreviewDto })
-  feePreview!: FeePreviewDto;
 
   @ApiProperty({ format: 'date-time' })
   expiredAt!: string;
@@ -63,31 +33,20 @@ export class CreatePaymentResultDto {
   })
   transactionStatus!: string;
 
-  @ApiPropertyOptional({ nullable: true, example: '8888812345678901' })
-  vaNumber?: string | null;
-
-  @ApiPropertyOptional({ nullable: true, example: 'BCA' })
-  bank?: string | null;
-
-  @ApiPropertyOptional({ nullable: true, example: 'OVO' })
-  ewalletType?: string | null;
-
-  @ApiPropertyOptional({ nullable: true })
-  redirectUrl?: string | null;
-
-  @ApiPropertyOptional({ nullable: true })
-  deeplinkUrl?: string | null;
-
-  @ApiPropertyOptional({ nullable: true })
-  qrString?: string | null;
+  @ApiPropertyOptional({
+    nullable: true,
+    example: 'https://checkout-staging.xendit.co/web/0193abc',
+    description: 'Xendit-hosted checkout page. Open in mobile WebView.',
+  })
+  invoiceUrl?: string | null;
 
   @ApiPropertyOptional({ nullable: true, format: 'date-time' })
   expiredAt?: string | null;
 
-  @ApiProperty({ example: 462000 })
+  @ApiProperty({ example: 450_000 })
   amount!: number;
 
-  @ApiProperty({ example: 4000 })
+  @ApiProperty({ example: 0 })
   fee!: number;
 }
 
@@ -95,20 +54,18 @@ export class ActivePaymentDto {
   @ApiProperty({ format: 'uuid' })
   paymentId!: string;
 
-  @ApiProperty({ example: 'va', enum: ['cc', 'va', 'eWallet', 'voucher'] })
+  @ApiProperty({ example: 'invoice', enum: ['invoice', 'voucher'] })
   paymentType!: string;
 
   @ApiProperty({ example: 'PENDING', enum: ['PENDING', 'SUCCESS', 'EXPIRED', 'FAILED', 'CANCELED'] })
   status!: string;
 
-  @ApiPropertyOptional({ nullable: true, example: '8888812345678901' })
-  vaNumber?: string | null;
-
-  @ApiPropertyOptional({ nullable: true, example: 'BCA' })
-  bank?: string | null;
-
-  @ApiPropertyOptional({ nullable: true, example: 'OVO' })
-  ewalletType?: string | null;
+  @ApiPropertyOptional({
+    nullable: true,
+    example: 'https://checkout-staging.xendit.co/web/0193abc',
+    description: 'Xendit-hosted checkout page. Open in mobile WebView.',
+  })
+  invoiceUrl?: string | null;
 
   @ApiPropertyOptional({ nullable: true, format: 'date-time' })
   expiredAt?: string | null;
@@ -138,7 +95,7 @@ export class TransactionStatusResultDto {
   })
   status!: string;
 
-  @ApiProperty({ example: 204000 })
+  @ApiProperty({ example: 450_000 })
   amount!: number;
 
   @ApiPropertyOptional({ nullable: true, format: 'date-time' })

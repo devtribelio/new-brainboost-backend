@@ -63,10 +63,6 @@ describe('commerce checkout flow', () => {
     expect(r.body.data.itemTotal).toBe(500_000);
     expect(r.body.data.voucherAmount).toBe(0);
     expect(r.body.data.amount).toBe(500_000);
-    expect(r.body.data.feePreview).toBeDefined();
-    expect(r.body.data.feePreview.cc).toBeGreaterThan(0);
-    expect(r.body.data.feePreview.va.BCA).toBeGreaterThan(0);
-    expect(r.body.data.feePreview.eWallet.OVO).toBeGreaterThan(0);
 
     // tx persisted PENDING
     const tx = await prisma.commerceTransaction.findUnique({

@@ -11,12 +11,34 @@ import {
 } from './fixtures';
 
 const CALLBACK_TOKEN = 'test-xendit-token';
+const ROUTE = '/api/webhook/xendit/invoice';
 
 function uid(): string {
   return `xnd-${Math.random().toString(36).slice(2, 12)}`;
 }
 
-describe('Xendit webhook callbacks', () => {
+function invoiceCallback(opts: {
+  invoiceId: string;
+  status: string;
+  paymentChannel?: string;
+  paymentDestination?: string;
+  paidAmount?: number;
+}): Record<string, unknown> {
+  return {
+    id: opts.invoiceId,
+    external_id: `commerce-${uid()}`,
+    status: opts.status,
+    amount: 500_000,
+    paid_amount: opts.paidAmount ?? 500_000,
+    currency: 'IDR',
+    payment_method: 'BANK_TRANSFER',
+    payment_channel: opts.paymentChannel ?? 'BCA',
+    payment_destination: opts.paymentDestination ?? '8888812345678901',
+    paid_at: new Date().toISOString(),
+  };
+}
+
+describe('Xendit Invoice webhook', () => {
   const app = buildApp();
   let memberId = '';
   let productId = '';
@@ -46,52 +68,48 @@ describe('Xendit webhook callbacks', () => {
   });
 
   it('rejects missing token (401)', async () => {
-    const r = await request(app).post('/api/webhook/xendit/va').send({ id: 'x' });
+    const r = await request(app)
+      .post(ROUTE)
+      .send(invoiceCallback({ invoiceId: 'x', status: 'PAID' }));
     expect(r.status).toBe(401);
   });
 
   it('rejects wrong token (401)', async () => {
     const r = await request(app)
-      .post('/api/webhook/xendit/va')
+      .post(ROUTE)
       .set('x-callback-token', 'wrong-token')
-      .send({ id: 'x' });
+      .send(invoiceCallback({ invoiceId: 'x', status: 'PAID' }));
     expect(r.status).toBe(401);
   });
 
-  it('VA callback flips PENDING → SUCCESS + tx PAID + emits event', async () => {
+  it('PAID → SUCCESS + tx PAID + emits event', async () => {
     const tx = await createPendingTransaction(memberId, productId, 500_000);
-    const xenditId = uid();
+    const invoiceId = `inv-${uid()}`;
     const payment = await prisma.commercePayment.create({
       data: {
         transactionId: tx.id,
         memberId,
-        paymentType: 'va',
-        bank: 'BCA',
+        paymentType: 'invoice',
         amount: 500_000,
         status: 'PENDING',
         externalId: uid(),
-        xenditId,
-        xenditVaId: xenditId,
-        vaNumber: '8888812345678901',
+        xenditId: invoiceId,
       },
     });
 
     const r = await request(app)
-      .post('/api/webhook/xendit/va')
+      .post(ROUTE)
       .set('x-callback-token', CALLBACK_TOKEN)
-      .send({
-        callback_virtual_account_id: xenditId,
-        status: 'COMPLETED',
-        amount: 500_000,
-      });
+      .send(invoiceCallback({ invoiceId, status: 'PAID' }));
 
     expect(r.status).toBe(200);
-    expect(r.body.received).toBe(true);
     expect(r.body.noop).toBe(false);
 
     const after = await prisma.commercePayment.findUnique({ where: { id: payment.id } });
     expect(after?.status).toBe('SUCCESS');
     expect(after?.paidAt).not.toBeNull();
+    expect(after?.bank).toBe('BCA');
+    expect(after?.vaNumber).toBe('8888812345678901');
 
     const txAfter = await prisma.commerceTransaction.findUnique({ where: { id: tx.id } });
     expect(txAfter?.status).toBe('PAID');
@@ -100,27 +118,25 @@ describe('Xendit webhook callbacks', () => {
     expect((successEvents[0] as { paymentId: string }).paymentId).toBe(payment.id);
   });
 
-  it('VA callback EXPIRED → tx EXPIRED + emits expired event', async () => {
+  it('EXPIRED → tx EXPIRED + emits expired event', async () => {
     const tx = await createPendingTransaction(memberId, productId, 500_000);
-    const xenditId = uid();
+    const invoiceId = `inv-${uid()}`;
     const payment = await prisma.commercePayment.create({
       data: {
         transactionId: tx.id,
         memberId,
-        paymentType: 'va',
-        bank: 'BNI',
+        paymentType: 'invoice',
         amount: 500_000,
         status: 'PENDING',
         externalId: uid(),
-        xenditId,
-        xenditVaId: xenditId,
+        xenditId: invoiceId,
       },
     });
 
     const r = await request(app)
-      .post('/api/webhook/xendit/va')
+      .post(ROUTE)
       .set('x-callback-token', CALLBACK_TOKEN)
-      .send({ callback_virtual_account_id: xenditId, status: 'EXPIRED' });
+      .send(invoiceCallback({ invoiceId, status: 'EXPIRED' }));
 
     expect(r.status).toBe(200);
     const after = await prisma.commercePayment.findUnique({ where: { id: payment.id } });
@@ -130,82 +146,26 @@ describe('Xendit webhook callbacks', () => {
     expect(expiredEvents).toHaveLength(1);
   });
 
-  it('eWallet callback SUCCESS', async () => {
-    const tx = await createPendingTransaction(memberId, productId, 500_000);
-    const xenditId = uid();
-    const payment = await prisma.commercePayment.create({
-      data: {
-        transactionId: tx.id,
-        memberId,
-        paymentType: 'eWallet',
-        ewalletType: 'OVO',
-        amount: 500_000,
-        status: 'PENDING',
-        externalId: uid(),
-        xenditId,
-      },
-    });
-
-    const r = await request(app)
-      .post('/api/webhook/xendit/ewallet')
-      .set('x-callback-token', CALLBACK_TOKEN)
-      .send({ id: xenditId, status: 'SUCCEEDED' });
-
-    expect(r.status).toBe(200);
-    const after = await prisma.commercePayment.findUnique({ where: { id: payment.id } });
-    expect(after?.status).toBe('SUCCESS');
-    expect(successEvents).toHaveLength(1);
-  });
-
-  it('CC callback FAILED → emits failed event', async () => {
-    const tx = await createPendingTransaction(memberId, productId, 500_000);
-    const xenditId = uid();
-    const payment = await prisma.commercePayment.create({
-      data: {
-        transactionId: tx.id,
-        memberId,
-        paymentType: 'cc',
-        amount: 500_000,
-        status: 'PENDING',
-        externalId: uid(),
-        xenditId,
-      },
-    });
-
-    const r = await request(app)
-      .post('/api/webhook/xendit/cc')
-      .set('x-callback-token', CALLBACK_TOKEN)
-      .send({ id: xenditId, status: 'FAILED', failure_reason: 'CARD_DECLINED' });
-
-    expect(r.status).toBe(200);
-    const after = await prisma.commercePayment.findUnique({ where: { id: payment.id } });
-    expect(after?.status).toBe('FAILED');
-    expect(failedEvents).toHaveLength(1);
-    expect((failedEvents[0] as { reason?: string }).reason).toBe('CARD_DECLINED');
-  });
-
   it('idempotency: redelivered webhook on terminal payment is no-op', async () => {
     const tx = await createPendingTransaction(memberId, productId, 500_000);
-    const xenditId = uid();
+    const invoiceId = `inv-${uid()}`;
     const payment = await prisma.commercePayment.create({
       data: {
         transactionId: tx.id,
         memberId,
-        paymentType: 'va',
-        bank: 'MANDIRI',
+        paymentType: 'invoice',
         amount: 500_000,
-        status: 'SUCCESS', // already terminal
+        status: 'SUCCESS',
         externalId: uid(),
-        xenditId,
-        xenditVaId: xenditId,
+        xenditId: invoiceId,
         paidAt: new Date(),
       },
     });
 
     const r = await request(app)
-      .post('/api/webhook/xendit/va')
+      .post(ROUTE)
       .set('x-callback-token', CALLBACK_TOKEN)
-      .send({ callback_virtual_account_id: xenditId, status: 'COMPLETED' });
+      .send(invoiceCallback({ invoiceId, status: 'PAID' }));
 
     expect(r.status).toBe(200);
     expect(r.body.noop).toBe(true);
@@ -217,11 +177,11 @@ describe('Xendit webhook callbacks', () => {
     expect(eventsCount).toBe(0);
   });
 
-  it('unknown xenditId returns 200 noop (no payment row)', async () => {
+  it('unknown invoice id returns 200 noop (no payment row)', async () => {
     const r = await request(app)
-      .post('/api/webhook/xendit/va')
+      .post(ROUTE)
       .set('x-callback-token', CALLBACK_TOKEN)
-      .send({ callback_virtual_account_id: 'xnd-unknown-xxxx', status: 'COMPLETED' });
+      .send(invoiceCallback({ invoiceId: `inv-unknown-${uid()}`, status: 'PAID' }));
 
     expect(r.status).toBe(200);
     expect(r.body.noop).toBe(true);
@@ -229,25 +189,23 @@ describe('Xendit webhook callbacks', () => {
 
   it('writes CommercePaymentEvent audit row', async () => {
     const tx = await createPendingTransaction(memberId, productId, 500_000);
-    const xenditId = uid();
+    const invoiceId = `inv-${uid()}`;
     const payment = await prisma.commercePayment.create({
       data: {
         transactionId: tx.id,
         memberId,
-        paymentType: 'va',
-        bank: 'BRI',
+        paymentType: 'invoice',
         amount: 500_000,
         status: 'PENDING',
         externalId: uid(),
-        xenditId,
-        xenditVaId: xenditId,
+        xenditId: invoiceId,
       },
     });
 
     await request(app)
-      .post('/api/webhook/xendit/va')
+      .post(ROUTE)
       .set('x-callback-token', CALLBACK_TOKEN)
-      .send({ callback_virtual_account_id: xenditId, status: 'COMPLETED' });
+      .send(invoiceCallback({ invoiceId, status: 'PAID' }));
 
     const events = await prisma.commercePaymentEvent.findMany({
       where: { paymentId: payment.id },
