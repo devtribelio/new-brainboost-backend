@@ -1,15 +1,22 @@
 import type { Request, Response } from 'express';
 import { ok } from '@/common/utils/response.util';
 import { parsePagination } from '@/common/utils/pagination.util';
-import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@/common/openapi/decorators';
+import {
+  ApiBearerAuth,
+  ApiBody,
+  ApiOperation,
+  ApiResponse,
+  ApiTags,
+} from '@/common/openapi/decorators';
 import type { CheckoutService } from './checkout.service';
 import type { PaymentService } from './payment.service';
 import type { VoucherService } from './voucher.service';
-import type { StartCheckoutDto } from './dto/start-checkout.dto';
-import type { PayDto, CancelTransactionDto, ValidateVoucherDto } from './dto/pay.dto';
+import { StartCheckoutDto } from './dto/start-checkout.dto';
+import { PayDto, CancelTransactionDto, ValidateVoucherDto } from './dto/pay.dto';
 import {
   CreatePaymentResultDto,
   StartCheckoutResultDto,
+  TransactionStatusResultDto,
   VoucherValidateResultDto,
 } from './dto/response.dto';
 
@@ -27,6 +34,7 @@ export class CommerceController {
 
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Start checkout — create PENDING transaction' })
+  @ApiBody({ type: () => StartCheckoutDto })
   @ApiResponse({ status: 200, type: () => StartCheckoutResultDto })
   startCheckout = async (req: ReqWithUser, res: Response) => {
     const dto = req.body as StartCheckoutDto;
@@ -40,6 +48,7 @@ export class CommerceController {
 
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Create payment for a PENDING transaction' })
+  @ApiBody({ type: () => PayDto })
   @ApiResponse({ status: 200, type: () => CreatePaymentResultDto })
   createPayment = async (req: ReqWithUser, res: Response) => {
     const dto = req.body as PayDto;
@@ -49,6 +58,7 @@ export class CommerceController {
 
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Poll transaction status + active payment' })
+  @ApiResponse({ status: 200, type: () => TransactionStatusResultDto })
   getTransactionStatus = async (req: ReqWithUser, res: Response) => {
     const tx = await this.payment.getTransactionStatus(req.user!.id, req.params.transactionId);
     return ok(res, tx);
@@ -64,6 +74,7 @@ export class CommerceController {
 
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Cancel a PENDING transaction' })
+  @ApiBody({ type: () => CancelTransactionDto })
   cancelTransaction = async (req: ReqWithUser, res: Response) => {
     const dto = req.body as CancelTransactionDto;
     const result = await this.payment.cancel(req.user!.id, dto.transactionId);
@@ -72,6 +83,7 @@ export class CommerceController {
 
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Validate voucher (dry-run, no redeem)' })
+  @ApiBody({ type: () => ValidateVoucherDto })
   @ApiResponse({ status: 200, type: () => VoucherValidateResultDto })
   validateVoucher = async (req: ReqWithUser, res: Response) => {
     const dto = req.body as ValidateVoucherDto;

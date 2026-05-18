@@ -1,9 +1,6 @@
 import { prisma } from '@/config/prisma';
-import {
-  BadRequestException,
-  ForbiddenException,
-  NotFoundException,
-} from '@/common/exceptions';
+import { logger } from '@/config/logger';
+import { BadRequestException, ForbiddenException, NotFoundException } from '@/common/exceptions';
 import { commerceEvents } from '@/common/events/commerce-events';
 import { xenditService, type IXenditService } from '@/common/services/xendit.service';
 import { computeExpiry } from './utils/compute-expiry';
@@ -169,12 +166,25 @@ export class PaymentService {
         await this.xendit.cancelVa(existingActive.xenditVaId);
       } catch (e) {
         const errCode = (e as { errorCode?: string }).errorCode;
-        if (errCode && errCode !== 'INACTIVE_VIRTUAL_ACCOUNT_ERROR') throw e;
+        logger.warn(
+          { paymentId: existingActive.id, vaId: existingActive.xenditVaId, errCode, err: (e as Error).message },
+          '[commerce.retry] xendit cancelVa failed; proceeding with local cancel',
+        );
       }
-      await prisma.commercePayment.update({
-        where: { id: existingActive.id },
-        data: { status: 'CANCELED' },
-      });
+      await prisma.$transaction([
+        prisma.commercePayment.update({
+          where: { id: existingActive.id },
+          data: { status: 'CANCELED' },
+        }),
+        prisma.commercePaymentEvent.create({
+          data: {
+            paymentId: existingActive.id,
+            source: 'manual',
+            fromStatus: existingActive.status,
+            toStatus: 'CANCELED',
+          },
+        }),
+      ]);
     }
 
     const externalId = this.xendit.generateExternalId();
@@ -189,7 +199,7 @@ export class PaymentService {
       amount: chargeAmount,
       externalId,
       expiredAt,
-      memberName: member?.fullName ?? member?.email ?? 'Customer',
+      memberName: sanitizeVaName(member?.fullName ?? member?.email ?? null),
     });
 
     const payment = await prisma.$transaction(async (txdb) => {
@@ -381,7 +391,28 @@ export class PaymentService {
     });
     if (!tx) throw new NotFoundException('Transaction not found');
     if (tx.memberId !== memberId) throw new ForbiddenException('Not your transaction');
-    return tx;
+    const latest = tx.payments[0];
+    return {
+      transactionId: tx.id,
+      transactionCode: tx.code,
+      status: tx.status,
+      amount: tx.amount,
+      expiredAt: tx.expiredAt,
+      paidAt: tx.paidAt,
+      canceledAt: tx.canceledAt,
+      activePayment: latest
+        ? {
+            paymentId: latest.id,
+            paymentType: latest.paymentType,
+            status: latest.status,
+            vaNumber: latest.vaNumber,
+            bank: latest.bank,
+            ewalletType: latest.ewalletType,
+            expiredAt: latest.expiredAt,
+          }
+        : null,
+      product: tx.product,
+    };
   }
 
   async listTransactions(memberId: string, page = 1, perPage = 20) {
@@ -415,20 +446,54 @@ export class PaymentService {
         try {
           await this.xendit.cancelVa(pending.xenditVaId);
         } catch (e) {
+          // Best-effort: VA may be in CREATING/INACTIVE state at Xendit. We still cancel
+          // locally; webhook handler will noop on CANCELED payment if user pays anyway.
           const errCode = (e as { errorCode?: string }).errorCode;
-          if (errCode && errCode !== 'INACTIVE_VIRTUAL_ACCOUNT_ERROR') throw e;
+          logger.warn(
+            { paymentId: pending.id, vaId: pending.xenditVaId, errCode, err: (e as Error).message },
+            '[commerce.cancel] xendit cancelVa failed; proceeding with local cancel',
+          );
         }
       }
-      await prisma.commercePayment.update({
-        where: { id: pending.id },
-        data: { status: 'CANCELED' },
-      });
+      await prisma.$transaction([
+        prisma.commercePayment.update({
+          where: { id: pending.id },
+          data: { status: 'CANCELED' },
+        }),
+        prisma.commercePaymentEvent.create({
+          data: {
+            paymentId: pending.id,
+            source: 'manual',
+            fromStatus: pending.status,
+            toStatus: 'CANCELED',
+          },
+        }),
+      ]);
     }
     return prisma.commerceTransaction.update({
       where: { id: transactionId },
       data: { status: 'CANCELED', canceledAt: new Date() },
     });
   }
+}
+
+/**
+ * Xendit VA `name` field requires 3..50 chars AND uppercase only for BCA
+ * (legacy bank account holder naming rule — lowercase is stripped server-side
+ * before length check, so "Lionnarta Savirandy" → "LS" → "currently 2"
+ * validation error). Normalize to ASCII uppercase + clamp length; fall back
+ * to "CUSTOMER" when sanitized result is too short or blank.
+ */
+function sanitizeVaName(raw: string | null): string {
+  const cleaned = (raw ?? '')
+    .normalize('NFKD')
+    .replace(/[^\x20-\x7E]/g, '')
+    .replace(/[^A-Za-z0-9 .]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toUpperCase();
+  if (cleaned.length >= 3) return cleaned.slice(0, 50);
+  return 'CUSTOMER';
 }
 
 type TransactionRow = {

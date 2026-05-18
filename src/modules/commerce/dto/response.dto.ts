@@ -91,6 +91,72 @@ export class CreatePaymentResultDto {
   fee!: number;
 }
 
+export class ActivePaymentDto {
+  @ApiProperty({ format: 'uuid' })
+  paymentId!: string;
+
+  @ApiProperty({ example: 'va', enum: ['cc', 'va', 'eWallet', 'voucher'] })
+  paymentType!: string;
+
+  @ApiProperty({ example: 'PENDING', enum: ['PENDING', 'SUCCESS', 'EXPIRED', 'FAILED', 'CANCELED'] })
+  status!: string;
+
+  @ApiPropertyOptional({ nullable: true, example: '8888812345678901' })
+  vaNumber?: string | null;
+
+  @ApiPropertyOptional({ nullable: true, example: 'BCA' })
+  bank?: string | null;
+
+  @ApiPropertyOptional({ nullable: true, example: 'OVO' })
+  ewalletType?: string | null;
+
+  @ApiPropertyOptional({ nullable: true, format: 'date-time' })
+  expiredAt?: string | null;
+}
+
+export class TransactionProductSummaryDto {
+  @ApiProperty({ format: 'uuid' })
+  id!: string;
+
+  @ApiProperty({ example: 'React Fundamentals' })
+  title!: string;
+
+  @ApiPropertyOptional({ nullable: true })
+  thumbnail?: string | null;
+}
+
+export class TransactionStatusResultDto {
+  @ApiProperty({ format: 'uuid' })
+  transactionId!: string;
+
+  @ApiProperty({ example: 'BB-20260513-0042' })
+  transactionCode!: string;
+
+  @ApiProperty({
+    example: 'PENDING',
+    enum: ['PENDING', 'PAID', 'EXPIRED', 'FAILED', 'CANCELED', 'REFUNDED'],
+  })
+  status!: string;
+
+  @ApiProperty({ example: 204000 })
+  amount!: number;
+
+  @ApiPropertyOptional({ nullable: true, format: 'date-time' })
+  expiredAt?: string | null;
+
+  @ApiPropertyOptional({ nullable: true, format: 'date-time' })
+  paidAt?: string | null;
+
+  @ApiPropertyOptional({ nullable: true, format: 'date-time' })
+  canceledAt?: string | null;
+
+  @ApiPropertyOptional({ nullable: true, type: () => ActivePaymentDto })
+  activePayment?: ActivePaymentDto | null;
+
+  @ApiProperty({ type: () => TransactionProductSummaryDto })
+  product!: TransactionProductSummaryDto;
+}
+
 export class VoucherValidateResultDto {
   @ApiProperty({ example: true })
   valid!: boolean;

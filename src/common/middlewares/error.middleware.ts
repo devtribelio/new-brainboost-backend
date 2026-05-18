@@ -2,6 +2,7 @@ import type { ErrorRequestHandler, Request, Response, NextFunction, RequestHandl
 import { HttpException } from '@/common/exceptions';
 import { fail } from '@/common/utils/response.util';
 import { logger } from '@/config/logger';
+import { env } from '@/config/env';
 
 function isAdminRequest(req: Request): boolean {
   return req.originalUrl.startsWith('/admin');
@@ -33,7 +34,14 @@ export const errorHandler: ErrorRequestHandler = (err, req: Request, res: Respon
     return;
   }
 
-  fail(res, status, message);
+  const debug =
+    !env.isProduction && !(err instanceof HttpException)
+      ? {
+          error: (err as Error)?.message,
+          stack: (err as Error)?.stack?.split('\n').slice(0, 8),
+        }
+      : undefined;
+  fail(res, status, message, debug);
 };
 
 export const notFoundHandler: RequestHandler = (req, res) => {

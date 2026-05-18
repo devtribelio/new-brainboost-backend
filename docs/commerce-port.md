@@ -481,7 +481,7 @@ Wired:
 - [ ] `pnpm test tests/api-smoke.spec.ts` includes all 9 routes
 - [ ] `pnpm test tests/swagger-smoke.spec.ts` serializes commerce DTOs
 - [ ] Manual: Postman happy path CC (Xendit sandbox)
-- [ ] Manual: Postman happy path VA + Xendit "Simulate Payment" → webhook → status PAID
+- [ ] Manual: Postman happy path VA + Xendit "Simulate Payment" → webhook → status PAID (use **BNI** or **MANDIRI** — see Sandbox Limitations below)
 - [ ] Manual: Postman happy path eWallet OVO sandbox
 - [ ] Manual: Voucher 100% bypass works
 - [ ] Manual: Cancel pending tx → VA canceled di Xendit dashboard
@@ -489,6 +489,16 @@ Wired:
 - [ ] CourseEnrollment row created post-success
 - [ ] Re-deliver webhook 5x → exactly one set of side effects (idempotent)
 - [ ] `mcp__jcodemunch__index_file` di-run untuk semua file baru
+
+---
+
+### Sandbox Limitations
+
+**BCA VA blocked on Xendit dev sandbox.** Observed 2026-05-18: `POST /callback_virtual_accounts` with `bank_code=BCA` always returns `API_VALIDATION_ERROR: Invalid name length, should be between 3 to 50, currently 2` regardless of `name` field sent. Xendit substitutes the merchant account holder name server-side and the BCA sandbox merchant has a 2-char name configured (fails Xendit's own 3-50 rule). BNI returns `XDT-PP` (6 chars) and MANDIRI returns `PP` (2 chars) — both accepted. Code is correct; the issue is upstream sandbox config.
+
+Workarounds:
+- Use **BNI / MANDIRI / BRI / PERMATA** for sandbox VA QA.
+- For BCA verification: configure account holder name in Xendit dashboard (production / paid sandbox), or test against the production key in a controlled QA window.
 
 ---
 

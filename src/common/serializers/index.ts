@@ -474,6 +474,7 @@ export function serializeProduct(
   // FE ProductModel reads leftmost-of-fallback. Backend emits only the
   // canonical (leftmost) name per audit §3.1 — aliases dropped.
   return {
+    id: p.id,
     networkAccountProductAffiliatorId: productId,
     productType: p.type,
     productTypeLabel: label,
@@ -698,6 +699,7 @@ export function serializeCourseDetailLegacy(
     }));
 
   return {
+    id: p.id,
     courseId: courseLegacyId,
     code,
     name: stripBrainboostLabel(p.title),

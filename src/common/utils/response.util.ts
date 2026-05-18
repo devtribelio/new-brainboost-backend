@@ -11,8 +11,18 @@ export function ok<T>(res: Response, data: T, status = 200): Response {
   return res.status(status).json(body);
 }
 
-export function fail(res: Response, status: number, message: string): Response {
-  const body: ApiEnvelope<null> = { errCode: status, errMessage: message, data: null };
+export function fail(
+  res: Response,
+  status: number,
+  message: string,
+  debug?: unknown,
+): Response {
+  const body: ApiEnvelope<null> & { debug?: unknown } = {
+    errCode: status,
+    errMessage: message,
+    data: null,
+    ...(debug !== undefined ? { debug } : {}),
+  };
   return res.status(status).json(body);
 }
 

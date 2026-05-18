@@ -131,7 +131,18 @@ export class XenditService implements IXenditService {
       is_closed: true,
       is_single_use: true,
       expiration_date: opts.expiredAt.toISOString(),
+      currency: 'IDR',
     };
+
+    logger.debug(
+      {
+        body,
+        nameLen: opts.memberName.length,
+        nameBytes: Buffer.byteLength(opts.memberName, 'utf8'),
+        nameCodePoints: [...opts.memberName].map((c) => c.codePointAt(0)),
+      },
+      '[xendit] createCallbackVa request',
+    );
     const res = await this.request<Record<string, unknown>>(
       'POST',
       '/callback_virtual_accounts',

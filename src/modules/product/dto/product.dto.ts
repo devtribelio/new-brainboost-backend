@@ -23,6 +23,13 @@ import { LegacyMetaDto } from '@/common/openapi/common.dto';
  */
 export class ProductDto {
   @ApiProperty({
+    format: 'uuid',
+    example: '0193f4c8-9abc-7123-89ab-cdef01234567',
+    description: 'Canonical UUID of the product. Use this when calling /commerce checkout.',
+  })
+  id!: string;
+
+  @ApiProperty({
     example: 456,
     description: 'FE id (`?? productId`) — canonical key for ProductModel.id',
   })
@@ -228,6 +235,13 @@ export class RatingSummaryDto {
  * must remain stable.
  */
 export class CourseDetailDto {
+  @ApiProperty({
+    format: 'uuid',
+    example: '0193f4c8-9abc-7123-89ab-cdef01234567',
+    description: 'Canonical UUID of the product. Use this when calling /commerce checkout.',
+  })
+  id!: string;
+
   @ApiPropertyOptional({ nullable: true, type: 'integer', example: 123 })
   courseId?: number | null;
 
