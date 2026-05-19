@@ -35,6 +35,12 @@ export const env = {
     clientId: optional('OAUTH_CLIENT_ID', ''),
     clientSecret: optional('OAUTH_CLIENT_SECRET', ''),
   },
+  google: {
+    audiences: optional('GOOGLE_CLIENT_IDS', '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
+  },
   admin: {
     jwtSecret: required('ADMIN_JWT_SECRET'),
     jwtTtl: optional('ADMIN_JWT_TTL', '8h'),

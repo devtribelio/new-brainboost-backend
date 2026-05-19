@@ -24,6 +24,7 @@ model Member {
   lastName            String?
   passwordHash        String
   passwordAlgo        String    @default("bcrypt")
+  googleSub           String?   @unique
   avatarUrl           String?
   coverUrl            String?
   bio                 String?

@@ -1,4 +1,4 @@
-import { IsIn, IsOptional, IsString, MinLength } from 'class-validator';
+import { IsIn, IsNotEmpty, IsOptional, IsString, MinLength, ValidateIf } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@/common/openapi/decorators';
 
 export class LoginDto {
@@ -31,16 +31,19 @@ export class LoginDto {
   refresh_token?: string;
 
   @ApiPropertyOptional({ enum: ['google', 'facebook', 'apple'], example: 'google' })
-  @IsOptional()
+  @ValidateIf((o: LoginDto) => o.grant_type === 'social')
   @IsString()
+  @IsNotEmpty()
+  @IsIn(['google', 'facebook', 'apple'])
   provider?: string;
 
   @ApiPropertyOptional({
-    example: 'ya29.a0AfH6SMBxxxxxxxxx',
-    description: 'social provider id_token',
+    example: 'eyJhbGciOiJSUzI1NiIsImtpZCI6...',
+    description: 'social provider id_token (Google id_token for provider=google)',
   })
-  @IsOptional()
+  @ValidateIf((o: LoginDto) => o.grant_type === 'social')
   @IsString()
+  @IsNotEmpty()
   social_token?: string;
 
   @ApiPropertyOptional({ example: 'brainboost-mobile' })

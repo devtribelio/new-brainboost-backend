@@ -1,5 +1,6 @@
 import bcrypt from 'bcryptjs';
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
+import passport from 'passport';
 import { prisma } from '@/config/prisma';
 import { env } from '@/config/env';
 import {
@@ -10,6 +11,7 @@ import {
 } from '@/common/utils/jwt.util';
 import { BadRequestException, NotFoundException, UnauthorizedException } from '@/common/exceptions';
 import { otpService } from '@/common/services/otp.service';
+import type { GoogleIdTokenPayload } from './social/google-verifier';
 import type { LoginDto } from './dto/login.dto';
 import type { RegisterDto } from './dto/register.dto';
 import type { CloudMessagingDto, RegisterDeviceDto } from './dto/device.dto';
@@ -90,7 +92,7 @@ export class AuthService {
       case 'client_credentials':
         return this.loginWithClientCredentials(dto);
       case 'social':
-        throw new BadRequestException('grant_type "social" not implemented yet');
+        return this.loginWithSocial(dto);
       default:
         throw new BadRequestException('Unsupported grant_type');
     }
@@ -261,6 +263,10 @@ export class AuthService {
   ): Promise<boolean> {
     const algo = (member.passwordAlgo ?? '').toLowerCase();
 
+    // Social-only accounts have a random sentinel hash; password grant must
+    // never authenticate them.
+    if (algo === 'social') return false;
+
     if (algo === 'bcrypt') {
       return bcrypt.compare(plaintext, member.passwordHash);
     }
@@ -316,6 +322,142 @@ export class AuthService {
       member.email,
       normalizeClientType(stored.clientType),
     );
+  }
+
+  private async loginWithSocial(dto: LoginDto): Promise<TokenBundle> {
+    if (dto.provider !== 'google') {
+      throw new BadRequestException('Only provider=google is supported');
+    }
+    if (!dto.social_token) {
+      throw new BadRequestException('social_token required for social grant');
+    }
+
+    const payload = await this.authenticateViaPassport(dto.social_token);
+    if (!payload.emailVerified) {
+      throw new UnauthorizedException('google_email_not_verified');
+    }
+
+    const clientType = normalizeClientType(dto.clientType);
+    const email = payload.email.trim().toLowerCase();
+
+    // Fast path: known google_sub → straight to issue.
+    const bySub = await prisma.member.findUnique({ where: { googleSub: payload.sub } });
+    if (bySub) {
+      if (!bySub.isActive) throw new UnauthorizedException('Member not active');
+      return this.issueTokenBundle(bySub.id, bySub.email, clientType);
+    }
+
+    // Link path: existing local account by email. Only allow if local account
+    // already passed email verification, otherwise an attacker could claim an
+    // unverified-registered email by signing in with Google.
+    const byEmail = await prisma.member.findUnique({ where: { email } });
+    if (byEmail) {
+      if (!byEmail.isActive) throw new UnauthorizedException('Member not active');
+      if (!byEmail.isVerified) {
+        throw new BadRequestException('email_in_use_unverified');
+      }
+      const linked = await prisma.member.update({
+        where: { id: byEmail.id },
+        data: { googleSub: payload.sub },
+      });
+      return this.issueTokenBundle(linked.id, linked.email, clientType);
+    }
+
+    // Create path: brand-new social account. Sentinel passwordHash + algo=social
+    // so loginWithPassword (verifyPassword guard) can never authenticate it.
+    const sentinelHash = `${randomUUID()}${randomUUID()}`;
+    const memberCode = await this.generateUniqueMemberCode();
+    const username = await this.deriveUniqueUsernameFromEmail(email);
+
+    try {
+      const created = await prisma.member.create({
+        data: {
+          email,
+          googleSub: payload.sub,
+          fullName: payload.name,
+          username,
+          passwordHash: sentinelHash,
+          passwordAlgo: 'social',
+          isVerified: true,
+          code: memberCode,
+          affiliateCode: memberCode,
+          registerFrom: clientType,
+        },
+      });
+      return this.issueTokenBundle(created.id, created.email, clientType);
+    } catch (err) {
+      // Race: a concurrent request created the same email/google_sub first.
+      // Re-resolve via the same priority (google_sub then email) and link/issue.
+      if (this.isUniqueViolation(err)) {
+        const retrySub = await prisma.member.findUnique({ where: { googleSub: payload.sub } });
+        if (retrySub) return this.issueTokenBundle(retrySub.id, retrySub.email, clientType);
+        const retryEmail = await prisma.member.findUnique({ where: { email } });
+        if (retryEmail) {
+          if (!retryEmail.isVerified) throw new BadRequestException('email_in_use_unverified');
+          const linked = await prisma.member.update({
+            where: { id: retryEmail.id },
+            data: { googleSub: payload.sub },
+          });
+          return this.issueTokenBundle(linked.id, linked.email, clientType);
+        }
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Programmatic Passport invocation: feed `social_token` as a synthetic req
+   * body into the registered `google-id-token` strategy and return its payload.
+   * Wraps Passport's callback style in a Promise.
+   */
+  private authenticateViaPassport(idToken: string): Promise<GoogleIdTokenPayload> {
+    return new Promise<GoogleIdTokenPayload>((resolve, reject) => {
+      const req = { body: { social_token: idToken } } as unknown as Parameters<
+        ReturnType<typeof passport.authenticate>
+      >[0];
+      const res = {} as unknown as Parameters<ReturnType<typeof passport.authenticate>>[1];
+      const middleware = passport.authenticate(
+        'google-id-token',
+        { session: false },
+        (err: Error | null, user: GoogleIdTokenPayload | false, info?: { message?: string }) => {
+          if (err) return reject(err);
+          if (!user)
+            return reject(new UnauthorizedException(info?.message ?? 'invalid_google_id_token'));
+          resolve(user);
+        },
+      );
+      middleware(req, res, (err: unknown) => {
+        if (err) reject(err as Error);
+      });
+    });
+  }
+
+  private isUniqueViolation(err: unknown): boolean {
+    return (
+      typeof err === 'object' &&
+      err !== null &&
+      'code' in err &&
+      (err as { code?: unknown }).code === 'P2002'
+    );
+  }
+
+  private async deriveUniqueUsernameFromEmail(email: string): Promise<string> {
+    const local = email.split('@')[0] ?? 'user';
+    const base =
+      local
+        .toLowerCase()
+        .replace(/[^a-z0-9._]/g, '')
+        .slice(0, 24) || 'user';
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const candidate = attempt === 0 ? base : `${base}${randomUUID().slice(0, 6)}`;
+      const exists = await prisma.member.findUnique({
+        where: { username: candidate },
+        select: { id: true },
+      });
+      if (!exists) return candidate;
+    }
+    // Extremely unlikely; fall back to random.
+    return `${base}${randomUUID().slice(0, 8)}`;
   }
 
   async registerDevice(memberId: string, dto: RegisterDeviceDto) {

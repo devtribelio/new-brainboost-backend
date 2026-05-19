@@ -11,3 +11,4 @@ process.env.DATABASE_URL =
   'postgresql://postgres:root@localhost:5433/bb?schema=public';
 process.env.XENDIT_CALLBACK_TOKEN = process.env.XENDIT_CALLBACK_TOKEN || 'test-xendit-token';
 process.env.XENDIT_SECRET_KEY = process.env.XENDIT_SECRET_KEY || 'xnd_test_dummy';
+process.env.GOOGLE_CLIENT_IDS = process.env.GOOGLE_CLIENT_IDS || 'test-google-android,test-google-ios';
