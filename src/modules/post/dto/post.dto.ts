@@ -284,3 +284,63 @@ export class PostDeleteResultDto {
   @ApiProperty({ type: 'boolean', example: true })
   deleted!: boolean;
 }
+
+// ---- Request body DTOs (Swagger only — runtime uses raw req.body) ----
+
+export class PostLikeBodyDto {
+  @ApiProperty({
+    example: '789',
+    description: 'Post legacyId (int as string) or UUID v7.',
+  })
+  postId!: string;
+}
+
+export class PostCreateBodyDto {
+  @ApiProperty({ example: 'Great insights from today\'s workshop on React patterns.' })
+  content!: string;
+
+  @ApiPropertyOptional({ example: 'topic-uuid-1234', description: 'Topic UUID — must belong to networkId when both set.' })
+  topicId?: string;
+
+  @ApiPropertyOptional({ example: 'network-uuid-1234', description: 'Target network UUID. Omit for global timeline.' })
+  networkId?: string;
+
+  @ApiPropertyOptional({ example: 'My First Post' })
+  title?: string;
+
+  @ApiPropertyOptional({ enum: ['status', 'image', 'video', 'embed'], example: 'status' })
+  postType?: string;
+
+  @ApiPropertyOptional({
+    type: 'array',
+    itemType: 'string',
+    example: ['https://cdn.brainboost.com/posts/789/hero.jpg'],
+    description: 'Alias `imageUrls` also accepted.',
+  })
+  images?: string[];
+
+  @ApiPropertyOptional({ example: 'https://cdn.brainboost.com/posts/789/clip.mp4' })
+  videoUrl?: string;
+
+  @ApiPropertyOptional({ example: 'https://www.youtube.com/watch?v=abc123' })
+  embedUrl?: string;
+}
+
+export class PostDeleteBodyDto {
+  @ApiProperty({ example: '789', description: 'Post legacyId or UUID.' })
+  postId!: string;
+}
+
+export class PostReportBodyDto {
+  @ApiProperty({ example: '789', description: 'Post legacyId or UUID.' })
+  postId!: string;
+
+  @ApiProperty({ example: 'category-uuid-1234', description: 'Report category UUID. Alias `reportCategoryId` also accepted.' })
+  categoryId!: string;
+
+  @ApiPropertyOptional({ example: 'network-uuid-1234' })
+  networkId?: string;
+
+  @ApiPropertyOptional({ example: 'Spam content' })
+  reason?: string;
+}

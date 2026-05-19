@@ -7,6 +7,7 @@ import { serializeComment } from './comment.serializer';
 import type { AuthenticatedRequest } from '@/common/interfaces/authenticated-request';
 import {
   ApiBearerAuth,
+  ApiBody,
   ApiOperation,
   ApiQuery,
   ApiResponse,
@@ -14,10 +15,14 @@ import {
 } from '@/common/openapi/decorators';
 import { ApiErrorResponseDto } from '@/common/openapi/common.dto';
 import {
+  CommentCreateBodyDto,
+  CommentDeleteBodyDto,
   CommentDeleteResultDto,
   CommentDto,
+  CommentLikeBodyDto,
   CommentLikeToggleResultDto,
   CommentPageDto,
+  CommentUpdateBodyDto,
 } from './dto/comment.dto';
 
 @ApiTags('Comment')
@@ -63,6 +68,7 @@ export class CommentController {
 
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Toggle like on a comment' })
+  @ApiBody({ type: () => CommentLikeBodyDto })
   @ApiResponse({ status: 200, type: () => CommentLikeToggleResultDto })
   like = async (req: AuthenticatedRequest, res: Response) => {
     if (!req.user) throw new UnauthorizedException();
@@ -79,6 +85,7 @@ export class CommentController {
 
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Create a comment (or reply when replyId is set)' })
+  @ApiBody({ type: () => CommentCreateBodyDto })
   @ApiResponse({ status: 201, type: () => CommentDto })
   create = async (req: AuthenticatedRequest, res: Response) => {
     if (!req.user) throw new UnauthorizedException();
@@ -94,6 +101,7 @@ export class CommentController {
 
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Update comment content' })
+  @ApiBody({ type: () => CommentUpdateBodyDto })
   @ApiResponse({ status: 200, type: () => CommentDto })
   update = async (req: AuthenticatedRequest, res: Response) => {
     if (!req.user) throw new UnauthorizedException();
@@ -107,6 +115,7 @@ export class CommentController {
 
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Soft-delete a comment' })
+  @ApiBody({ type: () => CommentDeleteBodyDto })
   @ApiResponse({ status: 200, type: () => CommentDeleteResultDto })
   remove = async (req: AuthenticatedRequest, res: Response) => {
     if (!req.user) throw new UnauthorizedException();

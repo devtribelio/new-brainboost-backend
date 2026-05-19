@@ -8,6 +8,7 @@ import { serializePost } from './post.serializer';
 import type { AuthenticatedRequest } from '@/common/interfaces/authenticated-request';
 import {
   ApiBearerAuth,
+  ApiBody,
   ApiOperation,
   ApiQuery,
   ApiResponse,
@@ -15,10 +16,14 @@ import {
 } from '@/common/openapi/decorators';
 import { ApiErrorResponseDto } from '@/common/openapi/common.dto';
 import {
+  PostCreateBodyDto,
+  PostDeleteBodyDto,
   PostDeleteResultDto,
   PostDto,
+  PostLikeBodyDto,
   PostLikeToggleResultDto,
   PostPageDto,
+  PostReportBodyDto,
 } from './dto/post.dto';
 import { ReportResultDto } from '@/modules/report/dto/report.dto';
 
@@ -111,6 +116,7 @@ export class PostController {
 
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Toggle like on a post' })
+  @ApiBody({ type: () => PostLikeBodyDto })
   @ApiResponse({ status: 200, type: () => PostLikeToggleResultDto })
   like = async (req: AuthenticatedRequest, res: Response) => {
     if (!req.user) throw new UnauthorizedException();
@@ -123,6 +129,7 @@ export class PostController {
 
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Create a post' })
+  @ApiBody({ type: () => PostCreateBodyDto })
   @ApiResponse({ status: 201, type: () => PostDto })
   upsert = async (req: AuthenticatedRequest, res: Response) => {
     if (!req.user) throw new UnauthorizedException();
@@ -142,6 +149,7 @@ export class PostController {
 
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Soft-delete a post' })
+  @ApiBody({ type: () => PostDeleteBodyDto })
   @ApiResponse({ status: 200, type: () => PostDeleteResultDto })
   remove = async (req: AuthenticatedRequest, res: Response) => {
     if (!req.user) throw new UnauthorizedException();
@@ -153,6 +161,7 @@ export class PostController {
 
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Report a post' })
+  @ApiBody({ type: () => PostReportBodyDto })
   @ApiResponse({ status: 201, type: () => ReportResultDto })
   report = async (req: AuthenticatedRequest, res: Response) => {
     if (!req.user) throw new UnauthorizedException();

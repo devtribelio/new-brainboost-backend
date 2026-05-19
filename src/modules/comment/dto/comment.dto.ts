@@ -158,3 +158,49 @@ export class CommentDeleteResultDto {
   @ApiProperty({ type: 'boolean', example: true })
   deleted!: boolean;
 }
+
+// ---- Request body DTOs (Swagger only — runtime uses raw req.body) ----
+
+export class CommentLikeBodyDto {
+  @ApiProperty({
+    example: '555',
+    description: 'Comment legacyId (int as string) or UUID v7.',
+  })
+  commentId!: string;
+}
+
+export class CommentCreateBodyDto {
+  @ApiProperty({ example: '789', description: 'Post legacyId or UUID.' })
+  postId!: string;
+
+  @ApiProperty({ example: 'Nice take — agreed.' })
+  content!: string;
+
+  @ApiPropertyOptional({
+    example: '540',
+    description:
+      'Parent comment legacyId/UUID. When set, the new comment is a reply. Aliases: `parentId`.',
+  })
+  replyId?: string;
+
+  @ApiPropertyOptional({
+    type: 'array',
+    itemType: 'string',
+    example: ['https://cdn.brainboost.com/comments/555/img.jpg'],
+    description: 'Alias `imageUrls` also accepted.',
+  })
+  images?: string[];
+}
+
+export class CommentUpdateBodyDto {
+  @ApiProperty({ example: '555', description: 'Comment legacyId or UUID.' })
+  commentId!: string;
+
+  @ApiProperty({ example: 'Edited: nice take, agreed.' })
+  content!: string;
+}
+
+export class CommentDeleteBodyDto {
+  @ApiProperty({ example: '555', description: 'Comment legacyId or UUID.' })
+  commentId!: string;
+}
