@@ -9,6 +9,8 @@ export function networkRoutes(): Router {
   const ctrl = new NetworkController(new NetworkService());
 
   bindRoute({ router, controller: ctrl, method: 'post', path: '/network/join', handlerKey: 'join', middlewares: [authGuard] });
+  bindRoute({ router, controller: ctrl, method: 'post', path: '/network/request/approve', handlerKey: 'approveRequest', middlewares: [authGuard] });
+  bindRoute({ router, controller: ctrl, method: 'post', path: '/network/request/reject', handlerKey: 'rejectRequest', middlewares: [authGuard] });
   bindRoute({ router, controller: ctrl, method: 'get', path: '/network/member', handlerKey: 'members' });
   bindRoute({ router, controller: ctrl, method: 'get', path: '/network/tag', handlerKey: 'tags' });
 

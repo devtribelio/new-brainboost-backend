@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '@/config/prisma';
 import { BadRequestException, ForbiddenException, NotFoundException } from '@/common/exceptions';
 import type { PaginationParams } from '@/common/utils/pagination.util';
+import { notificationEvents } from '@/common/events/notification-events';
 
 export class NetworkService {
   private async resolveNetworkId(input: string): Promise<string | null> {
@@ -161,10 +162,15 @@ export class NetworkService {
       if (pending && pending.status === 'PENDING') {
         return { networkId, status: 'PENDING', alreadyRequested: true };
       }
-      await prisma.networkMemberRequest.upsert({
+      const upserted = await prisma.networkMemberRequest.upsert({
         where: { networkId_memberId: { networkId, memberId } },
         create: { networkId, memberId, status: 'PENDING' },
         update: { status: 'PENDING' },
+      });
+      notificationEvents.emit('network.member.requested', {
+        requestId: upserted.id,
+        networkId,
+        memberId,
       });
       return { networkId, status: 'PENDING' };
     }
@@ -176,7 +182,90 @@ export class NetworkService {
         data: { countMember: { increment: 1 } },
       }),
     ]);
+    notificationEvents.emit('network.member.joined', { networkId, memberId });
     return { networkId, status: 'APPROVED', joined: true };
+  }
+
+  private async assertTeamMember(networkId: string, memberId: string) {
+    const team = await prisma.networkTeamMember.findUnique({
+      where: { networkId_memberId: { networkId, memberId } },
+    });
+    if (!team) throw new ForbiddenException('Only network team can manage join requests');
+  }
+
+  private async resolvePendingRequest(opts: { requestId?: string; networkInput?: string; memberId?: string }) {
+    if (opts.requestId) {
+      const r = await prisma.networkMemberRequest.findUnique({ where: { id: opts.requestId } });
+      if (!r) throw new NotFoundException('Join request not found');
+      return r;
+    }
+    if (opts.networkInput && opts.memberId) {
+      const networkId = await this.resolveNetworkId(opts.networkInput);
+      if (!networkId) throw new NotFoundException('Network not found');
+      const r = await prisma.networkMemberRequest.findUnique({
+        where: { networkId_memberId: { networkId, memberId: opts.memberId } },
+      });
+      if (!r) throw new NotFoundException('Join request not found');
+      return r;
+    }
+    throw new BadRequestException('requestId or (networkId+memberId) required');
+  }
+
+  async approveRequest(approverId: string, opts: { requestId?: string; networkInput?: string; memberId?: string }) {
+    const req = await this.resolvePendingRequest(opts);
+    if (req.status !== 'PENDING') {
+      throw new BadRequestException(`Request already ${req.status}`);
+    }
+    await this.assertTeamMember(req.networkId, approverId);
+
+    const banned = await prisma.networkBannedMember.findUnique({
+      where: { networkId_memberId: { networkId: req.networkId, memberId: req.memberId } },
+    });
+    if (banned) throw new ForbiddenException('Cannot approve banned member');
+
+    await prisma.$transaction(async (tx) => {
+      await tx.networkMemberRequest.update({
+        where: { id: req.id },
+        data: { status: 'APPROVED' },
+      });
+      await tx.networkMember.upsert({
+        where: { networkId_memberId: { networkId: req.networkId, memberId: req.memberId } },
+        create: { networkId: req.networkId, memberId: req.memberId },
+        update: {},
+      });
+      await tx.network.update({
+        where: { id: req.networkId },
+        data: { countMember: { increment: 1 } },
+      });
+    });
+
+    notificationEvents.emit('network.member.approved', {
+      requestId: req.id,
+      networkId: req.networkId,
+      memberId: req.memberId,
+      approverId,
+    });
+    notificationEvents.emit('network.member.joined', {
+      networkId: req.networkId,
+      memberId: req.memberId,
+    });
+
+    return { requestId: req.id, networkId: req.networkId, memberId: req.memberId, status: 'APPROVED' };
+  }
+
+  async rejectRequest(approverId: string, opts: { requestId?: string; networkInput?: string; memberId?: string }) {
+    const req = await this.resolvePendingRequest(opts);
+    if (req.status !== 'PENDING') {
+      throw new BadRequestException(`Request already ${req.status}`);
+    }
+    await this.assertTeamMember(req.networkId, approverId);
+
+    await prisma.networkMemberRequest.update({
+      where: { id: req.id },
+      data: { status: 'REJECTED' },
+    });
+
+    return { requestId: req.id, networkId: req.networkId, memberId: req.memberId, status: 'REJECTED' };
   }
 
   async leave(memberId: string, networkInput: string) {

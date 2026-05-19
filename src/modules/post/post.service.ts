@@ -1,6 +1,7 @@
 import { prisma } from '@/config/prisma';
 import { BadRequestException, ForbiddenException, NotFoundException } from '@/common/exceptions';
 import type { PaginationParams } from '@/common/utils/pagination.util';
+import { notificationEvents } from '@/common/events/notification-events';
 
 interface PostListQuery {
   keyword?: string;
@@ -172,6 +173,11 @@ export class PostService {
         data: { countLike: { increment: 1 } },
       }),
     ]);
+    notificationEvents.emit('post.liked', {
+      postId: post.id,
+      postAuthorId: post.authorId,
+      actorId: memberId,
+    });
     return { status: 'like', countLike: post.countLike + 1 };
   }
 
@@ -239,6 +245,12 @@ export class PostService {
         engagedAt: new Date(),
       },
       include: postInclude,
+    });
+    notificationEvents.emit('post.published', {
+      postId: post.id,
+      authorId: post.authorId,
+      networkId: post.networkId,
+      excerpt: post.excerpt ?? '',
     });
     return post;
   }

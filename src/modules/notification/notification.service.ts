@@ -66,4 +66,23 @@ export class NotificationService {
     });
     return result;
   }
+
+  async mute(memberId: string, scope: string, refId: string) {
+    if (scope !== 'post' && scope !== 'network') {
+      throw new Error('scope must be post or network');
+    }
+    await prisma.notificationMute.upsert({
+      where: { memberId_scope_refId: { memberId, scope, refId } },
+      create: { memberId, scope, refId },
+      update: {},
+    });
+    return { scope, refId, muted: true };
+  }
+
+  async unmute(memberId: string, scope: string, refId: string) {
+    await prisma.notificationMute.deleteMany({
+      where: { memberId, scope, refId },
+    });
+    return { scope, refId, muted: false };
+  }
 }

@@ -1,6 +1,7 @@
 import { prisma } from '@/config/prisma';
 import { BadRequestException, ForbiddenException, NotFoundException } from '@/common/exceptions';
 import type { PaginationParams } from '@/common/utils/pagination.util';
+import { notificationEvents } from '@/common/events/notification-events';
 
 const MAX_CONTENT_CHARS = 5000;
 
@@ -109,6 +110,11 @@ export class CommentService {
       prisma.commentLike.create({ data: { commentId: c.id, memberId } }),
       prisma.comment.update({ where: { id: c.id }, data: { countLike: { increment: 1 } } }),
     ]);
+    notificationEvents.emit('comment.liked', {
+      commentId: c.id,
+      commentAuthorId: c.authorId,
+      actorId: memberId,
+    });
     return { status: 'like', commentLegacyId: c.legacyId, countLike: c.countLike + 1 };
   }
 
@@ -187,6 +193,13 @@ export class CommentService {
         });
       }
       return created;
+    });
+    notificationEvents.emit('comment.created', {
+      commentId: comment.id,
+      postId,
+      authorId: memberId,
+      parentId,
+      content: sanitized,
     });
     return comment;
   }

@@ -1,7 +1,7 @@
 import type { Response } from 'express';
 import { NotificationService } from './notification.service';
 import { ok } from '@/common/utils/response.util';
-import { UnauthorizedException } from '@/common/exceptions';
+import { BadRequestException, UnauthorizedException } from '@/common/exceptions';
 import { buildLegacyPage, parsePagination } from '@/common/utils/pagination.util';
 import { serializeNotification } from './notification.serializer';
 import type { AuthenticatedRequest } from '@/common/interfaces/authenticated-request';
@@ -77,5 +77,28 @@ export class NotificationController {
       markAllRead,
     });
     return ok(res, { updated: result.count });
+  };
+
+  @ApiOperation({ summary: 'Mute notifications for a post or network' })
+  mute = async (req: AuthenticatedRequest, res: Response) => {
+    if (!req.user) throw new UnauthorizedException();
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const scope = typeof body.scope === 'string' ? body.scope : '';
+    const refId = typeof body.refId === 'string' ? body.refId : '';
+    if (!scope || !refId) throw new BadRequestException('scope and refId required');
+    if (scope !== 'post' && scope !== 'network') {
+      throw new BadRequestException('scope must be post or network');
+    }
+    return ok(res, await this.notificationService.mute(req.user.id, scope, refId));
+  };
+
+  @ApiOperation({ summary: 'Unmute notifications for a post or network' })
+  unmute = async (req: AuthenticatedRequest, res: Response) => {
+    if (!req.user) throw new UnauthorizedException();
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const scope = typeof body.scope === 'string' ? body.scope : '';
+    const refId = typeof body.refId === 'string' ? body.refId : '';
+    if (!scope || !refId) throw new BadRequestException('scope and refId required');
+    return ok(res, await this.notificationService.unmute(req.user.id, scope, refId));
   };
 }

@@ -10,6 +10,8 @@ export function notificationRoutes(): Router {
 
   bindRoute({ router, controller: ctrl, method: 'get', path: '/notification/list', handlerKey: 'list', middlewares: [authGuard] });
   bindRoute({ router, controller: ctrl, method: 'post', path: '/notification/seen', handlerKey: 'seen', middlewares: [authGuard] });
+  bindRoute({ router, controller: ctrl, method: 'post', path: '/notification/mute', handlerKey: 'mute', middlewares: [authGuard] });
+  bindRoute({ router, controller: ctrl, method: 'post', path: '/notification/unmute', handlerKey: 'unmute', middlewares: [authGuard] });
 
   return router;
 }

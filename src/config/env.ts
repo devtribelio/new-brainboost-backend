@@ -82,6 +82,10 @@ export const env = {
     ),
     invoiceExpiryHours: Number.parseInt(optional('COMMERCE_INVOICE_EXPIRY_HOURS', '24'), 10),
   },
+  fcm: {
+    projectId: optional('FCM_PROJECT_ID', ''),
+    serviceAccountJson: optional('FCM_SERVICE_ACCOUNT_JSON', ''),
+  },
 } as const;
 
 export type Env = typeof env;

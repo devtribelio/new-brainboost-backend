@@ -46,6 +46,7 @@ model Member {
   lastActiveAt        DateTime?
   latitude            Float?
   longitude           Float?
+  notificationsEnabled Boolean  @default(true)
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 
@@ -66,6 +67,7 @@ model Member {
   courseEnrollments    CourseEnrollment[]
   commerceTransactions CommerceTransaction[]
   commercePayments     CommercePayment[]
+  notificationMutes    NotificationMute[]
 
   @@map("members")
 }
@@ -650,6 +652,7 @@ model Notification {
   body       String?
   payload    Json?
   url        String?
+  dedupeKey  String?   @unique
   seenAt     DateTime?
   readAt     DateTime?
   createdAt  DateTime  @default(now())
@@ -658,7 +661,21 @@ model Notification {
 
   @@index([memberId, readAt])
   @@index([memberId, networkId])
+  @@index([memberId, seenAt])
   @@map("notifications")
+}
+
+model NotificationMute {
+  memberId  String   @db.Uuid
+  scope     String
+  refId     String   @db.Uuid
+  createdAt DateTime @default(now())
+
+  member Member @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@id([memberId, scope, refId])
+  @@index([scope, refId])
+  @@map("notification_mutes")
 }
 
 // ============================================================================

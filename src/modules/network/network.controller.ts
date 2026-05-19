@@ -19,6 +19,7 @@ import {
   NetworkTagPageDto,
 } from './dto/network.dto';
 import { NetworkJoinBodyDto } from './dto/network-join-body.dto';
+import { NetworkRequestActionDto } from './dto/network-request-action.dto';
 
 @ApiTags('Network')
 export class NetworkController {
@@ -101,6 +102,40 @@ export class NetworkController {
     description: 'Reserved; currently ignored (always `name asc`).',
   })
   @ApiResponse({ status: 200, type: () => NetworkTagPageDto })
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Approve a pending network join request (team-only)',
+    description: 'Caller must be a NetworkTeamMember of the target network. Provide either `requestId` directly or `(code|networkId) + memberId`.',
+  })
+  @ApiBody({ type: () => NetworkRequestActionDto })
+  approveRequest = async (req: AuthenticatedRequest, res: Response) => {
+    if (!req.user) throw new UnauthorizedException();
+    const body = req.body ?? {};
+    const result = await this.networkService.approveRequest(req.user.id, {
+      requestId: body.requestId,
+      networkInput: body.networkId ?? body.code,
+      memberId: body.memberId,
+    });
+    return ok(res, result);
+  };
+
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Reject a pending network join request (team-only)',
+    description: 'Caller must be a NetworkTeamMember of the target network.',
+  })
+  @ApiBody({ type: () => NetworkRequestActionDto })
+  rejectRequest = async (req: AuthenticatedRequest, res: Response) => {
+    if (!req.user) throw new UnauthorizedException();
+    const body = req.body ?? {};
+    const result = await this.networkService.rejectRequest(req.user.id, {
+      requestId: body.requestId,
+      networkInput: body.networkId ?? body.code,
+      memberId: body.memberId,
+    });
+    return ok(res, result);
+  };
+
   tags = async (req: Request, res: Response) => {
     const networkInput =
       (req.query.code as string) ||

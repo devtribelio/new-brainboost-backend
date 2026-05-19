@@ -12,12 +12,14 @@ import { mountSwagger } from '@/common/openapi/swagger.middleware';
 import { ok } from '@/common/utils/response.util';
 import { env } from '@/config/env';
 import { registerCommerceListeners } from '@/modules/commerce/listeners/payment-success.listener';
+import { registerNotificationListeners } from '@/modules/notification/listeners/register';
 
 let listenersRegistered = false;
 
 export function buildApp(): Express {
   if (!listenersRegistered) {
     registerCommerceListeners();
+    registerNotificationListeners();
     listenersRegistered = true;
   }
   const app = express();
