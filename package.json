@@ -6,7 +6,7 @@
   "type": "commonjs",
   "main": "dist/main.js",
   "scripts": {
-    "dev": "tsx watch src/main.ts",
+    "dev": "nodemon --watch src --ext ts,json --exec \"tsx src/main.ts\"",
     "build": "tsc -p tsconfig.json && tsc-alias -p tsconfig.json",
     "start": "node dist/main.js",
     "lint": "eslint \"src/**/*.ts\" \"tests/**/*.ts\"",
@@ -68,6 +68,7 @@
     "eslint": "^8.57.1",
     "eslint-config-prettier": "^9.1.0",
     "mysql2": "^3.22.3",
+    "nodemon": "^3.1.14",
     "pino-pretty": "^11.3.0",
     "prettier": "^3.3.3",
     "prisma": "^5.22.0",
