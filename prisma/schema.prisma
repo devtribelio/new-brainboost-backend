@@ -475,6 +475,11 @@ model Comment {
   parentId     String?  @db.Uuid
   content      String
   imageUrls    String[]
+  // First URL extracted from content at create time. Mobile renders a link
+  // preview from this. Mirrors legacy TBModel_Comment.embed_url. Full OG
+  // metadata (title/description/image) is deferred — FE fetches client-side
+  // if needed.
+  embedUrl     String?
   countLike    Int      @default(0)
   countReplies Int      @default(0)
   isDeleted    Boolean  @default(false)
@@ -578,6 +583,10 @@ model NetworkMember {
   networkId String   @db.Uuid
   memberId  String   @db.Uuid
   joinedAt  DateTime @default(now())
+  // Per-network moderation flag. Set by team/admin to silence a member in this
+  // tribe without removing them. Blocks post create, comment, and like.
+  // Mirrors legacy TBApi::validateMemberMuteNetwork.
+  isMuted   Boolean  @default(false)
 
   network Network @relation(fields: [networkId], references: [id], onDelete: Cascade)
 

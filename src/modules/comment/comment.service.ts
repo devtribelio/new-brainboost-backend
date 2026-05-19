@@ -8,8 +8,16 @@ const MAX_CONTENT_CHARS = 5000;
 const commentInclude = {
   author: true,
   parent: { select: { legacyId: true } },
-  post: { select: { legacyId: true } },
+  post: { select: { legacyId: true, networkId: true } },
 } as const;
+
+function extractFirstUrl(content: string): string | null {
+  // Greedy URL regex — first http(s) hit wins. Trim trailing punctuation
+  // that would not be part of a real URL.
+  const match = content.match(/\bhttps?:\/\/[^\s<>"']+/i);
+  if (!match) return null;
+  return match[0].replace(/[.,;:!?)\]}>]+$/, '');
+}
 
 function sanitizeContent(input: string): string {
   return input
@@ -96,6 +104,7 @@ export class CommentService {
   ): Promise<{ status: 'like' | 'dislike'; commentLegacyId: number | null; countLike: number }> {
     const c = await this.resolveCommentByAnyId(commentInput);
     if (!c) throw new NotFoundException('Comment not found');
+    if (c.post?.networkId) await this.assertNetworkAccess(c.post.networkId, memberId);
     const existing = await prisma.commentLike.findUnique({
       where: { commentId_memberId: { commentId: c.id, memberId } },
     });
@@ -150,6 +159,7 @@ export class CommentService {
       throw new BadRequestException('Cannot comment on unpublished post');
     }
     if (post.networkId) {
+      await this.assertNetworkAccess(post.networkId, memberId);
       const banned = await prisma.networkBannedMember.findUnique({
         where: { networkId_memberId: { networkId: post.networkId, memberId } },
       });
@@ -166,6 +176,8 @@ export class CommentService {
       parentId = parent.id;
     }
 
+    const embedUrl = extractFirstUrl(sanitized);
+
     const comment = await prisma.$transaction(async (tx) => {
       const created = await tx.comment.create({
         data: {
@@ -174,6 +186,7 @@ export class CommentService {
           parentId,
           content: sanitized,
           imageUrls,
+          embedUrl,
         },
         include: commentInclude,
       });
@@ -265,8 +278,33 @@ export class CommentService {
           data: { countComment: { decrement: 1 } },
         });
       }
+      // Recompute post.engagedAt from latest remaining comment. Mirrors
+      // legacy MemberDeleteComment: when the deleted comment was the most
+      // recent activity, engagedAt has to roll back to the previous one or
+      // the feed's `recent-engagement` sort drifts.
+      const latest = await tx.comment.findFirst({
+        where: { postId: c.postId, isDeleted: false },
+        orderBy: { updatedAt: 'desc' },
+        select: { updatedAt: true },
+      });
+      await tx.post.update({
+        where: { id: c.postId },
+        data: { engagedAt: latest?.updatedAt ?? null },
+      });
     });
 
     return prisma.comment.findUnique({ where: { id: c.id }, include: commentInclude });
+  }
+
+  // Asserts the caller is a NetworkMember of the tribe and is not muted
+  // there. Mirrors legacy TBApi::isMemberJoined + validateMemberMuteNetwork.
+  // Banned check is layered separately in create() — keep this narrow.
+  private async assertNetworkAccess(networkId: string, memberId: string) {
+    const m = await prisma.networkMember.findUnique({
+      where: { networkId_memberId: { networkId, memberId } },
+      select: { isMuted: true },
+    });
+    if (!m) throw new ForbiddenException('Must be a member of the network');
+    if (m.isMuted) throw new ForbiddenException('Muted in this network');
   }
 }

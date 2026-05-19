@@ -29,7 +29,7 @@ export function serializeComment(
     memberName: c.author?.fullName ?? null,
     memberProfileImage: c.author?.avatarUrl ?? null,
     embed: null,
-    embedUrl: null,
+    embedUrl: c.embedUrl ?? null,
     embedData: null,
     content: c.content,
     fullContent: c.content,

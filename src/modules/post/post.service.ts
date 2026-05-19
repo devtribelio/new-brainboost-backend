@@ -151,6 +151,7 @@ export class PostService {
   ): Promise<{ status: 'like' | 'dislike'; countLike: number }> {
     const post = await this.resolveByAnyId(postId);
     if (!post) throw new NotFoundException('Post not found');
+    if (post.networkId) await this.assertNetworkAccess(post.networkId, memberId);
 
     const existing = await prisma.postLike.findUnique({
       where: { postId_memberId: { postId: post.id, memberId } },
@@ -301,6 +302,18 @@ export class PostService {
     if (!joined) throw new ForbiddenException('Network not visible to viewer');
   }
 
+  // Asserts the caller is a NetworkMember of the tribe and is not muted there.
+  // Mirrors legacy TBApi::isMemberJoined + validateMemberMuteNetwork. Does not
+  // check banned — bans are handled separately at write paths.
+  private async assertNetworkAccess(networkId: string, memberId: string) {
+    const m = await prisma.networkMember.findUnique({
+      where: { networkId_memberId: { networkId, memberId } },
+      select: { isMuted: true },
+    });
+    if (!m) throw new ForbiddenException('Must be a member of the network');
+    if (m.isMuted) throw new ForbiddenException('Muted in this network');
+  }
+
   private async assertNetworkPostable(networkId: string, memberId: string) {
     const net = await prisma.network.findUnique({
       where: { id: networkId },
@@ -309,8 +322,10 @@ export class PostService {
     if (!net?.isActive) throw new BadRequestException('Network is not active');
     const joined = await prisma.networkMember.findUnique({
       where: { networkId_memberId: { networkId, memberId } },
+      select: { isMuted: true },
     });
     if (!joined) throw new ForbiddenException('Must be a member of the network to post');
+    if (joined.isMuted) throw new ForbiddenException('Muted in this network');
     const banned = await prisma.networkBannedMember.findUnique({
       where: { networkId_memberId: { networkId, memberId } },
     });
