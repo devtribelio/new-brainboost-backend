@@ -203,7 +203,7 @@ describe('auth social google grant', () => {
       grant_type: 'social',
       provider: 'google',
       social_token: 'fake.id.token',
-      clientType: 'mobile',
+      client_type: 'mobile',
     });
     expect(first.status).toBe(200);
     const firstRefresh = first.body.refresh_token as string;
@@ -213,7 +213,7 @@ describe('auth social google grant', () => {
       grant_type: 'social',
       provider: 'google',
       social_token: 'fake.id.token',
-      clientType: 'mobile',
+      client_type: 'mobile',
     });
     expect(second.status).toBe(200);
 

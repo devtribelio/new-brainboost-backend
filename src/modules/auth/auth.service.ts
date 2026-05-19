@@ -249,7 +249,7 @@ export class AuthService {
     const matches = await this.verifyPassword(dto.password, member);
     if (!matches) throw new UnauthorizedException('Invalid credentials');
 
-    return this.issueTokenBundle(member.id, member.email, normalizeClientType(dto.clientType));
+    return this.issueTokenBundle(member.id, member.email, normalizeClientType(dto.client_type));
   }
 
   /**
@@ -337,7 +337,7 @@ export class AuthService {
       throw new UnauthorizedException('google_email_not_verified');
     }
 
-    const clientType = normalizeClientType(dto.clientType);
+    const clientType = normalizeClientType(dto.client_type);
     const email = payload.email.trim().toLowerCase();
 
     // Fast path: known google_sub → straight to issue.

@@ -11,7 +11,10 @@ export class LoginDto {
   @IsIn(['password', 'refresh_token', 'social', 'client_credentials'])
   grant_type!: string;
 
-  @ApiPropertyOptional({ example: 'user@example.com', description: 'email/username/phone for password grant' })
+  @ApiPropertyOptional({
+    example: 'user@example.com',
+    description: 'email/username/phone for password grant',
+  })
   @IsOptional()
   @IsString()
   username?: string;
@@ -65,5 +68,5 @@ export class LoginDto {
   @IsOptional()
   @IsString()
   @IsIn(['mobile', 'web'])
-  clientType?: 'mobile' | 'web';
+  client_type?: 'mobile' | 'web';
 }
