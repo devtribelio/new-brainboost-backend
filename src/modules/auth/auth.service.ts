@@ -206,6 +206,8 @@ export class AuthService {
       });
     }
 
+    await this.autoJoinCommunityNetworks(member.id);
+
     await prisma.praMember.deleteMany({
       where: {
         OR: [
@@ -228,6 +230,31 @@ export class AuthService {
       if (!exists) return code;
     }
     throw new Error('Unable to generate unique member code after 5 attempts');
+  }
+
+  // Auto-join the default community networks (Timeline + Education) on every
+  // new member. Mirrors what mobile MainPage previously triggered via
+  // /api/member/info → /api/network/join, but guarantees the rows exist before
+  // the first feed render. Idempotent: per-network unique violation is swallowed
+  // so a retried registration cannot double-join or double-bump countMember.
+  private async autoJoinCommunityNetworks(memberId: string): Promise<void> {
+    const communities = await prisma.network.findMany({
+      where: { purpose: { in: ['timeline', 'education'] }, isActive: true },
+      select: { id: true },
+    });
+    for (const n of communities) {
+      try {
+        await prisma.$transaction([
+          prisma.networkMember.create({ data: { networkId: n.id, memberId } }),
+          prisma.network.update({
+            where: { id: n.id },
+            data: { countMember: { increment: 1 } },
+          }),
+        ]);
+      } catch (err) {
+        if (!this.isUniqueViolation(err)) throw err;
+      }
+    }
   }
 
   private async loginWithPassword(dto: LoginDto): Promise<TokenBundle> {
@@ -384,6 +411,7 @@ export class AuthService {
           registerFrom: clientType,
         },
       });
+      await this.autoJoinCommunityNetworks(created.id);
       return this.issueTokenBundle(created.id, created.email, clientType);
     } catch (err) {
       // Race: a concurrent request created the same email/google_sub first.
@@ -585,6 +613,8 @@ export class AuthService {
       },
       select: { id: true, legacyId: true, phone: true, phoneCode: true },
     });
+
+    await this.autoJoinCommunityNetworks(member.id);
 
     const otp = await otpService.issue({ target, purpose: 'verify-phone' });
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
