@@ -217,7 +217,7 @@ Module status (one-line summary; details in `docs/rewrite-progress.md`):
 - [x] comment — CRUD
 - [x] reply — minimal
 - [x] network — CRUD, member list (empty-input lists-all parity)
-- [x] notification — list, read
+- [x] notification — list, read, producer (commerce/post/comment/like/network), FCM v1 push (fire-and-forget), mute. Pending: FCM live credentials + manual push QA. RabbitMQ outbox deferred (see `docs/notification-port.md §12`).
 - [x] report — submit
 - [x] admin — auth, dashboard, CRUD scaffolding via `crud-factory`
 - [x] commerce / purchase — Xendit-only (CC + VA + eWallet), 2-step checkout→payment, voucher bypass, webhook + cron expire, event-driven side effects (enrollment + affiliate commission + voucher redeem). See `docs/commerce-port.md`. Pending: manual Xendit sandbox QA
