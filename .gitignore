@@ -14,4 +14,6 @@ uploads/
 # ruv-swarm / claude-flow artifacts
 .swarm/
 .claude-flow/
+.claude/
+.mcp.json
 ruvector.db
