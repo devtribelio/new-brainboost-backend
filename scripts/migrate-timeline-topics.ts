@@ -9,15 +9,9 @@
  *   pnpm tsx scripts/migrate-timeline-topics.ts
  */
 import 'dotenv/config';
-import mysql, { type RowDataPacket } from 'mysql2/promise';
+import type { RowDataPacket } from 'mysql2/promise';
 import { PrismaClient } from '@prisma/client';
-
-const LEGACY_HOST =
-  process.env.LEGACY_DB_HOST ??
-  'tribelio-db-rds1-mariadb.cly0dad2a29h.ap-southeast-1.rds.amazonaws.com';
-const LEGACY_USER = process.env.LEGACY_DB_USER ?? 'tribelio_readonly';
-const LEGACY_PASS = process.env.LEGACY_DB_PASS ?? '3373kfh6g0ZG0tgCU5J0';
-const LEGACY_DB = process.env.LEGACY_DB_NAME ?? 'tribelio_db';
+import { connectLegacyDb } from './legacy-db';
 
 const LEGACY_NETWORK_ID = 23410;
 const TARGET_NETWORK_CODE = 'BBTIMELN';
@@ -51,12 +45,7 @@ async function main() {
   }
   log(`target network: ${network.name} (${network.id})`);
 
-  const legacy = await mysql.createConnection({
-    host: LEGACY_HOST,
-    user: LEGACY_USER,
-    password: LEGACY_PASS,
-    database: LEGACY_DB,
-  });
+  const legacy = await connectLegacyDb();
 
   const [rows] = await legacy.query<RowDataPacket[]>(
     `SELECT topic_id, name, description, image_url, icon, icon_type, type, status, created

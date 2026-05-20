@@ -1,14 +1,8 @@
 import 'dotenv/config';
-import mysql from 'mysql2/promise';
 import type { RowDataPacket } from 'mysql2/promise';
 import { PrismaClient } from '@prisma/client';
+import { connectLegacyDb } from './legacy-db';
 
-const LEGACY_HOST =
-  process.env.LEGACY_DB_HOST ??
-  'tribelio-db-rds1-mariadb.cly0dad2a29h.ap-southeast-1.rds.amazonaws.com';
-const LEGACY_USER = process.env.LEGACY_DB_USER ?? 'tribelio_readonly';
-const LEGACY_PASS = process.env.LEGACY_DB_PASS ?? '3373kfh6g0ZG0tgCU5J0';
-const LEGACY_DB = process.env.LEGACY_DB_NAME ?? 'tribelio_db';
 const BATCH = Number(process.env.MIGRATE_BATCH ?? 1000);
 
 const prisma = new PrismaClient();
@@ -44,13 +38,7 @@ async function main() {
     return;
   }
 
-  const legacy = await mysql.createConnection({
-    host: LEGACY_HOST,
-    user: LEGACY_USER,
-    password: LEGACY_PASS,
-    database: LEGACY_DB,
-    dateStrings: false,
-  });
+  const legacy = await connectLegacyDb({ dateStrings: false });
 
   const legacyCourseIds = [...courseMap.keys()];
   let cursor = 0;

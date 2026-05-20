@@ -1,14 +1,7 @@
 import 'dotenv/config';
-import mysql from 'mysql2/promise';
 import type { RowDataPacket } from 'mysql2/promise';
 import { PrismaClient, Prisma } from '@prisma/client';
-
-const LEGACY_HOST =
-  process.env.LEGACY_DB_HOST ??
-  'tribelio-db-rds1-mariadb.cly0dad2a29h.ap-southeast-1.rds.amazonaws.com';
-const LEGACY_USER = process.env.LEGACY_DB_USER ?? 'tribelio_readonly';
-const LEGACY_PASS = process.env.LEGACY_DB_PASS ?? '3373kfh6g0ZG0tgCU5J0';
-const LEGACY_DB = process.env.LEGACY_DB_NAME ?? 'tribelio_db';
+import { connectLegacyDb } from './legacy-db';
 
 const prisma = new PrismaClient();
 
@@ -43,13 +36,7 @@ async function main() {
     .map((p) => p.legacyId)
     .filter((x): x is number => x !== null);
 
-  const legacy = await mysql.createConnection({
-    host: LEGACY_HOST,
-    user: LEGACY_USER,
-    password: LEGACY_PASS,
-    database: LEGACY_DB,
-    dateStrings: false,
-  });
+  const legacy = await connectLegacyDb({ dateStrings: false });
 
   const [rows] = await legacy.query<LegacyRow[]>(
     'SELECT course_id, selling_point FROM course WHERE course_id IN (?) AND selling_point IS NOT NULL AND selling_point != ""',

@@ -10,15 +10,9 @@
  *   posts | comments | post-likes | comment-likes | products | reports
  */
 import 'dotenv/config';
-import mysql, { type Connection, type RowDataPacket } from 'mysql2/promise';
+import type { Connection, RowDataPacket } from 'mysql2/promise';
 import { PrismaClient } from '@prisma/client';
-
-const LEGACY_HOST =
-  process.env.LEGACY_DB_HOST ??
-  'tribelio-db-rds1-mariadb.cly0dad2a29h.ap-southeast-1.rds.amazonaws.com';
-const LEGACY_USER = process.env.LEGACY_DB_USER ?? 'tribelio_readonly';
-const LEGACY_PASS = process.env.LEGACY_DB_PASS ?? '3373kfh6g0ZG0tgCU5J0';
-const LEGACY_DB = process.env.LEGACY_DB_NAME ?? 'tribelio_db';
+import { connectLegacyDb } from './legacy-db';
 
 const BATCH = Number.parseInt(process.env.MIGRATE_BATCH ?? '1000', 10);
 const PROGRESS_EVERY = 5;
@@ -1169,13 +1163,7 @@ async function main() {
   const requested = argv.length > 0 ? argv.join(',').split(',').map((s) => s.trim()) : DEFAULT_ORDER;
   log(`phases: ${requested.join(', ')}`);
 
-  const legacy = await mysql.createConnection({
-    host: LEGACY_HOST,
-    user: LEGACY_USER,
-    password: LEGACY_PASS,
-    database: LEGACY_DB,
-    dateStrings: false,
-  });
+  const legacy = await connectLegacyDb({ dateStrings: false });
   log('connected to legacy mariadb');
 
   try {
