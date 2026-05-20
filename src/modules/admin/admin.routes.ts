@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { asyncHandler } from '@/common/utils/async-handler';
+import { adminLoginRateLimiter } from '@/common/middlewares/rate-limit.middleware';
 import { adminAuthGuard } from './admin.auth.middleware';
 import { AdminAuthController } from './admin.auth.controller';
 import { AdminDashboardController } from './admin.dashboard.controller';
@@ -12,7 +13,7 @@ export function adminRoutes(): Router {
   const dashboard = new AdminDashboardController();
 
   router.get('/login', auth.loginPage);
-  router.post('/login', asyncHandler(auth.login));
+  router.post('/login', adminLoginRateLimiter, asyncHandler(auth.login));
   router.get('/logout', auth.logout);
 
   router.use(adminAuthGuard);

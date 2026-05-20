@@ -2,7 +2,10 @@ import bcrypt from 'bcryptjs';
 import { randomInt } from 'node:crypto';
 import { prisma } from '@/config/prisma';
 import { BadRequestException } from '@/common/exceptions';
+import { logger } from '@/config/logger';
 import { mailer } from './mailer.service';
+
+const MAX_OTP_ATTEMPTS = 5;
 
 export type OtpPurpose =
   | 'forgot-password'
@@ -60,7 +63,17 @@ class OtpService {
     return { id: row.id, code };
   }
 
-  async verify(target: string, code: string, purpose: OtpPurpose): Promise<void> {
+  /**
+   * Loads the latest unused OTP and verifies the supplied code against it.
+   * Enforces an attempt counter: wrong guesses are counted, and once
+   * MAX_OTP_ATTEMPTS is reached the OTP is invalidated so it cannot be
+   * brute-forced. Returns the matched OTP row on success.
+   */
+  private async resolveAndMatch(
+    target: string,
+    code: string,
+    purpose: OtpPurpose,
+  ): Promise<{ id: string }> {
     const otp = await prisma.otpCode.findFirst({
       where: { target, purpose, usedAt: null },
       orderBy: { createdAt: 'desc' },
@@ -68,22 +81,34 @@ class OtpService {
 
     if (!otp) throw new BadRequestException('OTP not found or already used');
     if (otp.expiresAt < new Date()) throw new BadRequestException('OTP expired');
+    if (otp.attempts >= MAX_OTP_ATTEMPTS) {
+      throw new BadRequestException('Too many incorrect attempts. Request a new code.');
+    }
 
     const matches = await bcrypt.compare(code, otp.code);
-    if (!matches) throw new BadRequestException('Invalid OTP');
+    if (!matches) {
+      const attempts = otp.attempts + 1;
+      const locked = attempts >= MAX_OTP_ATTEMPTS;
+      await prisma.otpCode.update({
+        where: { id: otp.id },
+        data: { attempts, ...(locked ? { usedAt: new Date() } : {}) },
+      });
+      if (locked) {
+        logger.warn({ purpose, target }, 'OTP locked after too many incorrect attempts');
+        throw new BadRequestException('Too many incorrect attempts. Request a new code.');
+      }
+      throw new BadRequestException('Invalid OTP');
+    }
+
+    return { id: otp.id };
+  }
+
+  async verify(target: string, code: string, purpose: OtpPurpose): Promise<void> {
+    await this.resolveAndMatch(target, code, purpose);
   }
 
   async consume(target: string, code: string, purpose: OtpPurpose): Promise<void> {
-    const otp = await prisma.otpCode.findFirst({
-      where: { target, purpose, usedAt: null },
-      orderBy: { createdAt: 'desc' },
-    });
-
-    if (!otp) throw new BadRequestException('OTP not found or already used');
-    if (otp.expiresAt < new Date()) throw new BadRequestException('OTP expired');
-
-    const matches = await bcrypt.compare(code, otp.code);
-    if (!matches) throw new BadRequestException('Invalid OTP');
+    const otp = await this.resolveAndMatch(target, code, purpose);
 
     await prisma.otpCode.update({
       where: { id: otp.id },
