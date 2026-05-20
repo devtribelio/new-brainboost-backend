@@ -278,7 +278,8 @@ const topicResource: ResourceConfig = {
   fields: [
     { name: 'name', label: 'Name', type: 'text', required: true },
     { name: 'description', label: 'Description', type: 'textarea' },
-    { name: 'iconUrl', label: 'Icon URL', type: 'text' },
+    { name: 'iconUrl', label: 'Icon (emoji or URL)', type: 'text' },
+    { name: 'iconType', label: 'Icon Type', type: 'text' },
     { name: 'isActive', label: 'Is Active', type: 'boolean' },
   ],
 };

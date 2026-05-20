@@ -19,8 +19,9 @@ export class TopicDto {
 
   @ApiPropertyOptional({
     nullable: true,
-    example: 'image',
-    description: 'Always `image` when icon is set, otherwise null',
+    enum: ['emoji', 'image'],
+    example: 'emoji',
+    description: '`emoji` or `image`; null when no icon',
   })
   iconType?: string | null;
 

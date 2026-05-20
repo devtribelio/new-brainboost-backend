@@ -352,6 +352,7 @@ model Topic {
   name        String
   description String?
   iconUrl     String?
+  iconType    String?  // "emoji" | "image" — null when no icon
   type        String   @default("PUBLIC")
   isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())

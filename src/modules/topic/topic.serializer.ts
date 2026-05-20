@@ -8,7 +8,7 @@ export function serializeTopic(
     topicId: t.legacyId ?? t.id,
     name: t.name,
     icon: t.iconUrl,
-    iconType: t.iconUrl ? 'image' : null,
+    iconType: t.iconType ?? (t.iconUrl ? 'image' : null),
     type: t.type,
     countPost: t.countPost ?? 0,
     orderNumber: t.orderNumber ?? 0,
