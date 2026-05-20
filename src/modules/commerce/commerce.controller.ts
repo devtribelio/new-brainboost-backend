@@ -14,6 +14,7 @@ import type { VoucherService } from './voucher.service';
 import { StartCheckoutDto } from './dto/start-checkout.dto';
 import { PayDto, CancelTransactionDto, ValidateVoucherDto } from './dto/pay.dto';
 import {
+  CommerceTransactionListItemDto,
   CreatePaymentResultDto,
   StartCheckoutResultDto,
   TransactionStatusResultDto,
@@ -66,6 +67,12 @@ export class CommerceController {
 
   @ApiBearerAuth()
   @ApiOperation({ summary: 'List commerce transactions (history)' })
+  @ApiResponse({
+    status: 200,
+    type: () => CommerceTransactionListItemDto,
+    isArray: true,
+    envelope: 'paginated',
+  })
   listTransactions = async (req: ReqWithUser, res: Response) => {
     const p = parsePagination(req.query as Record<string, unknown>, { perPage: 20 });
     const { rows, total } = await this.payment.listTransactions(req.user!.id, p.page, p.perPage);
