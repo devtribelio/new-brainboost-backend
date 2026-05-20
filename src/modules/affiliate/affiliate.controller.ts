@@ -7,7 +7,24 @@ import { ok, okCreated, okPaginated } from '@/common/utils/response.util';
 import { UnauthorizedException, BadRequestException } from '@/common/exceptions';
 import type { AuthenticatedRequest } from '@/common/interfaces/authenticated-request';
 import type { AffiliateBased } from './constants';
-import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@/common/openapi/decorators';
+import {
+  ApiBearerAuth,
+  ApiBody,
+  ApiOperation,
+  ApiQuery,
+  ApiResponse,
+  ApiTags,
+} from '@/common/openapi/decorators';
+import { LogAttributionDto, LogVisitDto, SetModeDto } from './dto/affiliate-request.dto';
+import {
+  AffiliateCommissionDto,
+  AffiliateProgramDto,
+  AffiliatorProfileDto,
+  AffiliatorSummaryDto,
+  MemberAffiliatorDto,
+  SetModeResultDto,
+  VisitLogResultDto,
+} from './dto/affiliate-response.dto';
 
 @ApiTags('Affiliate')
 export class AffiliateController {
@@ -20,7 +37,7 @@ export class AffiliateController {
 
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Get my affiliator profile (auto-generates affiliateCode if missing)' })
-  @ApiResponse({ status: 200 })
+  @ApiResponse({ status: 200, type: () => AffiliatorProfileDto })
   getMe = async (req: AuthenticatedRequest, res: Response) => {
     if (!req.user) throw new UnauthorizedException();
     const profile = await this.affiliatorService.getMe(req.user.id);
@@ -29,7 +46,8 @@ export class AffiliateController {
 
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Set my affiliate mode (PERFORMANCE | GROWTH | INACTIVE)' })
-  @ApiResponse({ status: 200 })
+  @ApiBody({ type: () => SetModeDto })
+  @ApiResponse({ status: 200, type: () => SetModeResultDto })
   setMode = async (req: AuthenticatedRequest, res: Response) => {
     if (!req.user) throw new UnauthorizedException();
     const mode = (req.body?.mode as AffiliateBased) || (req.body?.affiliateBased as AffiliateBased);
@@ -40,7 +58,7 @@ export class AffiliateController {
 
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Affiliator dashboard summary (lifetime, balance, pending, current tier)' })
-  @ApiResponse({ status: 200 })
+  @ApiResponse({ status: 200, type: () => AffiliatorSummaryDto })
   getSummary = async (req: AuthenticatedRequest, res: Response) => {
     if (!req.user) throw new UnauthorizedException();
     const summary = await this.affiliatorService.getSummary(req.user.id);
@@ -49,7 +67,12 @@ export class AffiliateController {
 
   @ApiBearerAuth()
   @ApiOperation({ summary: 'List my commissions (paginated, optional status/from/to filter)' })
-  @ApiResponse({ status: 200 })
+  @ApiQuery({ name: 'page', type: 'integer', required: false, example: 1 })
+  @ApiQuery({ name: 'perPage', type: 'integer', required: false, example: 20, description: 'Max 100.' })
+  @ApiQuery({ name: 'status', type: 'string', required: false, description: 'PENDING | BALANCE | VOIDED' })
+  @ApiQuery({ name: 'from', type: 'string', required: false, description: 'ISO date — createdAt lower bound.' })
+  @ApiQuery({ name: 'to', type: 'string', required: false, description: 'ISO date — createdAt upper bound.' })
+  @ApiResponse({ status: 200, type: () => AffiliateCommissionDto, isArray: true, envelope: 'paginated' })
   listMyCommissions = async (req: AuthenticatedRequest, res: Response) => {
     if (!req.user) throw new UnauthorizedException();
     const page = Math.max(1, Number(req.query.page) || 1);
@@ -62,7 +85,7 @@ export class AffiliateController {
   };
 
   @ApiOperation({ summary: 'List active affiliate programs' })
-  @ApiResponse({ status: 200 })
+  @ApiResponse({ status: 200, type: () => AffiliateProgramDto, isArray: true })
   listPrograms = async (_req: Request, res: Response) => {
     const programs = await this.programService.listActive();
     return ok(res, programs);
@@ -70,7 +93,7 @@ export class AffiliateController {
 
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Enroll in a program by code' })
-  @ApiResponse({ status: 201 })
+  @ApiResponse({ status: 201, type: () => MemberAffiliatorDto })
   enroll = async (req: AuthenticatedRequest, res: Response) => {
     if (!req.user) throw new UnauthorizedException();
     const code = req.params.code;
@@ -80,7 +103,10 @@ export class AffiliateController {
   };
 
   @ApiOperation({ summary: 'Log an affiliate link click. Always returns 200 — never breaks marketing ads.' })
-  @ApiResponse({ status: 200 })
+  @ApiBody({ type: () => LogVisitDto })
+  @ApiQuery({ name: 'program', type: 'string', required: false, description: 'Program code — query fallback for `programCode`.' })
+  @ApiQuery({ name: 'affCode', type: 'string', required: false, description: 'Affiliator code — query fallback for `affiliatorCode`.' })
+  @ApiResponse({ status: 200, type: () => VisitLogResultDto })
   logVisit = async (req: AuthenticatedRequest, res: Response) => {
     const body = (req.body ?? {}) as Record<string, unknown>;
     const programCode = (body.programCode || body.program_code || req.query.program) as string;
@@ -115,7 +141,8 @@ export class AffiliateController {
 
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Bind affiliate attribution to logged-in member (deep-link post-login)' })
-  @ApiResponse({ status: 200 })
+  @ApiBody({ type: () => LogAttributionDto })
+  @ApiResponse({ status: 200, type: () => VisitLogResultDto })
   logAttribution = async (req: AuthenticatedRequest, res: Response) => {
     if (!req.user) throw new UnauthorizedException();
     const body = (req.body ?? {}) as Record<string, unknown>;
