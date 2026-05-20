@@ -72,8 +72,8 @@ export class PaymentService {
       currency: 'IDR',
       payerEmail: member?.email ?? undefined,
       description: `Commerce ${tx.id}`,
-      successRedirectUrl: env.xendit.invoiceSuccessUrl,
-      failureRedirectUrl: env.xendit.invoiceFailureUrl,
+      successRedirectUrl: `${env.xendit.invoiceSuccessUrl}?transactionId=${tx.id}`,
+      failureRedirectUrl: `${env.xendit.invoiceFailureUrl}?transactionId=${tx.id}`,
       invoiceDuration: env.commerce.invoiceExpiryHours * 60 * 60,
       customer: member?.fullName
         ? {

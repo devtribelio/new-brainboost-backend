@@ -68,11 +68,11 @@ export const env = {
     callbackToken: optional('XENDIT_CALLBACK_TOKEN', ''),
     invoiceSuccessUrl: optional(
       'XENDIT_INVOICE_SUCCESS_URL',
-      'brainboost://payment/result?status=success',
+      'http://localhost:3000/checkout/success',
     ),
     invoiceFailureUrl: optional(
       'XENDIT_INVOICE_FAILURE_URL',
-      'brainboost://payment/result?status=failure',
+      'http://localhost:3000/checkout/failed',
     ),
   },
   commerce: {

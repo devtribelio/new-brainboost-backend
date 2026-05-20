@@ -23,14 +23,16 @@ function invoiceCallback(opts: {
   paymentChannel?: string;
   paymentDestination?: string;
   paidAmount?: number;
+  amount?: number;
+  currency?: string;
 }): Record<string, unknown> {
   return {
     id: opts.invoiceId,
     external_id: `commerce-${uid()}`,
     status: opts.status,
-    amount: 500_000,
+    amount: opts.amount ?? 500_000,
     paid_amount: opts.paidAmount ?? 500_000,
-    currency: 'IDR',
+    currency: opts.currency ?? 'IDR',
     payment_method: 'BANK_TRANSFER',
     payment_channel: opts.paymentChannel ?? 'BCA',
     payment_destination: opts.paymentDestination ?? '8888812345678901',
@@ -214,5 +216,84 @@ describe('Xendit Invoice webhook', () => {
     expect(events[0].source).toBe('webhook');
     expect(events[0].fromStatus).toBe('PENDING');
     expect(events[0].toStatus).toBe('SUCCESS');
+  });
+
+  it('refuses SUCCESS when paid_amount does not match the payment amount', async () => {
+    const tx = await createPendingTransaction(memberId, productId, 500_000);
+    const invoiceId = `inv-${uid()}`;
+    const payment = await prisma.commercePayment.create({
+      data: {
+        transactionId: tx.id,
+        memberId,
+        paymentType: 'invoice',
+        amount: 500_000,
+        status: 'PENDING',
+        externalId: uid(),
+        xenditId: invoiceId,
+      },
+    });
+
+    const r = await request(app)
+      .post(ROUTE)
+      .set('x-callback-token', CALLBACK_TOKEN)
+      .send(invoiceCallback({ invoiceId, status: 'PAID', paidAmount: 1 }));
+
+    expect(r.status).toBe(200);
+    expect(r.body.noop).toBe(true);
+    expect(r.body.reason).toBe('amount_mismatch');
+
+    const after = await prisma.commercePayment.findUnique({ where: { id: payment.id } });
+    expect(after?.status).toBe('PENDING');
+
+    const txAfter = await prisma.commerceTransaction.findUnique({ where: { id: tx.id } });
+    expect(txAfter?.status).toBe('PENDING');
+
+    expect(successEvents).toHaveLength(0);
+
+    // rejected callback is still recorded for audit, with no state transition
+    const events = await prisma.commercePaymentEvent.findMany({
+      where: { paymentId: payment.id },
+    });
+    expect(events).toHaveLength(1);
+    expect(events[0].fromStatus).toBe('PENDING');
+    expect(events[0].toStatus).toBe('PENDING');
+  });
+
+  it('refuses SUCCESS when the callback currency is not IDR', async () => {
+    const tx = await createPendingTransaction(memberId, productId, 500_000);
+    const invoiceId = `inv-${uid()}`;
+    const payment = await prisma.commercePayment.create({
+      data: {
+        transactionId: tx.id,
+        memberId,
+        paymentType: 'invoice',
+        amount: 500_000,
+        status: 'PENDING',
+        externalId: uid(),
+        xenditId: invoiceId,
+      },
+    });
+
+    const r = await request(app)
+      .post(ROUTE)
+      .set('x-callback-token', CALLBACK_TOKEN)
+      .send(invoiceCallback({ invoiceId, status: 'PAID', currency: 'USD' }));
+
+    expect(r.status).toBe(200);
+    expect(r.body.noop).toBe(true);
+    expect(r.body.reason).toBe('currency_mismatch');
+
+    const after = await prisma.commercePayment.findUnique({ where: { id: payment.id } });
+    expect(after?.status).toBe('PENDING');
+    expect(successEvents).toHaveLength(0);
+  });
+
+  it('rejects a malformed callback body (missing status) with 400', async () => {
+    const r = await request(app)
+      .post(ROUTE)
+      .set('x-callback-token', CALLBACK_TOKEN)
+      .send({ id: `inv-${uid()}` });
+
+    expect(r.status).toBe(400);
   });
 });
