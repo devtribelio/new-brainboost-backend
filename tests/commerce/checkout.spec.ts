@@ -21,7 +21,7 @@ describe('commerce checkout flow', () => {
     const tokenRes = await request(app)
       .post('/api/member/oauth/token')
       .send({ grant_type: 'password', username: email, password });
-    accessToken = (tokenRes.body as { access_token: string }).access_token;
+    accessToken = (tokenRes.body.data as { access_token: string }).access_token;
     const m = await prisma.member.findUnique({ where: { email } });
     memberId = m!.id;
 
@@ -56,8 +56,8 @@ describe('commerce checkout flow', () => {
       .post('/api/member/product/checkout/submit')
       .set('Authorization', `Bearer ${accessToken}`)
       .send({ productId });
-    expect(r.status).toBe(200);
-    expect(r.body.errCode).toBe(0);
+    expect(r.status).toBe(201);
+    expect(r.body.success).toBe(true);
     expect(r.body.data.transactionId).toBeDefined();
     expect(r.body.data.transactionCode).toMatch(/^BB-\d{8}-\d{4}$/);
     expect(r.body.data.itemTotal).toBe(500_000);
@@ -79,7 +79,7 @@ describe('commerce checkout flow', () => {
       .post('/api/member/product/checkout/submit')
       .set('Authorization', `Bearer ${accessToken}`)
       .send({ productId, voucherCode });
-    expect(r.status).toBe(200);
+    expect(r.status).toBe(201);
     expect(r.body.data.voucherAmount).toBe(50_000);
     expect(r.body.data.amount).toBe(450_000);
 

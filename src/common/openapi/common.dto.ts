@@ -38,46 +38,63 @@ export class TokenBundleDto {
   scope?: string;
 }
 
-export class ApiErrorResponseDto {
-  @ApiProperty({
-    type: 'integer',
-    example: 400,
-    description: 'Error code. `0` on success, HTTP-style status code on failure.',
-  })
-  errCode!: number;
-
-  @ApiProperty({
-    type: 'string',
-    nullable: true,
-    example: 'Invalid credentials',
-    description: 'Human-readable error message. `null` on success.',
-  })
-  errMessage!: string | null;
-
-  @ApiProperty({
-    type: 'object',
-    nullable: true,
-    example: null,
-    description: 'Always `null` on failure responses.',
-  })
-  data!: null;
-}
-
 export class GenericOkDto {
   @ApiProperty({ type: 'boolean', example: true })
   ok!: boolean;
 }
 
-// Meta block for the FE legacy http envelope emitted by `okLegacy`:
-// `{ meta: LegacyMetaDto, data: T[] }`. Distinct from `buildLegacyPage` which
-// emits a flat `{ total, perPage, currentPage, lastPage, items }` shape.
-export class LegacyMetaDto {
-  @ApiProperty({ type: 'integer', example: 137 })
-  total!: number;
+/** Inner `error` block in the standard envelope. */
+export class ApiErrorDto {
+  @ApiProperty({
+    type: 'string',
+    example: 'VALIDATION_ERROR',
+    description:
+      'Machine-readable error code (e.g. BAD_REQUEST, UNAUTHORIZED, NOT_FOUND, VALIDATION_ERROR).',
+  })
+  code!: string;
 
+  @ApiProperty({
+    type: 'string',
+    example: 'Validation failed',
+    description: 'Human-readable error message.',
+  })
+  message!: string;
+
+  @ApiPropertyOptional({
+    type: 'object',
+    description: 'Optional structured error context (validation field list, etc.).',
+  })
+  details?: unknown;
+}
+
+/**
+ * Full error envelope returned by `fail()` for any non-2xx response.
+ * Use as `@ApiResponse({ status: 4xx, type: () => ErrorEnvelopeDto, envelope: 'none' })`.
+ */
+export class ErrorEnvelopeDto {
+  @ApiProperty({ type: 'boolean', example: false })
+  success!: boolean;
+
+  @ApiProperty({ type: 'object', nullable: true, example: null })
+  data!: null;
+
+  @ApiProperty({ type: 'object', nullable: true, example: null })
+  meta!: null;
+
+  @ApiProperty({ type: () => ApiErrorDto })
+  error!: ApiErrorDto;
+}
+
+export class PaginationMetaDto {
   @ApiProperty({ type: 'integer', example: 1, description: 'Current page (1-based)' })
   page!: number;
 
+  @ApiProperty({ type: 'integer', example: 20 })
+  perPage!: number;
+
+  @ApiProperty({ type: 'integer', example: 137 })
+  total!: number;
+
   @ApiProperty({ type: 'integer', example: 7 })
-  lastPage!: number;
+  totalPages!: number;
 }

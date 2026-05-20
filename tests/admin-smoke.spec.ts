@@ -40,6 +40,6 @@ describe('admin panel routes', () => {
   it('GET /health still works (existing API not broken)', async () => {
     const res = await request(app).get('/health');
     expect(res.status).toBe(200);
-    expect(res.body).toMatchObject({ errCode: 0, data: { status: 'ok' } });
+    expect(res.body).toMatchObject({ success: true, data: { status: 'ok' } });
   });
 });

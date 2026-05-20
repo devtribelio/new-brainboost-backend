@@ -1,9 +1,9 @@
 import type { Response } from 'express';
 import { PostService } from './post.service';
 import { ReportService } from '@/modules/report/report.service';
-import { ok } from '@/common/utils/response.util';
+import { ok, okCreated, okPaginated } from '@/common/utils/response.util';
 import { BadRequestException, UnauthorizedException } from '@/common/exceptions';
-import { buildLegacyPage, parsePagination } from '@/common/utils/pagination.util';
+import { parsePagination } from '@/common/utils/pagination.util';
 import { serializePost } from './post.serializer';
 import type { AuthenticatedRequest } from '@/common/interfaces/authenticated-request';
 import {
@@ -14,7 +14,7 @@ import {
   ApiResponse,
   ApiTags,
 } from '@/common/openapi/decorators';
-import { ApiErrorResponseDto } from '@/common/openapi/common.dto';
+import { ErrorEnvelopeDto } from '@/common/openapi/common.dto';
 import {
   PostCreateBodyDto,
   PostDeleteBodyDto,
@@ -22,7 +22,6 @@ import {
   PostDto,
   PostLikeBodyDto,
   PostLikeToggleResultDto,
-  PostPageDto,
   PostReportBodyDto,
 } from './dto/post.dto';
 import { ReportResultDto } from '@/modules/report/dto/report.dto';
@@ -69,7 +68,7 @@ export class PostController {
     example: 'pinned',
     description: 'pinned | recent-engagement. Unknown values are no-op.',
   })
-  @ApiResponse({ status: 200, type: () => PostPageDto })
+  @ApiResponse({ status: 200, type: () => PostDto, isArray: true, envelope: 'paginated' })
   list = async (req: AuthenticatedRequest, res: Response) => {
     if (!req.user) throw new UnauthorizedException();
     const p = parsePagination(req.query as Record<string, unknown>);
@@ -91,7 +90,7 @@ export class PostController {
     );
 
     const data = rows.map((row) => serializePost(row, liked.has(row.id) ? 'like' : 'dislike'));
-    return ok(res, buildLegacyPage(data, total, p));
+    return okPaginated(res, data, { page: p.page, perPage: p.perPage, total });
   };
 
   @ApiBearerAuth()
@@ -104,7 +103,7 @@ export class PostController {
     description: 'legacyId or uuid',
   })
   @ApiResponse({ status: 200, type: () => PostDto })
-  @ApiResponse({ status: 404, description: 'Not found', type: () => ApiErrorResponseDto })
+  @ApiResponse({ status: 404, description: 'Not found', type: () => ErrorEnvelopeDto, envelope: 'none' })
   detail = async (req: AuthenticatedRequest, res: Response) => {
     if (!req.user) throw new UnauthorizedException();
     const postId = (req.query.postId as string) ?? '';
@@ -144,7 +143,7 @@ export class PostController {
       videoUrl: body.videoUrl,
       embedUrl: body.embedUrl,
     });
-    return ok(res, serializePost(post), 201);
+    return okCreated(res, serializePost(post));
   };
 
   @ApiBearerAuth()
@@ -177,6 +176,6 @@ export class PostController {
       networkId: body.networkId,
       reason: body.reason,
     });
-    return ok(res, r, 201);
+    return okCreated(res, r);
   };
 }

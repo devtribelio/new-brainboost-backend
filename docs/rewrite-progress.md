@@ -75,6 +75,14 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` parity met for current s
 - `crud-factory` generates basic CRUD for indexed resources (`resources/index.ts`, 27 entries).
 - `resources/loaders.ts` provides 12 Prisma loaders.
 
+### response envelope consolidation (2026-05-19)
+- Collapsed `ok()` + `okLegacy()` + `buildLegacyPage()` into a single envelope `{ success, data, meta, error }`.
+- New helpers: `ok`, `okCreated`, `okPaginated`, `fail` in `src/common/utils/response.util.ts`.
+- Login `/oauth/token` now wrapped; webhook stays raw (provider contract).
+- Status 201 applied to all POST-creates (checkout, payment, affiliate enroll, post/comment/report/register).
+- Error vocabulary: `BAD_REQUEST`, `VALIDATION_ERROR`, `UNAUTHORIZED`, `FORBIDDEN`, `NOT_FOUND`, `CONFLICT`, `INTERNAL_ERROR`.
+- Big-bang mobile rollout — see `docs/api-envelope.md` for spec + client migration notes.
+
 ---
 
 ## In progress ([~])

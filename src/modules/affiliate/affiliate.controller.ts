@@ -3,8 +3,7 @@ import type { AffiliateProgramService } from './program.service';
 import type { AffiliatorService } from './affiliator.service';
 import type { EnrollmentService } from './enrollment.service';
 import { VisitService } from './visit.service';
-import { ok } from '@/common/utils/response.util';
-import { buildLegacyPage } from '@/common/utils/pagination.util';
+import { ok, okCreated, okPaginated } from '@/common/utils/response.util';
 import { UnauthorizedException, BadRequestException } from '@/common/exceptions';
 import type { AuthenticatedRequest } from '@/common/interfaces/authenticated-request';
 import type { AffiliateBased } from './constants';
@@ -59,7 +58,7 @@ export class AffiliateController {
     const from = typeof req.query.from === 'string' ? new Date(req.query.from) : undefined;
     const to = typeof req.query.to === 'string' ? new Date(req.query.to) : undefined;
     const { rows, total } = await this.affiliatorService.listCommissions(req.user.id, { status, from, to }, page, perPage);
-    return ok(res, buildLegacyPage(rows, total, { page, perPage, skip: (page - 1) * perPage, take: perPage }));
+    return okPaginated(res, rows, { page, perPage, total });
   };
 
   @ApiOperation({ summary: 'List active affiliate programs' })
@@ -71,13 +70,13 @@ export class AffiliateController {
 
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Enroll in a program by code' })
-  @ApiResponse({ status: 200 })
+  @ApiResponse({ status: 201 })
   enroll = async (req: AuthenticatedRequest, res: Response) => {
     if (!req.user) throw new UnauthorizedException();
     const code = req.params.code;
     if (!code) throw new BadRequestException('program code required');
     const enrollment = await this.enrollmentService.joinByCode(req.user.id, code);
-    return ok(res, enrollment);
+    return okCreated(res, enrollment);
   };
 
   @ApiOperation({ summary: 'Log an affiliate link click. Always returns 200 — never breaks marketing ads.' })

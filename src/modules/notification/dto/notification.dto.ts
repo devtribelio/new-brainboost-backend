@@ -49,33 +49,6 @@ export class NotificationDto {
   type?: string | null;
 }
 
-export class NotificationPageDto {
-  @ApiProperty({ type: 'integer', example: 12 })
-  total!: number;
-
-  @ApiPropertyOptional({
-    type: 'integer',
-    example: 84,
-    description: 'Total across all filter groups (present when group filter applied)',
-  })
-  totalAll?: number;
-
-  @ApiProperty({ type: 'integer', example: 20 })
-  perPage!: number;
-
-  @ApiProperty({ type: 'integer', example: 1 })
-  currentPage!: number;
-
-  @ApiProperty({ type: 'integer', example: 1 })
-  lastPage!: number;
-
-  @ApiProperty({ type: 'array', itemType: () => NotificationDto })
-  items!: NotificationDto[];
-
-  @ApiProperty({ type: 'integer', example: 4, description: 'Unread count for the member' })
-  unread!: number;
-}
-
 export class NotificationSeenResultDto {
   @ApiProperty({ type: 'integer', example: 3, description: 'Number of notification rows updated' })
   updated!: number;

@@ -1,10 +1,4 @@
 import { ApiProperty, ApiPropertyOptional } from '@/common/openapi/decorators';
-import { LegacyMetaDto } from '@/common/openapi/common.dto';
-
-/**
- * Location endpoints emit FE legacy http envelope via `okLegacy`.
- * Shape: `{ meta: { total, page, lastPage }, data: <Item>Dto[] }`.
- */
 
 export class CountryDto {
   @ApiProperty({ example: 101 })
@@ -18,14 +12,6 @@ export class CountryDto {
 
   @ApiPropertyOptional({ nullable: true, example: 'ID', description: 'ISO 3166-1 alpha-2' })
   code?: string | null;
-}
-
-export class CountryPageDto {
-  @ApiProperty({ type: () => LegacyMetaDto })
-  meta!: LegacyMetaDto;
-
-  @ApiProperty({ type: 'array', itemType: () => CountryDto })
-  data!: CountryDto[];
 }
 
 export class ProvinceDto {
@@ -42,14 +28,6 @@ export class ProvinceDto {
   name!: string;
 }
 
-export class ProvincePageDto {
-  @ApiProperty({ type: () => LegacyMetaDto })
-  meta!: LegacyMetaDto;
-
-  @ApiProperty({ type: 'array', itemType: () => ProvinceDto })
-  data!: ProvinceDto[];
-}
-
 export class CityDto {
   @ApiProperty({ example: 103 })
   cityId!: number | string;
@@ -64,14 +42,6 @@ export class CityDto {
   name!: string;
 }
 
-export class CityPageDto {
-  @ApiProperty({ type: () => LegacyMetaDto })
-  meta!: LegacyMetaDto;
-
-  @ApiProperty({ type: 'array', itemType: () => CityDto })
-  data!: CityDto[];
-}
-
 export class DistrictDto {
   @ApiProperty({ example: 104 })
   districtId!: number | string;
@@ -84,12 +54,4 @@ export class DistrictDto {
 
   @ApiProperty({ example: 'Coblong' })
   name!: string;
-}
-
-export class DistrictPageDto {
-  @ApiProperty({ type: () => LegacyMetaDto })
-  meta!: LegacyMetaDto;
-
-  @ApiProperty({ type: 'array', itemType: () => DistrictDto })
-  data!: DistrictDto[];
 }

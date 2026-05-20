@@ -1,6 +1,6 @@
 import type { Request, Response } from 'express';
 import { ReportService } from './report.service';
-import { ok } from '@/common/utils/response.util';
+import { ok, okCreated } from '@/common/utils/response.util';
 import { BadRequestException, UnauthorizedException } from '@/common/exceptions';
 import type { AuthenticatedRequest } from '@/common/interfaces/authenticated-request';
 import {
@@ -49,7 +49,7 @@ export class ReportController {
       networkId: body.networkId,
       reason: body.reason,
     });
-    return ok(res, r, 201);
+    return okCreated(res, r);
   };
 
   @ApiBearerAuth()
@@ -69,6 +69,6 @@ export class ReportController {
       networkId: body.networkId,
       reason: body.reason,
     });
-    return ok(res, r, 201);
+    return okCreated(res, r);
   };
 }

@@ -90,23 +90,6 @@ export class NetworkMemberEntryDto {
   dateRegister!: string;
 }
 
-export class NetworkMemberPageDto {
-  @ApiProperty({ type: 'integer', example: 150 })
-  total!: number;
-
-  @ApiProperty({ type: 'integer', example: 20 })
-  perPage!: number;
-
-  @ApiProperty({ type: 'integer', example: 1 })
-  currentPage!: number;
-
-  @ApiProperty({ type: 'integer', example: 8 })
-  lastPage!: number;
-
-  @ApiProperty({ type: 'array', itemType: () => NetworkMemberEntryDto })
-  items!: NetworkMemberEntryDto[];
-}
-
 export class NetworkTagDto {
   @ApiProperty({ example: 'announcements' })
   tag!: string;
@@ -120,21 +103,4 @@ export class NetworkTagDto {
 
   @ApiProperty({ format: 'date-time', example: '2024-03-10T00:00:00.000Z' })
   created!: string;
-}
-
-export class NetworkTagPageDto {
-  @ApiProperty({ type: 'integer', example: 12 })
-  total!: number;
-
-  @ApiProperty({ type: 'integer', example: 20 })
-  perPage!: number;
-
-  @ApiProperty({ type: 'integer', example: 1 })
-  currentPage!: number;
-
-  @ApiProperty({ type: 'integer', example: 1 })
-  lastPage!: number;
-
-  @ApiProperty({ type: 'array', itemType: () => NetworkTagDto })
-  items!: NetworkTagDto[];
 }

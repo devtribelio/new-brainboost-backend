@@ -21,10 +21,12 @@ export function validateDto<T extends object>(
 
       if (errors.length > 0) {
         const details = errors.map((e) => ({
-          property: e.property,
+          field: e.property,
           constraints: e.constraints,
         }));
-        return next(new BadRequestException('Validation failed', details));
+        return next(
+          new BadRequestException('Validation failed', details, 'VALIDATION_ERROR'),
+        );
       }
 
       (req as unknown as Record<Source, T>)[source] = instance;

@@ -1,5 +1,4 @@
 import { ApiProperty, ApiPropertyOptional } from '@/common/openapi/decorators';
-import { LegacyMetaDto } from '@/common/openapi/common.dto';
 
 export class BannerDto {
   @ApiProperty({ example: 10, description: 'Legacy id or backend uuid' })
@@ -25,16 +24,4 @@ export class BannerDto {
 
   @ApiProperty({ type: 'boolean', example: true })
   isActive!: boolean;
-}
-
-/**
- * FE legacy http envelope for GET /data/banner — emitted by `okLegacy`.
- * Shape: `{ meta: { total, page, lastPage }, data: BannerDto[] }`.
- */
-export class BannerPageDto {
-  @ApiProperty({ type: () => LegacyMetaDto })
-  meta!: LegacyMetaDto;
-
-  @ApiProperty({ type: 'array', itemType: () => BannerDto })
-  data!: BannerDto[];
 }

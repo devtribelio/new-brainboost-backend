@@ -1,8 +1,8 @@
 import type { Request, Response } from 'express';
 import { TopicService } from './topic.service';
-import { ok } from '@/common/utils/response.util';
+import { ok, okPaginated } from '@/common/utils/response.util';
 import { BadRequestException, UnauthorizedException } from '@/common/exceptions';
-import { buildLegacyPage, parsePagination } from '@/common/utils/pagination.util';
+import { parsePagination } from '@/common/utils/pagination.util';
 import { serializeTopic } from './topic.serializer';
 import type { AuthenticatedRequest } from '@/common/interfaces/authenticated-request';
 import {
@@ -12,7 +12,7 @@ import {
   ApiResponse,
   ApiTags,
 } from '@/common/openapi/decorators';
-import { TopicPageDto, TopicSubscribeResultDto } from './dto/topic.dto';
+import { TopicDto, TopicSubscribeResultDto } from './dto/topic.dto';
 
 @ApiTags('Topic')
 export class TopicController {
@@ -30,7 +30,7 @@ export class TopicController {
     description: 'Network code (FE primary). Falls back to legacyId int / UUID.',
   })
   @ApiQuery({ name: 'networkId', type: 'string', required: false, example: 'network-uuid-1234' })
-  @ApiResponse({ status: 200, type: () => TopicPageDto })
+  @ApiResponse({ status: 200, type: () => TopicDto, isArray: true, envelope: 'paginated' })
   list = async (req: Request, res: Response) => {
     const p = parsePagination(req.query as Record<string, unknown>);
     const keyword = (req.query.keyword as string) ?? undefined;
@@ -38,7 +38,7 @@ export class TopicController {
     const networkInput =
       (req.query.code as string) ?? (req.query.networkId as string) ?? undefined;
     const { rows, total } = await this.topicService.list(p, { keyword, networkInput });
-    return ok(res, buildLegacyPage(rows.map(serializeTopic), total, p));
+    return okPaginated(res, rows.map(serializeTopic), { page: p.page, perPage: p.perPage, total });
   };
 
   @ApiBearerAuth()

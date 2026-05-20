@@ -12,7 +12,7 @@ import {
   ApiResponse,
   ApiTags,
 } from '@/common/openapi/decorators';
-import { ApiErrorResponseDto } from '@/common/openapi/common.dto';
+import { ErrorEnvelopeDto } from '@/common/openapi/common.dto';
 import { MemberInfoDto } from './dto/member-info.dto';
 
 function floatOrUndef(v: unknown): number | undefined {
@@ -33,7 +33,8 @@ export class MemberController {
   @ApiResponse({
     status: 401,
     description: 'Missing/invalid bearer token',
-    type: () => ApiErrorResponseDto,
+    type: () => ErrorEnvelopeDto,
+    envelope: 'none',
   })
   info = async (req: AuthenticatedRequest, res: Response) => {
     const communityNetworks = await prisma.network.findMany({

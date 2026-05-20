@@ -240,23 +240,6 @@ export class PostDto {
   member?: MemberLiteDto | null;
 }
 
-export class PostPageDto {
-  @ApiProperty({ type: 'integer', example: 384 })
-  total!: number;
-
-  @ApiProperty({ type: 'integer', example: 20 })
-  perPage!: number;
-
-  @ApiProperty({ type: 'integer', example: 1 })
-  currentPage!: number;
-
-  @ApiProperty({ type: 'integer', example: 20 })
-  lastPage!: number;
-
-  @ApiProperty({ type: 'array', itemType: () => PostDto })
-  items!: PostDto[];
-}
-
 export class PostLikeToggleResultDto {
   @ApiProperty({
     enum: ['like', 'dislike'],

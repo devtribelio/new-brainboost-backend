@@ -1,8 +1,8 @@
 import type { Response } from 'express';
 import { CommentService } from './comment.service';
-import { ok } from '@/common/utils/response.util';
+import { ok, okCreated, okPaginated } from '@/common/utils/response.util';
 import { BadRequestException, UnauthorizedException } from '@/common/exceptions';
-import { buildLegacyPage, parsePagination } from '@/common/utils/pagination.util';
+import { parsePagination } from '@/common/utils/pagination.util';
 import { serializeComment } from './comment.serializer';
 import type { AuthenticatedRequest } from '@/common/interfaces/authenticated-request';
 import {
@@ -13,7 +13,7 @@ import {
   ApiResponse,
   ApiTags,
 } from '@/common/openapi/decorators';
-import { ApiErrorResponseDto } from '@/common/openapi/common.dto';
+import { ErrorEnvelopeDto } from '@/common/openapi/common.dto';
 import {
   CommentCreateBodyDto,
   CommentDeleteBodyDto,
@@ -21,7 +21,6 @@ import {
   CommentDto,
   CommentLikeBodyDto,
   CommentLikeToggleResultDto,
-  CommentPageDto,
   CommentUpdateBodyDto,
 } from './dto/comment.dto';
 
@@ -33,11 +32,12 @@ export class CommentController {
   @ApiQuery({ name: 'postId', type: 'string', required: true, example: 'post-uuid-1234' })
   @ApiQuery({ name: 'page', type: 'integer', required: false, example: 1 })
   @ApiQuery({ name: 'perPage', type: 'integer', required: false, example: 20 })
-  @ApiResponse({ status: 200, type: () => CommentPageDto })
+  @ApiResponse({ status: 200, type: () => CommentDto, isArray: true, envelope: 'paginated' })
   @ApiResponse({
     status: 400,
     description: 'postId required',
-    type: () => ApiErrorResponseDto,
+    type: () => ErrorEnvelopeDto,
+    envelope: 'none',
   })
   list = async (req: AuthenticatedRequest, res: Response) => {
     const postId = (req.query.postId as string) ?? '';
@@ -50,7 +50,7 @@ export class CommentController {
     const data = rows.map((row) =>
       serializeComment(row, liked.has(row.id) ? 'like' : 'dislike'),
     );
-    return ok(res, buildLegacyPage(data, total, p));
+    return okPaginated(res, data, { page: p.page, perPage: p.perPage, total });
   };
 
   @ApiOperation({ summary: 'Comment detail' })
@@ -96,7 +96,7 @@ export class CommentController {
       parentId: body.replyId ?? body.parentId,
       imageUrls: Array.isArray(body.images) ? body.images : body.imageUrls,
     });
-    return ok(res, serializeComment(c), 201);
+    return okCreated(res, serializeComment(c));
   };
 
   @ApiBearerAuth()

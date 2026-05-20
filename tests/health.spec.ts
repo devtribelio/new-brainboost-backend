@@ -7,8 +7,8 @@ describe('health', () => {
     const app = buildApp();
     const res = await request(app).get('/health');
     expect(res.status).toBe(200);
-    expect(res.body.errCode).toBe(0);
-    expect(res.body.errMessage).toBeNull();
+    expect(res.body.success).toBe(true);
+    expect(res.body.error).toBeNull();
     expect(res.body.data.status).toBe('ok');
   });
 
@@ -16,8 +16,9 @@ describe('health', () => {
     const app = buildApp();
     const res = await request(app).get('/api/does-not-exist');
     expect(res.status).toBe(404);
-    expect(res.body.errCode).toBe(404);
-    expect(res.body.errMessage).toContain('Route not found');
+    expect(res.body.success).toBe(false);
+    expect(res.body.error.code).toBe('NOT_FOUND');
+    expect(res.body.error.message).toContain('Route not found');
     expect(res.body.data).toBeNull();
   });
 });

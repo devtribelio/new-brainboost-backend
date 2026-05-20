@@ -1,8 +1,8 @@
 import type { Request, Response } from 'express';
 import { NetworkService } from './network.service';
-import { ok } from '@/common/utils/response.util';
+import { ok, okPaginated } from '@/common/utils/response.util';
 import { BadRequestException, UnauthorizedException } from '@/common/exceptions';
-import { buildLegacyPage, parsePagination } from '@/common/utils/pagination.util';
+import { parsePagination } from '@/common/utils/pagination.util';
 import { serializeNetworkMemberLegacy } from './network.serializer';
 import type { AuthenticatedRequest } from '@/common/interfaces/authenticated-request';
 import {
@@ -15,8 +15,8 @@ import {
 } from '@/common/openapi/decorators';
 import {
   NetworkJoinResultDto,
-  NetworkMemberPageDto,
-  NetworkTagPageDto,
+  NetworkMemberEntryDto,
+  NetworkTagDto,
 } from './dto/network.dto';
 import { NetworkJoinBodyDto } from './dto/network-join-body.dto';
 import { NetworkRequestActionDto } from './dto/network-request-action.dto';
@@ -61,7 +61,7 @@ export class NetworkController {
   })
   @ApiQuery({ name: 'page', type: 'integer', required: false, example: 1 })
   @ApiQuery({ name: 'perPage', type: 'integer', required: false, example: 20 })
-  @ApiResponse({ status: 200, type: () => NetworkMemberPageDto })
+  @ApiResponse({ status: 200, type: () => NetworkMemberEntryDto, isArray: true, envelope: 'paginated' })
   members = async (req: Request, res: Response) => {
     const networkInput =
       (req.query.code as string) ||
@@ -74,7 +74,7 @@ export class NetworkController {
     const data = rows.map(({ networkMember, member }) =>
       serializeNetworkMemberLegacy(member, networkMember.joinedAt),
     );
-    return ok(res, buildLegacyPage(data, total, p));
+    return okPaginated(res, data, { page: p.page, perPage: p.perPage, total });
   };
 
   @ApiOperation({
@@ -101,7 +101,28 @@ export class NetworkController {
     required: false,
     description: 'Reserved; currently ignored (always `name asc`).',
   })
-  @ApiResponse({ status: 200, type: () => NetworkTagPageDto })
+  @ApiResponse({ status: 200, type: () => NetworkTagDto, isArray: true, envelope: 'paginated' })
+  tags = async (req: Request, res: Response) => {
+    const networkInput =
+      (req.query.code as string) ||
+      (req.query.networkId as string) ||
+      '';
+    const keyword =
+      typeof req.query.keyword === 'string' && req.query.keyword.length > 0
+        ? req.query.keyword
+        : undefined;
+    const p = parsePagination(req.query as Record<string, unknown>);
+    const { rows, total, countByTag } = await this.networkService.listTags(p, networkInput, keyword);
+    // FE TagModel: `{tag, count, created}`. count = posts referencing
+    // `#<tag>` in content (naive — no PostTag relation, see T3.5 note).
+    const data = rows.map((t) => ({
+      tag: t.name,
+      count: countByTag.get(t.id) ?? 0,
+      created: t.createdAt.toISOString(),
+    }));
+    return okPaginated(res, data, { page: p.page, perPage: p.perPage, total });
+  };
+
   @ApiBearerAuth()
   @ApiOperation({
     summary: 'Approve a pending network join request (team-only)',
@@ -134,26 +155,5 @@ export class NetworkController {
       memberId: body.memberId,
     });
     return ok(res, result);
-  };
-
-  tags = async (req: Request, res: Response) => {
-    const networkInput =
-      (req.query.code as string) ||
-      (req.query.networkId as string) ||
-      '';
-    const keyword =
-      typeof req.query.keyword === 'string' && req.query.keyword.length > 0
-        ? req.query.keyword
-        : undefined;
-    const p = parsePagination(req.query as Record<string, unknown>);
-    const { rows, total, countByTag } = await this.networkService.listTags(p, networkInput, keyword);
-    // FE TagModel: `{tag, count, created}`. count = posts referencing
-    // `#<tag>` in content (naive — no PostTag relation, see T3.5 note).
-    const data = rows.map((t) => ({
-      tag: t.name,
-      count: countByTag.get(t.id) ?? 0,
-      created: t.createdAt.toISOString(),
-    }));
-    return ok(res, buildLegacyPage(data, total, p));
   };
 }

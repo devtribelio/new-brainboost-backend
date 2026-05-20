@@ -20,12 +20,34 @@ function renderAdminError(res: Response, status: number, message: string): void 
   });
 }
 
-export const errorHandler: ErrorRequestHandler = (err, req: Request, res: Response, _next: NextFunction) => {
-  const status = err instanceof HttpException ? err.status : 500;
-  const message =
-    err instanceof HttpException ? err.message : 'Internal Server Error';
+function statusToCode(status: number): string {
+  switch (status) {
+    case 400:
+      return 'BAD_REQUEST';
+    case 401:
+      return 'UNAUTHORIZED';
+    case 403:
+      return 'FORBIDDEN';
+    case 404:
+      return 'NOT_FOUND';
+    case 409:
+      return 'CONFLICT';
+    case 422:
+      return 'UNPROCESSABLE_ENTITY';
+    case 429:
+      return 'TOO_MANY_REQUESTS';
+    default:
+      return status >= 500 ? 'INTERNAL_ERROR' : 'ERROR';
+  }
+}
 
-  if (!(err instanceof HttpException)) {
+export const errorHandler: ErrorRequestHandler = (err, req: Request, res: Response, _next: NextFunction) => {
+  const isHttp = err instanceof HttpException;
+  const status = isHttp ? err.status : 500;
+  const message = isHttp ? err.message : 'Internal Server Error';
+  const code = isHttp ? err.code : statusToCode(status);
+
+  if (!isHttp) {
     logger.error({ err }, 'Unhandled error');
   }
 
@@ -34,20 +56,22 @@ export const errorHandler: ErrorRequestHandler = (err, req: Request, res: Respon
     return;
   }
 
-  const debug =
-    !env.isProduction && !(err instanceof HttpException)
-      ? {
-          error: (err as Error)?.message,
-          stack: (err as Error)?.stack?.split('\n').slice(0, 8),
-        }
-      : undefined;
-  fail(res, status, message, debug);
+  let details: unknown = isHttp ? err.details : undefined;
+  if (!env.isProduction && !isHttp) {
+    details = {
+      error: (err as Error)?.message,
+      stack: (err as Error)?.stack?.split('\n').slice(0, 8),
+    };
+  }
+
+  fail(res, status, code, message, details);
 };
 
 export const notFoundHandler: RequestHandler = (req, res) => {
+  const message = `Route not found: ${req.method} ${req.originalUrl}`;
   if (isAdminRequest(req)) {
-    renderAdminError(res, 404, `Route not found: ${req.method} ${req.originalUrl}`);
+    renderAdminError(res, 404, message);
     return;
   }
-  fail(res, 404, `Route not found: ${req.method} ${req.originalUrl}`);
+  fail(res, 404, 'NOT_FOUND', message);
 };

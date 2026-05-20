@@ -14,7 +14,7 @@ import {
 } from './dto/register-by-phone.dto';
 import { RequestVerificationPhoneDto } from './dto/request-verification-phone.dto';
 import { ValidateOtpPhoneDto } from './dto/validate-otp-phone.dto';
-import { ok } from '@/common/utils/response.util';
+import { ok, okCreated } from '@/common/utils/response.util';
 import type { AuthenticatedRequest } from '@/common/interfaces/authenticated-request';
 import { UnauthorizedException } from '@/common/exceptions';
 import {
@@ -23,7 +23,7 @@ import {
   ApiResponse,
   ApiTags,
 } from '@/common/openapi/decorators';
-import { ApiErrorResponseDto, GenericOkDto, TokenBundleDto } from '@/common/openapi/common.dto';
+import { ErrorEnvelopeDto, GenericOkDto, TokenBundleDto } from '@/common/openapi/common.dto';
 
 @ApiTags('Auth')
 export class AuthController {
@@ -44,20 +44,20 @@ export class AuthController {
   })
   @ApiBody({ type: () => LoginDto })
   @ApiResponse({ status: 200, description: 'Tokens issued', type: () => TokenBundleDto })
-  @ApiResponse({ status: 400, description: 'Invalid request', type: () => ApiErrorResponseDto })
-  @ApiResponse({ status: 401, description: 'Invalid credentials', type: () => ApiErrorResponseDto })
+  @ApiResponse({ status: 400, description: 'Invalid request', type: () => ErrorEnvelopeDto, envelope: 'none' })
+  @ApiResponse({ status: 401, description: 'Invalid credentials', type: () => ErrorEnvelopeDto, envelope: 'none' })
   login = async (req: Request, res: Response) => {
     const tokens = await this.authService.login(req.body as LoginDto);
-    return res.status(200).json(tokens);
+    return ok(res, tokens);
   };
 
   @ApiOperation({ summary: 'Register a new member' })
   @ApiBody({ type: () => RegisterDto })
   @ApiResponse({ status: 201, description: 'Registered', type: () => TokenBundleDto })
-  @ApiResponse({ status: 400, description: 'Validation error', type: () => ApiErrorResponseDto })
+  @ApiResponse({ status: 400, description: 'Validation error', type: () => ErrorEnvelopeDto, envelope: 'none' })
   register = async (req: Request, res: Response) => {
     const tokens = await this.authService.register(req.body as RegisterDto);
-    return ok(res, tokens, 201);
+    return okCreated(res, tokens);
   };
 
   @ApiOperation({
@@ -133,7 +133,7 @@ export class AuthController {
   })
   @ApiBody({ type: () => RegisterByPhoneDto })
   @ApiResponse({ status: 200, type: () => PhoneVerificationResponseDto })
-  @ApiResponse({ status: 400, type: () => ApiErrorResponseDto })
+  @ApiResponse({ status: 400, type: () => ErrorEnvelopeDto, envelope: 'none' })
   registerByPhone = async (req: Request, res: Response) => {
     const result = await this.authService.registerByPhone(req.body as RegisterByPhoneDto);
     return ok(res, result);

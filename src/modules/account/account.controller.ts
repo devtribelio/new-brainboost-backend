@@ -9,7 +9,7 @@ import {
   ApiResponse,
   ApiTags,
 } from '@/common/openapi/decorators';
-import { ApiErrorResponseDto, GenericOkDto } from '@/common/openapi/common.dto';
+import { ErrorEnvelopeDto, GenericOkDto } from '@/common/openapi/common.dto';
 import type { AuthenticatedRequest } from '@/common/interfaces/authenticated-request';
 import { UnauthorizedException } from '@/common/exceptions';
 import { PreRegistrationDto } from './dto/pre-registration.dto';
@@ -35,7 +35,7 @@ export class AccountController {
   @ApiOperation({ summary: 'Pre-registration (request OTP for signup)' })
   @ApiBody({ type: () => PreRegistrationDto })
   @ApiResponse({ status: 200, type: () => GenericOkDto })
-  @ApiResponse({ status: 400, type: () => ApiErrorResponseDto })
+  @ApiResponse({ status: 400, type: () => ErrorEnvelopeDto, envelope: 'none' })
   preRegistration = async (req: Request, res: Response) => {
     const result = await this.accountService.preRegistration(req.body as PreRegistrationDto);
     return ok(res, result);
@@ -44,8 +44,8 @@ export class AccountController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Connect affiliator code to member (binds inviter, idempotent)' })
   @ApiResponse({ status: 200, type: () => AffiliateConnectResultDto })
-  @ApiResponse({ status: 400, type: () => ApiErrorResponseDto })
-  @ApiResponse({ status: 404, type: () => ApiErrorResponseDto })
+  @ApiResponse({ status: 400, type: () => ErrorEnvelopeDto, envelope: 'none' })
+  @ApiResponse({ status: 404, type: () => ErrorEnvelopeDto, envelope: 'none' })
   affiliateConnect = async (req: Request, res: Response) => {
     const user = requireUser(req);
     const body = (req.body ?? {}) as Record<string, unknown>;

@@ -15,14 +15,15 @@ describe('OpenAPI doc — response examples', () => {
     expect(tokenDto.properties.access_token.example).toBeTypeOf('string');
     expect(tokenDto.properties.expires_in.example).toBe(900);
 
+    // Paginated envelope: { success, data: PostDto[], meta: { pagination }, error }.
     const postListSchema =
       doc.paths['/api/member/post/list'].get.responses['200'].content['application/json'].schema;
-    expect(postListSchema.properties.errCode.example).toBe(0);
-    expect(postListSchema.properties.data.$ref).toBe('#/components/schemas/PostPageDto');
-
-    const postPage = doc.components.schemas.PostPageDto;
-    expect(postPage.properties.items.items.$ref).toBe('#/components/schemas/PostDto');
-    expect(postPage.properties.total.example).toBeTypeOf('number');
+    expect(postListSchema.properties.success.example).toBe(true);
+    expect(postListSchema.properties.data.type).toBe('array');
+    expect(postListSchema.properties.data.items.$ref).toBe('#/components/schemas/PostDto');
+    expect(postListSchema.properties.meta.properties.pagination.$ref).toBe(
+      '#/components/schemas/PaginationMetaDto',
+    );
 
     const postDto = doc.components.schemas.PostDto;
     expect(postDto.properties.content.example).toBeTypeOf('string');
@@ -31,18 +32,20 @@ describe('OpenAPI doc — response examples', () => {
     const memberLite = doc.components.schemas.MemberLiteDto;
     expect(memberLite.properties.email.example).toBe('john.doe@example.com');
 
-    // okLegacy endpoints (banner, product/list, location/*) bypass the errCode
-    // wrap — response schema is the page DTO directly, not the envelope.
-    const bannerOp = doc.paths['/api/member/data/banner'].get;
-    const bannerSchema = bannerOp.responses['200'].content['application/json'].schema;
-    expect(bannerSchema.$ref).toBe('#/components/schemas/BannerPageDto');
-    expect(doc.components.schemas.BannerPageDto.properties.data.items.$ref).toBe(
-      '#/components/schemas/BannerDto',
-    );
+    // Banner now uses unified paginated envelope (no special-case okLegacy shape).
+    const bannerSchema =
+      doc.paths['/api/member/data/banner'].get.responses['200'].content['application/json']
+        .schema;
+    expect(bannerSchema.properties.data.type).toBe('array');
+    expect(bannerSchema.properties.data.items.$ref).toBe('#/components/schemas/BannerDto');
 
-    const productPage = doc.components.schemas.ProductPageDto;
-    expect(productPage.properties.data.items.$ref).toBe('#/components/schemas/ProductDto');
-    expect(productPage.properties.meta.$ref).toBe('#/components/schemas/LegacyMetaDto');
+    const productListSchema =
+      doc.paths['/api/member/product/list'].get.responses['200'].content['application/json']
+        .schema;
+    expect(productListSchema.properties.data.items.$ref).toBe('#/components/schemas/ProductDto');
+    expect(productListSchema.properties.meta.properties.pagination.$ref).toBe(
+      '#/components/schemas/PaginationMetaDto',
+    );
 
     const productDto = doc.components.schemas.ProductDto;
     expect(productDto.properties.productName.example).toBe('React Fundamentals');
@@ -54,19 +57,23 @@ describe('OpenAPI doc — response examples', () => {
     const changePwDto = doc.components.schemas.ChangePasswordDto;
     expect(changePwDto.properties.oldPassword.example).toBe('oldS3cret');
 
-    expect(doc.components.schemas.CountryPageDto).toBeTruthy();
-    expect(doc.components.schemas.NotificationPageDto.properties.unread.example).toBe(4);
+    // Pagination meta DTO is registered globally for every paginated response.
+    expect(doc.components.schemas.PaginationMetaDto.properties.totalPages).toBeDefined();
     expect(doc.components.schemas.CommissionSummaryDto.properties.currency.example).toBe('IDR');
     expect(doc.components.schemas.UploadedFileDto.properties.url.example).toBe(
       '/static/temporary/tmp-abc123.jpg',
     );
 
-    // Envelope: errCode integer, errMessage string|null, data null on error.
-    expect(doc.components.schemas.ApiErrorResponseDto.properties.errCode.type).toBe('integer');
-    expect(doc.components.schemas.ApiErrorResponseDto.properties.errMessage.type).toBe('string');
+    // Error envelope: { success:false, data:null, meta:null, error: { code, message, details? } }.
+    expect(doc.components.schemas.ErrorEnvelopeDto.properties.success.type).toBe('boolean');
+    expect(doc.components.schemas.ErrorEnvelopeDto.properties.error.$ref).toBe(
+      '#/components/schemas/ApiErrorDto',
+    );
+    expect(doc.components.schemas.ApiErrorDto.properties.code.type).toBe('string');
+    expect(doc.components.schemas.ApiErrorDto.properties.message.type).toBe('string');
     expect(doc.components.schemas.GenericOkDto.properties.ok.type).toBe('boolean');
 
-    // Issue 3: network/join request body documented via NetworkJoinBodyDto.
+    // network/join request body documented via NetworkJoinBodyDto.
     expect(doc.components.schemas.NetworkJoinBodyDto).toBeTruthy();
     expect(doc.components.schemas.NetworkJoinBodyDto.properties.code).toBeTruthy();
     expect(doc.components.schemas.NetworkJoinBodyDto.properties.networkCode).toBeTruthy();
@@ -79,7 +86,7 @@ describe('OpenAPI doc — response examples', () => {
       doc.paths['/api/member/network/join'].post.requestBody.content['application/json'].schema;
     expect(joinBody.$ref).toBe('#/components/schemas/NetworkJoinBodyDto');
 
-    // Issue 4: network/tag exposes page/perPage/keyword/sort and none are required.
+    // network/tag exposes page/perPage/keyword/sort and none are required.
     const tagParams = doc.paths['/api/member/network/tag'].get.parameters as {
       name: string;
       required: boolean;
@@ -90,7 +97,7 @@ describe('OpenAPI doc — response examples', () => {
     );
     expect(tagParams.every((p) => p.required === false)).toBe(true);
 
-    // Issue 5 (PR1 portion): community networkId is no longer nullable.
+    // community networkId is no longer nullable.
     const community = doc.components.schemas.CommunityEntryDto;
     expect(community.properties.networkId.nullable).toBeUndefined();
     expect(community.required).toEqual(expect.arrayContaining(['networkId']));

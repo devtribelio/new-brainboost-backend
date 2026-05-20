@@ -70,10 +70,11 @@ describe('auth social google grant', () => {
     });
 
     expect(res.status).toBe(200);
-    expect(res.body.access_token).toBeTruthy();
-    expect(res.body.refresh_token).toBeTruthy();
-    expect(res.body.token_type).toBe('Bearer');
-    expect(typeof res.body.expires_in).toBe('number');
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.access_token).toBeTruthy();
+    expect(res.body.data.refresh_token).toBeTruthy();
+    expect(res.body.data.token_type).toBe('Bearer');
+    expect(typeof res.body.data.expires_in).toBe('number');
   });
 
   it('verifier throws (bad sig / wrong audience) → 401', async () => {
@@ -84,7 +85,7 @@ describe('auth social google grant', () => {
       social_token: 'tampered.token',
     });
     expect(res.status).toBe(401);
-    expect(res.body.errCode).toBe(401);
+    expect(res.body.error.code).toBe('UNAUTHORIZED');
   });
 
   it('email_verified=false → 401', async () => {
@@ -99,7 +100,7 @@ describe('auth social google grant', () => {
       social_token: 'fake.id.token',
     });
     expect(res.status).toBe(401);
-    expect(res.body.errMessage).toBe('google_email_not_verified');
+    expect(res.body.error.message).toBe('google_email_not_verified');
   });
 
   it('new email creates member with isVerified=true and passwordAlgo=social', async () => {
@@ -191,7 +192,7 @@ describe('auth social google grant', () => {
       social_token: 'fake.id.token',
     });
     expect(res.status).toBe(400);
-    expect(res.body.errMessage).toBe('email_in_use_unverified');
+    expect(res.body.error.message).toBe('email_in_use_unverified');
   });
 
   it('single-session: prior mobile session revoked after social login', async () => {
@@ -206,7 +207,7 @@ describe('auth social google grant', () => {
       client_type: 'mobile',
     });
     expect(first.status).toBe(200);
-    const firstRefresh = first.body.refresh_token as string;
+    const firstRefresh = first.body.data.refresh_token as string;
 
     setGoogleResponse({ sub, email, email_verified: true, name: 'Bucket User' });
     const second = await tokenRequest({
@@ -219,7 +220,7 @@ describe('auth social google grant', () => {
 
     const reuse = await tokenRequest({ grant_type: 'refresh_token', refresh_token: firstRefresh });
     expect(reuse.status).toBe(401);
-    expect(reuse.body.errMessage).toBe('session_revoked');
+    expect(reuse.body.error.message).toBe('session_revoked');
   });
 
   it('password grant on social-only account is rejected', async () => {

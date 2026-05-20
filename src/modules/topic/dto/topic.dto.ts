@@ -58,23 +58,6 @@ export class TopicDto {
   createdAt!: string;
 }
 
-export class TopicPageDto {
-  @ApiProperty({ type: 'integer', example: 42 })
-  total!: number;
-
-  @ApiProperty({ type: 'integer', example: 20 })
-  perPage!: number;
-
-  @ApiProperty({ type: 'integer', example: 1 })
-  currentPage!: number;
-
-  @ApiProperty({ type: 'integer', example: 3 })
-  lastPage!: number;
-
-  @ApiProperty({ type: 'array', itemType: () => TopicDto })
-  items!: TopicDto[];
-}
-
 export class TopicSubscribeResultDto {
   @ApiProperty({ type: 'integer', nullable: true, example: 42 })
   memberId!: number | null;

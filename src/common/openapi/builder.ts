@@ -9,6 +9,7 @@ import {
 } from './types';
 import { dtoToSchema } from './dto-to-schema';
 import { getRoutes, getSchemas } from './registry';
+import { ApiErrorDto, PaginationMetaDto } from './common.dto';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -134,18 +135,40 @@ function operationFromRoute(
       if (typeof ctorRef === 'function') {
         collectedDtos.add(ctorRef);
         const ref = `#/components/schemas/${(ctorRef as { name: string }).name}`;
-        const inner = r.isArray ? { type: 'array', items: { $ref: ref } } : { $ref: ref };
-        schemaSpec =
-          r.envelope === 'none'
-            ? inner
-            : {
+        const envelope = r.envelope ?? 'standard';
+
+        if (envelope === 'none') {
+          schemaSpec = r.isArray ? { type: 'array', items: { $ref: ref } } : { $ref: ref };
+        } else if (envelope === 'paginated') {
+          schemaSpec = {
+            type: 'object',
+            required: ['success', 'data', 'meta', 'error'],
+            properties: {
+              success: { type: 'boolean', example: true },
+              data: { type: 'array', items: { $ref: ref } },
+              meta: {
                 type: 'object',
+                required: ['pagination'],
                 properties: {
-                  errCode: { type: 'integer', example: 0 },
-                  errMessage: { type: 'string', nullable: true, example: null },
-                  data: inner,
+                  pagination: { $ref: '#/components/schemas/PaginationMetaDto' },
                 },
-              };
+              },
+              error: { type: 'object', nullable: true, example: null },
+            },
+          };
+        } else {
+          const inner = r.isArray ? { type: 'array', items: { $ref: ref } } : { $ref: ref };
+          schemaSpec = {
+            type: 'object',
+            required: ['success', 'data', 'meta', 'error'],
+            properties: {
+              success: { type: 'boolean', example: true },
+              data: inner,
+              meta: { type: 'object', nullable: true, example: null },
+              error: { type: 'object', nullable: true, example: null },
+            },
+          };
+        }
       }
     }
     responsesSpec[String(r.status)] = {
@@ -175,6 +198,12 @@ function operationFromRoute(
 export function buildOpenApiDocument(options: BuildOpenApiOptions): Record<string, unknown> {
   const schemas = new Map<string, JsonSchema>();
   const collectedDtos = new Set<unknown>();
+
+  // Always include envelope-shared DTOs so paginated/error references resolve.
+  for (const ctor of [PaginationMetaDto, ApiErrorDto]) {
+    collectedDtos.add(ctor);
+    dtoToSchema(ctor as unknown as { new (): unknown; name: string }, schemas);
+  }
 
   // Pre-register schemas from explicit registry calls
   for (const ctor of getSchemas()) {

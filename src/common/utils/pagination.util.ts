@@ -21,36 +21,11 @@ export function parsePagination(
   return { page, perPage, skip: (page - 1) * perPage, take: perPage };
 }
 
-export function buildPageMeta(total: number, params: PaginationParams) {
+export function buildPagination(input: { page: number; perPage: number; total: number }) {
   return {
-    page: params.page,
-    perPage: params.perPage,
-    total,
-    totalPages: Math.max(1, Math.ceil(total / params.perPage)),
-  };
-}
-
-export interface LegacyPage<T> {
-  total: number;
-  totalAll?: number;
-  perPage: number;
-  currentPage: number;
-  lastPage: number;
-  items: T[];
-}
-
-export function buildLegacyPage<T>(
-  rows: T[],
-  total: number,
-  params: PaginationParams,
-  totalAll?: number,
-): LegacyPage<T> {
-  return {
-    total,
-    ...(totalAll !== undefined ? { totalAll } : {}),
-    perPage: params.perPage,
-    currentPage: params.page,
-    lastPage: Math.max(1, Math.ceil(total / params.perPage)),
-    items: rows,
+    page: input.page,
+    perPage: input.perPage,
+    total: input.total,
+    totalPages: Math.max(1, Math.ceil(input.total / Math.max(1, input.perPage))),
   };
 }

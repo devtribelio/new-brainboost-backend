@@ -114,23 +114,6 @@ export class CommentDto {
   member?: MemberLiteDto | null;
 }
 
-export class CommentPageDto {
-  @ApiProperty({ type: 'integer', example: 24 })
-  total!: number;
-
-  @ApiProperty({ type: 'integer', example: 20 })
-  perPage!: number;
-
-  @ApiProperty({ type: 'integer', example: 1 })
-  currentPage!: number;
-
-  @ApiProperty({ type: 'integer', example: 2 })
-  lastPage!: number;
-
-  @ApiProperty({ type: 'array', itemType: () => CommentDto })
-  items!: CommentDto[];
-}
-
 export class CommentLikeToggleResultDto {
   @ApiProperty({
     enum: ['like', 'dislike'],

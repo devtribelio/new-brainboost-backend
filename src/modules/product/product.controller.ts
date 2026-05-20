@@ -1,6 +1,6 @@
 import type { Request, Response } from 'express';
 import { ProductService } from './product.service';
-import { ok, okLegacy } from '@/common/utils/response.util';
+import { ok, okPaginated } from '@/common/utils/response.util';
 import { BadRequestException } from '@/common/exceptions';
 import { parsePagination } from '@/common/utils/pagination.util';
 import { serializeProduct, serializeCourseDetailLegacy } from './product.serializer';
@@ -12,18 +12,23 @@ import {
   ApiResponse,
   ApiTags,
 } from '@/common/openapi/decorators';
-import { CourseDetailDto, ProductPageDto, ProductShareDto } from './dto/product.dto';
+import { CourseDetailDto, ProductDto, ProductShareDto } from './dto/product.dto';
 
 @ApiTags('Product')
 export class ProductController {
   constructor(private readonly productService: ProductService) {}
 
-  @ApiOperation({ summary: 'List products (FE legacy http envelope)' })
+  @ApiOperation({ summary: 'List products' })
   @ApiQuery({ name: 'page', type: 'integer', required: false, example: 1 })
   @ApiQuery({ name: 'perPage', type: 'integer', required: false, example: 100 })
   @ApiQuery({ name: 'keyword', type: 'string', required: false, example: 'react' })
   @ApiQuery({ name: 'type', type: 'string', required: false, example: 'course' })
-  @ApiResponse({ status: 200, type: () => ProductPageDto, envelope: 'none' })
+  @ApiResponse({
+    status: 200,
+    type: () => ProductDto,
+    isArray: true,
+    envelope: 'paginated',
+  })
   list = async (req: Request, res: Response) => {
     const p = parsePagination(req.query as Record<string, unknown>, { perPage: 100 });
     const keyword = (req.query.keyword as string) ?? undefined;
@@ -39,7 +44,7 @@ export class ProductController {
         isPurchased: purchasedProductIds.has(r.id),
       }),
     );
-    return okLegacy(res, items, total, p.page, p.perPage);
+    return okPaginated(res, items, { page: p.page, perPage: p.perPage, total });
   };
 
   @ApiOperation({ summary: 'Course product detail' })

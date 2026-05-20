@@ -135,8 +135,8 @@ For deep symbol-level mapping see `docs/legacy-analysis.md`.
 - **DI:** manual instantiation in `*.routes.ts` (`new Controller(new Service())`). No tsyringe (see memory `[[feedback_di]]`).
 - **Validation:** DTOs use `class-validator` decorators. `validateDto(Dto)` middleware transforms + validates `req.body` (or `req.query` with the `'query'` source variant).
 - **Auth:** `authGuard` middleware reads `Authorization: Bearer <jwt>` and attaches `AuthenticatedUser` to `req.user`. Routes that need auth list `authGuard` first in `middlewares`.
-- **Responses:** use `ok(res, data, meta?)` / `fail(res, ...)` from `src/common/utils/response.util.ts`. Standard envelope: `{ status: 'success'|'error', data, message?, meta? }`.
-- **Exceptions:** throw `BadRequestException` / `UnauthorizedException` / `ForbiddenException` / `NotFoundException`. `errorHandler` middleware maps them to envelopes.
+- **Responses:** use `ok(res, data, meta?)` / `okCreated(res, data, meta?)` / `okPaginated(res, items, {page,perPage,total}, extraMeta?)` / `fail(res, status, code, message, details?)` from `src/common/utils/response.util.ts`. Standard envelope: `{ success: boolean, data, meta, error }`. Pagination metadata lives at `meta.pagination = { page, perPage, total, totalPages }`. See `docs/api-envelope.md` for the full spec.
+- **Exceptions:** throw `BadRequestException` / `UnauthorizedException` / `ForbiddenException` / `NotFoundException`. `errorHandler` middleware maps them to `{ success:false, error:{ code, message, details? } }`. Default error codes: `BAD_REQUEST`, `VALIDATION_ERROR`, `UNAUTHORIZED`, `FORBIDDEN`, `NOT_FOUND`, `INTERNAL_ERROR`.
 - **IDs:** UUID v7 (`@default(uuid(7)) @db.Uuid`) repo-wide. **`legacyId Int? @unique`** on every entity that maps to legacy — the mobile app still passes int IDs (see memory `[[project_rewrite_context]]`).
 - **Logger:** `pino` (`src/config/logger.ts`). Don't `console.log`.
 - **Env:** `src/config/env.ts` uses `required('FOO')` — every env var has one declaration here.

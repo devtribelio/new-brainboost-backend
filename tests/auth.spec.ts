@@ -7,15 +7,16 @@ describe('auth (contract)', () => {
     const app = buildApp();
     const res = await request(app).post('/api/member/oauth/token').send({});
     expect(res.status).toBe(400);
-    expect(res.body.errCode).toBe(400);
-    expect(res.body.errMessage).toContain('Validation');
+    expect(res.body.success).toBe(false);
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
+    expect(res.body.error.message).toContain('Validation');
   });
 
   it('POST /api/member/oauth/token with invalid grant_type → 400', async () => {
     const app = buildApp();
     const res = await request(app).post('/api/member/oauth/token').send({ grant_type: 'unknown' });
     expect(res.status).toBe(400);
-    expect(res.body.errCode).toBe(400);
+    expect(res.body.success).toBe(false);
   });
 
   describe('client_credentials grant', () => {
@@ -27,11 +28,11 @@ describe('auth (contract)', () => {
         client_secret: 'test-secret',
       });
       expect(res.status).toBe(200);
-      // oauth/token returns raw TokenModel (NOT wrapped) per FE contract.
-      expect(res.body.access_token).toBeTruthy();
-      expect(res.body.refresh_token).toBeUndefined();
-      expect(res.body.scope).toBe('anon');
-      expect(res.body.token_type).toBe('Bearer');
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.access_token).toBeTruthy();
+      expect(res.body.data.refresh_token).toBeUndefined();
+      expect(res.body.data.scope).toBe('anon');
+      expect(res.body.data.token_type).toBe('Bearer');
     });
 
     it('wrong client_secret → 401', async () => {
@@ -42,7 +43,7 @@ describe('auth (contract)', () => {
         client_secret: 'WRONG',
       });
       expect(res.status).toBe(401);
-      expect(res.body.errCode).toBe(401);
+      expect(res.body.error.code).toBe('UNAUTHORIZED');
     });
 
     it('missing client_id → 400', async () => {
@@ -51,7 +52,7 @@ describe('auth (contract)', () => {
         grant_type: 'client_credentials',
       });
       expect(res.status).toBe(400);
-      expect(res.body.errMessage).toContain('client_id');
+      expect(res.body.error.message).toContain('client_id');
     });
 
     it('anon access_token rejected by member-protected endpoints', async () => {
@@ -61,9 +62,7 @@ describe('auth (contract)', () => {
         client_id: 'test-client',
         client_secret: 'test-secret',
       });
-      const access = tok.body.access_token as string;
-      // /member/info is pre-login splash — anon allowed (returns base only).
-      // Use a strictly member-protected endpoint to verify anon rejection.
+      const access = tok.body.data.access_token as string;
       const res = await request(app)
         .get('/api/member/account/profile/info')
         .set('Authorization', `Bearer ${access}`);
@@ -75,7 +74,7 @@ describe('auth (contract)', () => {
     const app = buildApp();
     const res = await request(app).get('/api/member/info');
     expect(res.status).toBe(200);
-    expect(res.body.errCode).toBe(0);
+    expect(res.body.success).toBe(true);
     expect(res.body.data.appName).toBeTruthy();
     expect(Array.isArray(res.body.data.community)).toBe(true);
   });
@@ -86,12 +85,12 @@ describe('auth (contract)', () => {
     expect(res.status).toBe(401);
   });
 
-  it('GET /api/member/data/banner (public, FE legacy http envelope) → 200', async () => {
+  it('GET /api/member/data/banner (paginated envelope) → 200', async () => {
     const app = buildApp();
     const res = await request(app).get('/api/member/data/banner');
     expect(res.status).toBe(200);
-    // Banner uses okLegacy: {meta:{total,page,lastPage}, data:[...]}.
-    expect(res.body.meta).toBeDefined();
+    expect(res.body.success).toBe(true);
     expect(Array.isArray(res.body.data)).toBe(true);
+    expect(res.body.meta.pagination).toBeDefined();
   });
 });

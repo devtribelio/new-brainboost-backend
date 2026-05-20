@@ -30,7 +30,7 @@ describe('auth single-session enforcement', () => {
       .post('/api/member/oauth/token')
       .send({ grant_type: 'password', username: email, password });
     expect(res.status).toBe(200);
-    return res.body as { access_token: string; refresh_token: string };
+    return res.body.data as { access_token: string; refresh_token: string };
   }
 
   async function refresh(refreshToken: string) {
@@ -49,14 +49,14 @@ describe('auth single-session enforcement', () => {
 
     const useB = await refresh(b.refresh_token);
     expect(useB.status).toBe(200);
-    expect(useB.body.refresh_token).toBeTruthy();
+    expect(useB.body.data.refresh_token).toBeTruthy();
   });
 
   it('refresh-token grant rotates: prior refresh token becomes unusable after rotation', async () => {
     const a = await loginPassword();
     const rotated = await refresh(a.refresh_token);
     expect(rotated.status).toBe(200);
-    const c = rotated.body as { refresh_token: string };
+    const c = rotated.body.data as { refresh_token: string };
 
     const reuseA = await refresh(a.refresh_token);
     expect(reuseA.status).toBe(401);
@@ -106,7 +106,7 @@ describe('auth single-session enforcement', () => {
     const a = await loginPassword();
     const rotated = await refresh(a.refresh_token);
     expect(rotated.status).toBe(200);
-    const c = rotated.body as { access_token: string };
+    const c = rotated.body.data as { access_token: string };
 
     const meA = await request(app)
       .get('/api/member/account/profile/info')
@@ -133,7 +133,7 @@ describe('auth single-session enforcement', () => {
       .set('Authorization', `Bearer ${a.access_token}`)
       .send({});
     expect(logoutA.status).toBe(200);
-    expect(logoutA.body.errCode).toBe(0);
+    expect(logoutA.body.success).toBe(true);
     expect(logoutA.body.data.loggedOut).toBe(true);
   });
 
@@ -143,7 +143,7 @@ describe('auth single-session enforcement', () => {
 
     const res = await refresh(a.refresh_token);
     expect(res.status).toBe(401);
-    expect(res.body.errMessage).toBe('session_revoked');
+    expect(res.body.error.message).toBe('session_revoked');
   });
 
   it('refresh grant on a tampered/unknown token returns invalid_refresh_token', async () => {
@@ -151,7 +151,7 @@ describe('auth single-session enforcement', () => {
     const res = await refresh(fake);
     expect(res.status).toBe(401);
     expect(['invalid_refresh_token', 'Invalid or expired refresh token']).toContain(
-      res.body.errMessage,
+      res.body.error.message,
     );
   });
 });

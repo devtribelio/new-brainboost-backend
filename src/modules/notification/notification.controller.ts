@@ -1,8 +1,8 @@
 import type { Response } from 'express';
 import { NotificationService } from './notification.service';
-import { ok } from '@/common/utils/response.util';
+import { ok, okPaginated } from '@/common/utils/response.util';
 import { BadRequestException, UnauthorizedException } from '@/common/exceptions';
-import { buildLegacyPage, parsePagination } from '@/common/utils/pagination.util';
+import { parsePagination } from '@/common/utils/pagination.util';
 import { serializeNotification } from './notification.serializer';
 import type { AuthenticatedRequest } from '@/common/interfaces/authenticated-request';
 import {
@@ -13,7 +13,7 @@ import {
   ApiTags,
 } from '@/common/openapi/decorators';
 import {
-  NotificationPageDto,
+  NotificationDto,
   NotificationSeenResultDto,
 } from './dto/notification.dto';
 
@@ -40,7 +40,7 @@ export class NotificationController {
   })
   @ApiQuery({ name: 'isUnreadOnly', type: 'boolean', required: false, example: false })
   @ApiQuery({ name: 'isReadOnly', type: 'boolean', required: false, example: false })
-  @ApiResponse({ status: 200, type: () => NotificationPageDto })
+  @ApiResponse({ status: 200, type: () => NotificationDto, isArray: true, envelope: 'paginated' })
   list = async (req: AuthenticatedRequest, res: Response) => {
     if (!req.user) throw new UnauthorizedException();
     // FE NotificationQueryRequest defaults perPage to 50.
@@ -57,8 +57,9 @@ export class NotificationController {
     );
 
     const items = rows.map(serializeNotification);
-    const page = buildLegacyPage(items, total, p, totalAll);
-    return ok(res, { ...page, unread });
+    const extraMeta: Record<string, unknown> = { unread };
+    if (totalAll !== undefined) extraMeta.totalAll = totalAll;
+    return okPaginated(res, items, { page: p.page, perPage: p.perPage, total }, extraMeta);
   };
 
   @ApiOperation({ summary: 'Mark notifications as seen (single id, ids array, or markAllRead)' })

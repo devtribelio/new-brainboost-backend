@@ -35,7 +35,7 @@ describe('auth client-type session buckets', () => {
     if (clientType) body.client_type = clientType;
     const res = await request(app).post('/api/member/oauth/token').send(body);
     expect(res.status).toBe(200);
-    return res.body as { access_token: string; refresh_token: string };
+    return res.body.data as { access_token: string; refresh_token: string };
   }
 
   function refresh(refreshToken: string) {

@@ -1,60 +1,85 @@
 import type { Response } from 'express';
 
-export interface ApiEnvelope<T> {
-  errCode: number;
-  errMessage: string | null;
-  data: T | null;
+export interface Pagination {
+  page: number;
+  perPage: number;
+  total: number;
+  totalPages: number;
 }
 
-export function ok<T>(res: Response, data: T, status = 200): Response {
-  const body: ApiEnvelope<T> = { errCode: 0, errMessage: null, data };
+export type Meta = Record<string, unknown> & { pagination?: Pagination };
+
+export interface ApiError {
+  code: string;
+  message: string;
+  details?: unknown;
+}
+
+export interface ApiEnvelope<T> {
+  success: boolean;
+  data: T | null;
+  meta: Meta | null;
+  error: ApiError | null;
+}
+
+export function ok<T>(res: Response, data: T, meta?: Meta, status = 200): Response {
+  const body: ApiEnvelope<T> = {
+    success: true,
+    data,
+    meta: meta ?? null,
+    error: null,
+  };
   return res.status(status).json(body);
+}
+
+export function okCreated<T>(res: Response, data: T, meta?: Meta): Response {
+  return ok(res, data, meta, 201);
+}
+
+export function okPaginated<T>(
+  res: Response,
+  items: T[],
+  pagination: { page: number; perPage: number; total: number },
+  extraMeta?: Omit<Meta, 'pagination'>,
+): Response {
+  const totalPages = Math.max(1, Math.ceil(pagination.total / Math.max(1, pagination.perPage)));
+  const meta: Meta = {
+    ...(extraMeta ?? {}),
+    pagination: {
+      page: pagination.page,
+      perPage: pagination.perPage,
+      total: pagination.total,
+      totalPages,
+    },
+  };
+  return ok(res, items, meta);
 }
 
 export function fail(
   res: Response,
   status: number,
+  code: string,
   message: string,
-  debug?: unknown,
+  details?: unknown,
 ): Response {
-  const body: ApiEnvelope<null> & { debug?: unknown } = {
-    errCode: status,
-    errMessage: message,
+  const body: ApiEnvelope<null> = {
+    success: false,
     data: null,
-    ...(debug !== undefined ? { debug } : {}),
+    meta: null,
+    error: {
+      code,
+      message,
+      ...(details !== undefined ? { details } : {}),
+    },
   };
   return res.status(status).json(body);
 }
 
 export function notImplemented(res: Response, name?: string): Response {
-  return fail(res, 501, name ? `Not Implemented: ${name}` : 'Not Implemented');
-}
-
-export interface LegacyMeta {
-  total: number;
-  page: number;
-  lastPage: number;
-}
-
-export interface LegacyEnvelope<T> {
-  meta: LegacyMeta;
-  data: T[];
-}
-
-// FE legacy http layer expects {meta:{total,page,lastPage}, data:[]} — no errCode wrap.
-// Used by /product/list, /data/location/*, /data/banner, /data/commisionSummary.
-export function okLegacy<T>(
-  res: Response,
-  rows: T[],
-  total: number,
-  page: number,
-  perPage: number,
-  status = 200,
-): Response {
-  const lastPage = Math.max(1, Math.ceil(total / Math.max(1, perPage)));
-  const body: LegacyEnvelope<T> = {
-    meta: { total, page, lastPage },
-    data: rows,
-  };
-  return res.status(status).json(body);
+  return fail(
+    res,
+    501,
+    'NOT_IMPLEMENTED',
+    name ? `Not Implemented: ${name}` : 'Not Implemented',
+  );
 }

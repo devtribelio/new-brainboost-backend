@@ -1,12 +1,12 @@
 import type { Response } from 'express';
 import { ReplyService } from './reply.service';
-import { ok } from '@/common/utils/response.util';
+import { okPaginated } from '@/common/utils/response.util';
 import { BadRequestException } from '@/common/exceptions';
-import { buildLegacyPage, parsePagination } from '@/common/utils/pagination.util';
+import { parsePagination } from '@/common/utils/pagination.util';
 import { serializeComment } from '@/modules/comment/comment.serializer';
 import type { AuthenticatedRequest } from '@/common/interfaces/authenticated-request';
 import { ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@/common/openapi/decorators';
-import { CommentPageDto } from '@/modules/comment/dto/comment.dto';
+import { CommentDto } from '@/modules/comment/dto/comment.dto';
 
 @ApiTags('Comment')
 export class ReplyController {
@@ -16,7 +16,7 @@ export class ReplyController {
   @ApiQuery({ name: 'commentId', type: 'string', required: true, example: 'comment-uuid-parent' })
   @ApiQuery({ name: 'page', type: 'integer', required: false, example: 1 })
   @ApiQuery({ name: 'perPage', type: 'integer', required: false, example: 20 })
-  @ApiResponse({ status: 200, type: () => CommentPageDto })
+  @ApiResponse({ status: 200, type: () => CommentDto, isArray: true, envelope: 'paginated' })
   list = async (req: AuthenticatedRequest, res: Response) => {
     const parent = (req.query.commentId as string) ?? (req.query.replyId as string) ?? '';
     if (!parent) throw new BadRequestException('commentId required');
@@ -28,6 +28,6 @@ export class ReplyController {
     const data = rows.map((row) =>
       serializeComment(row, liked.has(row.id) ? 'like' : 'dislike'),
     );
-    return ok(res, buildLegacyPage(data, total, p));
+    return okPaginated(res, data, { page: p.page, perPage: p.perPage, total });
   };
 }

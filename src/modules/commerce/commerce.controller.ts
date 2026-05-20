@@ -1,5 +1,5 @@
 import type { Request, Response } from 'express';
-import { ok } from '@/common/utils/response.util';
+import { ok, okCreated, okPaginated } from '@/common/utils/response.util';
 import { parsePagination } from '@/common/utils/pagination.util';
 import {
   ApiBearerAuth,
@@ -35,7 +35,7 @@ export class CommerceController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Start checkout — create PENDING transaction' })
   @ApiBody({ type: () => StartCheckoutDto })
-  @ApiResponse({ status: 200, type: () => StartCheckoutResultDto })
+  @ApiResponse({ status: 201, type: () => StartCheckoutResultDto })
   startCheckout = async (req: ReqWithUser, res: Response) => {
     const dto = req.body as StartCheckoutDto;
     const result = await this.checkout.start({
@@ -43,17 +43,17 @@ export class CommerceController {
       productId: dto.productId,
       voucherCode: dto.voucherCode,
     });
-    return ok(res, result);
+    return okCreated(res, result);
   };
 
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Create payment for a PENDING transaction' })
   @ApiBody({ type: () => PayDto })
-  @ApiResponse({ status: 200, type: () => CreatePaymentResultDto })
+  @ApiResponse({ status: 201, type: () => CreatePaymentResultDto })
   createPayment = async (req: ReqWithUser, res: Response) => {
     const dto = req.body as PayDto;
     const result = await this.payment.create(req.user!.id, dto);
-    return ok(res, result);
+    return okCreated(res, result);
   };
 
   @ApiBearerAuth()
@@ -69,7 +69,7 @@ export class CommerceController {
   listTransactions = async (req: ReqWithUser, res: Response) => {
     const p = parsePagination(req.query as Record<string, unknown>, { perPage: 20 });
     const { rows, total } = await this.payment.listTransactions(req.user!.id, p.page, p.perPage);
-    return ok(res, { rows, total, page: p.page, perPage: p.perPage });
+    return okPaginated(res, rows, { page: p.page, perPage: p.perPage, total });
   };
 
   @ApiBearerAuth()

@@ -9,6 +9,8 @@ import 'reflect-metadata';
 
 export type HttpMethod = 'get' | 'post' | 'put' | 'patch' | 'delete';
 
+export type EnvelopeShape = 'standard' | 'paginated' | 'none';
+
 export interface PropertyOptions {
   type?: 'string' | 'number' | 'integer' | 'boolean' | 'array' | 'object' | (() => unknown);
   format?: string;
@@ -32,10 +34,11 @@ export interface ApiResponseOptions {
   type?: () => unknown;
   isArray?: boolean;
   schema?: Record<string, unknown>;
-  // 'standard' (default) wraps the body in {errCode,errMessage,data}.
-  // 'none' uses `type`/`schema` as the full body — used by `okLegacy` endpoints
-  // that emit {meta,data:[]} per the FE legacy http envelope.
-  envelope?: 'standard' | 'none';
+  // Wrapping mode for the OpenAPI response body.
+  //   'standard'  (default) → { success, data, meta, error } with `data` = type/schema
+  //   'paginated'           → { success, data: T[], meta: { pagination }, error }
+  //   'none'                → raw `type`/`schema` (webhook & similar provider contracts)
+  envelope?: EnvelopeShape;
 }
 
 export interface ApiQueryOptions {
