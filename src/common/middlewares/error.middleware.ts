@@ -1,8 +1,38 @@
 import type { ErrorRequestHandler, Request, Response, NextFunction, RequestHandler } from 'express';
+import { Prisma } from '@prisma/client';
 import { HttpException } from '@/common/exceptions';
 import { fail } from '@/common/utils/response.util';
 import { logger } from '@/config/logger';
 import { env } from '@/config/env';
+
+interface MappedError {
+  status: number;
+  code: string;
+  message: string;
+}
+
+// Map raw Prisma errors to clean client responses. Without this a bad UUID
+// (P2023) or missing row (P2025) leaks the full Prisma invocation + stack as a
+// 500. Returns null for anything not recognised — caller falls back to 500.
+function mapPrismaError(err: unknown): MappedError | null {
+  if (err instanceof Prisma.PrismaClientValidationError) {
+    return { status: 400, code: 'BAD_REQUEST', message: 'Invalid request parameters' };
+  }
+  if (!(err instanceof Prisma.PrismaClientKnownRequestError)) return null;
+  switch (err.code) {
+    case 'P2023': // malformed id (e.g. non-UUID passed to a Uuid column)
+    case 'P2000': // value too long for column
+      return { status: 400, code: 'BAD_REQUEST', message: 'Invalid request parameters' };
+    case 'P2002': // unique constraint violation
+      return { status: 409, code: 'CONFLICT', message: 'Resource already exists' };
+    case 'P2003': // foreign key constraint violation
+      return { status: 400, code: 'BAD_REQUEST', message: 'Related resource is invalid' };
+    case 'P2025': // record not found
+      return { status: 404, code: 'NOT_FOUND', message: 'Resource not found' };
+    default:
+      return null;
+  }
+}
 
 function isAdminRequest(req: Request): boolean {
   return req.originalUrl.startsWith('/admin');
@@ -41,14 +71,25 @@ function statusToCode(status: number): string {
   }
 }
 
-export const errorHandler: ErrorRequestHandler = (err, req: Request, res: Response, _next: NextFunction) => {
+export const errorHandler: ErrorRequestHandler = (
+  err,
+  req: Request,
+  res: Response,
+  _next: NextFunction,
+) => {
   const isHttp = err instanceof HttpException;
-  const status = isHttp ? err.status : 500;
-  const message = isHttp ? err.message : 'Internal Server Error';
-  const code = isHttp ? err.code : statusToCode(status);
+  const mapped = isHttp ? null : mapPrismaError(err);
 
-  if (!isHttp) {
+  const status = isHttp ? err.status : (mapped?.status ?? 500);
+  const message = isHttp ? err.message : (mapped?.message ?? 'Internal Server Error');
+  const code = isHttp ? err.code : (mapped?.code ?? statusToCode(status));
+
+  // Log full error for anything we didn't deliberately produce (HttpException)
+  // or cleanly map. Mapped Prisma errors are expected client mistakes.
+  if (!isHttp && !mapped) {
     logger.error({ err }, 'Unhandled error');
+  } else if (mapped) {
+    logger.warn({ err: (err as Error)?.message }, 'Mapped database error');
   }
 
   if (isAdminRequest(req)) {
@@ -57,7 +98,8 @@ export const errorHandler: ErrorRequestHandler = (err, req: Request, res: Respon
   }
 
   let details: unknown = isHttp ? err.details : undefined;
-  if (!env.isProduction && !isHttp) {
+  // Expose raw error only in non-prod, and only for genuinely unhandled cases.
+  if (!env.isProduction && !isHttp && !mapped) {
     details = {
       error: (err as Error)?.message,
       stack: (err as Error)?.stack?.split('\n').slice(0, 8),

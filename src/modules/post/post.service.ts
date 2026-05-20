@@ -2,6 +2,7 @@ import { prisma } from '@/config/prisma';
 import { BadRequestException, ForbiddenException, NotFoundException } from '@/common/exceptions';
 import type { PaginationParams } from '@/common/utils/pagination.util';
 import { notificationEvents } from '@/common/events/notification-events';
+import { assertUuid } from '@/common/utils/uuid.util';
 
 interface PostListQuery {
   keyword?: string;
@@ -109,6 +110,7 @@ export class PostService {
       });
       if (byLegacy) return byLegacy;
     }
+    assertUuid(id);
     return prisma.post.findUnique({ where: { id }, include: postInclude });
   }
 

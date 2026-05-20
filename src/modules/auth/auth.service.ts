@@ -10,6 +10,7 @@ import {
   verifyRefreshToken,
 } from '@/common/utils/jwt.util';
 import { BadRequestException, NotFoundException, UnauthorizedException } from '@/common/exceptions';
+import { assertUuid } from '@/common/utils/uuid.util';
 import { otpService } from '@/common/services/otp.service';
 import type { GoogleIdTokenPayload } from './social/google-verifier';
 import type { LoginDto } from './dto/login.dto';
@@ -581,6 +582,7 @@ export class AuthService {
       const byLegacy = await prisma.member.findUnique({ where: { legacyId } });
       if (byLegacy) return byLegacy;
     }
+    assertUuid(input);
     return prisma.member.findUnique({ where: { id: input } });
   }
 

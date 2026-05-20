@@ -1,5 +1,6 @@
 import { prisma } from '@/config/prisma';
 import type { PaginationParams } from '@/common/utils/pagination.util';
+import { assertUuid } from '@/common/utils/uuid.util';
 
 interface LocationQuery {
   keyword?: string;
@@ -14,6 +15,7 @@ async function resolveLegacyOrId<T extends { id: string }>(
     const byLegacy = await finder({ legacyId });
     if (byLegacy) return byLegacy;
   }
+  assertUuid(input);
   return finder({ id: input });
 }
 
@@ -45,9 +47,7 @@ export class LocationService {
       const full = await prisma.country.findUnique({ where: { id: single.id } });
       return { rows: full ? [full] : [], total: full ? 1 : 0 };
     }
-    const where = q.keyword
-      ? { name: { contains: q.keyword, mode: 'insensitive' as const } }
-      : {};
+    const where = q.keyword ? { name: { contains: q.keyword, mode: 'insensitive' as const } } : {};
     const [rows, total] = await Promise.all([
       prisma.country.findMany({
         where,

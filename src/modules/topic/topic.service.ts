@@ -1,6 +1,7 @@
 import { prisma } from '@/config/prisma';
 import { BadRequestException, NotFoundException } from '@/common/exceptions';
 import type { PaginationParams } from '@/common/utils/pagination.util';
+import { assertUuid } from '@/common/utils/uuid.util';
 
 interface TopicListQuery {
   keyword?: string;
@@ -56,6 +57,7 @@ export class TopicService {
       });
       if (byLegacy) return byLegacy.id;
     }
+    assertUuid(input);
     const byId = await prisma.network.findUnique({ where: { id: input }, select: { id: true } });
     return byId?.id ?? null;
   }
@@ -68,6 +70,7 @@ export class TopicService {
       const byLegacy = await prisma.topic.findUnique({ where: { legacyId: asInt } });
       if (byLegacy) return byLegacy;
     }
+    assertUuid(input);
     return prisma.topic.findUnique({ where: { id: input } });
   }
 

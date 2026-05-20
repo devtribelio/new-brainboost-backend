@@ -1,5 +1,6 @@
 import { prisma } from '@/config/prisma';
 import { BadRequestException, NotFoundException } from '@/common/exceptions';
+import { assertUuid } from '@/common/utils/uuid.util';
 
 export class ReportService {
   async listCategories(opts: { isActive?: boolean; orderBy?: 'name' | 'createdAt' } = {}) {
@@ -19,6 +20,7 @@ export class ReportService {
       });
       if (byLegacy) return byLegacy.id;
     }
+    assertUuid(input);
     const byId = await prisma.member.findUnique({ where: { id: input }, select: { id: true } });
     return byId?.id ?? null;
   }
@@ -29,6 +31,7 @@ export class ReportService {
       const byLegacy = await prisma.post.findUnique({ where: { legacyId }, select: { id: true } });
       if (byLegacy) return byLegacy.id;
     }
+    assertUuid(input);
     const byId = await prisma.post.findUnique({ where: { id: input }, select: { id: true } });
     return byId?.id ?? null;
   }
@@ -42,6 +45,7 @@ export class ReportService {
       });
       if (byLegacy) return byLegacy.id;
     }
+    assertUuid(input);
     const byId = await prisma.reportCategory.findUnique({
       where: { id: input },
       select: { id: true },

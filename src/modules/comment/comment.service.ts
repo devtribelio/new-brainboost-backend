@@ -2,6 +2,7 @@ import { prisma } from '@/config/prisma';
 import { BadRequestException, ForbiddenException, NotFoundException } from '@/common/exceptions';
 import type { PaginationParams } from '@/common/utils/pagination.util';
 import { notificationEvents } from '@/common/events/notification-events';
+import { assertUuid } from '@/common/utils/uuid.util';
 
 const MAX_CONTENT_CHARS = 5000;
 
@@ -33,6 +34,7 @@ export class CommentService {
       const byLegacy = await prisma.post.findUnique({ where: { legacyId }, select: { id: true } });
       if (byLegacy) return byLegacy.id;
     }
+    assertUuid(input);
     const byId = await prisma.post.findUnique({ where: { id: input }, select: { id: true } });
     return byId?.id ?? null;
   }
@@ -46,6 +48,7 @@ export class CommentService {
       });
       if (byLegacy) return byLegacy;
     }
+    assertUuid(id);
     return prisma.comment.findUnique({ where: { id }, include: commentInclude });
   }
 

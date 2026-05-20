@@ -1,5 +1,6 @@
 import { prisma } from '@/config/prisma';
 import { BadRequestException, NotFoundException } from '@/common/exceptions';
+import { assertUuid } from '@/common/utils/uuid.util';
 
 export class ProfileService {
   async getInfo(memberId: string) {
@@ -87,6 +88,7 @@ export class ProfileService {
       const r = await prisma.country.findUnique({ where: { legacyId }, select: { id: true } });
       if (r) return r.id;
     }
+    assertUuid(input);
     const r = await prisma.country.findUnique({ where: { id: input }, select: { id: true } });
     return r?.id ?? null;
   }
@@ -98,6 +100,7 @@ export class ProfileService {
       const r = await prisma.province.findUnique({ where: { legacyId }, select: { id: true } });
       if (r) return r.id;
     }
+    assertUuid(input);
     const r = await prisma.province.findUnique({ where: { id: input }, select: { id: true } });
     return r?.id ?? null;
   }
@@ -109,6 +112,7 @@ export class ProfileService {
       const r = await prisma.city.findUnique({ where: { legacyId }, select: { id: true } });
       if (r) return r.id;
     }
+    assertUuid(input);
     const r = await prisma.city.findUnique({ where: { id: input }, select: { id: true } });
     return r?.id ?? null;
   }
@@ -120,6 +124,7 @@ export class ProfileService {
       const r = await prisma.district.findUnique({ where: { legacyId }, select: { id: true } });
       if (r) return r.id;
     }
+    assertUuid(input);
     const r = await prisma.district.findUnique({ where: { id: input }, select: { id: true } });
     return r?.id ?? null;
   }

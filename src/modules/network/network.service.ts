@@ -3,6 +3,7 @@ import { prisma } from '@/config/prisma';
 import { BadRequestException, ForbiddenException, NotFoundException } from '@/common/exceptions';
 import type { PaginationParams } from '@/common/utils/pagination.util';
 import { notificationEvents } from '@/common/events/notification-events';
+import { assertUuid } from '@/common/utils/uuid.util';
 
 export class NetworkService {
   private async resolveNetworkId(input: string): Promise<string | null> {
@@ -20,6 +21,7 @@ export class NetworkService {
       if (byLegacy) return byLegacy.id;
     }
     // Try uuid
+    assertUuid(input);
     const byId = await prisma.network.findUnique({ where: { id: input }, select: { id: true } });
     return byId?.id ?? null;
   }
