@@ -10,3 +10,7 @@ coverage/
 .vscode/
 tmp/
 uploads/
+
+# ruv-swarm / claude-flow artifacts
+.swarm/
+ruvector.db
