@@ -11,6 +11,13 @@ export interface HandleResult {
   reason?: string;
 }
 
+const TERMINAL_STATUSES: CommercePaymentStatus[] = [
+  'SUCCESS',
+  'EXPIRED',
+  'FAILED',
+  'CANCELED',
+];
+
 /**
  * Xendit Invoice webhook handler. Flat envelope — fields at root (no `data:` wrapper).
  */
@@ -32,6 +39,8 @@ export class XenditWebhookHandler {
       return { noop: true, reason: 'unknown_payment' };
     }
 
+    // Fast-path: payment already finalized. The authoritative idempotency guard
+    // is the conditional updateMany below — this only avoids needless work.
     if (isTerminal(payment.status)) {
       logger.info(
         { paymentId: payment.id, status: payment.status },
@@ -43,9 +52,42 @@ export class XenditWebhookHandler {
     const nextStatus = mapInvoiceStatus(payload['status'] as string | undefined);
     const now = new Date();
 
+    // SECURITY: never grant a SUCCESS transition on an unverified amount.
+    // The static callback token is a single, replayable factor; the paid
+    // amount is the second factor that defeats a forged "PAID" callback.
+    if (nextStatus === 'SUCCESS') {
+      const verdict = verifyPaidAmount(payload, payment.amount);
+      if (!verdict.ok) {
+        logger.error(
+          {
+            paymentId: payment.id,
+            reason: verdict.reason,
+            expected: payment.amount,
+            got: verdict.got,
+          },
+          '[webhook] amount verification failed — refusing SUCCESS',
+        );
+        // Record the rejected callback for audit; do NOT transition state.
+        await prisma.commercePaymentEvent.create({
+          data: {
+            paymentId: payment.id,
+            source: 'webhook',
+            fromStatus: payment.status,
+            toStatus: payment.status,
+            payload: payload as unknown as object,
+          },
+        });
+        return { noop: true, reason: verdict.reason };
+      }
+    }
+
+    let applied = false;
     await prisma.$transaction(async (txdb) => {
-      await txdb.commercePayment.update({
-        where: { id: payment.id },
+      // Conditional update: only one webhook can move a payment out of a
+      // non-terminal state. A concurrent / replayed callback updates 0 rows,
+      // closing the check-then-act race on the fast-path above.
+      const updated = await txdb.commercePayment.updateMany({
+        where: { id: payment.id, status: { notIn: TERMINAL_STATUSES } },
         data: {
           status: nextStatus,
           vendorStatus: (payload['status'] as string) ?? null,
@@ -56,6 +98,9 @@ export class XenditWebhookHandler {
           updatedAt: now,
         },
       });
+      if (updated.count === 0) return; // lost the race — already finalized
+
+      applied = true;
       await txdb.commercePaymentEvent.create({
         data: {
           paymentId: payment.id,
@@ -65,18 +110,29 @@ export class XenditWebhookHandler {
           payload: payload as unknown as object,
         },
       });
+
+      // Only settle/downgrade a transaction that is still PENDING — never
+      // clobber a transaction another payment row already settled.
       if (nextStatus === 'SUCCESS') {
-        await txdb.commerceTransaction.update({
-          where: { id: payment.transactionId },
+        await txdb.commerceTransaction.updateMany({
+          where: { id: payment.transactionId, status: 'PENDING' },
           data: { status: 'PAID', paidAt: now },
         });
       } else if (nextStatus === 'EXPIRED') {
-        await txdb.commerceTransaction.update({
-          where: { id: payment.transactionId },
+        await txdb.commerceTransaction.updateMany({
+          where: { id: payment.transactionId, status: 'PENDING' },
           data: { status: 'EXPIRED' },
         });
       }
     });
+
+    if (!applied) {
+      logger.info(
+        { paymentId: payment.id },
+        '[webhook] noop (lost race / already finalized)',
+      );
+      return { noop: true, reason: 'already_terminal' };
+    }
 
     if (nextStatus === 'SUCCESS') {
       const tx = await prisma.commerceTransaction.findUnique({
@@ -123,5 +179,28 @@ export class XenditWebhookHandler {
 }
 
 function isTerminal(s: CommercePaymentStatus): boolean {
-  return s === 'SUCCESS' || s === 'EXPIRED' || s === 'FAILED' || s === 'CANCELED';
+  return TERMINAL_STATUSES.includes(s);
+}
+
+type AmountVerdict = { ok: true } | { ok: false; reason: string; got: unknown };
+
+/**
+ * Verifies the callback's paid amount matches the amount expected for this
+ * payment, and that the currency (when present) is IDR. Fails closed: an
+ * absent or non-numeric amount is treated as a mismatch, so a SUCCESS
+ * transition is never granted without a positively verified amount.
+ */
+function verifyPaidAmount(payload: RawPayload, expected: number): AmountVerdict {
+  const currency = payload['currency'];
+  if (typeof currency === 'string' && currency.toUpperCase() !== 'IDR') {
+    return { ok: false, reason: 'currency_mismatch', got: currency };
+  }
+  const paid = payload['paid_amount'] ?? payload['amount'];
+  if (typeof paid !== 'number' || !Number.isFinite(paid)) {
+    return { ok: false, reason: 'amount_unverifiable', got: paid };
+  }
+  if (Math.round(paid) !== expected) {
+    return { ok: false, reason: 'amount_mismatch', got: paid };
+  }
+  return { ok: true };
 }
