@@ -8,6 +8,7 @@ import { ok, okCreated, okPaginated } from '@/common/utils/response.util';
 import { UnauthorizedException, BadRequestException } from '@/common/exceptions';
 import type { AuthenticatedRequest } from '@/common/interfaces/authenticated-request';
 import type { AffiliateBased } from './constants';
+import { AFFILIATE_COOKIE_NAME, AFFILIATE_COOKIE_MAX_AGE_MS } from './constants';
 import {
   ApiBearerAuth,
   ApiBody,
@@ -139,6 +140,18 @@ export class AffiliateController {
       rawHeaders: VisitService.sanitizeHeaders(req.headers as Record<string, string | string[] | undefined>),
       clientEventId: body.clientEventId as string | undefined,
     });
+
+    // Legacy parity: drop a 1-year last-touch attribution cookie (web flow). Latest click wins
+    // (sticky until overwritten/expired). Apps ignore this and pass affiliateCode explicitly.
+    if (affiliatorCode) {
+      res.cookie(AFFILIATE_COOKIE_NAME, affiliatorCode, {
+        maxAge: AFFILIATE_COOKIE_MAX_AGE_MS,
+        httpOnly: true,
+        sameSite: 'lax',
+        path: '/',
+        secure: process.env.NODE_ENV === 'production',
+      });
+    }
 
     return ok(res, result);
   };

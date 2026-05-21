@@ -12,6 +12,7 @@ import type { CheckoutService } from './checkout.service';
 import type { PaymentService } from './payment.service';
 import type { VoucherService } from './voucher.service';
 import { StartCheckoutDto } from './dto/start-checkout.dto';
+import { AFFILIATE_COOKIE_NAME } from '@/modules/affiliate/constants';
 import { PayDto, CancelTransactionDto, ValidateVoucherDto } from './dto/pay.dto';
 import {
   CommerceTransactionListItemDto,
@@ -39,11 +40,14 @@ export class CommerceController {
   @ApiResponse({ status: 201, type: () => StartCheckoutResultDto })
   startCheckout = async (req: ReqWithUser, res: Response) => {
     const dto = req.body as StartCheckoutDto;
+    // Attribution precedence: explicit body code (per-purchase) → cookie (legacy 1-yr last-touch
+    // sticky, web) → (engine then falls back to the buyer's permanent inviter).
+    const cookieAff = (req.cookies as Record<string, string> | undefined)?.[AFFILIATE_COOKIE_NAME];
     const result = await this.checkout.start({
       memberId: req.user!.id,
       productId: dto.productId,
       voucherCode: dto.voucherCode,
-      affiliatorCode: dto.affiliatorCode,
+      affiliatorCode: dto.affiliatorCode ?? cookieAff,
     });
     return okCreated(res, result);
   };
