@@ -12,6 +12,12 @@ export interface CommercePaymentSuccessEvent {
   programId?: string | null;
   /** Per-purchase override: Member behind the link used at checkout (supersedes inviter). */
   attributedAffiliatorMemberId?: string | null;
+  /**
+   * Whether this channel may generate affiliate commission. `undefined` = eligible (web/native).
+   * Ingestion sets it from the channel's `triggersAffiliate` toggle; `false` → listener still
+   * grants enrollment/voucher but does NOT pay commission.
+   */
+  affiliateEligible?: boolean;
 }
 
 export interface CommercePaymentExpiredEvent {

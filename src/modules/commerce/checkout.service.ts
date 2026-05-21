@@ -4,6 +4,7 @@ import { BadRequestException, NotFoundException } from '@/common/exceptions';
 import { computeTotals } from './utils/compute-totals';
 import { generateOrderCode } from './utils/generate-order-code';
 import { VoucherService } from './voucher.service';
+import { attributionService } from '@/modules/affiliate/attribution.service';
 
 export interface StartCheckoutInput {
   memberId: string;
@@ -53,9 +54,9 @@ export class CheckoutService {
     });
 
     const attribution = await this.resolveAttribution(input.memberId, input.productId);
-    const attributedAffiliatorMemberId = await this.resolveOverrideAffiliator(
-      input.affiliatorCode,
+    const attributedAffiliatorMemberId = await attributionService.resolveOverrideAffiliatorMemberId(
       input.memberId,
+      input.affiliatorCode,
     );
 
     const code = await generateOrderCode();
@@ -94,25 +95,6 @@ export class CheckoutService {
   }
 
   /**
-   * Per-purchase commission override: resolve the affiliate link used for THIS checkout
-   * to a Member id. No cookie persistence — only applies to this purchase. Ignores an
-   * unknown code or a self-referral (buyer using their own code).
-   */
-  private async resolveOverrideAffiliator(
-    affiliatorCode: string | undefined,
-    buyerId: string,
-  ): Promise<string | null> {
-    if (!affiliatorCode) return null;
-    const code = affiliatorCode.slice(0, 8); // first 8 chars = member code (rest = network suffix)
-    const affiliator = await prisma.member.findUnique({
-      where: { affiliateCode: code },
-      select: { id: true },
-    });
-    if (!affiliator || affiliator.id === buyerId) return null;
-    return affiliator.id;
-  }
-
-  /**
    * Last-touch attribution from AffiliateVisit within 30-day cookie window.
    * Falls back to {null, null} if no visit found.
    */
@@ -130,7 +112,7 @@ export class CheckoutService {
       orderBy: { createdAt: 'desc' },
       select: { affiliatorMemberId: true, programId: true },
     });
-    if (!visit) return { affiliatorId: null, programId: null };
+    if (!visit || !visit.programId) return { affiliatorId: null, programId: visit?.programId ?? null };
 
     const affiliator = await prisma.memberAffiliator.findUnique({
       where: {
