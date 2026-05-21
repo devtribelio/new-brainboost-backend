@@ -16,8 +16,9 @@ export const PENDING_TO_BALANCE_DAYS = 7; // marketing-facing: "5 hari kerja"
 
 // Affiliate attribution cookie (legacy parity: TB_BRAINBOOST_COOKIE, 1-year, last-touch sticky).
 // Web flow: set on affiliate-link click, read at checkout. Apps pass affiliateCode explicitly instead.
+// Duration is runtime-configurable via app_settings key `affiliate.cookieDays` (this is the fallback).
 export const AFFILIATE_COOKIE_NAME = 'bb_aff';
-export const AFFILIATE_COOKIE_MAX_AGE_MS = 365 * 24 * 60 * 60 * 1000; // 1 year
+export const AFFILIATE_COOKIE_DAYS_DEFAULT = 365; // 1 year
 
 // Disbursement / payout (legacy: TBDisbursement::affiliate — min 15k, flat fee 5k, net must exceed 10k)
 export const DISBURSEMENT_MIN_BALANCE = 15_000; // IDR — minimum withdrawable balance to request

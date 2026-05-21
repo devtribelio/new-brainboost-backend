@@ -1,6 +1,7 @@
 import { prisma } from '@/config/prisma';
 import { logger } from '@/config/logger';
 import { COMMISSION_STATUS, PENDING_TO_BALANCE_DAYS } from '@/modules/affiliate/constants';
+import { settingsService, SETTING_KEYS } from '@/common/services/settings.service';
 
 /**
  * Background job: promote affiliate commissions PENDING -> BALANCE once they have
@@ -12,13 +13,16 @@ import { COMMISSION_STATUS, PENDING_TO_BALANCE_DAYS } from '@/modules/affiliate/
  * effectively always), and held the rest as `is_pending`. The new model uses an
  * explicit N-day hold for refund/chargeback safety. VOIDED rows are never touched.
  *
- * Designed to be called from an external scheduler (cron / Postgres LISTEN).
+ * Hold window is runtime-configurable via app_settings (affiliate.holdDays); pass `holdDays`
+ * explicitly to override (e.g. tests). Designed to be called from an external scheduler.
  */
 export async function affiliatePendingToBalance(
   now: Date = new Date(),
-  holdDays: number = PENDING_TO_BALANCE_DAYS,
+  holdDays?: number,
 ): Promise<{ promoted: number }> {
-  const cutoff = new Date(now.getTime() - holdDays * 24 * 60 * 60 * 1000);
+  const days =
+    holdDays ?? (await settingsService.getNumber(SETTING_KEYS.affiliateHoldDays, PENDING_TO_BALANCE_DAYS));
+  const cutoff = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
 
   const res = await prisma.affiliateCommission.updateMany({
     where: {

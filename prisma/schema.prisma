@@ -1009,3 +1009,15 @@ model Admin {
 
   @@map("admins")
 }
+
+/// Runtime-configurable key-value settings. Change without redeploy (cached, short TTL).
+/// e.g. affiliate.cookieDays, affiliate.holdDays. Edit via DB/admin; takes effect within cache TTL.
+model AppSetting {
+  key         String   @id
+  value       String
+  description String?
+  updatedAt   DateTime @updatedAt
+  createdAt   DateTime @default(now())
+
+  @@map("app_settings")
+}

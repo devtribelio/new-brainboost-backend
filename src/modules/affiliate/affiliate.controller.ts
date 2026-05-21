@@ -8,7 +8,8 @@ import { ok, okCreated, okPaginated } from '@/common/utils/response.util';
 import { UnauthorizedException, BadRequestException } from '@/common/exceptions';
 import type { AuthenticatedRequest } from '@/common/interfaces/authenticated-request';
 import type { AffiliateBased } from './constants';
-import { AFFILIATE_COOKIE_NAME, AFFILIATE_COOKIE_MAX_AGE_MS } from './constants';
+import { AFFILIATE_COOKIE_NAME, AFFILIATE_COOKIE_DAYS_DEFAULT } from './constants';
+import { settingsService, SETTING_KEYS } from '@/common/services/settings.service';
 import {
   ApiBearerAuth,
   ApiBody,
@@ -141,11 +142,16 @@ export class AffiliateController {
       clientEventId: body.clientEventId as string | undefined,
     });
 
-    // Legacy parity: drop a 1-year last-touch attribution cookie (web flow). Latest click wins
+    // Legacy parity: drop a last-touch attribution cookie (web flow). Latest click wins
     // (sticky until overwritten/expired). Apps ignore this and pass affiliateCode explicitly.
+    // Duration is runtime-configurable via app_settings (affiliate.cookieDays).
     if (affiliatorCode) {
+      const cookieDays = await settingsService.getNumber(
+        SETTING_KEYS.affiliateCookieDays,
+        AFFILIATE_COOKIE_DAYS_DEFAULT,
+      );
       res.cookie(AFFILIATE_COOKIE_NAME, affiliatorCode, {
-        maxAge: AFFILIATE_COOKIE_MAX_AGE_MS,
+        maxAge: cookieDays * 24 * 60 * 60 * 1000,
         httpOnly: true,
         sameSite: 'lax',
         path: '/',
