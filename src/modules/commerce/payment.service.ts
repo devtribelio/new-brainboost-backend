@@ -29,6 +29,7 @@ type TransactionRow = {
   voucherId: string | null;
   affiliatorId: string | null;
   programId: string | null;
+  attributedAffiliatorMemberId: string | null;
 };
 
 export class PaymentService {
@@ -162,6 +163,7 @@ export class PaymentService {
       voucherId: result.tx.voucherId,
       affiliatorId: tx.affiliatorId,
       programId: tx.programId,
+      attributedAffiliatorMemberId: tx.attributedAffiliatorMemberId,
     });
 
     return {

@@ -885,6 +885,10 @@ model CommerceTransaction {
   voucherId     String?                   @db.Uuid
   affiliatorId  String?                   @db.Uuid
   programId     String?                   @db.Uuid
+  // Per-purchase commission override: the Member behind the affiliate link used at THIS
+  // checkout. When set, commission for this purchase goes to this member (and up their
+  // chain), superseding the buyer's permanent inviter. No cookie persistence — per-checkout.
+  attributedAffiliatorMemberId String?    @db.Uuid
   status        CommerceTransactionStatus @default(PENDING)
   paidAt        DateTime?
   canceledAt    DateTime?

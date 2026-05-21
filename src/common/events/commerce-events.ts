@@ -10,6 +10,8 @@ export interface CommercePaymentSuccessEvent {
   voucherId?: string | null;
   affiliatorId?: string | null;
   programId?: string | null;
+  /** Per-purchase override: Member behind the link used at checkout (supersedes inviter). */
+  attributedAffiliatorMemberId?: string | null;
 }
 
 export interface CommercePaymentExpiredEvent {

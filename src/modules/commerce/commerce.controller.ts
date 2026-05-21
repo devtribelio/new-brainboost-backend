@@ -43,6 +43,7 @@ export class CommerceController {
       memberId: req.user!.id,
       productId: dto.productId,
       voucherCode: dto.voucherCode,
+      affiliatorCode: dto.affiliatorCode,
     });
     return okCreated(res, result);
   };

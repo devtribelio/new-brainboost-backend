@@ -9,6 +9,8 @@ export interface StartCheckoutInput {
   memberId: string;
   productId: string;
   voucherCode?: string;
+  /** Affiliate code of the link used for THIS purchase (per-purchase commission override). */
+  affiliatorCode?: string;
 }
 
 export interface StartCheckoutResult {
@@ -51,6 +53,10 @@ export class CheckoutService {
     });
 
     const attribution = await this.resolveAttribution(input.memberId, input.productId);
+    const attributedAffiliatorMemberId = await this.resolveOverrideAffiliator(
+      input.affiliatorCode,
+      input.memberId,
+    );
 
     const code = await generateOrderCode();
     const expiredAt = new Date(
@@ -70,6 +76,7 @@ export class CheckoutService {
         amount: totals.amount,
         affiliatorId: attribution.affiliatorId,
         programId: attribution.programId,
+        attributedAffiliatorMemberId,
         status: 'PENDING',
         expiredAt,
       },
@@ -84,6 +91,25 @@ export class CheckoutService {
       amount: totals.amount,
       expiredAt,
     };
+  }
+
+  /**
+   * Per-purchase commission override: resolve the affiliate link used for THIS checkout
+   * to a Member id. No cookie persistence — only applies to this purchase. Ignores an
+   * unknown code or a self-referral (buyer using their own code).
+   */
+  private async resolveOverrideAffiliator(
+    affiliatorCode: string | undefined,
+    buyerId: string,
+  ): Promise<string | null> {
+    if (!affiliatorCode) return null;
+    const code = affiliatorCode.slice(0, 8); // first 8 chars = member code (rest = network suffix)
+    const affiliator = await prisma.member.findUnique({
+      where: { affiliateCode: code },
+      select: { id: true },
+    });
+    if (!affiliator || affiliator.id === buyerId) return null;
+    return affiliator.id;
   }
 
   /**

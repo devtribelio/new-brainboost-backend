@@ -120,23 +120,31 @@ export class AffiliatorService {
     voucherAmount: number;
     buyerMemberId: string;
     programId?: string | null;
+    /** Per-purchase override: the affiliate link used at checkout (supersedes inviter). */
+    overrideAffiliatorMemberId?: string | null;
   }): Promise<{ committed: number }> {
-    if (!input.programId) {
-      logger.debug({ paymentId: input.paymentId }, '[affiliate] no programId — skip commit');
+    // Option B: any product is affiliate-able — `programId` is optional metadata, not a gate.
+    // Recipient seed (Model: A permanent + per-purchase link override):
+    //  - if this purchase came through a specific affiliate link → that affiliator (override),
+    //  - otherwise the buyer's permanent inviter.
+    // Level 1 = the seed; GROWTH then walks up the seed's own chain. Skip if neither exists.
+    let seedMemberId = input.overrideAffiliatorMemberId ?? null;
+    if (!seedMemberId) {
+      const buyer = await prisma.member.findUnique({
+        where: { id: input.buyerMemberId },
+        select: { inviterId: true },
+      });
+      seedMemberId = buyer?.inviterId ?? null;
+    }
+    if (!seedMemberId) {
+      logger.debug(
+        { buyerMemberId: input.buyerMemberId },
+        '[affiliate] no link override and no inviter — skip',
+      );
       return { committed: 0 };
     }
 
-    const buyer = await prisma.member.findUnique({
-      where: { id: input.buyerMemberId },
-      select: { inviterId: true },
-    });
-    if (!buyer?.inviterId) {
-      logger.debug({ buyerMemberId: input.buyerMemberId }, '[affiliate] no inviter — skip');
-      return { committed: 0 };
-    }
-
-    // Walk chain starting from the buyer's inviter (level 1 = direct inviter)
-    const chain = await walkInviterChain(buyer.inviterId, {
+    const chain = await walkInviterChain(seedMemberId, {
       maxDepth: GROWTH_MAX_DEPTH,
       stopOnPerformance: false,
     });
@@ -150,10 +158,13 @@ export class AffiliatorService {
       const amount = computeAmount(input.productPrice, input.voucherAmount, rate);
       if (amount <= 0) continue;
 
-      const affiliator = await prisma.memberAffiliator.findUnique({
-        where: { memberId_programId: { memberId: node.id, programId: input.programId } },
-        select: { id: true },
-      });
+      // MemberAffiliator is program-scoped; only resolvable when a program is attributed.
+      const affiliator = input.programId
+        ? await prisma.memberAffiliator.findUnique({
+            where: { memberId_programId: { memberId: node.id, programId: input.programId } },
+            select: { id: true },
+          })
+        : null;
 
       const schemaType =
         node.affiliateBased === AFFILIATE_BASED.PERFORMANCE
