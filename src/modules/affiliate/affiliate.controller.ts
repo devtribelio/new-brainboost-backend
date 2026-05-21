@@ -2,6 +2,7 @@ import type { Request, Response } from 'express';
 import type { AffiliateProgramService } from './program.service';
 import type { AffiliatorService } from './affiliator.service';
 import type { EnrollmentService } from './enrollment.service';
+import type { DisbursementService } from './disbursement.service';
 import { VisitService } from './visit.service';
 import { ok, okCreated, okPaginated } from '@/common/utils/response.util';
 import { UnauthorizedException, BadRequestException } from '@/common/exceptions';
@@ -18,9 +19,11 @@ import {
 import { LogAttributionDto, LogVisitDto, SetModeDto } from './dto/affiliate-request.dto';
 import {
   AffiliateCommissionDto,
+  AffiliateDisbursementDto,
   AffiliateProgramDto,
   AffiliatorProfileDto,
   AffiliatorSummaryDto,
+  DisbursementSummaryDto,
   MemberAffiliatorDto,
   SetModeResultDto,
   VisitLogResultDto,
@@ -33,6 +36,7 @@ export class AffiliateController {
     private readonly affiliatorService: AffiliatorService,
     private readonly enrollmentService: EnrollmentService,
     private readonly visitService: VisitService,
+    private readonly disbursementService: DisbursementService,
   ) {}
 
   @ApiBearerAuth()
@@ -173,6 +177,37 @@ export class AffiliateController {
     });
 
     return ok(res, result);
+  };
+
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Withdrawable balance + payout eligibility' })
+  @ApiResponse({ status: 200, type: () => DisbursementSummaryDto })
+  getDisbursementSummary = async (req: AuthenticatedRequest, res: Response) => {
+    if (!req.user) throw new UnauthorizedException();
+    const summary = await this.disbursementService.getSummary(req.user.id);
+    return ok(res, summary);
+  };
+
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Request a payout for the full withdrawable balance' })
+  @ApiResponse({ status: 201, type: () => AffiliateDisbursementDto })
+  requestDisbursement = async (req: AuthenticatedRequest, res: Response) => {
+    if (!req.user) throw new UnauthorizedException();
+    const disbursement = await this.disbursementService.requestDisbursement(req.user.id);
+    return okCreated(res, disbursement);
+  };
+
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'List my payout requests (paginated)' })
+  @ApiQuery({ name: 'page', type: 'integer', required: false, example: 1 })
+  @ApiQuery({ name: 'perPage', type: 'integer', required: false, example: 20, description: 'Max 100.' })
+  @ApiResponse({ status: 200, type: () => AffiliateDisbursementDto, isArray: true, envelope: 'paginated' })
+  listDisbursements = async (req: AuthenticatedRequest, res: Response) => {
+    if (!req.user) throw new UnauthorizedException();
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const perPage = Math.min(100, Math.max(1, Number(req.query.perPage) || 20));
+    const { rows, total } = await this.disbursementService.listDisbursements(req.user.id, page, perPage);
+    return okPaginated(res, rows, { page, perPage, total });
   };
 }
 

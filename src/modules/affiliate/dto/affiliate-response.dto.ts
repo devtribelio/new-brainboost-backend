@@ -204,6 +204,68 @@ export class MemberAffiliatorDto {
   updatedAt!: string;
 }
 
+const DISBURSEMENT_STATUS_ENUM = ['PENDING', 'PAID', 'FAILED', 'VOIDED'] as const;
+
+/** One affiliate payout request. */
+export class AffiliateDisbursementDto {
+  @ApiProperty({ format: 'uuid' })
+  id!: string;
+
+  @ApiProperty({ format: 'uuid' })
+  memberId!: string;
+
+  @ApiProperty({ type: 'integer', example: 50_000, description: 'Withdrawable balance consumed.' })
+  grossAmount!: number;
+
+  @ApiProperty({ type: 'integer', example: 5_000 })
+  fee!: number;
+
+  @ApiProperty({ type: 'integer', example: 45_000, description: 'Paid to member = gross - fee.' })
+  netAmount!: number;
+
+  @ApiProperty({ enum: DISBURSEMENT_STATUS_ENUM, example: 'PENDING' })
+  status!: string;
+
+  @ApiPropertyOptional({ nullable: true, example: 'xendit' })
+  provider?: string | null;
+
+  @ApiPropertyOptional({ nullable: true })
+  providerRef?: string | null;
+
+  @ApiPropertyOptional({ nullable: true })
+  failureReason?: string | null;
+
+  @ApiProperty({ format: 'date-time' })
+  requestedAt!: string;
+
+  @ApiPropertyOptional({ nullable: true, format: 'date-time' })
+  paidAt?: string | null;
+}
+
+/** `GET /affiliate/me/disbursement` — withdrawable balance + eligibility. */
+export class DisbursementSummaryDto {
+  @ApiProperty({ type: 'integer', example: 50_000 })
+  withdrawableBalance!: number;
+
+  @ApiProperty({ example: true, description: 'True only if balance meets thresholds AND no pending payout exists.' })
+  eligible!: boolean;
+
+  @ApiPropertyOptional({ nullable: true, description: 'Why not eligible, when applicable.' })
+  reason?: string | null;
+
+  @ApiProperty({ type: 'integer', example: 5_000 })
+  fee!: number;
+
+  @ApiProperty({ type: 'integer', example: 45_000, description: 'Projected net payout = balance - fee.' })
+  netAmount!: number;
+
+  @ApiProperty({ example: false })
+  hasPendingDisbursement!: boolean;
+
+  @ApiPropertyOptional({ nullable: true, type: () => AffiliateDisbursementDto })
+  pendingDisbursement?: AffiliateDisbursementDto | null;
+}
+
 /** `POST /affiliate/visits` & `POST /affiliate/attribution` — visit log outcome. */
 export class VisitLogResultDto {
   @ApiProperty({

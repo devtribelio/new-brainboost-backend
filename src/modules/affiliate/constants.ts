@@ -14,6 +14,20 @@ export const INACTIVE_RATE = 20;
 export const COOKIE_DAYS = 30;
 export const PENDING_TO_BALANCE_DAYS = 7; // marketing-facing: "5 hari kerja"
 
+// Disbursement / payout (legacy: TBDisbursement::affiliate — min 15k, flat fee 5k, net must exceed 10k)
+export const DISBURSEMENT_MIN_BALANCE = 15_000; // IDR — minimum withdrawable balance to request
+export const DISBURSEMENT_FEE = 5_000; // IDR — flat platform fee per payout
+export const DISBURSEMENT_MIN_NET = 10_000; // IDR — net (balance - fee) must be strictly greater than this
+
+// Disbursement status
+export const DISBURSEMENT_STATUS = {
+  PENDING: 'PENDING', // requested, awaiting payout
+  PAID: 'PAID', // successfully paid out by provider
+  FAILED: 'FAILED', // provider rejected — balance released back
+  VOIDED: 'VOIDED', // cancelled — balance released back
+} as const;
+export type DisbursementStatus = (typeof DISBURSEMENT_STATUS)[keyof typeof DISBURSEMENT_STATUS];
+
 // Affiliate modes
 export const AFFILIATE_BASED = {
   PERFORMANCE: 'PERFORMANCE',

@@ -654,41 +654,16 @@ async function migrateProducts(legacy: Connection) {
   log(`products: ${inserted} done`);
 }
 
-async function migrateAffiliateProgramCategories(legacy: Connection) {
-  log('affiliate-categories: fetching');
-  const [rows] = (await legacy.query(
-    `SELECT affiliator_program_category_id AS id, name, status FROM affiliator_program_category`,
-  )) as [RowDataPacket[], unknown];
-  let inserted = 0;
-  for (const r of rows as any[]) {
-    const name = nonEmpty(r.name);
-    if (!name) continue;
-    await prisma.affiliateProgramCategory.upsert({
-      where: { legacyId: r.id },
-      create: { legacyId: r.id, name, isActive: bool(r.status) },
-      update: { name, isActive: bool(r.status) },
-    });
-    inserted++;
-  }
-  log(`affiliate-categories: ${inserted} done`);
-}
-
 async function migrateAffiliatePrograms(legacy: Connection) {
   log('affiliate-programs: building maps');
-  const networkMap = await buildMap(prisma.network);
   const productMap = await buildMap(prisma.product);
-  const catMap = await buildMap(prisma.affiliateProgramCategory);
 
+  // AffiliateProgram schema: legacyId, code (required+unique), name (required), productId?, isActive.
   const baseSql = `SELECT napa.network_account_product_affiliator_id,
-    napa.network_account_id, napa.productable, napa.productable_id,
-    napa.super_commision_type, napa.super_commision_amount,
-    napa.pbs_commission_type, napa.pbs_aff_1, napa.pbs_aff_2, napa.pbs_aff_3,
-    napa.affiliator_program_category_id AS category_id,
-    napa.name, napa.is_active, napa.created, napa.updated, napa.status
+    napa.productable, napa.productable_id, napa.name, napa.is_active, napa.created
     FROM network_account_product_affiliator napa
     WHERE napa.status=1 AND napa.deleted IS NULL`;
   let inserted = 0,
-    skipped = 0,
     page = 0;
   for await (const rows of paginate<RowDataPacket>(
     legacy,
@@ -697,41 +672,29 @@ async function migrateAffiliatePrograms(legacy: Connection) {
     2000,
   )) {
     page++;
-    const data = (rows as any[])
-      .map((r) => {
-        const networkId = r.network_account_id ? networkMap.get(r.network_account_id) ?? null : null;
-        // legacy uses Laravel polymorphic — link only if productable=Product
-        const isProduct =
-          typeof r.productable === 'string' &&
-          r.productable.toLowerCase().includes('product');
-        const productId =
-          isProduct && r.productable_id ? productMap.get(r.productable_id) ?? null : null;
-        const categoryId = r.category_id ? catMap.get(r.category_id) ?? null : null;
-        return {
-          legacyId: r.network_account_product_affiliator_id as number,
-          networkId,
-          productId,
-          categoryId,
-          name: nonEmpty(r.name),
-          commissionType: nonEmpty(r.super_commision_type) ?? 'percent',
-          commissionAmount: Number(r.super_commision_amount ?? 0),
-          pbsCommissionType: nonEmpty(r.pbs_commission_type) ?? 'PERCENT',
-          pbsAff1: Number(r.pbs_aff_1 ?? 20),
-          pbsAff2: Number(r.pbs_aff_2 ?? 30),
-          pbsAff3: Number(r.pbs_aff_3 ?? 40),
-          isActive: bool(r.is_active),
-          createdAt: date(r.created) ?? new Date(),
-        };
-      })
-      .filter((x): x is NonNullable<typeof x> => x !== null);
+    const data = (rows as any[]).map((r) => {
+      // legacy uses Laravel polymorphic — link only if productable=Product
+      const isProduct =
+        typeof r.productable === 'string' && r.productable.toLowerCase().includes('product');
+      const productId =
+        isProduct && r.productable_id ? productMap.get(r.productable_id) ?? null : null;
+      const legacyId = r.network_account_product_affiliator_id as number;
+      return {
+        legacyId,
+        productId,
+        code: `PROG-${legacyId}`, // deterministic, satisfies required+unique code
+        name: nonEmpty(r.name) ?? `Program ${legacyId}`,
+        isActive: bool(r.is_active),
+        createdAt: date(r.created) ?? new Date(),
+      };
+    });
     if (data.length) {
       const res = await prisma.affiliateProgram.createMany({ data, skipDuplicates: true });
       inserted += res.count;
     }
-    if (page % PROGRESS_EVERY === 0)
-      log(`affiliate-programs: page ${page} inserted=${inserted}`);
+    if (page % PROGRESS_EVERY === 0) log(`affiliate-programs: page ${page} inserted=${inserted}`);
   }
-  log(`affiliate-programs: DONE inserted=${inserted} skipped=${skipped}`);
+  log(`affiliate-programs: DONE inserted=${inserted}`);
 }
 
 async function migrateMemberAffiliators(legacy: Connection) {
@@ -774,8 +737,6 @@ async function migrateMemberAffiliators(legacy: Connection) {
           programId,
           exitState: nonEmpty(r.exit_state),
           exitAt: date(r.exit_date),
-          fbPixelId: nonEmpty(r.fb_pixel_id),
-          ttPixelId: nonEmpty(r.tiktok_pixel_id),
           isActive: bool(r.status),
           createdAt: date(r.created) ?? new Date(),
         };
@@ -789,53 +750,6 @@ async function migrateMemberAffiliators(legacy: Connection) {
       log(`member-affiliators: page ${page} inserted=${inserted}`);
   }
   log(`member-affiliators: DONE inserted=${inserted} skipped=${skipped}`);
-}
-
-async function migrateAffiliateRequests(legacy: Connection) {
-  log('affiliate-requests: building maps');
-  const memberMap = await buildMap(prisma.member);
-  const programMap = await buildMap(prisma.affiliateProgram);
-
-  const baseSql = `SELECT affiliate_request_id, network_account_product_affiliator_id AS program_id,
-    member_id, member_id_inviter, name, email, phone, from_source, invited_type, tags,
-    affiliate_request_status, actionat, actionby, created, updated, status
-    FROM affiliate_request WHERE 1=1`;
-  let inserted = 0,
-    page = 0;
-  for await (const rows of paginate<RowDataPacket>(legacy, baseSql, 'affiliate_request_id', 5000)) {
-    page++;
-    const data = (rows as any[]).map((r) => {
-      const programId = r.program_id ? programMap.get(r.program_id) ?? null : null;
-      const memberId = r.member_id ? memberMap.get(r.member_id) ?? null : null;
-      const inviterId = r.member_id_inviter ? memberMap.get(r.member_id_inviter) ?? null : null;
-      const status = ((nonEmpty(r.affiliate_request_status) ?? 'PENDING').toUpperCase());
-      const validStatus = ['PENDING', 'APPROVED', 'REJECTED', 'CANCELLED'].includes(status)
-        ? (status as 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED')
-        : 'PENDING';
-      return {
-        legacyId: r.affiliate_request_id as number,
-        programId,
-        memberId,
-        inviterId,
-        email: nonEmpty(r.email)?.toLowerCase() ?? null,
-        name: nonEmpty(r.name),
-        phone: nonEmpty(r.phone),
-        fromSource: nonEmpty(r.from_source),
-        invitedType: nonEmpty(r.invited_type),
-        tags: nonEmpty(r.tags),
-        reqStatus: validStatus,
-        actionAt: date(r.actionat),
-        actionBy: nonEmpty(r.actionby),
-        createdAt: date(r.created) ?? new Date(),
-      };
-    });
-    if (data.length) {
-      const res = await prisma.affiliateRequest.createMany({ data, skipDuplicates: true });
-      inserted += res.count;
-    }
-    if (page % PROGRESS_EVERY === 0) log(`affiliate-requests: page ${page} inserted=${inserted}`);
-  }
-  log(`affiliate-requests: DONE inserted=${inserted}`);
 }
 
 async function migrateAffiliateCommissions(legacy: Connection) {
@@ -869,6 +783,8 @@ async function migrateAffiliateCommissions(legacy: Connection) {
           : null;
         const productId =
           r.product_model === 'Product' && r.product_id ? productMap.get(r.product_id) ?? null : null;
+        // Map legacy status flags onto the new ledger status.
+        const status = bool(r.is_pending) ? 'PENDING' : bool(r.is_expired) ? 'VOIDED' : 'BALANCE';
         return {
           legacyId: r.affiliator_commision_id as number,
           recipientId,
@@ -876,16 +792,12 @@ async function migrateAffiliateCommissions(legacy: Connection) {
           programId,
           productId,
           level: Number(r.level ?? 1),
+          affiliateBased: nonEmpty(r.affiliate_based) ?? 'PERFORMANCE',
           productPrice: Math.round(Number(r.product_price ?? 0)),
-          commissionType: nonEmpty(r.commision_type) ?? 'percent',
-          commissionAmount: Number(r.commision_amount ?? 0),
+          voucherAmount: 0,
+          commissionRate: Number(r.commision_amount ?? 0),
           amount: Math.round(Number(r.price_recipient ?? 0)),
-          feePercent: Number(r.fee_service_percent ?? 0),
-          feeAmount: Math.round(Number(r.fee_service_price ?? 0)),
-          isPending: bool(r.is_pending),
-          isExpired: bool(r.is_expired),
-          isSuper: bool(r.is_super_commision),
-          source: nonEmpty(r.affiliate_based),
+          status,
           paymentLegacyId: r.payment_id ? Number(r.payment_id) : null,
           createdAt: date(r.created) ?? new Date(),
         };
@@ -1118,16 +1030,12 @@ const PHASES: Record<string, (legacy: Connection) => Promise<void>> = {
   'comment-likes': migrateCommentLikes,
   products: migrateProducts,
   reports: migrateMemberReports,
-  'affiliate-categories': migrateAffiliateProgramCategories,
   'affiliate-programs': migrateAffiliatePrograms,
   'member-affiliators': migrateMemberAffiliators,
-  'affiliate-requests': migrateAffiliateRequests,
   'affiliate-commissions': migrateAffiliateCommissions,
   affiliate: async (legacy) => {
-    await migrateAffiliateProgramCategories(legacy);
     await migrateAffiliatePrograms(legacy);
     await migrateMemberAffiliators(legacy);
-    await migrateAffiliateRequests(legacy);
     await migrateAffiliateCommissions(legacy);
   },
   'backfill-members': backfillMembers,

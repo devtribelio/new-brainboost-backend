@@ -64,6 +64,7 @@ model Member {
   memberAffiliators    MemberAffiliator[]    @relation("MemberAffiliatorMember")
   affiliateCommissions AffiliateCommission[] @relation("AffiliateCommissionRecipient")
   affiliateVisits      AffiliateVisit[]      @relation("AffiliateVisitAffiliator")
+  affiliateDisbursements AffiliateDisbursement[] @relation("MemberDisbursements")
   courseEnrollments    CourseEnrollment[]
   commerceTransactions CommerceTransaction[]
   commercePayments     CommercePayment[]
@@ -819,6 +820,30 @@ model AffiliateVisit {
   @@index([adId])
   @@index([utmCampaign])
   @@map("affiliate_visits")
+}
+
+/// Affiliate payout request. Ledger debit against cleared (BALANCE) commissions.
+/// Source: legacy `disbursement_payment_affiliate` / TBDisbursement::affiliate.
+model AffiliateDisbursement {
+  id            String    @id @default(uuid(7)) @db.Uuid
+  memberId      String    @db.Uuid
+  grossAmount   Int       @default(0) // withdrawable balance consumed by this payout
+  fee           Int       @default(0) // flat platform fee
+  netAmount     Int       @default(0) // paid to member = gross - fee
+  status        String    @default("PENDING") // PENDING | PAID | FAILED | VOIDED
+  provider      String? // "xendit"
+  providerRef   String? // provider disbursement id
+  failureReason String?
+  requestedAt   DateTime  @default(now())
+  paidAt        DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  member Member @relation("MemberDisbursements", fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@index([memberId, status])
+  @@index([status])
+  @@map("affiliate_disbursements")
 }
 
 // ============================================================================
