@@ -13,6 +13,16 @@ import { credentialService } from '@/modules/ingest/credential.service';
 const TAG = `ingest-${Date.now()}`;
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** Poll for an async-listener side effect (commission) — robust to tunnel latency. */
+async function waitForCommission(where: Record<string, unknown>, tries = 25, gap = 120) {
+  for (let i = 0; i < tries; i++) {
+    const c = await prisma.affiliateCommission.findFirst({ where });
+    if (c) return c;
+    await wait(gap);
+  }
+  return null;
+}
+
 describe('purchase ingestion kernel', () => {
   let inviterId = '';
   let buyerId = '';
@@ -70,9 +80,10 @@ describe('purchase ingestion kernel', () => {
       cred!,
     );
     expect(res.status).toBe('committed');
-    await wait(250);
-    const comm = await prisma.affiliateCommission.findFirst({
-      where: { recipientId: inviterId, buyerMemberId: buyerId, paymentId: res.paymentId },
+    const comm = await waitForCommission({
+      recipientId: inviterId,
+      buyerMemberId: buyerId,
+      paymentId: res.paymentId,
     });
     expect(comm).not.toBeNull();
     expect(comm?.amount).toBe(20_000); // PERFORMANCE tier 1 (20%)
