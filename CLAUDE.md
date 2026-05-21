@@ -81,6 +81,7 @@ views/                   # EJS for /admin
 | `application/tribelio/default/controllers/upload.php` + `libraries/TBAsset.php` | `src/modules/upload/` | File upload (multer) |
 | `libraries/TBBanner.php` | `src/modules/banner/` | Banner listing |
 | `application/tribelio/default/controllers/product.php`, `commerce.php` + `libraries/TBProduct.php`, `TBCommerce.php`, `TBCourse.php`, `TBPlan.php` | `src/modules/product/` | Course/product detail (legacy parity per `feat/base-update`) |
+| mobile `BunnynetService`, `ProductService::downloadAudio` | `src/modules/media/` | BunnyCDN Stream proxy — hides `guid`/`library_id` from FE |
 | `libraries/TBCommision.php` | `src/modules/commission/` | Commission listing (read-only for now) |
 | `libraries/TBAffiliate.php`, `TBAffiliator.php`, `TBAffiliator_Commision_CoursePayment` | `src/modules/affiliate/` | Affiliate program, attribution, visit logging, payout compute. See `plan.md` |
 | `application/tribelio/default/controllers/topic.php` | `src/modules/topic/` | Topic CRUD |
@@ -180,6 +181,7 @@ Critical rules surfaced from legacy that **must be preserved exactly** in the re
 - **Member.legacyId:** Int, unique, **must be populated** when migrating users from legacy. Mobile app uses it as the primary identifier in some endpoints.
 - **OAuth grant types** the mobile app sends: `password`, `social`, `client_credentials`, `refresh_token` (legacy `AuthService`). Refresh path is `POST /api/member/oauth/token` with `grant_type=refresh_token` — **not** `/oauth/refresh`. The `refreshTokenUrl` constant in the mobile client points at the unused path; don't be confused.
 - **Network member list** edge: `/network/member` with empty `input` lists **all** members (mirrors legacy tag filter behavior — see commit `95a40c2`).
+- **Media access (BunnyCDN):** course audio + video both live in one Bunny **Stream** library (id `157244`, CDN `vz-5439ef3e-878.b-cdn.net`) — there is no separate Storage zone. Bunny's only protection is referrer-gating (any `Referer` header → `200`), which is hotlink protection, **not** access control. The `media` module proxies MP4 renditions and the product serializer emits an opaque `streamUrl` token so `guid`/`videoLibraryId` never reach the client. Preview lessons (`isPreview`) stream without enrollment; non-preview requires `CourseEnrollment`. See `docs/media-port.md`.
 
 For complete rule extraction per module, see `docs/legacy-analysis.md`.
 
@@ -210,6 +212,7 @@ Module status (one-line summary; details in `docs/rewrite-progress.md`):
 - [x] upload — multipart, temp storage
 - [x] banner — list
 - [x] product — course detail (legacy parity — see `feat/base-update`)
+- [x] media — BunnyCDN Stream MP4 proxy; opaque token hides `guid`/`library_id`; preview-free / enrollment-gated. Integration tests pending host Postgres
 - [x] commission — list (read-only)
 - [~] affiliate — program, attribution, visit logging done; payout compute pending parity tests
 - [x] topic — CRUD

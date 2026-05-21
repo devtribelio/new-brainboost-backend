@@ -39,7 +39,15 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` parity met for current s
 ### product — `src/modules/product/`
 - Course detail endpoint at full 1:1 parity with legacy `Controller_Product::detail` (commits `b1370fe`, `d2bd550`).
 - DTOs match the exact shape mobile expects (8 DTOs).
+- Course-detail serializer scrubs Bunny `guid`/`videoLibraryId`/iframe-HTML from `slidesData` + `dataContent`; audio/video slides expose `streamUrl` (opaque media token) — see `media` module + `docs/media-port.md`.
 - Outstanding: catalog filters, purchase flow (lives in unstarted `commerce` module).
+
+### media — `src/modules/media/`
+- Backend proxy for BunnyCDN Stream — streams MP4 renditions so the raw `guid`/`library_id` never reach the client.
+- Endpoint `GET|HEAD /api/member/media/stream?t={token}&res={360p|480p|720p}`; opaque AES-256-GCM token carries `guid`/`courseId`/`isPreview`.
+- Preview media open (anonymous OK); non-preview gated on `CourseEnrollment`. HTTP Range forwarded for seek/resume.
+- Tests: `media-token.spec.ts` (5) + `swagger-smoke` green; `media.spec.ts` integration pending host Postgres.
+- Plan + Bunny audit: `docs/media-port.md`.
 
 ### commission — `src/modules/commission/`
 - Read-only list, performance schema metadata.
