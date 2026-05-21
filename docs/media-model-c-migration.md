@@ -1,8 +1,9 @@
 # Media — Model C Migration Plan (signed-URL)
 
-> **Status:** PLANNED — not yet implemented. Backend currently runs **Model B** (byte
-> proxy). This document is the ready-to-execute plan for switching to **Model C**
-> (backend signs Bunny URLs, client streams direct from the edge).
+> **Status:** CODE IMPLEMENTED — the signed-URL path ships behind `MEDIA_MODE` (default
+> `proxy`, so runtime behaviour is unchanged). Backend still serves Model B (byte proxy).
+> Flipping to `signed` needs the new library populated + the DB `guid` rewrite (§11) + the
+> env swap (§6).
 
 ## 0. How to use this document
 
@@ -48,11 +49,21 @@ URL is rejected by Bunny.
 - [ ] **Token Authentication is ENABLED** on the library (or the new library).
 - [ ] **Signing algorithm confirmed** against current Bunny docs (see §4) — Bunny has
       changed token schemes before; verify with a live probe.
-- [ ] **Transport decided** — signed **HLS** (`playlist.m3u8`, adaptive bitrate, recommended)
-      vs signed **MP4** (`play_{res}.mp4`, single file). HLS is preferred under Model C since
-      there is no proxy to complicate it.
+- [x] **Transport decided** — signed **HLS** (`playlist.m3u8` + directory `token_path`).
 
 If the first box cannot be satisfied, **stay on Model B** — do not proceed.
+
+### Decisions locked (2026-05-21)
+
+- **New-library path chosen.** A new Bunny Stream library `666592` (CDN host
+  `vz-f594ac4d-255.b-cdn.net`, pull zone `5895234`) holds the Model C content. The legacy
+  library `157244` is untouched → the legacy app keeps working, no cutover dependency.
+- **Token Authentication already ON** on `666592` — probed 2026-05-21: an unsigned
+  `playlist.m3u8` returns `403` even with a `Referer` header (true token auth, not
+  referrer-gating). The legacy `157244` stays referrer-gated only.
+- **Transport: signed HLS**, directory token over `/{guid}/`.
+- **Consequence — §11.** A new library mints new `guid`s; the DB `slidesData` still points
+  at the old `157244` guids and must be rewritten before the flip.
 
 ---
 
@@ -122,6 +133,10 @@ that asserts a known `(key, path, expires)` triple produces a stable token.
 ---
 
 ## 5. Code changes (file-by-file)
+
+> **STATUS: implemented.** All files below exist. `MEDIA_MODE` defaults to `proxy`, so the
+> signed path is dormant until the flip. `bunny-sign.util.ts` is new and uses the directory
+> `token_path` form. Tests: `bunny-sign.spec.ts` (7) + `media-signed.spec.ts` (5) green.
 
 ### 5.1 `src/config/env.ts`
 Add to the `bunny` block:
@@ -194,12 +209,23 @@ No change (same endpoint, same query DTO; `res` is ignored when signed-HLS is us
 
 ## 8. Verification checklist
 
-- [ ] `pnpm exec tsc -p tsconfig.json --noEmit` clean.
-- [ ] `pnpm test` green (both modes covered).
-- [ ] Live: signed URL `200`, unsigned `403` against `vz-5439ef3e-878.b-cdn.net`.
+- [x] `pnpm exec tsc -p tsconfig.json --noEmit` clean.
+- [x] `pnpm test` green (both modes covered) — 179/179.
+- [x] **Live: signed URL `200`** against `vz-f594ac4d-255.b-cdn.net` (library 666592),
+      verified 2026-05-21 via `scripts/probe-bunny-token.ts`. The signing algorithm
+      (`bunny-sign.util.ts`) is confirmed correct against the real Bunny CDN.
 - [ ] Mobile player follows the `302` and streams from the Bunny edge.
 - [ ] Backend egress for media drops to ~0 (metrics).
 - [ ] `docs/media-port.md` + `docs/rewrite-progress.md` updated to say media runs Model C.
+
+### Library prerequisite — `BlockNoneReferrer` must be OFF
+
+The Model C library (`666592`) must have **`BlockNoneReferrer = false`**. With it `true`,
+every request without a `Referer` header is `403` — and a native mobile player streaming a
+signed URL does not send one, so the token never gets a chance. The signed token is the
+access control; referrer blocking is redundant and breaks Model C. (`AllowDirectPlay = false`
+is fine — it does not block signed direct-CDN access.) Verified: flipping `BlockNoneReferrer`
+to `false` turned the signed probe from `403` to `200`.
 
 ## 9. Rollback
 
@@ -216,3 +242,29 @@ Because the Model B proxy code is never removed, rollback is always one env var 
 - HLS vs MP4 as the signed transport — confirm MP4 fallback is still enabled and decide.
 - Exact `token_path` directory-token form — confirm from Bunny docs.
 - Download flow: a dedicated longer-TTL signed URL, or reuse the streaming TTL.
+
+---
+
+## 11. New-library content migration (REQUIRED before the flip)
+
+Model C content lives in a **new** Bunny Stream library (`666592`), separate from the legacy
+library (`157244`). A new library gives every video a **new `guid`** — Bunny `guid`s are
+per-video-per-library. The DB `slidesData` JSONB still stores the **old** `157244` guids, so
+a signed URL built from them would point at a video that does not exist in `666592`.
+
+Before flipping `MEDIA_MODE=signed`:
+
+1. **Migrate the assets** `157244 → 666592` — re-upload, or Bunny "fetch from URL" against
+   the old CDN host (`vz-5439ef3e-878.b-cdn.net`) while the old library is still open.
+2. **Build an old→new `guid` map** from the migration output.
+3. **Rewrite the DB.** A script (`scripts/migrate-media-guids.ts`) walks every
+   `Lesson.slidesData`:
+   - `AudioTemplate` → `data.audio.guid`
+   - `VideoTemplate` → the `guid` embedded in the `data.url` iframe HTML
+   and swaps old → new. Idempotent; dry-run first.
+4. **Swap env** to the new library (`BUNNY_STREAM_CDN_HOST`, `BUNNY_STREAM_LIBRARY_ID`,
+   `BUNNY_STREAM_TOKEN_KEY`, `BUNNY_STREAM_API_KEY`) — see §6.
+5. Only then flip `MEDIA_MODE=signed`.
+
+The media module code is library-agnostic (it signs whatever `env.bunny.streamCdnHost` +
+`streamTokenKey` point at), so this migration is a separate workstream from the module.

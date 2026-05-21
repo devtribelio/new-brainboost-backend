@@ -2,6 +2,7 @@ import { ForbiddenException } from '@/common/exceptions';
 import { env } from '@/config/env';
 import { prisma } from '@/config/prisma';
 import type { MediaResolution } from './dto/media.dto';
+import { signBunnyHlsUrl } from './bunny-sign.util';
 
 /**
  * Media proxy service.
@@ -47,5 +48,14 @@ export class MediaService {
       },
       signal,
     });
+  }
+
+  /**
+   * Build a signed, short-lived HLS URL for direct-from-edge playback (Model C).
+   * The Bunny library has Token Authentication on — the signature is what makes
+   * the URL playable, so the raw `guid` in it is harmless.
+   */
+  buildSignedUrl(guid: string): string {
+    return signBunnyHlsUrl(guid);
   }
 }

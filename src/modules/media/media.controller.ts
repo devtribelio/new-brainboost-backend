@@ -51,6 +51,11 @@ export class MediaController {
     envelope: 'none',
   })
   @ApiResponse({ status: 206, description: 'Partial content (range request)', envelope: 'none' })
+  @ApiResponse({
+    status: 302,
+    description: 'Redirect to a signed Bunny URL (signed mode / Model C)',
+    envelope: 'none',
+  })
   @ApiResponse({ status: 400, description: 'Missing media token' })
   @ApiResponse({ status: 401, description: 'Invalid/expired token, or auth required' })
   @ApiResponse({ status: 403, description: 'Not enrolled in the course' })
@@ -70,6 +75,13 @@ export class MediaController {
         throw new UnauthorizedException('Authentication required for this media');
       }
       await this.mediaService.assertEnrollment(payload.courseId, user.id);
+    }
+
+    // Model C — hand the client a signed Bunny URL and let it stream from the
+    // edge directly. `proxy` mode (Model B) falls through to the byte proxy.
+    if (env.media.mode === 'signed') {
+      res.redirect(302, this.mediaService.buildSignedUrl(payload.guid));
+      return;
     }
 
     const resolution = this.resolveResolution(req.query.res);

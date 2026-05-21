@@ -95,6 +95,9 @@ export const env = {
     streamApiKey: optional('BUNNY_STREAM_API_KEY', ''),
     // Referer sent on CDN fetch — Bunny pull zone blocks empty-referer requests.
     referer: optional('BUNNY_REFERER', 'https://brainboost.id'),
+    // Token Authentication key for signed CDN URLs (Model C / signed mode).
+    // Secret; empty in proxy mode. Belongs to the Token-Auth-enabled Stream library.
+    streamTokenKey: optional('BUNNY_STREAM_TOKEN_KEY', ''),
   },
   media: {
     // AES-256-GCM key source for opaque media stream tokens. Required in prod.
@@ -104,6 +107,11 @@ export const env = {
         : optional('MEDIA_TOKEN_SECRET', 'dev-insecure-media-token-secret-change-me'),
     tokenTtlSeconds: Number.parseInt(optional('MEDIA_TOKEN_TTL_SECONDS', '21600'), 10),
     defaultResolution: optional('MEDIA_DEFAULT_RESOLUTION', '720p'),
+    // 'proxy' = Model B (backend streams the bytes); 'signed' = Model C (302 to a
+    // signed Bunny URL, client streams from the edge). See docs/media-model-c-migration.md.
+    mode: (optional('MEDIA_MODE', 'proxy') === 'signed' ? 'signed' : 'proxy') as 'proxy' | 'signed',
+    // Signed-URL lifetime for Model C, seconds.
+    signedUrlTtlSeconds: Number.parseInt(optional('MEDIA_SIGNED_URL_TTL_SECONDS', '7200'), 10),
   },
 } as const;
 
