@@ -17,3 +17,9 @@ uploads/
 .claude/
 .mcp.json
 ruvector.db
+
+# media migration runtime state (Model C — see docs/media-model-c-migration.md)
+# media-guid-map.json IS committed — the old→new guid map is needed to run the
+# `rewrite` phase on other environments (dev/staging) with the same Bunny library.
+scripts/media-guids.json
+scripts/media-copy-failures.json

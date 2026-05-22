@@ -14,7 +14,7 @@ const ACCOUNT_KEY = process.env.BUNNY_ACCOUNT_API_KEY ?? '';
 const TOKEN_KEY = process.env.BUNNY_STREAM_TOKEN_KEY ?? '';
 const LIBRARY_ID = 666592;
 const CDN = 'vz-f594ac4d-255.b-cdn.net';
-const GUID = '7fa0efa5-6132-48af-b605-32f87049ca9b';
+const GUID = process.argv[2] ?? '7fa0efa5-6132-48af-b605-32f87049ca9b';
 
 async function main(): Promise<void> {
   if (!TOKEN_KEY) {

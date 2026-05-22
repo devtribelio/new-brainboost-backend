@@ -252,19 +252,38 @@ library (`157244`). A new library gives every video a **new `guid`** — Bunny `
 per-video-per-library. The DB `slidesData` JSONB still stores the **old** `157244` guids, so
 a signed URL built from them would point at a video that does not exist in `666592`.
 
-Before flipping `MEDIA_MODE=signed`:
+### Runbook (scripts)
 
-1. **Migrate the assets** `157244 → 666592` — re-upload, or Bunny "fetch from URL" against
-   the old CDN host (`vz-5439ef3e-878.b-cdn.net`) while the old library is still open.
-2. **Build an old→new `guid` map** from the migration output.
-3. **Rewrite the DB.** A script (`scripts/migrate-media-guids.ts`) walks every
-   `Lesson.slidesData`:
-   - `AudioTemplate` → `data.audio.guid`
-   - `VideoTemplate` → the `guid` embedded in the `data.url` iframe HTML
-   and swaps old → new. Idempotent; dry-run first.
-4. **Swap env** to the new library (`BUNNY_STREAM_CDN_HOST`, `BUNNY_STREAM_LIBRARY_ID`,
-   `BUNNY_STREAM_TOKEN_KEY`, `BUNNY_STREAM_API_KEY`) — see §6.
-5. Only then flip `MEDIA_MODE=signed`.
+All scripts read `BUNNY_ACCOUNT_API_KEY` from `.env`. **None delete anything in `157244`** —
+the legacy library stays intact as the rollback source.
 
-The media module code is library-agnostic (it signs whatever `env.bunny.streamCdnHost` +
-`streamTokenKey` point at), so this migration is a separate workstream from the module.
+| Script | Purpose |
+|---|---|
+| `scan-media-guids.ts` | inventory — every Bunny guid referenced by `slidesData` |
+| `migrate-all-media.ts` | the migration — phases `status` / `copy` / `rewrite` |
+| `migrate-product-media.ts` | per-product migration (testing / spot fixes) |
+| `check-product-media.ts` | print one product's slide guids straight from the DB |
+| `copy-bunny-video.ts` | copy a single video (POC tool) |
+
+State files (gitignored, runtime): `scripts/media-guid-map.json` (old→new guid map — the
+resumable source of truth), `scripts/media-guids.json` (inventory), `scripts/media-copy-failures.json`.
+
+Steps:
+
+1. **Inventory** — `pnpm exec tsx scripts/scan-media-guids.ts`
+2. **Progress** — `pnpm exec tsx scripts/migrate-all-media.ts status`
+3. **Copy all videos** (long — ~178 videos, encodes in chunks of 8; resumable):
+   `pnpm exec tsx scripts/migrate-all-media.ts copy --apply`
+   Re-run until `status` shows `0 to copy` and `media-copy-failures.json` is gone.
+4. **Rewrite the DB** — dry-run then apply:
+   `pnpm exec tsx scripts/migrate-all-media.ts rewrite` then `… rewrite --apply`
+5. **Cutover** — swap env to library `666592` + `MEDIA_MODE=signed` (§6).
+
+Notes:
+- Source = the highest MP4 rendition (`720p`→`480p`→`360p`). `/original` is blocked
+  (`ExposeOriginals=false` on `157244`) — the copy re-encodes from the rendition.
+- Library `666592` must have `BlockNoneReferrer=false` (§8).
+- Copy is resumable — `media-guid-map.json` records each video the moment it finishes.
+- `copy` and `rewrite` are independent and idempotent — safe to repeat.
+- The media module code is library-agnostic (it signs whatever `env.bunny.streamCdnHost` +
+  `streamTokenKey` point at), so this migration is a separate workstream from the module.
