@@ -12,6 +12,7 @@ import { verifyMediaToken } from '@/modules/media/media-token.util';
 const COURSE_UUID = '01890000-0000-7000-8000-000000000001';
 const AUDIO_GUID = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
 const VIDEO_GUID = '11111111-2222-3333-4444-555555555555';
+const VIDEO_OBJ_GUID = '99999999-8888-7777-6666-555555555555';
 
 /** Deep-scan an arbitrary JSON value for any string key/value containing `needle`. */
 function deepIncludes(value: unknown, needle: string): boolean {
@@ -106,6 +107,28 @@ const youtubeSlide = {
   },
 };
 
+// VideoTemplate using the structured `data.video` shape (guid in an object,
+// like AudioTemplate) instead of the `data.url` iframe HTML.
+const videoObjectSlide = {
+  id: 'slide-video-obj',
+  type: 'VideoTemplate',
+  name: 'Tutorial',
+  duration: 35,
+  data: {
+    title: 'How to play offline',
+    description: 'tutorial',
+    platform: 'bunnynet',
+    video: {
+      guid: VIDEO_OBJ_GUID,
+      videoLibraryId: 157244,
+      title: 'tutorial.mp4',
+      width: 480,
+      height: 848,
+      collectionId: 'col-x',
+    },
+  },
+};
+
 function buildProduct(): Parameters<typeof serializeCourseDetailLegacy>[0] {
   const base = {
     id: '01890000-0000-7000-8000-0000000000aa',
@@ -157,7 +180,7 @@ function buildProduct(): Parameters<typeof serializeCourseDetailLegacy>[0] {
               lessonStatus: 'PUBLISH',
               isPreview: false,
               duration: 900,
-              slidesData: [videoSlide, youtubeSlide],
+              slidesData: [videoSlide, youtubeSlide, videoObjectSlide],
             },
           ],
         },
@@ -177,6 +200,7 @@ describe('serializeCourseDetailLegacy — Bunny identifier scrubbing', () => {
     expect(deepIncludes(out, 'library_id')).toBe(false);
     expect(deepIncludes(out, AUDIO_GUID)).toBe(false);
     expect(deepIncludes(out, VIDEO_GUID)).toBe(false);
+    expect(deepIncludes(out, VIDEO_OBJ_GUID)).toBe(false);
     expect(deepIncludes(out, 'mediadelivery.net')).toBe(false);
     expect(deepIncludes(out, 'directplayurl')).toBe(false);
     expect(deepIncludes(out, 'collectionid')).toBe(false);
@@ -222,6 +246,29 @@ describe('serializeCourseDetailLegacy — Bunny identifier scrubbing', () => {
     expect(data.platform).toBe('mp4');
     expect(data.url).toBeUndefined();
     expect(data.streamUrl).toMatch(/^\/api\/member\/media\/stream\?t=/);
+  });
+
+  it('handles the structured data.video VideoTemplate shape — emits streamUrl, drops the object', () => {
+    const out = serializeCourseDetailLegacy(buildProduct(), reviewAggregate) as Record<
+      string,
+      unknown
+    >;
+    const lessonsData = out.lessonsData as Array<Record<string, unknown>>;
+    const lessonB = (lessonsData[0].courseLessonData as Array<Record<string, unknown>>)[1];
+    const slides = lessonB.slidesData as Array<Record<string, unknown>>;
+    const vid = slides[2];
+
+    expect(vid.type).toBe('VideoTemplate');
+    const data = vid.data as Record<string, unknown>;
+    expect(data.title).toBe('How to play offline');
+    expect(data.platform).toBe('mp4');
+    expect(data.streamUrl).toMatch(/^\/api\/member\/media\/stream\?t=/);
+    expect(data.video).toBeUndefined();
+    expect(data.url).toBeUndefined();
+
+    const payload = verifyMediaToken(tokenFromStreamUrl(data.streamUrl as string));
+    expect(payload.guid).toBe(VIDEO_OBJ_GUID);
+    expect(payload.isPreview).toBe(false);
   });
 
   it('passes non-media slides through unchanged', () => {
