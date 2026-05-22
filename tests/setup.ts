@@ -1,6 +1,9 @@
 import 'reflect-metadata';
 
 process.env.NODE_ENV = 'test';
+// Tests default to Model B (proxy) regardless of the dev .env; the signed-mode
+// suite (media-signed.spec.ts) flips MEDIA_MODE in its own beforeAll.
+process.env.MEDIA_MODE = 'proxy';
 process.env.JWT_ACCESS_SECRET = process.env.JWT_ACCESS_SECRET || 'test-access-secret';
 process.env.JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'test-refresh-secret';
 process.env.ADMIN_JWT_SECRET = process.env.ADMIN_JWT_SECRET || 'test-admin-secret';
