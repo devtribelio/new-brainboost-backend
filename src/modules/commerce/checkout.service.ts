@@ -4,11 +4,14 @@ import { BadRequestException, NotFoundException } from '@/common/exceptions';
 import { computeTotals } from './utils/compute-totals';
 import { generateOrderCode } from './utils/generate-order-code';
 import { VoucherService } from './voucher.service';
+import { attributionService } from '@/modules/affiliate/attribution.service';
 
 export interface StartCheckoutInput {
   memberId: string;
   productId: string;
   voucherCode?: string;
+  /** Affiliate code of the link used for THIS purchase (per-purchase commission override). */
+  affiliatorCode?: string;
 }
 
 export interface StartCheckoutResult {
@@ -51,6 +54,10 @@ export class CheckoutService {
     });
 
     const attribution = await this.resolveAttribution(input.memberId, input.productId);
+    const attributedAffiliatorMemberId = await attributionService.resolveOverrideAffiliatorMemberId(
+      input.memberId,
+      input.affiliatorCode,
+    );
 
     const code = await generateOrderCode();
     const expiredAt = new Date(
@@ -70,6 +77,7 @@ export class CheckoutService {
         amount: totals.amount,
         affiliatorId: attribution.affiliatorId,
         programId: attribution.programId,
+        attributedAffiliatorMemberId,
         status: 'PENDING',
         expiredAt,
       },
@@ -104,7 +112,7 @@ export class CheckoutService {
       orderBy: { createdAt: 'desc' },
       select: { affiliatorMemberId: true, programId: true },
     });
-    if (!visit) return { affiliatorId: null, programId: null };
+    if (!visit || !visit.programId) return { affiliatorId: null, programId: visit?.programId ?? null };
 
     const affiliator = await prisma.memberAffiliator.findUnique({
       where: {

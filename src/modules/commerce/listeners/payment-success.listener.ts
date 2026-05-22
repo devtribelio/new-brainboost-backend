@@ -32,19 +32,24 @@ export function registerCommerceListeners(): void {
         );
     }
 
-    // 3. Commit affiliate commissions (idempotent via unique constraint)
-    await affiliatorService
-      .commitCommissionsForPayment({
-        paymentId: e.paymentId,
-        productId: e.productId,
-        productPrice: e.amount + e.voucherAmount,
-        voucherAmount: e.voucherAmount,
-        buyerMemberId: e.memberId,
-        programId: e.programId ?? null,
-      })
-      .catch((err) =>
-        logger.error({ err, paymentId: e.paymentId }, '[commerce] commission commit failed'),
-      );
+    // 3. Commit affiliate commissions (idempotent via unique constraint).
+    //    Skip when the channel is not affiliate-eligible (e.g. an ingested channel with
+    //    triggersAffiliate=false). `undefined` (web/native) = eligible.
+    if (e.affiliateEligible !== false) {
+      await affiliatorService
+        .commitCommissionsForPayment({
+          paymentId: e.paymentId,
+          productId: e.productId,
+          productPrice: e.amount + e.voucherAmount,
+          voucherAmount: e.voucherAmount,
+          buyerMemberId: e.memberId,
+          programId: e.programId ?? null,
+          overrideAffiliatorMemberId: e.attributedAffiliatorMemberId ?? null,
+        })
+        .catch((err) =>
+          logger.error({ err, paymentId: e.paymentId }, '[commerce] commission commit failed'),
+        );
+    }
   });
 }
 

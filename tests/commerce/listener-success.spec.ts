@@ -148,7 +148,7 @@ describe('commerce.payment.success listener', () => {
     expect(enrollments).toHaveLength(1);
   });
 
-  it('no programId: skips commission but still grants enrollment', async () => {
+  it('no programId: still commissions the buyer inviter (Option B — program optional)', async () => {
     const paymentId = randomUUID();
     const transactionId = randomUUID();
     commerceEvents.emit('commerce.payment.success', {
@@ -164,9 +164,14 @@ describe('commerce.payment.success listener', () => {
     });
     await wait(150);
 
+    // Option B: any product is affiliate-able; commission follows the permanent inviter
+    // even without a program. Recipient = inviter, programId stays null.
     const commissions = await prisma.affiliateCommission.findMany({
       where: { buyerMemberId: memberId, paymentId },
     });
-    expect(commissions).toHaveLength(0);
+    expect(commissions).toHaveLength(1);
+    expect(commissions[0]?.recipientId).toBe(inviterId);
+    expect(commissions[0]?.programId).toBeNull();
+    expect(commissions[0]?.amount).toBe(Math.floor(500_000 * 0.2)); // PERFORMANCE tier 1 (20%)
   });
 });

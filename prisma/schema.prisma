@@ -64,6 +64,7 @@ model Member {
   memberAffiliators    MemberAffiliator[]    @relation("MemberAffiliatorMember")
   affiliateCommissions AffiliateCommission[] @relation("AffiliateCommissionRecipient")
   affiliateVisits      AffiliateVisit[]      @relation("AffiliateVisitAffiliator")
+  affiliateDisbursements AffiliateDisbursement[] @relation("MemberDisbursements")
   courseEnrollments    CourseEnrollment[]
   commerceTransactions CommerceTransaction[]
   commercePayments     CommercePayment[]
@@ -225,6 +226,7 @@ model Banner {
 model Product {
   id              String   @id @default(uuid(7)) @db.Uuid
   legacyId        Int?     @unique
+  iapProductId    String?  @unique // store SKU (App Store/Play) → resolves a provider product_id (e.g. RevenueCat) to this Product
   type            String
   code            String?  @unique // legacy `course.code` — short alphanumeric id
   slug            String? // SEO-friendly slug from legacy `course.slug`
@@ -784,7 +786,7 @@ model AffiliateCommission {
 /// Affiliate link click log. Marketing-grade tracking + sumber attribution.
 model AffiliateVisit {
   id                 String   @id @default(uuid(7)) @db.Uuid
-  programId          String   @db.Uuid
+  programId          String?  @db.Uuid
   affiliatorMemberId String   @db.Uuid
   memberId           String?  @db.Uuid
   // marketing
@@ -810,8 +812,8 @@ model AffiliateVisit {
   clientEventId      String?  @unique
   createdAt          DateTime @default(now())
 
-  program    AffiliateProgram @relation(fields: [programId], references: [id])
-  affiliator Member           @relation("AffiliateVisitAffiliator", fields: [affiliatorMemberId], references: [id])
+  program    AffiliateProgram? @relation(fields: [programId], references: [id])
+  affiliator Member            @relation("AffiliateVisitAffiliator", fields: [affiliatorMemberId], references: [id])
 
   @@index([programId, createdAt])
   @@index([affiliatorMemberId, createdAt])
@@ -819,6 +821,30 @@ model AffiliateVisit {
   @@index([adId])
   @@index([utmCampaign])
   @@map("affiliate_visits")
+}
+
+/// Affiliate payout request. Ledger debit against cleared (BALANCE) commissions.
+/// Source: legacy `disbursement_payment_affiliate` / TBDisbursement::affiliate.
+model AffiliateDisbursement {
+  id            String    @id @default(uuid(7)) @db.Uuid
+  memberId      String    @db.Uuid
+  grossAmount   Int       @default(0) // withdrawable balance consumed by this payout
+  fee           Int       @default(0) // flat platform fee
+  netAmount     Int       @default(0) // paid to member = gross - fee
+  status        String    @default("PENDING") // PENDING | PAID | FAILED | VOIDED
+  provider      String? // "xendit"
+  providerRef   String? // provider disbursement id
+  failureReason String?
+  requestedAt   DateTime  @default(now())
+  paidAt        DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  member Member @relation("MemberDisbursements", fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@index([memberId, status])
+  @@index([status])
+  @@map("affiliate_disbursements")
 }
 
 // ============================================================================
@@ -860,6 +886,13 @@ model CommerceTransaction {
   voucherId     String?                   @db.Uuid
   affiliatorId  String?                   @db.Uuid
   programId     String?                   @db.Uuid
+  // Per-purchase commission override: the Member behind the affiliate link used at THIS
+  // checkout. When set, commission for this purchase goes to this member (and up their
+  // chain), superseding the buyer's permanent inviter. No cookie persistence — per-checkout.
+  attributedAffiliatorMemberId String?    @db.Uuid
+  // Multi-channel ingestion (IAP/Scalev/Lynk.id via /ingest/purchase). Null for native web checkout.
+  provider        String?                 // = ThirdPartyCredential.name
+  providerEventId String?                 // provider's event/txn id — idempotency
   status        CommerceTransactionStatus @default(PENDING)
   paidAt        DateTime?
   canceledAt    DateTime?
@@ -874,6 +907,7 @@ model CommerceTransaction {
   voucher    Voucher?          @relation(fields: [voucherId], references: [id])
   payments   CommercePayment[]
 
+  @@unique([provider, providerEventId]) // idempotent ingest; both null for web (NULLs distinct in PG)
   @@index([memberId, createdAt])
   @@index([status])
   @@index([expiredAt])
@@ -979,4 +1013,32 @@ model Admin {
   updatedAt    DateTime  @updatedAt
 
   @@map("admins")
+}
+
+/// Runtime-configurable key-value settings. Change without redeploy (cached, short TTL).
+/// e.g. affiliate.cookieDays, affiliate.holdDays. Edit via DB/admin; takes effect within cache TTL.
+model AppSetting {
+  key         String   @id
+  value       String
+  description String?
+  updatedAt   DateTime @updatedAt
+  createdAt   DateTime @default(now())
+
+  @@map("app_settings")
+}
+
+/// Auth + per-channel capability toggles for 3rd-party ingestion (IAP/Scalev/Lynk.id) via
+/// POST /ingest/purchase. Key is stored hashed. Toggles are plain booleans (easy manual edit).
+model ThirdPartyCredential {
+  id                String    @id @default(uuid(7)) @db.Uuid
+  name              String    @unique // "revenuecat", "scalev", "lynkid"
+  keyHash           String    @unique // hash of the API key (never store plaintext)
+  isActive          Boolean   @default(true) // master on/off
+  triggersAffiliate Boolean   @default(false) // may generate affiliate commission (SAFE DEFAULT off)
+  canIngestRefund   Boolean   @default(false) // may void commissions on refund events
+  lastUsedAt        DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@map("third_party_credentials")
 }
