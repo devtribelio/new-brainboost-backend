@@ -25,6 +25,17 @@ export function buildApp(): Express {
   const app = express();
 
   app.disable('x-powered-by');
+
+  // Behind a reverse proxy / load balancer the real client IP arrives in
+  // X-Forwarded-For. `trust proxy` makes req.ip reflect it, so per-IP rate
+  // limiting keys on the actual client instead of the proxy. Off unless
+  // TRUST_PROXY is set (see env.ts). A numeric value is treated as a hop
+  // count; any other value is passed to Express as-is (e.g. "loopback").
+  if (env.trustProxy) {
+    const hops = Number(env.trustProxy);
+    app.set('trust proxy', Number.isNaN(hops) ? env.trustProxy : hops);
+  }
+
   app.use(
     helmet({
       contentSecurityPolicy: false,

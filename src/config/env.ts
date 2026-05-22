@@ -52,6 +52,11 @@ export const env = {
     maxBytes: Number.parseInt(optional('UPLOAD_MAX_BYTES', String(10 * 1024 * 1024)), 10),
   },
   baseUrl: optional('BASE_URL', 'http://localhost:3000'),
+  // Express `trust proxy` setting. Empty = off (req.ip = socket address).
+  // Set to a hop count ("1") behind a reverse proxy / LB so req.ip reflects
+  // the real client IP — required for per-IP rate limiting to work correctly.
+  // Also accepts Express values like "loopback" or a CIDR list.
+  trustProxy: optional('TRUST_PROXY', ''),
   smtp: {
     host: optional('SMTP_HOST', ''),
     port: Number.parseInt(optional('SMTP_PORT', '587'), 10),
