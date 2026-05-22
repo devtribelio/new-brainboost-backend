@@ -3,7 +3,16 @@ import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { validateDto } from '@/common/middlewares/validation.middleware';
 import { authGuard } from '@/common/middlewares/auth.middleware';
-import { authRateLimiter, otpRateLimiter } from '@/common/middlewares/rate-limit.middleware';
+import {
+  loginRateLimiter,
+  registerRateLimiter,
+  registerByPhoneRateLimiter,
+  forgotPasswordRequestRateLimiter,
+  forgotPasswordVerifyRateLimiter,
+  requestVerificationPhoneRateLimiter,
+  validateOtpRateLimiter,
+  validateOtpPhoneRateLimiter,
+} from '@/common/middlewares/rate-limit.middleware';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { CloudMessagingDto, RegisterDeviceDto } from './dto/device.dto';
@@ -27,7 +36,7 @@ export function authRoutes(): Router {
     method: 'post',
     path: '/oauth/token',
     handlerKey: 'login',
-    middlewares: [authRateLimiter, validateDto(LoginDto)],
+    middlewares: [loginRateLimiter, validateDto(LoginDto)],
   });
   bindRoute({
     router,
@@ -35,7 +44,7 @@ export function authRoutes(): Router {
     method: 'post',
     path: '/auth/register',
     handlerKey: 'register',
-    middlewares: [authRateLimiter, validateDto(RegisterDto)],
+    middlewares: [registerRateLimiter, validateDto(RegisterDto)],
   });
   bindRoute({
     router,
@@ -59,7 +68,7 @@ export function authRoutes(): Router {
     method: 'post',
     path: '/auth/requestForgotPassword',
     handlerKey: 'requestForgotPassword',
-    middlewares: [authRateLimiter, validateDto(RequestForgotPasswordDto)],
+    middlewares: [forgotPasswordRequestRateLimiter, validateDto(RequestForgotPasswordDto)],
   });
   bindRoute({
     router,
@@ -67,7 +76,7 @@ export function authRoutes(): Router {
     method: 'post',
     path: '/auth/forgotPasswordVerification',
     handlerKey: 'forgotPasswordVerification',
-    middlewares: [authRateLimiter, validateDto(ForgotPasswordVerificationDto)],
+    middlewares: [forgotPasswordVerifyRateLimiter, validateDto(ForgotPasswordVerificationDto)],
   });
   bindRoute({
     router,
@@ -75,7 +84,7 @@ export function authRoutes(): Router {
     method: 'post',
     path: '/auth/validateOtp',
     handlerKey: 'validateOtp',
-    middlewares: [otpRateLimiter, validateDto(ValidateOtpDto)],
+    middlewares: [validateOtpRateLimiter, validateDto(ValidateOtpDto)],
   });
 
   // Phone-register flow (T1.1-T1.3, audit #2/#3/#4).
@@ -85,7 +94,7 @@ export function authRoutes(): Router {
     method: 'post',
     path: '/auth/registerByPhone',
     handlerKey: 'registerByPhone',
-    middlewares: [authRateLimiter, validateDto(RegisterByPhoneDto)],
+    middlewares: [registerByPhoneRateLimiter, validateDto(RegisterByPhoneDto)],
   });
   bindRoute({
     router,
@@ -93,7 +102,7 @@ export function authRoutes(): Router {
     method: 'post',
     path: '/auth/requestVerificationPhone',
     handlerKey: 'requestVerificationPhone',
-    middlewares: [authRateLimiter, validateDto(RequestVerificationPhoneDto)],
+    middlewares: [requestVerificationPhoneRateLimiter, validateDto(RequestVerificationPhoneDto)],
   });
   bindRoute({
     router,
@@ -101,7 +110,7 @@ export function authRoutes(): Router {
     method: 'post',
     path: '/auth/validateOtpPhone',
     handlerKey: 'validateOtpPhone',
-    middlewares: [otpRateLimiter, validateDto(ValidateOtpPhoneDto)],
+    middlewares: [validateOtpPhoneRateLimiter, validateDto(ValidateOtpPhoneDto)],
   });
 
   return router;

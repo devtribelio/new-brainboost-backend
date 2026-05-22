@@ -5,8 +5,12 @@ import { env } from '@/config/env';
 
 // Brute-force / abuse throttling for unauthenticated, credential-facing
 // endpoints (oauth token, register, forgot-password, OTP, admin login).
-// All limiters are keyed by client IP and emit the repo's standard error
-// envelope (`{ success:false, error:{ code, message } }`) on 429.
+//
+// Each export below is its OWN rateLimit() instance, so each endpoint gets an
+// independent per-IP bucket and can be tuned separately — spending the budget
+// on one endpoint does not lock the others. All limiters are keyed by client
+// IP and emit the repo's standard error envelope
+// (`{ success:false, error:{ code, message } }`) on 429.
 
 const WINDOW_MS = 15 * 60 * 1000; // 15 minutes
 
@@ -24,39 +28,37 @@ const tooManyRequestsHandler: RequestHandler = (_req, res) => {
 const skipInTest = (): boolean => env.isTest;
 
 /**
- * Strict limiter for credential-facing auth endpoints: password-grant token,
- * register, and forgot-password. ~10 requests / 15 min per IP.
+ * Build a per-IP rate limiter. Each call returns a fresh instance with its
+ * own in-memory store, so distinct endpoints count independently even though
+ * they share this module.
+ *
+ * @param limit    max requests per IP per window
+ * @param windowMs rolling window length (default 15 min)
  */
-export const authRateLimiter = rateLimit({
-  windowMs: WINDOW_MS,
-  limit: 10,
-  standardHeaders: true,
-  legacyHeaders: false,
-  handler: tooManyRequestsHandler,
-  skip: skipInTest,
-});
+function makeRateLimiter(limit: number, windowMs: number = WINDOW_MS): RequestHandler {
+  return rateLimit({
+    windowMs,
+    limit,
+    standardHeaders: true,
+    legacyHeaders: false,
+    handler: tooManyRequestsHandler,
+    skip: skipInTest,
+  });
+}
 
-/**
- * Stricter limiter for OTP-validation endpoints, where a low guess budget is
- * the whole point. ~5 requests / 15 min per IP.
- */
-export const otpRateLimiter = rateLimit({
-  windowMs: WINDOW_MS,
-  limit: 5,
-  standardHeaders: true,
-  legacyHeaders: false,
-  handler: tooManyRequestsHandler,
-  skip: skipInTest,
-});
+// --- OTP-guess endpoints — lowest budget; code-guessing is the attack -------
+export const validateOtpRateLimiter = makeRateLimiter(3);
+export const validateOtpPhoneRateLimiter = makeRateLimiter(3);
+export const forgotPasswordVerifyRateLimiter = makeRateLimiter(3);
 
-/**
- * Limiter for the admin login POST route. ~10 requests / 15 min per IP.
- */
-export const adminLoginRateLimiter = rateLimit({
-  windowMs: WINDOW_MS,
-  limit: 10,
-  standardHeaders: true,
-  legacyHeaders: false,
-  handler: tooManyRequestsHandler,
-  skip: skipInTest,
-});
+// --- OTP/email SEND endpoints — medium budget; abuse = spamming a victim ----
+export const forgotPasswordRequestRateLimiter = makeRateLimiter(10);
+export const requestVerificationPhoneRateLimiter = makeRateLimiter(10);
+
+// --- Account creation -------------------------------------------------------
+export const registerRateLimiter = makeRateLimiter(15);
+export const registerByPhoneRateLimiter = makeRateLimiter(15);
+
+// --- Login — looser; legit users mistype passwords -------------------------
+export const loginRateLimiter = makeRateLimiter(30);
+export const adminLoginRateLimiter = makeRateLimiter(10);
