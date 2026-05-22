@@ -146,6 +146,7 @@ export class XenditWebhookHandler {
           voucherId: true,
           affiliatorId: true,
           programId: true,
+          attributedAffiliatorMemberId: true,
         },
       });
       if (tx) {
@@ -159,6 +160,7 @@ export class XenditWebhookHandler {
           voucherId: tx.voucherId,
           affiliatorId: tx.affiliatorId,
           programId: tx.programId,
+          attributedAffiliatorMemberId: tx.attributedAffiliatorMemberId,
         });
       }
     } else if (nextStatus === 'EXPIRED') {

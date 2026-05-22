@@ -10,4 +10,13 @@ export class StartCheckoutDto {
   @IsOptional()
   @IsString()
   voucherCode?: string;
+
+  @ApiProperty({
+    required: false,
+    example: 'P6W0W0',
+    description: 'Affiliate code of the link used for this purchase (per-purchase commission override).',
+  })
+  @IsOptional()
+  @IsString()
+  affiliatorCode?: string;
 }

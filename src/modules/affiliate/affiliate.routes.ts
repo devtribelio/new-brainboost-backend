@@ -4,6 +4,7 @@ import { AffiliateProgramService } from './program.service';
 import { AffiliatorService } from './affiliator.service';
 import { EnrollmentService } from './enrollment.service';
 import { VisitService } from './visit.service';
+import { DisbursementService } from './disbursement.service';
 import { authGuard, optionalAuthGuard } from '@/common/middlewares/auth.middleware';
 import { bindRoute } from '@/common/openapi/route-binder';
 
@@ -14,6 +15,7 @@ export function affiliateRoutes(): Router {
     new AffiliatorService(),
     new EnrollmentService(),
     new VisitService(),
+    new DisbursementService(),
   );
 
   // Affiliator profile
@@ -29,6 +31,11 @@ export function affiliateRoutes(): Router {
   // Visit + attribution (visit endpoint is public/optional-auth, attribution requires auth)
   bindRoute({ router, controller: ctrl, method: 'post', path: '/affiliate/visits', handlerKey: 'logVisit', middlewares: [optionalAuthGuard] });
   bindRoute({ router, controller: ctrl, method: 'post', path: '/affiliate/attribution', handlerKey: 'logAttribution', middlewares: [authGuard] });
+
+  // Disbursement / payout
+  bindRoute({ router, controller: ctrl, method: 'get', path: '/affiliate/me/disbursement', handlerKey: 'getDisbursementSummary', middlewares: [authGuard] });
+  bindRoute({ router, controller: ctrl, method: 'post', path: '/affiliate/me/disbursement', handlerKey: 'requestDisbursement', middlewares: [authGuard] });
+  bindRoute({ router, controller: ctrl, method: 'get', path: '/affiliate/me/disbursements', handlerKey: 'listDisbursements', middlewares: [authGuard] });
 
   return router;
 }
