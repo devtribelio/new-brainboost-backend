@@ -113,7 +113,9 @@ interface RawSlide {
     description?: unknown;
     platform?: unknown;
     audio?: Record<string, unknown>;
-    /** VideoTemplate embeds the Bunny iframe HTML here — there is no `data.video`. */
+    /** Structured-video shape — guid lives in `data.video.guid`, like `data.audio`. */
+    video?: Record<string, unknown>;
+    /** Iframe-HTML shape — VideoTemplate Bunny embed wrapped in `data.url`. */
     url?: unknown;
     /** Injected by `scrubSlide` for VideoTemplate — opaque media-proxy URL. */
     streamUrl?: unknown;
@@ -175,13 +177,19 @@ function scrubSlide(slide: RawSlide, courseId: string, isPreview: boolean): RawS
 
   if (type === 'VideoTemplate') {
     const embed = typeof d.url === 'string' ? parseBunnyEmbed(d.url) : null;
+    const v = d.video;
+    const videoGuid = v && typeof v.guid === 'string' ? v.guid : null;
     const newData: Record<string, unknown> = {
       title: d.title,
       description: d.description,
       platform: 'mp4',
     };
     if (embed) {
+      // Iframe-HTML shape — guid parsed out of the `data.url` blob.
       newData.streamUrl = buildStreamUrl(embed.guid, courseId, isPreview);
+    } else if (videoGuid) {
+      // Structured shape — guid is `data.video.guid` (like AudioTemplate).
+      newData.streamUrl = buildStreamUrl(videoGuid, courseId, isPreview);
     } else if (typeof d.url === 'string') {
       // Non-Bunny embed (YouTube/external) — preserve the original url verbatim.
       newData.url = d.url;
