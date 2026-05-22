@@ -137,7 +137,9 @@ export class CourseLessonItemDto {
   @ApiProperty({
     type: 'array',
     description:
-      'Slide objects per lesson — shape per type (AudioTemplate/VideoTemplate/GreetingTemplate/ThankYouTemplate/DocumentTemplate). Pass-through from JSONB column. Empty array when null.',
+      'Slide objects per lesson — shape per type (AudioTemplate/VideoTemplate/GreetingTemplate/ThankYouTemplate/DocumentTemplate). ' +
+      'Bunny identifiers (`guid`, `videoLibraryId`, iframe HTML) are scrubbed by the serializer: audio/video slides expose an opaque ' +
+      '`data.streamUrl` pointing at the media proxy instead. Empty array when null.',
     example: [
       {
         id: 'ABC123XYZ',
@@ -147,13 +149,11 @@ export class CourseLessonItemDto {
         data: {
           title: 'Intro',
           description: '<p>Audio narration</p>',
+          platform: 'mp4',
           audio: {
-            guid: 'bunny-guid-xxx',
-            videoLibraryId: '152957',
-            storageSize: 1048576,
-            availableResolutions: [],
+            duration: '120',
+            streamUrl: '/api/member/media/stream?t=<opaque-token>',
           },
-          platform: 'files',
         },
       },
     ],

@@ -39,17 +39,19 @@ Status legend: 🔴 not started · ⚠️ partial (legacy-shape consumed but no 
 
 ## Media Storage 
 
-### BunnyCDN (Stream + Storage)  🔴
+### BunnyCDN (Stream)  ✅ (playback proxy wired) / ⚠️ (admin upload pending)
 
 - **Used for**: course audio + video hosting/playback.
-- **Legacy location**: video assets uploaded to Bunny Stream library; mobile reads `videoLibraryId` + `guid` for HLS playback URLs. Audio uses Bunny Storage `vz-5439ef3e-878` bucket.
-- **Legacy specifics** (from `docs/api-fe.md` §2.8):
-  - Bunny Stream API: `GET https://video.bunnycdn.com/library/{libraryId}/videos/{videoId}` — header `AccessKey: {bunnynetStreamApiKey}`.
-  - Bunny Storage audio: `GET https://storage.bunnycdn.com/vz-5439ef3e-878/{audioId}/original?accessKey={token}&download` → raw bytes.
-- **Current new-backend state**: `serializeCourseDetailLegacy` (P5 dataContent flatten) emits `videoLibraryId` + `guid` pass-through from JSONB — backend never calls Bunny. Mobile calls Bunny directly. Acceptable.
+- **Audit correction**: there is **no separate Bunny Storage zone** for audio. Both audio and video are objects in one Bunny **Stream** library — id `157244`, CDN host `vz-5439ef3e-878.b-cdn.net`. "Audio" lessons are simply Stream video objects (they carry `width`/`height`/`x264`); legacy `vz-5439ef3e-878` is that library's CDN hostname, not a storage zone. The `docs/api-fe.md` §2.8 "Bunny Storage" label was imprecise.
+- **Slide shapes in `Lesson.slidesData` JSONB**:
+  - `AudioTemplate` → `data.audio` is a structured object with `guid` + `videoLibraryId`.
+  - `VideoTemplate` → `data.url` is an HTML `<iframe src="https://iframe.mediadelivery.net/embed/{libraryId}/{guid}…">` blob; guid is embedded in the URL, no structured object.
+- **Bunny protection reality (probed 2026-05-21)**: the Stream pull zone uses **referrer-gating only** — requests with no `Referer` header get `403`, any `Referer` value gets `200`. This is hotlink protection, **not** token authentication and **not** access control. Knowing `library_id` + `guid` is enough to fetch the full asset. Token Authentication is **off**.
+- **Current new-backend state**: `media` module (`src/modules/media/`) proxies Bunny Stream MP4 renditions. The product course-detail serializer scrubs `guid`/`videoLibraryId`/iframe-HTML and emits an opaque `streamUrl` token instead — the raw Bunny identifiers never reach the client. Backend fetches `https://vz-5439ef3e-878.b-cdn.net/{guid}/play_{res}.mp4` with a `Referer` header. Non-preview media gated on `CourseEnrollment`. See `docs/media-port.md`.
+- **Credentials** (in `.env`, not committed): `BUNNY_STREAM_CDN_HOST`, `BUNNY_STREAM_LIBRARY_ID`, `BUNNY_STREAM_API_KEY`, `BUNNY_REFERER`.
 - **Follow-up tasks**:
   - **TX.1** Server-side upload to Bunny when admin uploads lesson assets. Currently admin module accepts raw uploads to local disk (`uploads/`); should push to Bunny on success.
-  - **TX.2** Signed URL generator for restricted Stream library access (per-member tokens), if Bunny library is configured private.
+  - **TX.2** Real access control: Bunny gives none today. Either enable Token Authentication on the pull zone via the account API (`bunnynetAPIKey` → pull zone `ZoneSecurityKey`) for signed URLs, or rely on the current proxy gate. Enabling token auth is a breaking change for any legacy client still hitting unsigned URLs.
 
 ### AWS S3 / `TBAWS`  🔴
 

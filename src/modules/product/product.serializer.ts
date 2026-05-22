@@ -1,4 +1,5 @@
 import type { Product } from '@prisma/client';
+import { signMediaToken } from '@/modules/media/media-token.util';
 
 /**
  * Map product `type` to a human label per legacy convention.
@@ -83,6 +84,8 @@ interface SectionLite {
 }
 
 interface CourseLite {
+  /** Course UUID — needed to mint media tokens. Prisma `include`s the full course at runtime. */
+  id: string;
   legacyCourseId: number | null;
   sections: SectionLite[];
 }
@@ -108,14 +111,93 @@ interface RawSlide {
   data?: {
     title?: unknown;
     description?: unknown;
+    platform?: unknown;
     audio?: Record<string, unknown>;
-    video?: Record<string, unknown>;
+    /** VideoTemplate embeds the Bunny iframe HTML here — there is no `data.video`. */
+    url?: unknown;
+    /** Injected by `scrubSlide` for VideoTemplate — opaque media-proxy URL. */
+    streamUrl?: unknown;
   };
 }
 
+/**
+ * Pull the Bunny `libraryId` + `guid` out of a VideoTemplate `data.url` blob,
+ * which wraps an `<iframe src="https://iframe.mediadelivery.net/embed/{lib}/{guid}?...">`.
+ * Returns `null` for non-Bunny URLs (e.g. YouTube / external embeds) so they
+ * pass through untouched.
+ */
+function parseBunnyEmbed(html: string): { libraryId: string; guid: string } | null {
+  const m = /iframe\.mediadelivery\.net\/embed\/(\d+)\/([0-9a-fA-F-]{36})/.exec(html);
+  if (!m) return null;
+  return { libraryId: m[1], guid: m[2] };
+}
+
+/**
+ * Build the opaque media-proxy URL that replaces the raw Bunny `guid` /
+ * `videoLibraryId` in client-facing responses.
+ */
+function buildStreamUrl(guid: string, courseId: string, isPreview: boolean): string {
+  const token = signMediaToken({ guid, courseId, isPreview });
+  return `/api/member/media/stream?t=${token}`;
+}
+
+/**
+ * Scrub a single raw slide so no Bunny identifiers leak to the client.
+ *
+ * - AudioTemplate: replaces the whole `data.audio` Bunny object with `{ streamUrl, duration }`.
+ * - VideoTemplate: drops the `data.url` iframe HTML, adds `data.streamUrl`.
+ * - Any other slide type passes through unchanged.
+ *
+ * `courseId` (Course UUID) + `isPreview` (parent lesson) are baked into the
+ * media token. Returns a shallow-cloned slide; the original JSONB is untouched.
+ */
+function scrubSlide(slide: RawSlide, courseId: string, isPreview: boolean): RawSlide {
+  const type = typeof slide.type === 'string' ? slide.type : '';
+  const d = slide.data ?? {};
+
+  if (type === 'AudioTemplate' && d.audio) {
+    const a = d.audio;
+    const guid = typeof a.guid === 'string' ? a.guid : null;
+    const cleanAudio: Record<string, unknown> = {
+      duration: a.duration ?? slide.duration ?? 0,
+    };
+    if (guid) cleanAudio.streamUrl = buildStreamUrl(guid, courseId, isPreview);
+    return {
+      ...slide,
+      data: {
+        title: d.title,
+        description: d.description,
+        platform: 'mp4',
+        audio: cleanAudio,
+      },
+    };
+  }
+
+  if (type === 'VideoTemplate') {
+    const embed = typeof d.url === 'string' ? parseBunnyEmbed(d.url) : null;
+    const newData: Record<string, unknown> = {
+      title: d.title,
+      description: d.description,
+      platform: 'mp4',
+    };
+    if (embed) {
+      newData.streamUrl = buildStreamUrl(embed.guid, courseId, isPreview);
+    } else if (typeof d.url === 'string') {
+      // Non-Bunny embed (YouTube/external) — preserve the original url verbatim.
+      newData.url = d.url;
+      newData.platform = d.platform ?? 'mp4';
+    }
+    return { ...slide, data: newData };
+  }
+
+  // TextTemplate / GreetingTemplate / ThankYouTemplate / DocumentTemplate / ...
+  return slide;
+}
+
 // Flatten `lessonsData[].courseLessonData[].slidesData[]` into a flat list of
-// `{id, type, title, description, audio?, video?}` items (FE ProductDataContent).
+// `{id, type, title, description, duration, streamUrl?}` items (FE ProductDataContent).
 // Mirrors legacy mobile transform — only AudioTemplate / VideoTemplate slides emitted.
+// Consumes already-scrubbed slides, so it never sees a raw Bunny `guid`.
 function buildDataContent(
   lessonsData: { courseLessonData: { slidesData: unknown[] }[] }[],
 ): Record<string, unknown>[] {
@@ -131,30 +213,16 @@ function buildDataContent(
           type,
           title: (d.title ?? slide.name ?? null) as unknown,
           description: d.description ?? null,
+          platform: 'mp4',
         };
         if (type === 'AudioTemplate' && d.audio) {
           const a = d.audio;
-          item.audio = {
-            id: a.id ?? null,
-            title: a.title ?? null,
-            description: a.description ?? null,
-            duration: a.duration ?? slide.duration ?? 0,
-            videoLibraryId: a.videoLibraryId ?? null,
-            guid: a.guid ?? null,
-            audioName: a.audioName ?? null,
-            availableRes: a.availableRes ?? null,
-          };
+          item.duration = a.duration ?? slide.duration ?? 0;
+          if (typeof a.streamUrl === 'string') item.streamUrl = a.streamUrl;
         }
-        if (type === 'VideoTemplate' && d.video) {
-          const v = d.video;
-          item.video = {
-            id: v.id ?? null,
-            title: v.title ?? null,
-            description: v.description ?? null,
-            platform: v.platform ?? null,
-            url: v.url ?? null,
-            duration: v.duration ?? slide.duration ?? 0,
-          };
+        if (type === 'VideoTemplate') {
+          item.duration = slide.duration ?? 0;
+          if (typeof d.streamUrl === 'string') item.streamUrl = d.streamUrl;
         }
         out.push(item);
       }
@@ -225,6 +293,9 @@ export function serializeCourseDetailLegacy(
   const productUrl = p.marketingLink ?? `${baseUrl}/p/${slug}`;
   const shareUrl = opts.affiliateCode ? `${productUrl}?affCode=${opts.affiliateCode}` : productUrl;
   const courseLegacyId = p.course?.legacyCourseId ?? p.legacyId ?? 0;
+  // Course UUID — required to mint media tokens. `p.course` is null only for
+  // non-course products; in that case there are no slides to scrub anyway.
+  const courseUuid = p.course?.id ?? '';
 
   const lessonsData = (p.course?.sections ?? [])
     .slice()
@@ -240,7 +311,11 @@ export function serializeCourseDetailLegacy(
         .slice()
         .sort((a, b) => a.order - b.order)
         .map((l) => {
-          const slides = normalizeSlidesData(l.slidesData);
+          // Scrub each slide while the parent lesson's `isPreview` is in scope,
+          // so Bunny `guid`/`videoLibraryId`/iframe-HTML never reach the client.
+          const slides = normalizeSlidesData(l.slidesData).map((s) =>
+            scrubSlide(s as RawSlide, courseUuid, l.isPreview),
+          );
           return {
             courseLessonId: l.legacyLessonId,
             courseId: courseLegacyId,
