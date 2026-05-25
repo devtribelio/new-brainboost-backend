@@ -38,20 +38,15 @@ export class MemberController {
   })
   info = async (req: AuthenticatedRequest, res: Response) => {
     const communityNetworks = await prisma.network.findMany({
-      where: { purpose: { in: ['timeline', 'education'] }, isActive: true },
-      select: { id: true, legacyId: true, code: true, name: true, purpose: true },
+      where: { purpose: { not: null }, isActive: true },
+      select: { id: true, code: true, name: true, purpose: true },
     });
-    // FE InfoModel.networkId is int — UUID fallback would force string-coercion
-    // on the mobile side (history: FE commit dbc63de patched a prod hang from
-    // exactly that). Skip rows without legacyId; community network seeds set it.
-    const community = communityNetworks
-      .filter((n): n is typeof n & { legacyId: number } => n.legacyId !== null)
-      .map((n) => ({
-        page: n.purpose,
-        networkId: n.legacyId,
-        networkCode: n.code ?? String(n.legacyId),
-        name: n.name,
-      }));
+    const community = communityNetworks.map((n) => ({
+      page: n.purpose,
+      networkId: n.id,
+      networkCode: n.code ?? n.id,
+      name: n.name,
+    }));
 
     const base = {
       appName: process.env.APP_NAME ?? 'Brainboost',
