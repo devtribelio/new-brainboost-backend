@@ -334,4 +334,40 @@ describe('serializeCourseDetailLegacy — Bunny identifier scrubbing', () => {
     expect(audioToken?.isPreview).toBe(true);
     expect(videoToken?.isPreview).toBe(false);
   });
+
+  it('emits downloadUrl alongside streamUrl for every Bunny media slide', () => {
+    const out = serializeCourseDetailLegacy(buildProduct(), reviewAggregate) as Record<
+      string,
+      unknown
+    >;
+    const lessonsData = out.lessonsData as Array<Record<string, unknown>>;
+    const lessonA = (lessonsData[0].courseLessonData as Array<Record<string, unknown>>)[0];
+    const lessonB = (lessonsData[0].courseLessonData as Array<Record<string, unknown>>)[1];
+
+    // AudioTemplate → data.audio.downloadUrl
+    const audio = (lessonA.slidesData as Array<Record<string, unknown>>)[0];
+    const audioObj = (audio.data as Record<string, unknown>).audio as Record<string, unknown>;
+    expect(audioObj.downloadUrl).toMatch(/^\/api\/member\/media\/download\?t=/);
+
+    // VideoTemplate (data.url iframe shape) → data.downloadUrl
+    const videoUrl = (lessonB.slidesData as Array<Record<string, unknown>>)[0];
+    expect((videoUrl.data as Record<string, unknown>).downloadUrl).toMatch(
+      /^\/api\/member\/media\/download\?t=/,
+    );
+
+    // VideoTemplate (data.video structured shape) → data.downloadUrl
+    const videoObj = (lessonB.slidesData as Array<Record<string, unknown>>)[2];
+    expect((videoObj.data as Record<string, unknown>).downloadUrl).toMatch(
+      /^\/api\/member\/media\/download\?t=/,
+    );
+
+    // dataContent entries carry downloadUrl too
+    const dataContent = out.dataContent as Array<Record<string, unknown>>;
+    const audioEntry = dataContent.find((e) => e.type === 'AudioTemplate');
+    const videoEntry = dataContent.find(
+      (e) => e.type === 'VideoTemplate' && typeof e.streamUrl === 'string',
+    );
+    expect(audioEntry?.downloadUrl).toMatch(/^\/api\/member\/media\/download\?t=/);
+    expect(videoEntry?.downloadUrl).toMatch(/^\/api\/member\/media\/download\?t=/);
+  });
 });

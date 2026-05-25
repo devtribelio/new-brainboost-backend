@@ -62,3 +62,19 @@ export const registerByPhoneRateLimiter = makeRateLimiter(15);
 // --- Login — looser; legit users mistype passwords -------------------------
 export const loginRateLimiter = makeRateLimiter(30);
 export const adminLoginRateLimiter = makeRateLimiter(10);
+
+// --- Media download — per-member (or per-IP fallback). Anti-scrape budget on
+//     the signed-download endpoint; streaming is not throttled because legit
+//     playback hits the endpoint once per session.
+export const mediaDownloadRateLimiter: RequestHandler = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => {
+    const user = (req as unknown as { user?: { id?: string } }).user;
+    return user?.id ?? req.ip ?? 'anonymous';
+  },
+  handler: tooManyRequestsHandler,
+  skip: skipInTest,
+});

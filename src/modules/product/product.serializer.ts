@@ -1,5 +1,6 @@
 import type { Product } from '@prisma/client';
 import { signMediaToken } from '@/modules/media/media-token.util';
+import { env } from '@/config/env';
 
 /**
  * Map product `type` to a human label per legacy convention.
@@ -119,6 +120,8 @@ interface RawSlide {
     url?: unknown;
     /** Injected by `scrubSlide` for VideoTemplate — opaque media-proxy URL. */
     streamUrl?: unknown;
+    /** Injected by `scrubSlide` for AudioTemplate / VideoTemplate — long-lived MP4 download URL. */
+    downloadUrl?: unknown;
   };
 }
 
@@ -144,6 +147,17 @@ function buildStreamUrl(guid: string, courseId: string, isPreview: boolean): str
 }
 
 /**
+ * Build a long-lived signed download URL for the same Bunny asset. The opaque
+ * token carries the longer download TTL so it does not expire before a slow
+ * offline download finishes; the proxy endpoint then 302-redirects to a signed
+ * Bunny MP4 URL.
+ */
+function buildDownloadUrl(guid: string, courseId: string, isPreview: boolean): string {
+  const token = signMediaToken({ guid, courseId, isPreview }, env.media.downloadTtlSeconds);
+  return `/api/member/media/download?t=${token}`;
+}
+
+/**
  * Scrub a single raw slide so no Bunny identifiers leak to the client.
  *
  * - AudioTemplate: replaces the whole `data.audio` Bunny object with `{ streamUrl, duration }`.
@@ -163,7 +177,10 @@ function scrubSlide(slide: RawSlide, courseId: string, isPreview: boolean): RawS
     const cleanAudio: Record<string, unknown> = {
       duration: a.duration ?? slide.duration ?? 0,
     };
-    if (guid) cleanAudio.streamUrl = buildStreamUrl(guid, courseId, isPreview);
+    if (guid) {
+      cleanAudio.streamUrl = buildStreamUrl(guid, courseId, isPreview);
+      cleanAudio.downloadUrl = buildDownloadUrl(guid, courseId, isPreview);
+    }
     return {
       ...slide,
       data: {
@@ -187,9 +204,11 @@ function scrubSlide(slide: RawSlide, courseId: string, isPreview: boolean): RawS
     if (embed) {
       // Iframe-HTML shape — guid parsed out of the `data.url` blob.
       newData.streamUrl = buildStreamUrl(embed.guid, courseId, isPreview);
+      newData.downloadUrl = buildDownloadUrl(embed.guid, courseId, isPreview);
     } else if (videoGuid) {
       // Structured shape — guid is `data.video.guid` (like AudioTemplate).
       newData.streamUrl = buildStreamUrl(videoGuid, courseId, isPreview);
+      newData.downloadUrl = buildDownloadUrl(videoGuid, courseId, isPreview);
     } else if (typeof d.url === 'string') {
       // Non-Bunny embed (YouTube/external) — preserve the original url verbatim.
       newData.url = d.url;
@@ -227,10 +246,12 @@ function buildDataContent(
           const a = d.audio;
           item.duration = a.duration ?? slide.duration ?? 0;
           if (typeof a.streamUrl === 'string') item.streamUrl = a.streamUrl;
+          if (typeof a.downloadUrl === 'string') item.downloadUrl = a.downloadUrl;
         }
         if (type === 'VideoTemplate') {
           item.duration = slide.duration ?? 0;
           if (typeof d.streamUrl === 'string') item.streamUrl = d.streamUrl;
+          if (typeof d.downloadUrl === 'string') item.downloadUrl = d.downloadUrl;
         }
         out.push(item);
       }

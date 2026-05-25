@@ -82,3 +82,21 @@ export function signBunnyHlsUrl(guid: string, opts: { ttlSeconds?: number } = {}
     pathAllowed: `/${guid}/`,
   });
 }
+
+/**
+ * Build a signed MP4 rendition URL for a Bunny Stream video `guid` — the
+ * download-friendly single-file form. Uses the basic query-string token (no
+ * directory) since one file is one URL; default TTL is the longer download
+ * window so a slow download does not outlive the signature.
+ */
+export function signBunnyMp4Url(
+  guid: string,
+  res: string,
+  opts: { ttlSeconds?: number } = {},
+): string {
+  const fileUrl = `https://${env.bunny.streamCdnHost}/${guid}/play_${res}.mp4`;
+  return signBunnyUrl(fileUrl, env.bunny.streamTokenKey, {
+    expirationSeconds: opts.ttlSeconds ?? env.media.downloadTtlSeconds,
+    isDirectory: false,
+  });
+}

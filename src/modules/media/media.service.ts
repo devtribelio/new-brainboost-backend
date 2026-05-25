@@ -2,7 +2,7 @@ import { ForbiddenException } from '@/common/exceptions';
 import { env } from '@/config/env';
 import { prisma } from '@/config/prisma';
 import type { MediaResolution } from './dto/media.dto';
-import { signBunnyHlsUrl } from './bunny-sign.util';
+import { signBunnyHlsUrl, signBunnyMp4Url } from './bunny-sign.util';
 
 /**
  * Media proxy service.
@@ -57,5 +57,14 @@ export class MediaService {
    */
   buildSignedUrl(guid: string): string {
     return signBunnyHlsUrl(guid);
+  }
+
+  /**
+   * Build a signed, long-lived MP4 URL for offline downloads. Same Bunny token
+   * scheme as the HLS variant but for a single rendition file and with the
+   * download TTL (`MEDIA_DOWNLOAD_TTL_SECONDS`).
+   */
+  buildDownloadUrl(guid: string, res: MediaResolution): string {
+    return signBunnyMp4Url(guid, res);
   }
 }

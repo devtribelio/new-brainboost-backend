@@ -244,3 +244,104 @@ describe('GET /api/member/media/stream', () => {
     expect(res.body).toEqual({});
   });
 });
+
+describe('GET /api/member/media/download', () => {
+  it('preview token → 302 redirect to a signed Bunny MP4', async () => {
+    const token = signMediaToken({ guid: 'guid-dl-preview', courseId, isPreview: true });
+    const res = await request(app)
+      .get('/api/member/media/download')
+      .query({ t: token })
+      .redirects(0);
+
+    expect(res.status).toBe(302);
+    const loc = res.headers.location as string;
+    expect(loc).toContain('/guid-dl-preview/play_');
+    expect(loc).toContain('.mp4');
+    expect(loc).toContain('?token=HS256-');
+    expect(loc).toMatch(/&expires=\d+/);
+    // Single-file form — not a directory token.
+    expect(loc).not.toContain('/bcdn_token=');
+  });
+
+  it('sets Content-Disposition: attachment with a sanitised filename override', async () => {
+    const token = signMediaToken({ guid: 'guid-dl-name', courseId, isPreview: true });
+    const withCustom = await request(app)
+      .get('/api/member/media/download')
+      .query({ t: token, filename: 'Brain Boost / Trauma <Audio>.mp4' })
+      .redirects(0);
+    expect(withCustom.status).toBe(302);
+    // Slashes + angle brackets stripped; rest preserved.
+    expect(withCustom.headers['content-disposition']).toBe(
+      'attachment; filename="Brain Boost  Trauma Audio.mp4"',
+    );
+
+    const noOverride = await request(app)
+      .get('/api/member/media/download')
+      .query({ t: token })
+      .redirects(0);
+    expect(noOverride.status).toBe(302);
+    expect(noOverride.headers['content-disposition']).toBe(
+      'attachment; filename="media-guid-dl-name.mp4"',
+    );
+  });
+
+  it('honours the res query param', async () => {
+    const token = signMediaToken({ guid: 'guid-dl-res', courseId, isPreview: true });
+    const res = await request(app)
+      .get('/api/member/media/download')
+      .query({ t: token, res: '360p' })
+      .redirects(0);
+
+    expect(res.status).toBe(302);
+    expect(res.headers.location as string).toContain('/guid-dl-res/play_360p.mp4');
+  });
+
+  it('non-preview token without auth → 401', async () => {
+    const token = signMediaToken({ guid: 'guid-dl-gated', courseId, isPreview: false });
+    const res = await request(app)
+      .get('/api/member/media/download')
+      .query({ t: token })
+      .redirects(0);
+
+    expect(res.status).toBe(401);
+    expect(res.body.success).toBe(false);
+  });
+
+  it('non-preview token, authed but not enrolled → 403', async () => {
+    const access = await loginToken(strangerEmail);
+    const token = signMediaToken({ guid: 'guid-dl-gated', courseId, isPreview: false });
+    const res = await request(app)
+      .get('/api/member/media/download')
+      .query({ t: token })
+      .set('Authorization', `Bearer ${access}`)
+      .redirects(0);
+
+    expect(res.status).toBe(403);
+  });
+
+  it('non-preview token, authed and enrolled → 302', async () => {
+    const access = await loginToken(enrolledEmail);
+    const token = signMediaToken({ guid: 'guid-dl-gated', courseId, isPreview: false });
+    const res = await request(app)
+      .get('/api/member/media/download')
+      .query({ t: token })
+      .set('Authorization', `Bearer ${access}`)
+      .redirects(0);
+
+    expect(res.status).toBe(302);
+    expect(res.headers.location as string).toContain('/guid-dl-gated/play_');
+  });
+
+  it('malformed token → 401', async () => {
+    const res = await request(app)
+      .get('/api/member/media/download')
+      .query({ t: 'totally-bogus-token' })
+      .redirects(0);
+    expect(res.status).toBe(401);
+  });
+
+  it('missing token → 400', async () => {
+    const res = await request(app).get('/api/member/media/download').redirects(0);
+    expect(res.status).toBe(400);
+  });
+});
