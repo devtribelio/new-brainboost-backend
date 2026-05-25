@@ -101,6 +101,7 @@ model Device {
   fcmToken   String?  @map("fcm_token")
   lastSeenAt DateTime @default(now()) @map("last_seen_at")
   createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
 
   member Member @relation(fields: [memberId], references: [id], onDelete: Cascade)
 
@@ -162,6 +163,7 @@ model Country {
   legacyId  Int?            @unique @map("legacy_id")
   name      String
   code      String?         @unique
+  updatedAt DateTime        @updatedAt @map("updated_at")
   provinces Province[]
   profiles  MemberProfile[]
 
@@ -173,6 +175,7 @@ model Province {
   legacyId  Int?            @unique @map("legacy_id")
   countryId String          @map("country_id") @db.Uuid
   name      String
+  updatedAt DateTime        @updatedAt @map("updated_at")
   cities    City[]
   country   Country         @relation(fields: [countryId], references: [id])
   profiles  MemberProfile[]
@@ -186,6 +189,7 @@ model City {
   legacyId   Int?            @unique @map("legacy_id")
   provinceId String          @map("province_id") @db.Uuid
   name       String
+  updatedAt  DateTime        @updatedAt @map("updated_at")
   districts  District[]
   province   Province        @relation(fields: [provinceId], references: [id])
   profiles   MemberProfile[]
@@ -195,12 +199,13 @@ model City {
 }
 
 model District {
-  id       String          @id @default(uuid(7)) @db.Uuid
-  legacyId Int?            @unique @map("legacy_id")
-  cityId   String          @map("city_id") @db.Uuid
-  name     String
-  city     City            @relation(fields: [cityId], references: [id])
-  profiles MemberProfile[]
+  id        String          @id @default(uuid(7)) @db.Uuid
+  legacyId  Int?            @unique @map("legacy_id")
+  cityId    String          @map("city_id") @db.Uuid
+  name      String
+  updatedAt DateTime        @updatedAt @map("updated_at")
+  city      City            @relation(fields: [cityId], references: [id])
+  profiles  MemberProfile[]
 
   @@index([cityId])
   @@map("districts")
@@ -219,6 +224,7 @@ model Banner {
   position  Int      @default(0)
   isActive  Boolean  @default(true) @map("is_active")
   createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   @@map("banners")
 }
@@ -254,12 +260,13 @@ model Product {
 }
 
 model Course {
-  id             String  @id @default(uuid(7)) @db.Uuid
-  productId      String  @unique @map("product_id") @db.Uuid
-  legacyCourseId Int?    @unique @map("legacy_course_id") // legacy `course.id` int — emitted as `courseId` in response
-  durationMin    Int     @default(0) @map("duration_min")
+  id             String   @id @default(uuid(7)) @db.Uuid
+  productId      String   @unique @map("product_id") @db.Uuid
+  legacyCourseId Int?     @unique @map("legacy_course_id") // legacy `course.id` int — emitted as `courseId` in response
+  durationMin    Int      @default(0) @map("duration_min")
   level          String?
-  contentRef     String? @map("content_ref")
+  contentRef     String?  @map("content_ref")
+  updatedAt      DateTime @updatedAt @map("updated_at")
 
   product     Product            @relation(fields: [productId], references: [id], onDelete: Cascade)
   sections    CourseSection[]
@@ -299,6 +306,7 @@ model CourseSection {
   name            String
   order           Int      @default(0)
   createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
 
   course  Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
   lessons Lesson[]
@@ -321,6 +329,7 @@ model Lesson {
   duration       Int      @default(0) // legacy `duration` seconds
   order          Int      @default(0)
   createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
 
   section CourseSection @relation(fields: [sectionId], references: [id], onDelete: Cascade)
 
@@ -359,6 +368,7 @@ model Topic {
   type        String   @default("PUBLIC")
   isActive    Boolean  @default(true) @map("is_active")
   createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
 
   network       Network?            @relation(fields: [networkId], references: [id], onDelete: Cascade)
   posts         Post[]
@@ -463,6 +473,7 @@ model PostReport {
   reason       String?
   reportStatus ReportStatus @default(REPORTED) @map("report_status")
   createdAt    DateTime     @default(now()) @map("created_at")
+  updatedAt    DateTime     @updatedAt @map("updated_at")
 
   post     Post           @relation(fields: [postId], references: [id], onDelete: Cascade)
   category ReportCategory @relation(fields: [categoryId], references: [id])
@@ -530,6 +541,7 @@ model Network {
   isHelpdesk  Boolean  @default(false) @map("is_helpdesk")
   isActive    Boolean  @default(true) @map("is_active")
   createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
 
   members        NetworkMember[]
   memberRequests NetworkMemberRequest[]
@@ -575,6 +587,7 @@ model NetworkTeamMember {
   memberId  String   @map("member_id") @db.Uuid
   role      String   @default("MODERATOR")
   createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   @@unique([networkId, memberId])
   @@index([memberId])
@@ -591,6 +604,7 @@ model NetworkMember {
   // tribe without removing them. Blocks post create, comment, and like.
   // Mirrors legacy TBApi::validateMemberMuteNetwork.
   isMuted   Boolean  @default(false) @map("is_muted")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   network Network @relation(fields: [networkId], references: [id], onDelete: Cascade)
 
@@ -603,6 +617,7 @@ model NetworkTag {
   networkId String   @map("network_id") @db.Uuid
   name      String
   createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   network Network @relation(fields: [networkId], references: [id], onDelete: Cascade)
 
@@ -620,6 +635,7 @@ model ReportCategory {
   name      String   @unique
   isActive  Boolean  @default(true) @map("is_active")
   createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   postReports   PostReport[]
   memberReports MemberReport[]
@@ -643,6 +659,7 @@ model MemberReport {
   reason       String?
   reportStatus ReportStatus @default(REPORTED) @map("report_status")
   createdAt    DateTime     @default(now()) @map("created_at")
+  updatedAt    DateTime     @updatedAt @map("updated_at")
 
   category ReportCategory @relation(fields: [categoryId], references: [id])
 
@@ -669,6 +686,7 @@ model Notification {
   seenAt     DateTime? @map("seen_at")
   readAt     DateTime? @map("read_at")
   createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
 
   member Member @relation(fields: [memberId], references: [id], onDelete: Cascade)
 
