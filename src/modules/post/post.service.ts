@@ -72,6 +72,7 @@ export class PostService {
     if (q.topicId) where.topicId = q.topicId;
     if (q.authorId) where.authorId = q.authorId;
     if (q.filter === 'pinned') where.isPinned = true;
+    if (q.filter === 'curated') where.isCurated = true;
 
     if (q.networkId) {
       where.networkId = q.networkId;
@@ -256,6 +257,16 @@ export class PostService {
       excerpt: post.excerpt ?? '',
     });
     return post;
+  }
+
+  async setCurated(postId: string, isCurated: boolean) {
+    const post = await this.resolveByAnyId(postId);
+    if (!post) throw new NotFoundException('Post not found');
+    return prisma.post.update({
+      where: { id: post.id },
+      data: { isCurated },
+      include: postInclude,
+    });
   }
 
   async remove(memberId: string, postId: string) {

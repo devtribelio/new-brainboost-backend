@@ -178,6 +178,9 @@ export class PostDto {
   @ApiProperty({ type: 'integer', enum: [0, 1], example: 0 })
   pinned!: number;
 
+  @ApiProperty({ type: 'boolean', example: false, description: 'Admin-marked as curated/featured content.' })
+  isCurated!: boolean;
+
   @ApiProperty({
     type: 'integer',
     example: 0,

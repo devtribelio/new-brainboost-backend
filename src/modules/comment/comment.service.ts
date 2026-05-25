@@ -241,6 +241,16 @@ export class CommentService {
     });
   }
 
+  async setCurated(commentInput: string, isCurated: boolean) {
+    const c = await this.resolveCommentByAnyId(commentInput);
+    if (!c) throw new NotFoundException('Comment not found');
+    return prisma.comment.update({
+      where: { id: c.id },
+      data: { isCurated },
+      include: commentInclude,
+    });
+  }
+
   async remove(memberId: string, commentInput: string) {
     const c = await this.resolveCommentByAnyId(commentInput);
     if (!c) throw new NotFoundException('Comment not found');

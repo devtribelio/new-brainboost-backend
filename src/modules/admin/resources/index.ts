@@ -312,6 +312,7 @@ const postResource: ResourceConfig = {
     { field: 'authorId', label: 'Author' },
     { field: 'topicId', label: 'Topic' },
     { field: 'content', label: 'Content' },
+    { field: 'isCurated', label: 'Curated' },
     { field: 'isDeleted', label: 'Deleted' },
     { field: 'createdAt', label: 'Created' },
   ],
@@ -325,6 +326,7 @@ const postResource: ResourceConfig = {
       type: 'string-array',
       helpText: 'One URL per line',
     },
+    { name: 'isCurated', label: 'Is Curated', type: 'boolean' },
     { name: 'isDeleted', label: 'Is Deleted', type: 'boolean' },
   ],
 };
@@ -358,6 +360,7 @@ const commentResource: ResourceConfig = {
     { field: 'authorId', label: 'Author' },
     { field: 'parentId', label: 'Parent' },
     { field: 'content', label: 'Content' },
+    { field: 'isCurated', label: 'Curated' },
     { field: 'isDeleted', label: 'Deleted' },
   ],
   fields: [
@@ -365,6 +368,7 @@ const commentResource: ResourceConfig = {
     { name: 'authorId', label: 'Author', type: 'select', required: true, optionsLoader: loadMembers },
     { name: 'parentId', label: 'Parent Comment', type: 'select', optionsLoader: loadComments },
     { name: 'content', label: 'Content', type: 'textarea', required: true },
+    { name: 'isCurated', label: 'Is Curated', type: 'boolean' },
     { name: 'isDeleted', label: 'Is Deleted', type: 'boolean' },
   ],
 };

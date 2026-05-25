@@ -101,6 +101,9 @@ export class CommentDto {
   @ApiProperty({ type: 'array', itemType: 'string', example: [] })
   images!: string[];
 
+  @ApiProperty({ type: 'boolean', example: false, description: 'Admin-marked as curated/featured content.' })
+  isCurated!: boolean;
+
   @ApiProperty({ type: 'boolean', example: false })
   isDeleted!: boolean;
 
