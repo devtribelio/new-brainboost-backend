@@ -7,7 +7,7 @@ import { xenditGateway, type XenditGateway } from '@/common/services/xendit-gate
 import { generateExternalId } from '@/common/services/xendit-signature';
 import type { CreateInvoiceRequest } from 'xendit-node/invoice/models';
 import type { PayDto } from './dto/pay.dto';
-import type { CommercePaymentStatus, CommerceTransactionStatus } from '@prisma/client';
+import type { CommercePaymentStatus, CommerceTransactionStatus, Prisma } from '@prisma/client';
 
 export interface CreatePaymentResult {
   paymentId: string;
@@ -211,16 +211,41 @@ export class PaymentService {
     };
   }
 
-  async listTransactions(memberId: string, page = 1, perPage = 20) {
+  async listTransactions(
+    memberId: string,
+    page = 1,
+    perPage = 20,
+    filters: {
+      status?: CommerceTransactionStatus[];
+      search?: string;
+      createdFrom?: Date;
+      createdTo?: Date;
+    } = {},
+  ) {
+    const where: Prisma.CommerceTransactionWhereInput = { memberId };
+    if (filters.status && filters.status.length > 0) {
+      where.status = { in: filters.status };
+    }
+    if (filters.createdFrom || filters.createdTo) {
+      where.createdAt = {
+        ...(filters.createdFrom ? { gte: filters.createdFrom } : {}),
+        ...(filters.createdTo ? { lte: filters.createdTo } : {}),
+      };
+    }
+    const search = filters.search?.trim();
+    if (search) {
+      where.product = { title: { contains: search, mode: 'insensitive' } };
+    }
+
     const [rows, total] = await Promise.all([
       prisma.commerceTransaction.findMany({
-        where: { memberId },
+        where,
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * perPage,
         take: perPage,
         include: { product: { select: { id: true, title: true, thumbnail: true } } },
       }),
-      prisma.commerceTransaction.count({ where: { memberId } }),
+      prisma.commerceTransaction.count({ where }),
     ]);
     return { rows, total };
   }

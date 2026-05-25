@@ -5,6 +5,7 @@ import {
   ApiBearerAuth,
   ApiBody,
   ApiOperation,
+  ApiQuery,
   ApiResponse,
   ApiTags,
 } from '@/common/openapi/decorators';
@@ -14,6 +15,7 @@ import type { VoucherService } from './voucher.service';
 import { StartCheckoutDto } from './dto/start-checkout.dto';
 import { AFFILIATE_COOKIE_NAME } from '@/modules/affiliate/constants';
 import { PayDto, CancelTransactionDto, ValidateVoucherDto } from './dto/pay.dto';
+import { ListTransactionsQueryDto } from './dto/list-transactions.dto';
 import {
   CommerceTransactionListItemDto,
   CreatePaymentResultDto,
@@ -72,6 +74,37 @@ export class CommerceController {
 
   @ApiBearerAuth()
   @ApiOperation({ summary: 'List commerce transactions (history)' })
+  @ApiQuery({ name: 'page', type: 'integer', required: false, example: 1 })
+  @ApiQuery({ name: 'perPage', type: 'integer', required: false, example: 20 })
+  @ApiQuery({
+    name: 'status',
+    type: 'string',
+    required: false,
+    example: 'PAID,CANCELED',
+    description:
+      'Comma-separated statuses. Valid: PENDING, PAID, EXPIRED, FAILED, CANCELED, REFUNDED.',
+  })
+  @ApiQuery({
+    name: 'search',
+    type: 'string',
+    required: false,
+    example: 'react',
+    description: 'Case-insensitive substring match against product title.',
+  })
+  @ApiQuery({
+    name: 'createdFrom',
+    type: 'string',
+    required: false,
+    example: '2026-05-01T00:00:00.000Z',
+    description: 'Inclusive lower bound on createdAt (ISO 8601).',
+  })
+  @ApiQuery({
+    name: 'createdTo',
+    type: 'string',
+    required: false,
+    example: '2026-05-31T23:59:59.999Z',
+    description: 'Inclusive upper bound on createdAt (ISO 8601).',
+  })
   @ApiResponse({
     status: 200,
     type: () => CommerceTransactionListItemDto,
@@ -79,8 +112,14 @@ export class CommerceController {
     envelope: 'paginated',
   })
   listTransactions = async (req: ReqWithUser, res: Response) => {
+    const q = req.query as unknown as ListTransactionsQueryDto;
     const p = parsePagination(req.query as Record<string, unknown>, { perPage: 20 });
-    const { rows, total } = await this.payment.listTransactions(req.user!.id, p.page, p.perPage);
+    const { rows, total } = await this.payment.listTransactions(req.user!.id, p.page, p.perPage, {
+      status: q.status,
+      search: q.search,
+      createdFrom: q.createdFrom ? new Date(q.createdFrom) : undefined,
+      createdTo: q.createdTo ? new Date(q.createdTo) : undefined,
+    });
     return okPaginated(res, rows, { page: p.page, perPage: p.perPage, total });
   };
 
