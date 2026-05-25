@@ -1,20 +1,20 @@
 import { ApiProperty, ApiPropertyOptional } from '@/common/openapi/decorators';
 
 export class CommunityEntryDto {
-  @ApiProperty({ enum: ['timeline', 'education'], example: 'timeline' })
+  @ApiProperty({ example: 'timeline', description: 'Network purpose tag (e.g. timeline, education)' })
   page!: string;
 
   @ApiProperty({
-    type: 'integer',
-    example: 999000001,
-    description: 'Network legacyId (int). Rows without legacyId are filtered out of /info.',
+    format: 'uuid',
+    example: '7a3c1a52-9f1b-4f8b-9d2a-1e0a7b1c4d51',
+    description: 'Network UUID',
   })
-  networkId!: number;
+  networkId!: string;
 
-  @ApiProperty({ example: 'timeline-main' })
+  @ApiProperty({ example: 'BB-TIMELINE' })
   networkCode!: string;
 
-  @ApiProperty({ example: 'Timeline' })
+  @ApiProperty({ example: 'Brainboost Timeline' })
   name!: string;
 }
 
