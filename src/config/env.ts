@@ -115,8 +115,12 @@ export const env = {
     // 'proxy' = Model B (backend streams the bytes); 'signed' = Model C (302 to a
     // signed Bunny URL, client streams from the edge). See docs/media-model-c-migration.md.
     mode: (optional('MEDIA_MODE', 'proxy') === 'signed' ? 'signed' : 'proxy') as 'proxy' | 'signed',
-    // Signed-URL lifetime for Model C, seconds.
+    // Signed-URL lifetime for Model C streaming, seconds.
     signedUrlTtlSeconds: Number.parseInt(optional('MEDIA_SIGNED_URL_TTL_SECONDS', '7200'), 10),
+    // Signed-URL lifetime for offline downloads — longer than streaming so slow
+    // downloads don't outlive the token. Applies to the opaque media token AND
+    // the Bunny CDN signed URL.
+    downloadTtlSeconds: Number.parseInt(optional('MEDIA_DOWNLOAD_TTL_SECONDS', '86400'), 10),
   },
 } as const;
 

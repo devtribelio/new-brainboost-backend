@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { MediaController } from './media.controller';
 import { MediaService } from './media.service';
 import { optionalAuthGuard } from '@/common/middlewares/auth.middleware';
+import { mediaDownloadRateLimiter } from '@/common/middlewares/rate-limit.middleware';
 import { bindRoute } from '@/common/openapi/route-binder';
 
 /**
@@ -26,6 +27,18 @@ export function mediaRoutes(): Router {
     path: '/media/stream',
     handlerKey: 'stream',
     middlewares: [optionalAuthGuard],
+  });
+
+  // Download — same gating as stream, plus a per-member rate limiter to
+  // discourage scripted bulk-scraping. Returns a 302 to a long-lived signed
+  // Bunny MP4 URL (single-file rendition).
+  bindRoute({
+    router,
+    controller: ctrl,
+    method: 'get',
+    path: '/media/download',
+    handlerKey: 'download',
+    middlewares: [optionalAuthGuard, mediaDownloadRateLimiter],
   });
 
   return router;

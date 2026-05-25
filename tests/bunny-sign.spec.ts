@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { createHmac } from 'node:crypto';
-import { signBunnyUrl, signBunnyHlsUrl } from '../src/modules/media/bunny-sign.util';
+import { signBunnyUrl, signBunnyHlsUrl, signBunnyMp4Url } from '../src/modules/media/bunny-sign.util';
 
 /**
  * Unit tests for Bunny CDN URL token signing (Model C).
@@ -73,6 +73,30 @@ describe('bunny-sign', () => {
       const now = Math.floor(Date.now() / 1000);
       expect(expires).toBeGreaterThan(now);
       expect(expires).toBeLessThanOrEqual(now + 61);
+    });
+  });
+
+  describe('signBunnyMp4Url', () => {
+    it('builds a query-token MP4 URL with the requested rendition', () => {
+      const url = signBunnyMp4Url('vid-1', '720p');
+      expect(url).toContain('/vid-1/play_720p.mp4');
+      expect(url).toContain('?token=HS256-');
+      expect(url).toMatch(/&expires=\d+/);
+      // Single-file form — no directory token, no path-embed.
+      expect(url).not.toContain('/bcdn_token=');
+      expect(url).not.toContain('token_path=');
+    });
+
+    it('produces distinct URLs for different renditions', () => {
+      expect(signBunnyMp4Url('g', '360p')).not.toBe(signBunnyMp4Url('g', '720p'));
+    });
+
+    it('honours an explicit ttl', () => {
+      const url = signBunnyMp4Url('g', '360p', { ttlSeconds: 120 });
+      const expires = Number(url.match(/&expires=(\d+)/)?.[1]);
+      const now = Math.floor(Date.now() / 1000);
+      expect(expires).toBeGreaterThan(now);
+      expect(expires).toBeLessThanOrEqual(now + 121);
     });
   });
 });

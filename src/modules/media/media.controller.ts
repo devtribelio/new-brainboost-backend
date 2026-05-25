@@ -139,6 +139,68 @@ export class MediaController {
     body.pipe(res);
   };
 
+  @ApiOperation({
+    summary: 'Get a signed Bunny MP4 download URL for an audio/video slide',
+    description:
+      'Decrypts the opaque media token, gates access (enrollment for non-preview), ' +
+      'and 302-redirects to a short-lived signed Bunny MP4 URL with a longer TTL ' +
+      'tuned for downloads. Rate-limited per member.',
+  })
+  @ApiQuery({ name: 't', type: 'string', required: true, description: 'Opaque media token.' })
+  @ApiQuery({
+    name: 'res',
+    type: 'string',
+    required: false,
+    description: 'Rendition: 360p | 480p | 720p. Defaults to the configured resolution.',
+  })
+  @ApiResponse({
+    status: 302,
+    description: 'Redirect to a signed Bunny MP4 URL',
+    envelope: 'none',
+  })
+  @ApiResponse({ status: 400, description: 'Missing media token' })
+  @ApiResponse({ status: 401, description: 'Invalid/expired token, or auth required' })
+  @ApiResponse({ status: 403, description: 'Not enrolled in the course' })
+  @ApiResponse({ status: 429, description: 'Rate limit exceeded' })
+  download = async (req: Request, res: Response): Promise<void> => {
+    const token = typeof req.query.t === 'string' ? req.query.t : '';
+    if (!token) {
+      throw new BadRequestException('Missing media token');
+    }
+
+    const payload = verifyMediaToken(token);
+
+    if (!payload.isPreview) {
+      const user = (req as AuthenticatedRequest).user;
+      if (!user) {
+        throw new UnauthorizedException('Authentication required for this media');
+      }
+      await this.mediaService.assertEnrollment(payload.courseId, user.id);
+    }
+
+    const resolution = this.resolveResolution(req.query.res);
+    const user = (req as AuthenticatedRequest).user;
+    logger.info(
+      {
+        memberId: user?.id ?? null,
+        courseId: payload.courseId,
+        guid: payload.guid,
+        res: resolution,
+        isPreview: payload.isPreview,
+      },
+      'media: download requested',
+    );
+
+    // Content-Disposition on a 302 is honoured by many native downloaders
+    // (Android DownloadManager / iOS URLSession / wget). Browsers tend to ignore
+    // it and use the Bunny response's headers, so this is a hint, not a hard
+    // guarantee — but it lets FE control the saved filename when supported.
+    const filename =
+      this.sanitizeFilename(req.query.filename) ?? `media-${payload.guid}.mp4`;
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.redirect(302, this.mediaService.buildDownloadUrl(payload.guid, resolution));
+  };
+
   /** Validate the `res` query param; fall back to the configured default. */
   private resolveResolution(raw: unknown): MediaResolution {
     if (typeof raw === 'string' && (MEDIA_RESOLUTIONS as readonly string[]).includes(raw)) {
@@ -148,5 +210,16 @@ export class MediaController {
       throw new BadRequestException('Invalid resolution — expected 360p | 480p | 720p');
     }
     return env.media.defaultResolution as MediaResolution;
+  }
+
+  /**
+   * Sanitise a client-supplied filename for Content-Disposition. Strips
+   * anything outside `[A-Za-z0-9._- ]`, caps at 100 chars, returns null when
+   * the result is empty so the caller can fall back to a default.
+   */
+  private sanitizeFilename(raw: unknown): string | null {
+    if (typeof raw !== 'string') return null;
+    const cleaned = raw.replace(/[^a-zA-Z0-9._\- ]/g, '').slice(0, 100).trim();
+    return cleaned.length > 0 ? cleaned : null;
   }
 }
