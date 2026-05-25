@@ -866,12 +866,9 @@ async function backfillBatch(
     const colList = columns.join(',');
     const setList = columns
       .filter((c) => c !== 'legacy_id')
-      .map((c) => {
-        const camel = c.replace(/_([a-z])/g, (_, x) => x.toUpperCase());
-        return `"${camel}" = COALESCE(v.${c}, "${table}"."${camel}")`;
-      })
+      .map((c) => `"${c}" = COALESCE(v.${c}, "${table}"."${c}")`)
       .join(', ');
-    const sql = `UPDATE "${table}" SET ${setList} FROM (VALUES ${placeholders}) AS v(${colList}) WHERE "${table}"."legacyId" = v.legacy_id`;
+    const sql = `UPDATE "${table}" SET ${setList} FROM (VALUES ${placeholders}) AS v(${colList}) WHERE "${table}".legacy_id = v.legacy_id`;
     const flat = sub.flat();
     total += await prisma.$executeRawUnsafe(sql, ...flat);
   }
