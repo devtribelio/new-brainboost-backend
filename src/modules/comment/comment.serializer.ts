@@ -46,6 +46,7 @@ export function serializeComment(
     id: c.id,
     parentId: c.parentId,
     images: c.imageUrls,
+    isCurated: c.isCurated,
     isDeleted: c.isDeleted,
     createdAt: c.createdAt.toISOString(),
     updatedAt: c.updatedAt.toISOString(),

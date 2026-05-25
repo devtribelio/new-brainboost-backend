@@ -6,6 +6,7 @@ import { AdminAuthController } from './admin.auth.controller';
 import { AdminDashboardController } from './admin.dashboard.controller';
 import { createResourceRouter } from './util/crud-factory';
 import { resources } from './resources';
+import { adminCurationRoutes } from './admin.curation.routes';
 
 export function adminRoutes(): Router {
   const router = Router();
@@ -19,6 +20,10 @@ export function adminRoutes(): Router {
   router.use(adminAuthGuard);
 
   router.get('/', asyncHandler(dashboard.index));
+
+  // Custom action endpoints must be registered BEFORE the generic crud loop
+  // so `/posts/:id/curate` is not shadowed by the resource router on `/posts`.
+  router.use('/', adminCurationRoutes());
 
   for (const cfg of resources) {
     router.use(`/${cfg.key}`, createResourceRouter(cfg));
