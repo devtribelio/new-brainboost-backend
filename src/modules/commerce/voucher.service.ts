@@ -47,12 +47,12 @@ export class VoucherService {
     const now = new Date();
     const updated = await prisma.$executeRaw`
       UPDATE vouchers
-      SET used = used + 1, "updatedAt" = ${now}
+      SET used = used + 1, updated_at = ${now}
       WHERE id = ${voucherId}::uuid
-        AND "isActive" = true
+        AND is_active = true
         AND (quota IS NULL OR used < quota)
-        AND ("startsAt" IS NULL OR "startsAt" <= ${now})
-        AND ("endsAt" IS NULL OR "endsAt" > ${now})
+        AND (starts_at IS NULL OR starts_at <= ${now})
+        AND (ends_at IS NULL OR ends_at > ${now})
     `;
     if (updated === 0) {
       throw new BadRequestException('Voucher exhausted or no longer redeemable');

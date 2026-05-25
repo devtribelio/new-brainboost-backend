@@ -27,11 +27,11 @@ export async function walkInviterChain(
 
   const rows = await prisma.$queryRaw<Array<{ id: string; affiliateBased: string; inviterId: string | null; level: number }>>`
     WITH RECURSIVE chain AS (
-      SELECT id, "affiliateBased", "inviterId", 1 AS level
+      SELECT id, affiliate_based AS "affiliateBased", inviter_id AS "inviterId", 1 AS level
       FROM members
       WHERE id = ${startMemberId}::uuid
       UNION ALL
-      SELECT m.id, m."affiliateBased", m."inviterId", c.level + 1
+      SELECT m.id, m.affiliate_based, m.inviter_id, c.level + 1
       FROM members m
       INNER JOIN chain c ON m.id = c."inviterId"
       WHERE c.level < ${maxDepth}
