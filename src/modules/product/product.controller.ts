@@ -13,6 +13,7 @@ import {
   ApiTags,
 } from '@/common/openapi/decorators';
 import { CourseDetailDto, ProductDto, ProductShareDto } from './dto/product.dto';
+import { ListProductsQueryDto, OWNERSHIP_VALUES } from './dto/list-query.dto';
 
 @ApiTags('Product')
 export class ProductController {
@@ -23,6 +24,13 @@ export class ProductController {
   @ApiQuery({ name: 'perPage', type: 'integer', required: false, example: 100 })
   @ApiQuery({ name: 'keyword', type: 'string', required: false, example: 'react' })
   @ApiQuery({ name: 'type', type: 'string', required: false, example: 'course' })
+  @ApiQuery({
+    name: 'ownership',
+    type: 'string',
+    required: false,
+    enum: OWNERSHIP_VALUES as unknown as string[],
+    example: 'purchased',
+  })
   @ApiResponse({
     status: 200,
     type: () => ProductDto,
@@ -31,12 +39,11 @@ export class ProductController {
   })
   list = async (req: Request, res: Response) => {
     const p = parsePagination(req.query as Record<string, unknown>, { perPage: 100 });
-    const keyword = (req.query.keyword as string) ?? undefined;
-    const type = (req.query.type as string) ?? undefined;
+    const q = req.query as unknown as ListProductsQueryDto;
     const memberId = (req as { user?: { id?: string } }).user?.id;
     const { rows, total, ratingAvgByProduct, purchasedProductIds } = await this.productService.list(
       p,
-      { keyword, type, memberId },
+      { keyword: q.keyword, type: q.type, memberId, ownership: q.ownership },
     );
     const items = rows.map((r) =>
       serializeProduct(r, {

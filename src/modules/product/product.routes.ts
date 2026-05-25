@@ -3,6 +3,8 @@ import { ProductController } from './product.controller';
 import { ProductService } from './product.service';
 import { authGuard, optionalAuthGuard } from '@/common/middlewares/auth.middleware';
 import { bindRoute } from '@/common/openapi/route-binder';
+import { validateDto } from '@/common/middlewares/validation.middleware';
+import { ListProductsQueryDto } from './dto/list-query.dto';
 
 export function productRoutes(): Router {
   const router = Router();
@@ -14,7 +16,7 @@ export function productRoutes(): Router {
     method: 'get',
     path: '/product/list',
     handlerKey: 'list',
-    middlewares: [authGuard],
+    middlewares: [authGuard, validateDto(ListProductsQueryDto, 'query')],
   });
   bindRoute({
     router,
@@ -30,7 +32,7 @@ export function productRoutes(): Router {
     method: 'get',
     path: '/product/list/public',
     handlerKey: 'list',
-    middlewares: [optionalAuthGuard],
+    middlewares: [optionalAuthGuard, validateDto(ListProductsQueryDto, 'query')],
   });
   bindRoute({
     router,

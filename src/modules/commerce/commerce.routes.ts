@@ -8,6 +8,7 @@ import { PaymentService } from './payment.service';
 import { VoucherService } from './voucher.service';
 import { StartCheckoutDto } from './dto/start-checkout.dto';
 import { PayDto, CancelTransactionDto, ValidateVoucherDto } from './dto/pay.dto';
+import { ListTransactionsQueryDto } from './dto/list-transactions.dto';
 
 export function commerceRoutes(): Router {
   const router = Router();
@@ -36,7 +37,7 @@ export function commerceRoutes(): Router {
     method: 'get',
     path: '/payment/commerce/list',
     handlerKey: 'listTransactions',
-    middlewares: [authGuard],
+    middlewares: [authGuard, validateDto(ListTransactionsQueryDto, 'query')],
   });
   bindRoute({
     router,

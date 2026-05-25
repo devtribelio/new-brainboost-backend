@@ -47,6 +47,7 @@ export interface ApiQueryOptions {
   required?: boolean;
   description?: string;
   example?: unknown;
+  enum?: string[];
 }
 
 export interface ApiBodyOptions {

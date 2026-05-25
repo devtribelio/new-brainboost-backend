@@ -1,6 +1,8 @@
+import type { Prisma, Product } from '@prisma/client';
 import { prisma } from '@/config/prisma';
 import { NotFoundException } from '@/common/exceptions';
 import type { PaginationParams } from '@/common/utils/pagination.util';
+import type { Ownership } from './dto/list-query.dto';
 
 export interface ReviewAggregate {
   avg: number;
@@ -24,10 +26,23 @@ function distributionFromGroupBy(
 }
 
 export class ProductService {
-  async list(p: PaginationParams, q: { keyword?: string; type?: string; memberId?: string }) {
-    const where: Record<string, unknown> = { isActive: true };
+  async list(
+    p: PaginationParams,
+    q: { keyword?: string; type?: string; memberId?: string; ownership?: Ownership },
+  ) {
+    if (q.ownership === 'purchased' && q.memberId) {
+      return this.listPurchased(p, q.memberId, { keyword: q.keyword, type: q.type });
+    }
+
+    const where: Prisma.ProductWhereInput = { isActive: true };
     if (q.keyword) where.title = { contains: q.keyword, mode: 'insensitive' };
     if (q.type) where.type = q.type;
+    if (q.ownership === 'not_purchased' && q.memberId) {
+      where.OR = [
+        { course: null },
+        { course: { enrollments: { none: { memberId: q.memberId } } } },
+      ];
+    }
     const [rows, total] = await Promise.all([
       prisma.product.findMany({
         where,
@@ -39,6 +54,42 @@ export class ProductService {
     ]);
     const ratingAvgByProduct = await this.batchRatingAvg(rows.map((r) => r.id));
     const purchasedProductIds = await this.batchPurchased(q.memberId, rows);
+    return { rows, total, ratingAvgByProduct, purchasedProductIds };
+  }
+
+  // ownership=purchased: drive query off CourseEnrollment so we can paginate
+  // and sort by *purchase date*, not product.createdAt. Total = enrollment count
+  // for the member, so meta.pagination.total matches the filtered result.
+  private async listPurchased(
+    p: PaginationParams,
+    memberId: string,
+    filter: { keyword?: string; type?: string },
+  ) {
+    const enrollmentWhere: Prisma.CourseEnrollmentWhereInput = {
+      memberId,
+      course: {
+        product: {
+          isActive: true,
+          ...(filter.keyword
+            ? { title: { contains: filter.keyword, mode: 'insensitive' as const } }
+            : {}),
+          ...(filter.type ? { type: filter.type } : {}),
+        },
+      },
+    };
+    const [enrollments, total] = await Promise.all([
+      prisma.courseEnrollment.findMany({
+        where: enrollmentWhere,
+        orderBy: { createdAt: 'desc' },
+        skip: p.skip,
+        take: p.take,
+        select: { course: { select: { product: true } } },
+      }),
+      prisma.courseEnrollment.count({ where: enrollmentWhere }),
+    ]);
+    const rows: Product[] = enrollments.map((e) => e.course.product);
+    const ratingAvgByProduct = await this.batchRatingAvg(rows.map((r) => r.id));
+    const purchasedProductIds = new Set(rows.map((r) => r.id));
     return { rows, total, ratingAvgByProduct, purchasedProductIds };
   }
 
