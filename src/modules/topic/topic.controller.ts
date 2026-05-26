@@ -1,4 +1,4 @@
-import type { Request, Response } from 'express';
+import type { Response } from 'express';
 import { TopicService } from './topic.service';
 import { ok, okPaginated } from '@/common/utils/response.util';
 import { BadRequestException, UnauthorizedException } from '@/common/exceptions';
@@ -32,13 +32,17 @@ export class TopicController {
   })
   @ApiQuery({ name: 'networkId', type: 'string', required: false, example: 'network-uuid-1234' })
   @ApiResponse({ status: 200, type: () => TopicDto, isArray: true, envelope: 'paginated' })
-  list = async (req: Request, res: Response) => {
+  list = async (req: AuthenticatedRequest, res: Response) => {
     const p = parsePagination(req.query as Record<string, unknown>);
     const keyword = (req.query.keyword as string) ?? undefined;
     // FE sends `code` (network code). `networkId` accepted as alias for backwards compat.
     const networkInput =
       (req.query.code as string) ?? (req.query.networkId as string) ?? undefined;
-    const { rows, total } = await this.topicService.list(p, { keyword, networkInput });
+    const { rows, total } = await this.topicService.list(p, {
+      keyword,
+      networkInput,
+      memberId: req.user?.id,
+    });
     return okPaginated(res, rows.map(serializeTopic), { page: p.page, perPage: p.perPage, total });
   };
 

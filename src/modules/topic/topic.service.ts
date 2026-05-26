@@ -7,6 +7,8 @@ interface TopicListQuery {
   keyword?: string;
   // Network code (8-char alphanumeric), legacyId int, or backend UUID.
   networkInput?: string;
+  // Authed member id. When provided, each row gets `isSubscribed` set.
+  memberId?: string;
 }
 
 export interface TopicSubscribeResult {
@@ -39,7 +41,19 @@ export class TopicService {
       }),
       prisma.topic.count({ where }),
     ]);
-    return { rows, total };
+
+    if (!q.memberId || rows.length === 0) {
+      return { rows, total };
+    }
+
+    const topicIds = rows.map((r) => r.id);
+    const subs = await prisma.topicSubscription.findMany({
+      where: { memberId: q.memberId, topicId: { in: topicIds } },
+      select: { topicId: true },
+    });
+    const subscribed = new Set(subs.map((s) => s.topicId));
+    const decorated = rows.map((r) => Object.assign(r, { isSubscribed: subscribed.has(r.id) }));
+    return { rows: decorated, total };
   }
 
   // FE sends `code` (8-char alphanumeric from /info). Backend accepts code,
