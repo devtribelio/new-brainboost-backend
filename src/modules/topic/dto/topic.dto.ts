@@ -59,6 +59,21 @@ export class TopicDto {
   createdAt!: string;
 }
 
+export class TopicSubscribeBodyDto {
+  @ApiProperty({
+    example: 'topic-uuid-1234',
+    description: 'Topic UUID or legacyId (int as string).',
+  })
+  topicId!: string;
+
+  @ApiPropertyOptional({
+    enum: ['subscribe', 'unsubscribe'],
+    example: 'subscribe',
+    description: 'Defaults to `subscribe` when omitted.',
+  })
+  action?: string;
+}
+
 export class TopicSubscribeResultDto {
   @ApiProperty({ type: 'integer', nullable: true, example: 42 })
   memberId!: number | null;
