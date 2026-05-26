@@ -17,7 +17,7 @@ function parseMentions(content: string): string[] {
 
 export function serializeComment(
   c: CommentWithAuthor,
-  statusLike: 'like' | 'dislike' = 'dislike',
+  isLiked: boolean = false,
 ): Record<string, unknown> {
   const mentions = parseMentions(c.content);
   return {
@@ -35,7 +35,7 @@ export function serializeComment(
     fullContent: c.content,
     image: c.imageUrls.length > 0 ? c.imageUrls[0] : null,
     audio: null,
-    statusLike,
+    isLiked,
     timeAgo: timeAgoString(c.createdAt),
     dateAgo: dateAgoString(c.createdAt),
     countLike: c.countLike,

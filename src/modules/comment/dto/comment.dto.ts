@@ -60,8 +60,8 @@ export class CommentDto {
   })
   audio?: unknown;
 
-  @ApiProperty({ enum: ['like', 'dislike'], example: 'dislike' })
-  statusLike!: string;
+  @ApiProperty({ type: 'boolean', example: false, description: 'Whether the viewer has liked this comment.' })
+  isLiked!: boolean;
 
   @ApiProperty({ example: '5m', description: 'Relative time string (just now / Xm / Xh / Xd / Xw / Xmo / Xy)' })
   timeAgo!: string;
@@ -119,11 +119,11 @@ export class CommentDto {
 
 export class CommentLikeToggleResultDto {
   @ApiProperty({
-    enum: ['like', 'dislike'],
-    example: 'like',
-    description: 'New like state after toggle',
+    type: 'boolean',
+    example: true,
+    description: 'New like state after toggle. true = liked, false = unliked.',
   })
-  status!: 'like' | 'dislike';
+  isLiked!: boolean;
 
   @ApiProperty({
     type: 'integer',
