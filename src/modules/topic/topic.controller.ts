@@ -7,12 +7,13 @@ import { serializeTopic } from './topic.serializer';
 import type { AuthenticatedRequest } from '@/common/interfaces/authenticated-request';
 import {
   ApiBearerAuth,
+  ApiBody,
   ApiOperation,
   ApiQuery,
   ApiResponse,
   ApiTags,
 } from '@/common/openapi/decorators';
-import { TopicDto, TopicSubscribeResultDto } from './dto/topic.dto';
+import { TopicDto, TopicSubscribeBodyDto, TopicSubscribeResultDto } from './dto/topic.dto';
 
 @ApiTags('Topic')
 export class TopicController {
@@ -43,6 +44,7 @@ export class TopicController {
 
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Subscribe / unsubscribe to a topic' })
+  @ApiBody({ type: () => TopicSubscribeBodyDto })
   @ApiResponse({ status: 200, type: () => TopicSubscribeResultDto })
   subscribe = async (req: AuthenticatedRequest, res: Response) => {
     if (!req.user) throw new UnauthorizedException();
