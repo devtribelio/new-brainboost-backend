@@ -47,9 +47,7 @@ export class CommentController {
     const liked = req.user
       ? await this.commentService.likedByMember(req.user.id, rows.map((r) => r.id))
       : new Set<string>();
-    const data = rows.map((row) =>
-      serializeComment(row, liked.has(row.id) ? 'like' : 'dislike'),
-    );
+    const data = rows.map((row) => serializeComment(row, liked.has(row.id)));
     return okPaginated(res, data, { page: p.page, perPage: p.perPage, total });
   };
 
@@ -63,7 +61,7 @@ export class CommentController {
     const liked = req.user
       ? await this.commentService.likedByMember(req.user.id, [c.id])
       : new Set<string>();
-    return ok(res, serializeComment(c, liked.has(c.id) ? 'like' : 'dislike'));
+    return ok(res, serializeComment(c, liked.has(c.id)));
   };
 
   @ApiBearerAuth()
@@ -75,9 +73,9 @@ export class CommentController {
     const commentId = (req.body?.commentId as string) ?? '';
     if (!commentId) throw new BadRequestException('commentId required');
     const result = await this.commentService.toggleLike(req.user.id, commentId);
-    // FE LikeModel: {status, commentId, countLike}. commentId = comment's legacyId int.
+    // commentId = comment's legacyId int (null when unmigrated).
     return ok(res, {
-      status: result.status,
+      isLiked: result.isLiked,
       commentId: result.commentLegacyId,
       countLike: result.countLike,
     });

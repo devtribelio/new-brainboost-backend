@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { prisma } from '@/config/prisma';
 import { BadRequestException, ForbiddenException, NotFoundException } from '@/common/exceptions';
 import type { PaginationParams } from '@/common/utils/pagination.util';
@@ -151,39 +152,55 @@ export class PostService {
   async toggleLike(
     memberId: string,
     postId: string,
-  ): Promise<{ status: 'like' | 'dislike'; countLike: number }> {
+  ): Promise<{ isLiked: boolean; countLike: number }> {
     const post = await this.resolveByAnyId(postId);
     if (!post) throw new NotFoundException('Post not found');
     if (post.networkId) await this.assertNetworkAccess(post.networkId, memberId);
 
-    const existing = await prisma.postLike.findUnique({
-      where: { postId_memberId: { postId: post.id, memberId } },
-    });
-    if (existing) {
-      await prisma.$transaction([
-        prisma.postLike.delete({ where: { id: existing.id } }),
-        prisma.post.update({
+    const result = await prisma.$transaction(async (tx) => {
+      const deleted = await tx.postLike.deleteMany({
+        where: { postId: post.id, memberId },
+      });
+      if (deleted.count > 0) {
+        const updated = await tx.post.update({
           where: { id: post.id },
           data: { countLike: { decrement: 1 } },
-        }),
-      ]);
-      return { status: 'dislike', countLike: Math.max(0, post.countLike - 1) };
-    }
+          select: { countLike: true },
+        });
+        return { isLiked: false, countLike: Math.max(0, updated.countLike), notify: false };
+      }
 
-    await prisma.$transaction([
-      prisma.postLike.create({ data: { postId: post.id, memberId } }),
-      prisma.post.update({
+      try {
+        await tx.postLike.create({ data: { postId: post.id, memberId } });
+      } catch (e) {
+        if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+          // Concurrent like landed first. Read current count, don't double-increment.
+          const current = await tx.post.findUnique({
+            where: { id: post.id },
+            select: { countLike: true },
+          });
+          return { isLiked: true, countLike: current?.countLike ?? 0, notify: false };
+        }
+        throw e;
+      }
+      const updated = await tx.post.update({
         where: { id: post.id },
         data: { countLike: { increment: 1 } },
-      }),
-    ]);
-    notificationEvents.emit('post.liked', {
-      postId: post.id,
-      postAuthorId: post.authorId,
-      actorId: memberId,
+        select: { countLike: true },
+      });
+      return { isLiked: true, countLike: updated.countLike, notify: true };
     });
-    return { status: 'like', countLike: post.countLike + 1 };
+
+    if (result.notify) {
+      notificationEvents.emit('post.liked', {
+        postId: post.id,
+        postAuthorId: post.authorId,
+        actorId: memberId,
+      });
+    }
+    return { isLiked: result.isLiked, countLike: result.countLike };
   }
+
 
   async create(memberId: string, dto: PostCreateDto) {
     const member = await prisma.member.findUnique({ where: { id: memberId } });

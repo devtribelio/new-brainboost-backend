@@ -144,8 +144,8 @@ export class PostDto {
   })
   videoThumbnailUrl?: string | null;
 
-  @ApiProperty({ enum: ['like', 'dislike'], example: 'dislike' })
-  statusLike!: string;
+  @ApiProperty({ type: 'boolean', example: false, description: 'Whether the viewer has liked this post.' })
+  isLiked!: boolean;
 
   @ApiProperty({ type: 'integer', example: 42 })
   countLike!: number;
@@ -245,11 +245,11 @@ export class PostDto {
 
 export class PostLikeToggleResultDto {
   @ApiProperty({
-    enum: ['like', 'dislike'],
-    example: 'like',
-    description: 'New like state after toggle',
+    type: 'boolean',
+    example: true,
+    description: 'New like state after toggle. true = liked, false = unliked.',
   })
-  status!: 'like' | 'dislike';
+  isLiked!: boolean;
 
   @ApiProperty({
     type: 'integer',

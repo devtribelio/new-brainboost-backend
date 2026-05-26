@@ -25,9 +25,7 @@ export class ReplyController {
     const liked = req.user
       ? await this.replyService.likedByMember(req.user.id, rows.map((r) => r.id))
       : new Set<string>();
-    const data = rows.map((row) =>
-      serializeComment(row, liked.has(row.id) ? 'like' : 'dislike'),
-    );
+    const data = rows.map((row) => serializeComment(row, liked.has(row.id)));
     return okPaginated(res, data, { page: p.page, perPage: p.perPage, total });
   };
 }

@@ -52,7 +52,7 @@ function buildPostCreator(m: Member | null | undefined) {
 
 export function serializePost(
   p: PostWithRelations,
-  statusLike: 'like' | 'dislike' = 'dislike',
+  isLiked: boolean = false,
   opts: { viewerId?: string; isJoined?: boolean | null } = {},
 ): Record<string, unknown> {
   const memberId = p.author?.legacyId ?? null;
@@ -85,7 +85,7 @@ export function serializePost(
         }
       : null,
     videoThumbnailUrl: null,
-    statusLike,
+    isLiked,
     countLike: p.countLike,
     starred: null,
     countComment: p.countComment,

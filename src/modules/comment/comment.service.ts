@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { prisma } from '@/config/prisma';
 import { BadRequestException, ForbiddenException, NotFoundException } from '@/common/exceptions';
 import type { PaginationParams } from '@/common/utils/pagination.util';
@@ -104,30 +105,52 @@ export class CommentService {
   async toggleLike(
     memberId: string,
     commentInput: string,
-  ): Promise<{ status: 'like' | 'dislike'; commentLegacyId: number | null; countLike: number }> {
+  ): Promise<{ isLiked: boolean; commentLegacyId: number | null; countLike: number }> {
     const c = await this.resolveCommentByAnyId(commentInput);
     if (!c) throw new NotFoundException('Comment not found');
     if (c.post?.networkId) await this.assertNetworkAccess(c.post.networkId, memberId);
-    const existing = await prisma.commentLike.findUnique({
-      where: { commentId_memberId: { commentId: c.id, memberId } },
+
+    const result = await prisma.$transaction(async (tx) => {
+      const deleted = await tx.commentLike.deleteMany({
+        where: { commentId: c.id, memberId },
+      });
+      if (deleted.count > 0) {
+        const updated = await tx.comment.update({
+          where: { id: c.id },
+          data: { countLike: { decrement: 1 } },
+          select: { countLike: true },
+        });
+        return { isLiked: false, countLike: Math.max(0, updated.countLike), notify: false };
+      }
+
+      try {
+        await tx.commentLike.create({ data: { commentId: c.id, memberId } });
+      } catch (e) {
+        if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+          const current = await tx.comment.findUnique({
+            where: { id: c.id },
+            select: { countLike: true },
+          });
+          return { isLiked: true, countLike: current?.countLike ?? 0, notify: false };
+        }
+        throw e;
+      }
+      const updated = await tx.comment.update({
+        where: { id: c.id },
+        data: { countLike: { increment: 1 } },
+        select: { countLike: true },
+      });
+      return { isLiked: true, countLike: updated.countLike, notify: true };
     });
-    if (existing) {
-      await prisma.$transaction([
-        prisma.commentLike.delete({ where: { id: existing.id } }),
-        prisma.comment.update({ where: { id: c.id }, data: { countLike: { decrement: 1 } } }),
-      ]);
-      return { status: 'dislike', commentLegacyId: c.legacyId, countLike: Math.max(0, c.countLike - 1) };
+
+    if (result.notify) {
+      notificationEvents.emit('comment.liked', {
+        commentId: c.id,
+        commentAuthorId: c.authorId,
+        actorId: memberId,
+      });
     }
-    await prisma.$transaction([
-      prisma.commentLike.create({ data: { commentId: c.id, memberId } }),
-      prisma.comment.update({ where: { id: c.id }, data: { countLike: { increment: 1 } } }),
-    ]);
-    notificationEvents.emit('comment.liked', {
-      commentId: c.id,
-      commentAuthorId: c.authorId,
-      actorId: memberId,
-    });
-    return { status: 'like', commentLegacyId: c.legacyId, countLike: c.countLike + 1 };
+    return { isLiked: result.isLiked, commentLegacyId: c.legacyId, countLike: result.countLike };
   }
 
   async create(memberId: string, dto: {

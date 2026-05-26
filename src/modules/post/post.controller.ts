@@ -89,7 +89,7 @@ export class PostController {
       rows.map((r) => r.id),
     );
 
-    const data = rows.map((row) => serializePost(row, liked.has(row.id) ? 'like' : 'dislike'));
+    const data = rows.map((row) => serializePost(row, liked.has(row.id)));
     return okPaginated(res, data, { page: p.page, perPage: p.perPage, total });
   };
 
@@ -110,7 +110,7 @@ export class PostController {
     if (!postId) throw new BadRequestException('postId required');
     const post = await this.postService.detail(postId, req.user.id);
     const liked = await this.postService.likedByMember(req.user.id, [post.id]);
-    return ok(res, serializePost(post, liked.has(post.id) ? 'like' : 'dislike'));
+    return ok(res, serializePost(post, liked.has(post.id)));
   };
 
   @ApiBearerAuth()
@@ -122,8 +122,8 @@ export class PostController {
     const postId = (req.body?.postId as string) ?? '';
     if (!postId) throw new BadRequestException('postId required');
     const result = await this.postService.toggleLike(req.user.id, postId);
-    // FE LikeModel: {status, commentId, countLike}. commentId is null for post-like.
-    return ok(res, { status: result.status, commentId: null, countLike: result.countLike });
+    // commentId always null for post-like (FE LikeModel parity).
+    return ok(res, { isLiked: result.isLiked, commentId: null, countLike: result.countLike });
   };
 
   @ApiBearerAuth()
