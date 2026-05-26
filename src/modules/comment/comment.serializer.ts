@@ -4,12 +4,8 @@ import { dateAgoString, timeAgoString } from '@/common/serializers/time-format';
 
 interface CommentWithAuthor extends Comment {
   author?: Member | null;
-  parent?: { legacyId: number | null } | null;
-  post?: { legacyId: number | null } | null;
 }
 
-// Tracks both `commentId` parent legacyId (FE replyId expects int) and the post
-// legacyId without forcing the caller to query each lookup separately.
 function parseMentions(content: string): string[] {
   const matches = content.match(/@[A-Za-z0-9_]+/g);
   return matches ? Array.from(new Set(matches.map((m) => m.slice(1)))) : [];
@@ -22,10 +18,10 @@ export function serializeComment(
   const mentions = parseMentions(c.content);
   return {
     // FE CommentModel — primary fields
-    commentId: c.legacyId ?? c.id,
-    replyId: c.parent?.legacyId ?? c.parentId ?? null,
-    postId: c.post?.legacyId ?? c.postId,
-    memberId: c.author?.legacyId ?? null,
+    commentId: c.id,
+    replyId: c.parentId ?? null,
+    postId: c.postId,
+    memberId: c.author?.id ?? null,
     memberName: c.author?.fullName ?? null,
     memberProfileImage: c.author?.avatarUrl ?? null,
     embed: null,

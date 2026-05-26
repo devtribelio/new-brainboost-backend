@@ -9,8 +9,7 @@ const MAX_CONTENT_CHARS = 5000;
 
 const commentInclude = {
   author: true,
-  parent: { select: { legacyId: true } },
-  post: { select: { legacyId: true, networkId: true } },
+  post: { select: { networkId: true } },
 } as const;
 
 function extractFirstUrl(content: string): string | null {

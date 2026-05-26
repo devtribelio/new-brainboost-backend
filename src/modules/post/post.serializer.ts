@@ -32,7 +32,7 @@ function buildPostTopic(t: Topic | null | undefined) {
   if (!t) return null;
   // FE PostTopicModel shape: `{topicId, topicName, topicType, topicIcon}`.
   return {
-    topicId: t.legacyId ?? t.id,
+    topicId: t.id,
     topicName: t.name,
     topicType: t.type,
     topicIcon: t.iconUrl,
@@ -43,7 +43,7 @@ function buildPostCreator(m: Member | null | undefined) {
   if (!m) return null;
   // FE PostCreatorModel: `{memberId, name, profileImage, profileCoverImage}`.
   return {
-    memberId: m.legacyId ?? m.id,
+    memberId: m.id,
     name: m.fullName,
     profileImage: m.avatarUrl,
     profileCoverImage: m.coverUrl,
@@ -55,15 +55,14 @@ export function serializePost(
   isLiked: boolean = false,
   opts: { viewerId?: string; isJoined?: boolean | null } = {},
 ): Record<string, unknown> {
-  const memberId = p.author?.legacyId ?? null;
+  const memberId = p.author?.id ?? null;
   const isAuthor = opts.viewerId != null && p.authorId === opts.viewerId;
   const baseUrl = process.env.PUBLIC_WEB_URL ?? 'https://brainboost.com';
-  const postSlug = p.legacyId ?? p.id;
-  const postUrl = `${baseUrl}/post/${postSlug}`;
+  const postUrl = `${baseUrl}/post/${p.id}`;
 
   return {
     // FE PostModel — primary fields
-    postId: p.legacyId ?? p.id,
+    postId: p.id,
     postContentData: buildPostContentData(p.content, p.excerpt),
     postType: p.postType,
     title: p.title,
@@ -106,7 +105,7 @@ export function serializePost(
     id: p.id,
     memberId,
     networkId: p.networkId,
-    topicId: p.topic?.legacyId ?? p.topicId,
+    topicId: p.topicId,
     countReplies: p.countReplies,
     viewCount: p.viewCount,
     videoUrl: p.videoUrl,
