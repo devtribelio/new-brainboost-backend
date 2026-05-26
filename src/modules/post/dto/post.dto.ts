@@ -19,8 +19,8 @@ class PostContentDataDto {
 }
 
 class PostTopicDto {
-  @ApiProperty({ example: 5 })
-  topicId!: number | string;
+  @ApiProperty({ format: 'uuid', example: 'topic-uuid-1234' })
+  topicId!: string;
 
   @ApiProperty({ example: 'React' })
   topicName!: string;
@@ -36,8 +36,8 @@ class PostTopicDto {
 }
 
 class PostCreatorDto {
-  @ApiProperty({ example: 123 })
-  memberId!: number | string;
+  @ApiProperty({ format: 'uuid', example: 'member-uuid-1234' })
+  memberId!: string;
 
   @ApiPropertyOptional({ nullable: true, example: 'Jane Doe' })
   name?: string | null;
@@ -65,8 +65,8 @@ class PostVideoDto {
  * Plus backend-native extras retained — FE legacy parser ignores unknown keys.
  */
 export class PostDto {
-  @ApiProperty({ example: 789 })
-  postId!: number | string;
+  @ApiProperty({ format: 'uuid', example: 'post-uuid-1234' })
+  postId!: string;
 
   @ApiProperty({ type: () => PostContentDataDto })
   postContentData!: PostContentDataDto;
@@ -128,8 +128,8 @@ export class PostDto {
   })
   audios!: unknown[];
 
-  @ApiPropertyOptional({ nullable: true, type: 'integer', example: 123 })
-  memberIdPost?: number | null;
+  @ApiPropertyOptional({ nullable: true, format: 'uuid', example: 'member-uuid-1234' })
+  memberIdPost?: string | null;
 
   @ApiPropertyOptional({
     nullable: true,
@@ -212,14 +212,14 @@ export class PostDto {
   @ApiProperty({ format: 'uuid', example: 'post-uuid-1234' })
   id!: string;
 
-  @ApiPropertyOptional({ nullable: true, type: 'integer', example: 123 })
-  memberId?: number | null;
+  @ApiPropertyOptional({ nullable: true, format: 'uuid', example: 'member-uuid-1234' })
+  memberId?: string | null;
 
   @ApiPropertyOptional({ nullable: true, format: 'uuid', example: 'network-uuid-1234' })
   networkId?: string | null;
 
-  @ApiPropertyOptional({ nullable: true, example: 1 })
-  topicId?: number | string | null;
+  @ApiPropertyOptional({ nullable: true, format: 'uuid', example: 'topic-uuid-1234' })
+  topicId?: string | null;
 
   @ApiProperty({ type: 'integer', example: 0 })
   countReplies!: number;

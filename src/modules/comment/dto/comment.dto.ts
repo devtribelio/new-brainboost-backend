@@ -7,17 +7,17 @@ import { MemberLiteDto } from '@/common/openapi/member.dto';
  * — FE legacy parser tolerates unknown keys.
  */
 export class CommentDto {
-  @ApiProperty({ example: 555 })
-  commentId!: number | string;
+  @ApiProperty({ format: 'uuid', example: 'comment-uuid-1234' })
+  commentId!: string;
 
-  @ApiPropertyOptional({ nullable: true, type: 'integer', example: 540 })
-  replyId?: number | string | null;
+  @ApiPropertyOptional({ nullable: true, format: 'uuid', example: 'comment-uuid-parent' })
+  replyId?: string | null;
 
-  @ApiProperty({ example: 12 })
-  postId!: number | string;
+  @ApiProperty({ format: 'uuid', example: 'post-uuid-1234' })
+  postId!: string;
 
-  @ApiPropertyOptional({ nullable: true, type: 'integer', example: 42 })
-  memberId?: number | string | null;
+  @ApiPropertyOptional({ nullable: true, format: 'uuid', example: 'member-uuid-1234' })
+  memberId?: string | null;
 
   @ApiPropertyOptional({ nullable: true, example: 'Jane Doe' })
   memberName?: string | null;
