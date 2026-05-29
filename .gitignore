@@ -23,3 +23,6 @@ ruvector.db
 # `rewrite` phase on other environments (dev/staging) with the same Bunny library.
 scripts/media-guids.json
 scripts/media-copy-failures.json
+
+# TS incremental build info
+*.tsbuildinfo
