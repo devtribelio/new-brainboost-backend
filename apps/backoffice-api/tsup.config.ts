@@ -9,6 +9,9 @@ export default defineConfig({
   clean: true,
   sourcemap: true,
   tsconfig: 'tsconfig.build.json',
-  // Bundle workspace packages; keep node_modules deps external.
+  // Bundle workspace packages; keep node_modules deps external. pino + its
+  // worker-thread transports (thread-stream/pino-pretty) MUST stay external —
+  // bundling them breaks the worker file path resolution at runtime.
   noExternal: [/^@bb\//],
+  external: ['pino', 'pino-pretty', 'thread-stream'],
 });
