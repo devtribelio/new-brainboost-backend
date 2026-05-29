@@ -66,7 +66,8 @@ export class PostController {
     type: 'string',
     required: false,
     example: 'pinned',
-    description: 'pinned | recent-engagement | curated. Unknown values are no-op.',
+    description:
+      'pinned | recent-engagement | curated | admin (post admin) | mine (post saya). Unknown values are no-op.',
   })
   @ApiResponse({ status: 200, type: () => PostDto, isArray: true, envelope: 'paginated' })
   list = async (req: AuthenticatedRequest, res: Response) => {

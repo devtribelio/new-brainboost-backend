@@ -74,6 +74,10 @@ export class PostService {
     if (q.authorId) where.authorId = q.authorId;
     if (q.filter === 'pinned') where.isPinned = true;
     if (q.filter === 'curated') where.isCurated = true;
+    // "Post admin" — posts flagged isAdminPost.
+    if (q.filter === 'admin') where.isAdminPost = true;
+    // "Post saya" — viewer's own posts. Overrides authorId/memberId param.
+    if (q.filter === 'mine' && q.viewerId) where.authorId = q.viewerId;
 
     if (q.networkId) {
       where.networkId = q.networkId;

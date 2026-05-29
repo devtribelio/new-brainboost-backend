@@ -95,6 +95,7 @@ export function serializePost(
     canDelete: isAuthor,
     pinned: p.isPinned ? 1 : 0,
     isCurated: p.isCurated,
+    isAdminPost: p.isAdminPost,
     havePolling: 0,
     creator: buildPostCreator(p.author),
     isJoined: opts.isJoined ?? null,
