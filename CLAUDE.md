@@ -38,38 +38,45 @@ Operational instructions for working on this repo. Keep responses short; read de
 
 ## 2. Repository Structure
 
+> **pnpm monorepo** (ADR-0001, Accepted). The old single `src/` tree was split into
+> shared `packages/*` + deployable `apps/*`. Repo dir + remote stay
+> `new-brainboost-backend` (rename to `bb-platform` deferred). `node-linker=hoisted`
+> (`.npmrc`). Dev: `pnpm dev:mobile` / `dev:backoffice` / `dev:admin` (tsx
+> `--conditions=development` → resolves `@bb/*` to package source). Prod build: `tsup`
+> per app (bundles `@/*` + `@bb/*`). Tests: `pnpm test` (vitest workspace, real Postgres).
+
 ```
-src/
-  app.ts                 # Express wiring (helmet, cors, routes, swagger, errors)
-  main.ts                # bootstrap + graceful shutdown
-  core/
-    module.interface.ts  # AppModule contract (name, prefix, routes)
-    register-modules.ts  # Module list — add modules HERE
-  common/
-    exceptions/          # HttpException + 400/401/403/404 subclasses
-    interfaces/          # AuthenticatedRequest, AuthenticatedUser
-    middlewares/         # auth.middleware, validation.middleware, error.middleware
-    openapi/             # registry, route-binder, decorators, swagger.middleware
-    serializers/         # response envelope shapers
-    services/            # cross-module services (mailer, jwt, etc.)
-    utils/               # response.util, pagination.util, jwt.util, async-handler
-  config/                # env.ts (required()), logger.ts, prisma.ts
-  modules/
-    <feature>/
-      <feature>.module.ts      # AppModule export (name, prefix, routes)
-      <feature>.routes.ts      # bindRoute(...) entries
-      <feature>.controller.ts  # thin: parse → service → ok/fail
-      <feature>.service.ts     # business logic + Prisma calls
-      dto/*.dto.ts             # class-validator DTOs
-prisma/
-  schema.prisma          # all models (UUID v7 PKs, `legacyId Int?` mobile-compat)
-  migrations/            # schema-driven
-  seeds/
-tests/                   # *.spec.ts (vitest)
-views/                   # EJS for /admin
+packages/
+  db/        @bb/db        # Prisma client singleton + re-export @prisma/client (dep-free)
+  common/    @bb/common    # exceptions, interfaces, middlewares, openapi, serializers,
+                           #   services (mailer/otp/settings/system-config/xendit*),
+                           #   utils, events, config/{env,logger}, core/module.interface
+  domain/    @bb/domain    # shared business services + rules (NO Express):
+                           #   commerce, affiliate, notification, voucher, post.service,
+                           #   comment.service, jobs/, registerDomainListeners()
+apps/
+  mobile-api/     :3000    # member-facing API. app.ts/main.ts/core/register-modules +
+                           #   modules/<feature>/{module,routes,controller,dto,serializer}.
+                           #   service layer of shared features lives in @bb/domain.
+  backoffice-api/ :3001    # JSON product-ops API (scaffold; see backoffice-port-plan.md)
+  admin-ejs/      :3002    # EJS internal sysadmin (views/, public/) + modules/admin
+prisma/                    # SINGLE source of truth — schema.prisma (UUID v7, legacyId Int?),
+                           #   migrations/, seeds/  (root-level, shared by all apps)
+tests/setup.ts             # shared vitest setup; specs live in apps/*/tests/
 ```
 
+Each consumer maps `@bb/*` paths to built `dist` for `tsc` typecheck; node/tsx/vitest
+resolve via package `exports`. Add a new mobile module under `apps/mobile-api/src/modules/`
+and register it in that app's `core/register-modules.ts`.
+
 ### Legacy → New module map
+
+> Path note (post ADR-0001): `src/modules/<feature>/` in the rows below now lives at
+> **`apps/mobile-api/src/modules/<feature>/`**; `src/modules/admin/` → **`apps/admin-ejs/`**;
+> `src/modules/backoffice/` → **`apps/backoffice-api/`**. Service/rule layer of
+> commerce/affiliate/notification + post/comment services moved to **`packages/domain/`**;
+> `src/common/*` + `src/config/{env,logger}` → **`packages/common/`**; prisma client →
+> **`packages/db/`**.
 
 | Legacy path | New module | Notes |
 |---|---|---|
@@ -202,6 +209,8 @@ For complete rule extraction per module, see `docs/legacy-analysis.md`.
 ---
 
 ## 7. Rewrite Progress Tracking
+
+- [x] **monorepo extraction** (ADR-0001) — pnpm workspace: `packages/{db,common,domain}` + `apps/{mobile-api,backoffice-api,admin-ejs}`. All 238 tests green on new layout. Repo rename to `bb-platform` deferred.
 
 Module status (one-line summary; details in `docs/rewrite-progress.md`):
 

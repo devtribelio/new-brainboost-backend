@@ -1,6 +1,6 @@
 # ADR-0001: Monorepo split for backoffice
 
-- **Status:** Proposed
+- **Status:** Accepted (implemented 2026-05-29; repo rename deferred)
 - **Date:** 2026-05-26
 - **Deciders:** brainboost@tribelio.com
 - **Related:** [`docs/backoffice-port-plan.md`](../backoffice-port-plan.md)
@@ -162,3 +162,36 @@ Tracked separately as the migration script. Steps:
 12. Rename `bb-backend-new` → `bb-platform`.
 
 Sprint 1 backoffice work (per `docs/backoffice-port-plan.md` §4) starts **after** monorepo extraction lands.
+
+## Implementation addendum (2026-05-29)
+
+Extraction landed on branch `chore/monorepo-split` (10 commits, one per step). Deviations
+and decisions made during execution:
+
+- **Repo rename deferred** (step 12). Dir + remote stay `new-brainboost-backend`; rename
+  to `bb-platform` is a separate later step (only `package.json` `name` set to `bb-platform`).
+- **`packages/domain` includes `post.service` + `comment.service`** (not just commerce/
+  affiliate/notification/voucher): admin-ejs curation + reply consume them, so by the
+  one-direction sharing rule they are domain. `report.service` stayed in mobile-api (single
+  consumer). `payment.service` takes a domain `CreatePaymentInput` instead of importing the
+  HTTP `PayDto` (the lone domain→app coupling found).
+- **`node-linker=hoisted`** (`.npmrc`): npm-style flat resolution so per-app `package.json`
+  need not enumerate every transitive dep. Trades strict isolation for migration velocity;
+  revisit if Docker prune size matters.
+- **Build pipeline = `tsup` per app**, not `tsc + tsc-alias`. node `exports` subpaths are
+  unreadable under `moduleResolution: node` (+commonjs), and tsc-alias would wrongly rewrite
+  `@bb/*`. tsup (esbuild) bundles `@/*` + `@bb/*`, externalizes node_modules; `@swc/core`
+  added for decorator-metadata parity with tsc. `tsconfig.build.json` drops the `@bb` paths
+  so esbuild resolves them via node `exports`.
+- **Typecheck**: consumer `tsconfig` maps `@bb/*` → built `dist/*.d.ts` (node resolution
+  can't read exports subpaths); verify via `tsc --noEmit` + vitest, not the emit pipeline.
+- **Tests**: per-app `vitest.config.ts` resolves `@bb/*` to package **source** and dedupes
+  `class-transformer`/`class-validator`/`reflect-metadata` — loading `@bb/common` from dist
+  while app DTOs load from src created two decorator-metadata storages, silently dropping
+  `@Type` query coercion.
+- **In-process listeners per app**: domain event listeners are registered in each app that
+  emits (EventEmitter does not cross process boundaries). Cross-process notification delivery
+  for admin-/backoffice-originated events is a follow-up (was implicit single-process before).
+- **Docker/CI authored but not validated locally** (no Docker in dev env).
+
+All 40 test files / 238 tests green on the new layout.
