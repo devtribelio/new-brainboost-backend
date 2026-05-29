@@ -7,7 +7,6 @@ import morgan from 'morgan';
 import cookieParser from 'cookie-parser';
 import { errorHandler, notFoundHandler } from '@bb/common/middlewares/error.middleware';
 import { registerModules } from '@/core/register-modules';
-import { adminRoutes } from '@/modules/admin/admin.routes';
 import { mountSwagger } from '@bb/common/openapi/swagger.middleware';
 import { ok } from '@bb/common/utils/response.util';
 import { env } from '@bb/common/config/env';
@@ -49,14 +48,10 @@ export function buildApp(): Express {
     app.use(morgan(env.isProduction ? 'combined' : 'dev'));
   }
 
-  app.set('view engine', 'ejs');
-  app.set('views', path.join(process.cwd(), 'views'));
-  app.use('/admin/static', express.static(path.join(process.cwd(), 'public/admin')));
   app.use('/static/temporary', express.static(path.resolve(process.cwd(), env.upload.tempDir)));
 
   app.get('/health', (_req, res) => ok(res, { status: 'ok', service: env.appName }));
 
-  app.use('/admin', adminRoutes());
   app.use('/api', registerModules());
 
   // OpenAPI / Swagger UI — mounted AFTER all module routes so the
