@@ -5,8 +5,8 @@ import {
   BadRequestException,
   NotFoundException,
   UnauthorizedException,
-} from '@/common/exceptions';
-import { otpService } from '@/common/services/otp.service';
+} from '@bb/common/exceptions';
+import { otpService } from '@bb/common/services/otp.service';
 import type { PreRegistrationDto } from './dto/pre-registration.dto';
 import type { LogoutDto } from './dto/logout.dto';
 import type { ChangePasswordDto } from './dto/change-password.dto';

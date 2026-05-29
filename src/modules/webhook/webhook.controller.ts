@@ -1,5 +1,5 @@
 import type { Request, Response } from 'express';
-import { ApiBody, ApiOperation, ApiTags } from '@/common/openapi/decorators';
+import { ApiBody, ApiOperation, ApiTags } from '@bb/common/openapi/decorators';
 import type { XenditWebhookHandler } from './xendit.handler';
 import { XenditInvoiceCallbackDto } from './dto/xendit-callback.dto';
 

@@ -9,7 +9,7 @@ vi.mock('google-auth-library', () => ({
 }));
 
 import { buildApp } from '../src/app';
-import { prisma } from '../src/config/prisma';
+import { prisma } from '@bb/db';
 
 const app = buildApp();
 

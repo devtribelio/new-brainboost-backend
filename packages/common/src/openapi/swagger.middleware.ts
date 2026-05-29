@@ -1,7 +1,7 @@
 import type { Express, Request, Response } from 'express';
 import swaggerUi from 'swagger-ui-express';
 import { buildOpenApiDocument } from './builder';
-import { env } from '@/config/env';
+import { env } from '@bb/common/config/env';
 
 export function mountSwagger(app: Express, prefix = '/api/docs'): void {
   // Build once after all module routes have been registered.

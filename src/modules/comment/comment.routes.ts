@@ -1,8 +1,8 @@
 import { Router } from 'express';
 import { CommentController } from './comment.controller';
 import { CommentService } from './comment.service';
-import { authGuard, optionalAuthGuard } from '@/common/middlewares/auth.middleware';
-import { bindRoute } from '@/common/openapi/route-binder';
+import { authGuard, optionalAuthGuard } from '@bb/common/middlewares/auth.middleware';
+import { bindRoute } from '@bb/common/openapi/route-binder';
 
 export function commentRoutes(): Router {
   const router = Router();

@@ -2,16 +2,16 @@ import bcrypt from 'bcryptjs';
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import passport from 'passport';
 import { prisma } from '@bb/db';
-import { env } from '@/config/env';
+import { env } from '@bb/common/config/env';
 import {
   signAccessToken,
   signAnonAccessToken,
   signRefreshToken,
   verifyRefreshToken,
-} from '@/common/utils/jwt.util';
-import { BadRequestException, NotFoundException, UnauthorizedException } from '@/common/exceptions';
-import { assertUuid } from '@/common/utils/uuid.util';
-import { otpService } from '@/common/services/otp.service';
+} from '@bb/common/utils/jwt.util';
+import { BadRequestException, NotFoundException, UnauthorizedException } from '@bb/common/exceptions';
+import { assertUuid } from '@bb/common/utils/uuid.util';
+import { otpService } from '@bb/common/services/otp.service';
 import type { GoogleIdTokenPayload } from './social/google-verifier';
 import type { LoginDto } from './dto/login.dto';
 import type { RegisterDto } from './dto/register.dto';
@@ -24,7 +24,7 @@ import type {
 import type { RegisterByPhoneDto } from './dto/register-by-phone.dto';
 import type { RequestVerificationPhoneDto } from './dto/request-verification-phone.dto';
 import type { ValidateOtpPhoneDto } from './dto/validate-otp-phone.dto';
-import { logger } from '@/config/logger';
+import { logger } from '@bb/common/config/logger';
 
 interface TokenBundle {
   access_token: string;

@@ -1,5 +1,5 @@
 import { Router, type Response } from 'express';
-import { asyncHandler } from '@/common/utils/async-handler';
+import { asyncHandler } from '@bb/common/utils/async-handler';
 import { PostService } from '@/modules/post/post.service';
 import { CommentService } from '@/modules/comment/comment.service';
 import type { AdminRequest } from './admin.types';

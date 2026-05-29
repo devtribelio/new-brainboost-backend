@@ -1,7 +1,7 @@
 import { prisma } from '@bb/db';
-import { logger } from '@/config/logger';
-import { BadRequestException } from '@/common/exceptions';
-import { commerceEvents } from '@/common/events/commerce-events';
+import { logger } from '@bb/common/config/logger';
+import { BadRequestException } from '@bb/common/exceptions';
+import { commerceEvents } from '@bb/common/events/commerce-events';
 import { generateOrderCode } from '@/modules/commerce/utils/generate-order-code';
 import { attributionService } from '@/modules/affiliate/attribution.service';
 import { COMMISSION_STATUS } from '@/modules/affiliate/constants';

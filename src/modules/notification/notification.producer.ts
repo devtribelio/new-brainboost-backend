@@ -1,5 +1,5 @@
 import { prisma } from '@bb/db';
-import { logger } from '@/config/logger';
+import { logger } from '@bb/common/config/logger';
 import type { ActionLabel, NotifGroup } from './action-labels';
 import { fcmService } from './fcm.service';
 

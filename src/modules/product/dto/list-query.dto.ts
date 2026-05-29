@@ -1,6 +1,6 @@
 import { IsIn, IsInt, IsOptional, IsString, MaxLength, Min } from 'class-validator';
 import { Type } from 'class-transformer';
-import { ApiPropertyOptional } from '@/common/openapi/decorators';
+import { ApiPropertyOptional } from '@bb/common/openapi/decorators';
 
 export const OWNERSHIP_VALUES = ['purchased', 'not_purchased'] as const;
 export type Ownership = (typeof OWNERSHIP_VALUES)[number];

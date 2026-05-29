@@ -1,7 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from './decorators';
 
 /**
- * Standard response shapes returned by `@/common/utils/response.util`.
+ * Standard response shapes returned by `@bb/common/utils/response.util`.
  * Re-used across controllers as `@ApiResponse({ type: () => ... })`.
  */
 

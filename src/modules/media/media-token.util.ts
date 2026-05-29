@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
-import { env } from '@/config/env';
-import { UnauthorizedException } from '@/common/exceptions';
+import { env } from '@bb/common/config/env';
+import { UnauthorizedException } from '@bb/common/exceptions';
 
 /**
  * Opaque media stream token.

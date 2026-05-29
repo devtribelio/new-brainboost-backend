@@ -1,7 +1,7 @@
 import { Router } from 'express';
-import type { AppModule } from './module.interface';
-import { logger } from '@/config/logger';
-import { withModulePrefix } from '@/common/openapi/registry';
+import type { AppModule } from '@bb/common/core/module.interface';
+import { logger } from '@bb/common/config/logger';
+import { withModulePrefix } from '@bb/common/openapi/registry';
 
 import { AuthModule } from '@/modules/auth/auth.module';
 import { AccountModule } from '@/modules/account/account.module';

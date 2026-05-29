@@ -1,5 +1,5 @@
 import type { Router, RequestHandler } from 'express';
-import { asyncHandler } from '@/common/utils/async-handler';
+import { asyncHandler } from '@bb/common/utils/async-handler';
 import { registerRoute } from './registry';
 import { REQUIRES_BEARER_AUTH, type HttpMethod } from './types';
 

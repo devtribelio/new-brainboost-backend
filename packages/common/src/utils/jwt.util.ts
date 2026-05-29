@@ -1,6 +1,6 @@
 import jwt, { type SignOptions, type VerifyOptions } from 'jsonwebtoken';
-import { env } from '@/config/env';
-import { UnauthorizedException } from '@/common/exceptions';
+import { env } from '@bb/common/config/env';
+import { UnauthorizedException } from '@bb/common/exceptions';
 
 /** Pinned signing/verification algorithm — guards against alg-confusion (alg:none / RS256→HS256). */
 const ALGORITHM = 'HS256' as const;

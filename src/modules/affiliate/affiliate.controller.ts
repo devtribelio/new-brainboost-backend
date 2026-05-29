@@ -4,12 +4,12 @@ import type { AffiliatorService } from './affiliator.service';
 import type { EnrollmentService } from './enrollment.service';
 import type { DisbursementService } from './disbursement.service';
 import { VisitService } from './visit.service';
-import { ok, okCreated, okPaginated } from '@/common/utils/response.util';
-import { UnauthorizedException, BadRequestException } from '@/common/exceptions';
-import type { AuthenticatedRequest } from '@/common/interfaces/authenticated-request';
+import { ok, okCreated, okPaginated } from '@bb/common/utils/response.util';
+import { UnauthorizedException, BadRequestException } from '@bb/common/exceptions';
+import type { AuthenticatedRequest } from '@bb/common/interfaces/authenticated-request';
 import type { AffiliateBased } from './constants';
 import { AFFILIATE_COOKIE_NAME, AFFILIATE_COOKIE_DAYS_DEFAULT } from './constants';
-import { settingsService, SETTING_KEYS } from '@/common/services/settings.service';
+import { settingsService, SETTING_KEYS } from '@bb/common/services/settings.service';
 import {
   ApiBearerAuth,
   ApiBody,
@@ -17,7 +17,7 @@ import {
   ApiQuery,
   ApiResponse,
   ApiTags,
-} from '@/common/openapi/decorators';
+} from '@bb/common/openapi/decorators';
 import { LogAttributionDto, LogVisitDto, SetModeDto } from './dto/affiliate-request.dto';
 import {
   AffiliateCommissionDto,

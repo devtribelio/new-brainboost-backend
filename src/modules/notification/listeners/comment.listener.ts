@@ -1,6 +1,6 @@
 import { prisma } from '@bb/db';
-import { logger } from '@/config/logger';
-import { notificationEvents } from '@/common/events/notification-events';
+import { logger } from '@bb/common/config/logger';
+import { notificationEvents } from '@bb/common/events/notification-events';
 import { NotificationProducer } from '../notification.producer';
 import { RecipientResolver } from '../recipient.resolver';
 import { resolveMentionMemberIds } from '../mentions.util';

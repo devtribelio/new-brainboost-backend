@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } 
 import { Readable } from 'node:stream';
 import request from 'supertest';
 import { buildApp } from '../src/app';
-import { prisma } from '../src/config/prisma';
+import { prisma } from '@bb/db';
 import { signMediaToken } from '../src/modules/media/media-token.util';
 import * as bcrypt from 'bcryptjs';
 

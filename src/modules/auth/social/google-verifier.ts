@@ -1,6 +1,6 @@
 import { OAuth2Client } from 'google-auth-library';
-import { env } from '@/config/env';
-import { BadRequestException, UnauthorizedException } from '@/common/exceptions';
+import { env } from '@bb/common/config/env';
+import { BadRequestException, UnauthorizedException } from '@bb/common/exceptions';
 
 export interface GoogleIdTokenPayload {
   sub: string;

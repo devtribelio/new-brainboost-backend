@@ -1,4 +1,4 @@
-import { ApiProperty } from '@/common/openapi/decorators';
+import { ApiProperty } from '@bb/common/openapi/decorators';
 
 export class UploadedFileDto {
   @ApiProperty({ example: 'photo.jpg', description: 'Original filename from the client' })

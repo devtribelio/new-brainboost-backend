@@ -1,7 +1,7 @@
 import { GoogleAuth } from 'google-auth-library';
 import { prisma } from '@bb/db';
-import { env } from '@/config/env';
-import { logger } from '@/config/logger';
+import { env } from '@bb/common/config/env';
+import { logger } from '@bb/common/config/logger';
 
 interface FcmPayload {
   title: string;

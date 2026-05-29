@@ -18,7 +18,7 @@ const ORIG = {
   BUNNY_STREAM_CDN_HOST: process.env.BUNNY_STREAM_CDN_HOST,
 };
 let app: Express;
-let prisma: typeof import('../src/config/prisma').prisma;
+let prisma: typeof import('@bb/db').prisma;
 let signMediaToken: typeof import('../src/modules/media/media-token.util').signMediaToken;
 
 const suffix = `${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
@@ -47,7 +47,7 @@ beforeAll(async () => {
   process.env.BUNNY_STREAM_CDN_HOST = 'vz-test-c.b-cdn.net';
 
   app = (await import('../src/app')).buildApp();
-  prisma = (await import('../src/config/prisma')).prisma;
+  prisma = (await import('@bb/db')).prisma;
   signMediaToken = (await import('../src/modules/media/media-token.util')).signMediaToken;
 
   enrolledEmail = `media-c-enrolled-${suffix}@test.local`;

@@ -1,8 +1,8 @@
 import bcrypt from 'bcryptjs';
 import { randomInt } from 'node:crypto';
 import { prisma } from '@bb/db';
-import { BadRequestException } from '@/common/exceptions';
-import { logger } from '@/config/logger';
+import { BadRequestException } from '@bb/common/exceptions';
+import { logger } from '@bb/common/config/logger';
 import { mailer } from './mailer.service';
 
 const MAX_OTP_ATTEMPTS = 5;

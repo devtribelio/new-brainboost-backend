@@ -1,6 +1,6 @@
 import type { Product } from '@prisma/client';
 import { signMediaToken } from '@/modules/media/media-token.util';
-import { env } from '@/config/env';
+import { env } from '@bb/common/config/env';
 
 /**
  * Map product `type` to a human label per legacy convention.

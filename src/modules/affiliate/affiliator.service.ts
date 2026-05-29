@@ -1,6 +1,6 @@
 import { prisma } from '@bb/db';
-import { logger } from '@/config/logger';
-import { NotFoundException, BadRequestException } from '@/common/exceptions';
+import { logger } from '@bb/common/config/logger';
+import { NotFoundException, BadRequestException } from '@bb/common/exceptions';
 import { assignMemberAffiliateCode } from './utils/code-generator';
 import {
   AFFILIATE_BASED,

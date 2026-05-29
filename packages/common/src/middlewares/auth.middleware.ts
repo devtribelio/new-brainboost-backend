@@ -1,9 +1,9 @@
 import type { Response, NextFunction, RequestHandler } from 'express';
-import { UnauthorizedException } from '@/common/exceptions';
-import { verifyAccessToken } from '@/common/utils/jwt.util';
-import type { AuthenticatedRequest } from '@/common/interfaces/authenticated-request';
+import { UnauthorizedException } from '@bb/common/exceptions';
+import { verifyAccessToken } from '@bb/common/utils/jwt.util';
+import type { AuthenticatedRequest } from '@bb/common/interfaces/authenticated-request';
 import { prisma } from '@bb/db';
-import { REQUIRES_BEARER_AUTH } from '@/common/openapi/types';
+import { REQUIRES_BEARER_AUTH } from '@bb/common/openapi/types';
 
 async function assertSessionActive(sid: string | undefined): Promise<void> {
   if (!sid) {

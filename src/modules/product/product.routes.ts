@@ -1,9 +1,9 @@
 import { Router } from 'express';
 import { ProductController } from './product.controller';
 import { ProductService } from './product.service';
-import { authGuard, optionalAuthGuard } from '@/common/middlewares/auth.middleware';
-import { bindRoute } from '@/common/openapi/route-binder';
-import { validateDto } from '@/common/middlewares/validation.middleware';
+import { authGuard, optionalAuthGuard } from '@bb/common/middlewares/auth.middleware';
+import { bindRoute } from '@bb/common/openapi/route-binder';
+import { validateDto } from '@bb/common/middlewares/validation.middleware';
 import { ListProductsQueryDto } from './dto/list-query.dto';
 
 export function productRoutes(): Router {

@@ -1,5 +1,5 @@
 import { IsIn, IsNotEmpty, IsOptional, IsString, MinLength, ValidateIf } from 'class-validator';
-import { ApiProperty, ApiPropertyOptional } from '@/common/openapi/decorators';
+import { ApiProperty, ApiPropertyOptional } from '@bb/common/openapi/decorators';
 
 export class LoginDto {
   @ApiProperty({

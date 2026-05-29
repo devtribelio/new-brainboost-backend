@@ -1,7 +1,7 @@
 import type { Request, Response, NextFunction, RequestHandler } from 'express';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
-import { BadRequestException } from '@/common/exceptions';
+import { BadRequestException } from '@bb/common/exceptions';
 
 type ClassConstructor<T> = new (...args: unknown[]) => T;
 type Source = 'body' | 'query' | 'params';

@@ -3,16 +3,16 @@ import type { Request, Response } from 'express';
 import { MediaService } from './media.service';
 import { MEDIA_RESOLUTIONS, type MediaResolution } from './dto/media.dto';
 import { verifyMediaToken } from './media-token.util';
-import { BadRequestException, UnauthorizedException } from '@/common/exceptions';
-import type { AuthenticatedRequest } from '@/common/interfaces/authenticated-request';
+import { BadRequestException, UnauthorizedException } from '@bb/common/exceptions';
+import type { AuthenticatedRequest } from '@bb/common/interfaces/authenticated-request';
 import {
   ApiOperation,
   ApiQuery,
   ApiResponse,
   ApiTags,
-} from '@/common/openapi/decorators';
-import { env } from '@/config/env';
-import { logger } from '@/config/logger';
+} from '@bb/common/openapi/decorators';
+import { env } from '@bb/common/config/env';
+import { logger } from '@bb/common/config/logger';
 
 /** Upstream response headers relayed verbatim to the client. */
 const RELAYED_HEADERS = [

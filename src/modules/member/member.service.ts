@@ -1,6 +1,6 @@
 import { prisma } from '@bb/db';
-import { NotFoundException } from '@/common/exceptions';
-import { buildSystemConfig } from '@/common/services/system-config.service';
+import { NotFoundException } from '@bb/common/exceptions';
+import { buildSystemConfig } from '@bb/common/services/system-config.service';
 
 interface FindByIdOptions {
   latitude?: number;

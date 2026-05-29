@@ -1,8 +1,8 @@
 import { Router } from 'express';
 import { ReplyController } from './reply.controller';
 import { ReplyService } from './reply.service';
-import { optionalAuthGuard } from '@/common/middlewares/auth.middleware';
-import { bindRoute } from '@/common/openapi/route-binder';
+import { optionalAuthGuard } from '@bb/common/middlewares/auth.middleware';
+import { bindRoute } from '@bb/common/openapi/route-binder';
 
 export function replyRoutes(): Router {
   const router = Router();

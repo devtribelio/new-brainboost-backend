@@ -1,5 +1,5 @@
 import type { Member } from '@prisma/client';
-import { serializeMember } from '@/common/serializers/member-lite.serializer';
+import { serializeMember } from '@bb/common/serializers/member-lite.serializer';
 
 /**
  * Full member shape — legacy NetworkMember/Member fields used by mobile.

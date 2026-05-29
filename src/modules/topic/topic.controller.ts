@@ -1,10 +1,10 @@
 import type { Response } from 'express';
 import { TopicService } from './topic.service';
-import { ok, okPaginated } from '@/common/utils/response.util';
-import { BadRequestException, UnauthorizedException } from '@/common/exceptions';
-import { parsePagination } from '@/common/utils/pagination.util';
+import { ok, okPaginated } from '@bb/common/utils/response.util';
+import { BadRequestException, UnauthorizedException } from '@bb/common/exceptions';
+import { parsePagination } from '@bb/common/utils/pagination.util';
 import { serializeTopic } from './topic.serializer';
-import type { AuthenticatedRequest } from '@/common/interfaces/authenticated-request';
+import type { AuthenticatedRequest } from '@bb/common/interfaces/authenticated-request';
 import {
   ApiBearerAuth,
   ApiBody,
@@ -12,7 +12,7 @@ import {
   ApiQuery,
   ApiResponse,
   ApiTags,
-} from '@/common/openapi/decorators';
+} from '@bb/common/openapi/decorators';
 import { TopicDto, TopicSubscribeBodyDto, TopicSubscribeResultDto } from './dto/topic.dto';
 
 @ApiTags('Topic')

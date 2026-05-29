@@ -1,5 +1,5 @@
 import { IsIn, IsOptional, IsString } from 'class-validator';
-import { ApiProperty, ApiPropertyOptional } from '@/common/openapi/decorators';
+import { ApiProperty, ApiPropertyOptional } from '@bb/common/openapi/decorators';
 
 /** Allowed Bunny Stream rendition heights. */
 export const MEDIA_RESOLUTIONS = ['360p', '480p', '720p'] as const;

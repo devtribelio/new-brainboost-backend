@@ -1,14 +1,14 @@
 import type { Response } from 'express';
 import { CommissionService } from './commission.service';
-import { ok } from '@/common/utils/response.util';
-import { UnauthorizedException } from '@/common/exceptions';
-import type { AuthenticatedRequest } from '@/common/interfaces/authenticated-request';
+import { ok } from '@bb/common/utils/response.util';
+import { UnauthorizedException } from '@bb/common/exceptions';
+import type { AuthenticatedRequest } from '@bb/common/interfaces/authenticated-request';
 import {
   ApiBearerAuth,
   ApiOperation,
   ApiResponse,
   ApiTags,
-} from '@/common/openapi/decorators';
+} from '@bb/common/openapi/decorators';
 import { CommissionSummaryDto } from './dto/commission.dto';
 
 @ApiTags('Commission')

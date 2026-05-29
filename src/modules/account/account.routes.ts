@@ -1,9 +1,9 @@
 import { Router } from 'express';
 import { AccountController } from './account.controller';
 import { AccountService } from './account.service';
-import { authGuard, authGuardLenient } from '@/common/middlewares/auth.middleware';
-import { validateDto } from '@/common/middlewares/validation.middleware';
-import { bindRoute } from '@/common/openapi/route-binder';
+import { authGuard, authGuardLenient } from '@bb/common/middlewares/auth.middleware';
+import { validateDto } from '@bb/common/middlewares/validation.middleware';
+import { bindRoute } from '@bb/common/openapi/route-binder';
 import { PreRegistrationDto } from './dto/pre-registration.dto';
 import { LogoutDto } from './dto/logout.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';

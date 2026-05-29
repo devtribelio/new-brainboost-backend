@@ -1,9 +1,9 @@
 import { Router } from 'express';
 import { MediaController } from './media.controller';
 import { MediaService } from './media.service';
-import { optionalAuthGuard } from '@/common/middlewares/auth.middleware';
-import { mediaDownloadRateLimiter } from '@/common/middlewares/rate-limit.middleware';
-import { bindRoute } from '@/common/openapi/route-binder';
+import { optionalAuthGuard } from '@bb/common/middlewares/auth.middleware';
+import { mediaDownloadRateLimiter } from '@bb/common/middlewares/rate-limit.middleware';
+import { bindRoute } from '@bb/common/openapi/route-binder';
 
 /**
  * Media proxy routes — mounted under `/api/member`.

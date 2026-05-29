@@ -1,5 +1,5 @@
 import { IsString, IsUUID } from 'class-validator';
-import { ApiProperty } from '@/common/openapi/decorators';
+import { ApiProperty } from '@bb/common/openapi/decorators';
 
 /**
  * Create payment for an existing PENDING CommerceTransaction.

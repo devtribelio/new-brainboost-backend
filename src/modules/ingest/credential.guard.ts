@@ -1,5 +1,5 @@
 import type { Request, RequestHandler } from 'express';
-import { UnauthorizedException } from '@/common/exceptions';
+import { UnauthorizedException } from '@bb/common/exceptions';
 import { credentialService, type VerifiedCredential } from './credential.service';
 
 export interface CredentialedRequest extends Request {

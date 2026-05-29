@@ -1,14 +1,14 @@
 import type { Request, Response } from 'express';
 import { ReportService } from './report.service';
-import { ok, okCreated } from '@/common/utils/response.util';
-import { BadRequestException, UnauthorizedException } from '@/common/exceptions';
-import type { AuthenticatedRequest } from '@/common/interfaces/authenticated-request';
+import { ok, okCreated } from '@bb/common/utils/response.util';
+import { BadRequestException, UnauthorizedException } from '@bb/common/exceptions';
+import type { AuthenticatedRequest } from '@bb/common/interfaces/authenticated-request';
 import {
   ApiBearerAuth,
   ApiOperation,
   ApiResponse,
   ApiTags,
-} from '@/common/openapi/decorators';
+} from '@bb/common/openapi/decorators';
 import { ReportCategoryDto, ReportResultDto } from './dto/report.dto';
 
 @ApiTags('Report')

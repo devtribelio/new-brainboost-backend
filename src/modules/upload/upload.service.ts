@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { extname } from 'node:path';
-import { env } from '@/config/env';
-import { BadRequestException } from '@/common/exceptions';
+import { env } from '@bb/common/config/env';
+import { BadRequestException } from '@bb/common/exceptions';
 
 const BLOCKED_EXTENSIONS = new Set([
   '.exe', '.bat', '.cmd', '.com', '.cpl', '.dll', '.scr', '.msi', '.msp', '.mst',

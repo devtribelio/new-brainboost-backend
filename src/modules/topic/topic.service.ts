@@ -1,7 +1,7 @@
 import { prisma } from '@bb/db';
-import { BadRequestException, NotFoundException } from '@/common/exceptions';
-import type { PaginationParams } from '@/common/utils/pagination.util';
-import { assertUuid } from '@/common/utils/uuid.util';
+import { BadRequestException, NotFoundException } from '@bb/common/exceptions';
+import type { PaginationParams } from '@bb/common/utils/pagination.util';
+import { assertUuid } from '@bb/common/utils/uuid.util';
 
 interface TopicListQuery {
   keyword?: string;

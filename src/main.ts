@@ -1,7 +1,7 @@
 import 'reflect-metadata';
 import { buildApp } from './app';
-import { env } from './config/env';
-import { logger } from './config/logger';
+import { env } from '@bb/common/config/env';
+import { logger } from '@bb/common/config/logger';
 
 async function bootstrap() {
   const app = buildApp();

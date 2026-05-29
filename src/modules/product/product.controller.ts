@@ -1,8 +1,8 @@
 import type { Request, Response } from 'express';
 import { ProductService } from './product.service';
-import { ok, okPaginated } from '@/common/utils/response.util';
-import { BadRequestException } from '@/common/exceptions';
-import { parsePagination } from '@/common/utils/pagination.util';
+import { ok, okPaginated } from '@bb/common/utils/response.util';
+import { BadRequestException } from '@bb/common/exceptions';
+import { parsePagination } from '@bb/common/utils/pagination.util';
 import { serializeProduct, serializeCourseDetailLegacy } from './product.serializer';
 import { prisma } from '@bb/db';
 import {
@@ -11,7 +11,7 @@ import {
   ApiQuery,
   ApiResponse,
   ApiTags,
-} from '@/common/openapi/decorators';
+} from '@bb/common/openapi/decorators';
 import { CourseDetailDto, ProductDto, ProductShareDto } from './dto/product.dto';
 import { ListProductsQueryDto, OWNERSHIP_VALUES } from './dto/list-query.dto';
 

@@ -1,5 +1,5 @@
 import { IsNotEmpty, IsString, Length, Matches, MinLength } from 'class-validator';
-import { ApiProperty } from '@/common/openapi/decorators';
+import { ApiProperty } from '@bb/common/openapi/decorators';
 
 export class RegisterByPhoneDto {
   @ApiProperty({ example: '8111111111', description: 'Phone number without country code' })

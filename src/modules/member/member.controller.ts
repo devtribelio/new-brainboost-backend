@@ -1,9 +1,9 @@
 import type { Response } from 'express';
 import { MemberService } from './member.service';
 import { prisma } from '@bb/db';
-import { env } from '@/config/env';
-import { ok } from '@/common/utils/response.util';
-import type { AuthenticatedRequest } from '@/common/interfaces/authenticated-request';
+import { env } from '@bb/common/config/env';
+import { ok } from '@bb/common/utils/response.util';
+import type { AuthenticatedRequest } from '@bb/common/interfaces/authenticated-request';
 import { serializeMemberFull } from './member.serializer';
 import {
   ApiBearerAuth,
@@ -11,8 +11,8 @@ import {
   ApiQuery,
   ApiResponse,
   ApiTags,
-} from '@/common/openapi/decorators';
-import { ErrorEnvelopeDto } from '@/common/openapi/common.dto';
+} from '@bb/common/openapi/decorators';
+import { ErrorEnvelopeDto } from '@bb/common/openapi/common.dto';
 import { MemberInfoDto } from './dto/member-info.dto';
 
 function floatOrUndef(v: unknown): number | undefined {

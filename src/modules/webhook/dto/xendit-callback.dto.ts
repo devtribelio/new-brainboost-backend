@@ -1,5 +1,5 @@
 import { IsInt, IsNotEmpty, IsOptional, IsString, Min } from 'class-validator';
-import { ApiProperty, ApiPropertyOptional } from '@/common/openapi/decorators';
+import { ApiProperty, ApiPropertyOptional } from '@bb/common/openapi/decorators';
 
 /**
  * Xendit Invoice webhook payload (flat envelope, no `data:` wrapper).

@@ -1,4 +1,4 @@
-import { ApiProperty, ApiPropertyOptional } from '@/common/openapi/decorators';
+import { ApiProperty, ApiPropertyOptional } from '@bb/common/openapi/decorators';
 
 /**
  * Wire shape for `serializeNotification()` per FE NotificationModel (audit #32).

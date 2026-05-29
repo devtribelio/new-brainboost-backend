@@ -1,12 +1,12 @@
 import type { Response } from 'express';
 import { ProfileService } from './profile.service';
 import { prisma } from '@bb/db';
-import { ok } from '@/common/utils/response.util';
-import { UnauthorizedException } from '@/common/exceptions';
+import { ok } from '@bb/common/utils/response.util';
+import { UnauthorizedException } from '@bb/common/exceptions';
 import { serializeMemberFull } from '@/modules/member/member.serializer';
-import type { AuthenticatedRequest } from '@/common/interfaces/authenticated-request';
-import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@/common/openapi/decorators';
-import { MemberFullDto } from '@/common/openapi/member.dto';
+import type { AuthenticatedRequest } from '@bb/common/interfaces/authenticated-request';
+import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@bb/common/openapi/decorators';
+import { MemberFullDto } from '@bb/common/openapi/member.dto';
 import { MemberProfileDto } from './dto/profile.dto';
 
 @ApiTags('Profile')

@@ -5,12 +5,12 @@ import helmet from 'helmet';
 import compression from 'compression';
 import morgan from 'morgan';
 import cookieParser from 'cookie-parser';
-import { errorHandler, notFoundHandler } from '@/common/middlewares/error.middleware';
+import { errorHandler, notFoundHandler } from '@bb/common/middlewares/error.middleware';
 import { registerModules } from '@/core/register-modules';
 import { adminRoutes } from '@/modules/admin/admin.routes';
-import { mountSwagger } from '@/common/openapi/swagger.middleware';
-import { ok } from '@/common/utils/response.util';
-import { env } from '@/config/env';
+import { mountSwagger } from '@bb/common/openapi/swagger.middleware';
+import { ok } from '@bb/common/utils/response.util';
+import { env } from '@bb/common/config/env';
 import { registerCommerceListeners } from '@/modules/commerce/listeners/payment-success.listener';
 import { registerNotificationListeners } from '@/modules/notification/listeners/register';
 

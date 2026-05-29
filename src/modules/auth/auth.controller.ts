@@ -14,16 +14,16 @@ import {
 } from './dto/register-by-phone.dto';
 import { RequestVerificationPhoneDto } from './dto/request-verification-phone.dto';
 import { ValidateOtpPhoneDto } from './dto/validate-otp-phone.dto';
-import { ok, okCreated } from '@/common/utils/response.util';
-import type { AuthenticatedRequest } from '@/common/interfaces/authenticated-request';
-import { UnauthorizedException } from '@/common/exceptions';
+import { ok, okCreated } from '@bb/common/utils/response.util';
+import type { AuthenticatedRequest } from '@bb/common/interfaces/authenticated-request';
+import { UnauthorizedException } from '@bb/common/exceptions';
 import {
   ApiBody,
   ApiOperation,
   ApiResponse,
   ApiTags,
-} from '@/common/openapi/decorators';
-import { ErrorEnvelopeDto, GenericOkDto, TokenBundleDto } from '@/common/openapi/common.dto';
+} from '@bb/common/openapi/decorators';
+import { ErrorEnvelopeDto, GenericOkDto, TokenBundleDto } from '@bb/common/openapi/common.dto';
 
 @ApiTags('Auth')
 export class AuthController {

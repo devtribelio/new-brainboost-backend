@@ -1,11 +1,11 @@
 import type { Response } from 'express';
 import { ReplyService } from './reply.service';
-import { okPaginated } from '@/common/utils/response.util';
-import { BadRequestException } from '@/common/exceptions';
-import { parsePagination } from '@/common/utils/pagination.util';
+import { okPaginated } from '@bb/common/utils/response.util';
+import { BadRequestException } from '@bb/common/exceptions';
+import { parsePagination } from '@bb/common/utils/pagination.util';
 import { serializeComment } from '@/modules/comment/comment.serializer';
-import type { AuthenticatedRequest } from '@/common/interfaces/authenticated-request';
-import { ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@/common/openapi/decorators';
+import type { AuthenticatedRequest } from '@bb/common/interfaces/authenticated-request';
+import { ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@bb/common/openapi/decorators';
 import { CommentDto } from '@/modules/comment/dto/comment.dto';
 
 @ApiTags('Comment')

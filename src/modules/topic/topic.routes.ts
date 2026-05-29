@@ -1,8 +1,8 @@
 import { Router } from 'express';
 import { TopicController } from './topic.controller';
 import { TopicService } from './topic.service';
-import { authGuard, optionalAuthGuard } from '@/common/middlewares/auth.middleware';
-import { bindRoute } from '@/common/openapi/route-binder';
+import { authGuard, optionalAuthGuard } from '@bb/common/middlewares/auth.middleware';
+import { bindRoute } from '@bb/common/openapi/route-binder';
 
 export function topicRoutes(): Router {
   const router = Router();

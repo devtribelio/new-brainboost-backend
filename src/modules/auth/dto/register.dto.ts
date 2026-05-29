@@ -1,6 +1,6 @@
 import { IsEmail, IsOptional, IsString, Length, Matches, MinLength } from 'class-validator';
 import { Transform } from 'class-transformer';
-import { ApiProperty, ApiPropertyOptional } from '@/common/openapi/decorators';
+import { ApiProperty, ApiPropertyOptional } from '@bb/common/openapi/decorators';
 
 export class RegisterDto {
   @ApiProperty({ format: 'email', example: 'user@example.com' })

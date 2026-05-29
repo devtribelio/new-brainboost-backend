@@ -1,4 +1,4 @@
-import type { AppModule } from '@/core/module.interface';
+import type { AppModule } from '@bb/common/core/module.interface';
 import { webhookRoutes } from './webhook.routes';
 
 export const WebhookModule: AppModule = {

@@ -1,4 +1,4 @@
-import { env } from '@/config/env';
+import { env } from '@bb/common/config/env';
 
 export interface SystemConfigEnvelope {
   appVersion: string;

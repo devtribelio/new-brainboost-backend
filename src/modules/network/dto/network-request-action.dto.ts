@@ -1,4 +1,4 @@
-import { ApiPropertyOptional } from '@/common/openapi/decorators';
+import { ApiPropertyOptional } from '@bb/common/openapi/decorators';
 
 // Approve/reject body. Provide either `requestId` directly or `(networkId|code) + memberId`.
 export class NetworkRequestActionDto {

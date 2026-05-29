@@ -5,7 +5,10 @@
     "rootDir": "src",
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["src/*"],
+      "@bb/common": ["packages/common/dist/index.d.ts"],
+      "@bb/common/*": ["packages/common/dist/*"],
+      "@bb/db": ["packages/db/dist/index.d.ts"]
     }
   },
   "include": ["src/**/*.ts"],

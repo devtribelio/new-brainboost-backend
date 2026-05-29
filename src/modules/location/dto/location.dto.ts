@@ -1,4 +1,4 @@
-import { ApiProperty, ApiPropertyOptional } from '@/common/openapi/decorators';
+import { ApiProperty, ApiPropertyOptional } from '@bb/common/openapi/decorators';
 
 export class CountryDto {
   @ApiProperty({ example: 101 })

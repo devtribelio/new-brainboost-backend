@@ -1,5 +1,5 @@
-import { ApiProperty, ApiPropertyOptional } from '@/common/openapi/decorators';
-import { MemberLiteDto } from '@/common/openapi/member.dto';
+import { ApiProperty, ApiPropertyOptional } from '@bb/common/openapi/decorators';
+import { MemberLiteDto } from '@bb/common/openapi/member.dto';
 
 class PostContentDataDto {
   @ApiProperty({ example: 'Great insights from today\'s workshop on React patterns.' })

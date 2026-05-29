@@ -1,6 +1,6 @@
 import { prisma } from '@bb/db';
-import { logger } from '@/config/logger';
-import { commerceEvents } from '@/common/events/commerce-events';
+import { logger } from '@bb/common/config/logger';
+import { commerceEvents } from '@bb/common/events/commerce-events';
 import { AffiliatorService } from '@/modules/affiliate/affiliator.service';
 import { VoucherService } from '../voucher.service';
 

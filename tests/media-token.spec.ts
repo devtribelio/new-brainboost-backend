@@ -4,7 +4,7 @@ import {
   verifyMediaToken,
   type MediaTokenPayload,
 } from '../src/modules/media/media-token.util';
-import { UnauthorizedException } from '../src/common/exceptions';
+import { UnauthorizedException } from '@bb/common/exceptions';
 
 const payload: MediaTokenPayload = {
   guid: 'bunny-guid-abc-123',

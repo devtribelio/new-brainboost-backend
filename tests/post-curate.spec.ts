@@ -2,8 +2,8 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import * as bcrypt from 'bcryptjs';
 import { prisma } from '@bb/db';
 import { PostService } from '@/modules/post/post.service';
-import { NotFoundException } from '@/common/exceptions';
-import { parsePagination } from '@/common/utils/pagination.util';
+import { NotFoundException } from '@bb/common/exceptions';
+import { parsePagination } from '@bb/common/utils/pagination.util';
 
 function uid(): string {
   return Math.random().toString(36).slice(2, 12);

@@ -1,5 +1,5 @@
 import type { Response, NextFunction, RequestHandler } from 'express';
-import { env } from '@/config/env';
+import { env } from '@bb/common/config/env';
 import { prisma } from '@bb/db';
 import { verifyAdminToken } from './admin.jwt.util';
 import type { AdminRequest } from './admin.types';

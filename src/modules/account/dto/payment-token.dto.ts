@@ -1,5 +1,5 @@
 import { IsOptional, IsString } from 'class-validator';
-import { ApiPropertyOptional } from '@/common/openapi/decorators';
+import { ApiPropertyOptional } from '@bb/common/openapi/decorators';
 
 export class GetPaymentTokenQueryDto {
   @ApiPropertyOptional({ example: 'pay_abc123', description: 'Internal payment record id' })

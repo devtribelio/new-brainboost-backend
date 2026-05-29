@@ -1,8 +1,8 @@
 import { Router } from 'express';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
-import { validateDto } from '@/common/middlewares/validation.middleware';
-import { authGuard } from '@/common/middlewares/auth.middleware';
+import { validateDto } from '@bb/common/middlewares/validation.middleware';
+import { authGuard } from '@bb/common/middlewares/auth.middleware';
 import {
   loginRateLimiter,
   registerRateLimiter,
@@ -12,7 +12,7 @@ import {
   requestVerificationPhoneRateLimiter,
   validateOtpRateLimiter,
   validateOtpPhoneRateLimiter,
-} from '@/common/middlewares/rate-limit.middleware';
+} from '@bb/common/middlewares/rate-limit.middleware';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { CloudMessagingDto, RegisterDeviceDto } from './dto/device.dto';
@@ -24,7 +24,7 @@ import {
 import { RegisterByPhoneDto } from './dto/register-by-phone.dto';
 import { RequestVerificationPhoneDto } from './dto/request-verification-phone.dto';
 import { ValidateOtpPhoneDto } from './dto/validate-otp-phone.dto';
-import { bindRoute } from '@/common/openapi/route-binder';
+import { bindRoute } from '@bb/common/openapi/route-binder';
 
 export function authRoutes(): Router {
   const router = Router();

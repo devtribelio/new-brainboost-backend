@@ -1,7 +1,7 @@
 import { prisma } from '@bb/db';
-import { logger } from '@/config/logger';
+import { logger } from '@bb/common/config/logger';
 import { COMMISSION_STATUS, PENDING_TO_BALANCE_DAYS } from '@/modules/affiliate/constants';
-import { settingsService, SETTING_KEYS } from '@/common/services/settings.service';
+import { settingsService, SETTING_KEYS } from '@bb/common/services/settings.service';
 
 /**
  * Background job: promote affiliate commissions PENDING -> BALANCE once they have

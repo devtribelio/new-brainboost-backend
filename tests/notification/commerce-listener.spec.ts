@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import * as bcrypt from 'bcryptjs';
 import { randomUUID } from 'node:crypto';
 import { prisma } from '@bb/db';
-import { commerceEvents } from '@/common/events/commerce-events';
+import { commerceEvents } from '@bb/common/events/commerce-events';
 import { registerCommerceNotificationListener } from '@/modules/notification/listeners/commerce.listener';
 
 function uid(): string {

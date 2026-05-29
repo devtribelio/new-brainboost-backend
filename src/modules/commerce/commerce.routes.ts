@@ -1,7 +1,7 @@
 import { Router } from 'express';
-import { authGuard } from '@/common/middlewares/auth.middleware';
-import { bindRoute } from '@/common/openapi/route-binder';
-import { validateDto } from '@/common/middlewares/validation.middleware';
+import { authGuard } from '@bb/common/middlewares/auth.middleware';
+import { bindRoute } from '@bb/common/openapi/route-binder';
+import { validateDto } from '@bb/common/middlewares/validation.middleware';
 import { CommerceController } from './commerce.controller';
 import { CheckoutService } from './checkout.service';
 import { PaymentService } from './payment.service';

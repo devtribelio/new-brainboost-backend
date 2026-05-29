@@ -1,5 +1,5 @@
-import { ApiProperty, ApiPropertyOptional } from '@/common/openapi/decorators';
-import { MemberLiteDto } from '@/common/openapi/member.dto';
+import { ApiProperty, ApiPropertyOptional } from '@bb/common/openapi/decorators';
+import { MemberLiteDto } from '@bb/common/openapi/member.dto';
 
 /**
  * Wire shape for `serializeComment()` per FE CommentModel (audit §1.7).

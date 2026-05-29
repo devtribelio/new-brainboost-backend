@@ -1,4 +1,4 @@
-import { ApiProperty, ApiPropertyOptional } from '@/common/openapi/decorators';
+import { ApiProperty, ApiPropertyOptional } from '@bb/common/openapi/decorators';
 
 const AFFILIATE_BASED_ENUM = ['PERFORMANCE', 'GROWTH', 'INACTIVE'] as const;
 const COMMISSION_STATUS_ENUM = ['PENDING', 'BALANCE', 'VOIDED'] as const;

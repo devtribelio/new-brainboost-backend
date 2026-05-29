@@ -1,6 +1,6 @@
 import { Router } from 'express';
-import { asyncHandler } from '@/common/utils/async-handler';
-import { adminLoginRateLimiter } from '@/common/middlewares/rate-limit.middleware';
+import { asyncHandler } from '@bb/common/utils/async-handler';
+import { adminLoginRateLimiter } from '@bb/common/middlewares/rate-limit.middleware';
 import { adminAuthGuard } from './admin.auth.middleware';
 import { AdminAuthController } from './admin.auth.controller';
 import { AdminDashboardController } from './admin.dashboard.controller';

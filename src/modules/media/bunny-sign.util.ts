@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { env } from '@/config/env';
+import { env } from '@bb/common/config/env';
 
 /**
  * Bunny CDN URL Token Authentication — signed playback URLs (Model C).

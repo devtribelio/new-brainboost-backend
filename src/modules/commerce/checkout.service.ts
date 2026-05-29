@@ -1,6 +1,6 @@
 import { prisma } from '@bb/db';
-import { env } from '@/config/env';
-import { BadRequestException, NotFoundException } from '@/common/exceptions';
+import { env } from '@bb/common/config/env';
+import { BadRequestException, NotFoundException } from '@bb/common/exceptions';
 import { computeTotals } from './utils/compute-totals';
 import { generateOrderCode } from './utils/generate-order-code';
 import { VoucherService } from './voucher.service';

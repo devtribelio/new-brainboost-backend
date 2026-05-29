@@ -5,8 +5,8 @@ import { AffiliatorService } from './affiliator.service';
 import { EnrollmentService } from './enrollment.service';
 import { VisitService } from './visit.service';
 import { DisbursementService } from './disbursement.service';
-import { authGuard, optionalAuthGuard } from '@/common/middlewares/auth.middleware';
-import { bindRoute } from '@/common/openapi/route-binder';
+import { authGuard, optionalAuthGuard } from '@bb/common/middlewares/auth.middleware';
+import { bindRoute } from '@bb/common/openapi/route-binder';
 
 export function affiliateRoutes(): Router {
   const router = Router();

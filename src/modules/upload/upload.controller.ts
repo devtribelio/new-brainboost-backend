@@ -1,12 +1,12 @@
 import type { Request, Response } from 'express';
 import { UploadService } from './upload.service';
-import { ok } from '@/common/utils/response.util';
+import { ok } from '@bb/common/utils/response.util';
 import {
   ApiBearerAuth,
   ApiOperation,
   ApiResponse,
   ApiTags,
-} from '@/common/openapi/decorators';
+} from '@bb/common/openapi/decorators';
 import { UploadedFilesWrapperDto } from './dto/upload.dto';
 
 @ApiTags('Upload')

@@ -1,4 +1,4 @@
-import type { AppModule } from '@/core/module.interface';
+import type { AppModule } from '@bb/common/core/module.interface';
 import { mediaRoutes } from './media.routes';
 
 export const MediaModule: AppModule = {

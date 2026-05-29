@@ -1,6 +1,6 @@
 import type { Request, Response } from 'express';
-import { ok, okCreated, okPaginated } from '@/common/utils/response.util';
-import { parsePagination } from '@/common/utils/pagination.util';
+import { ok, okCreated, okPaginated } from '@bb/common/utils/response.util';
+import { parsePagination } from '@bb/common/utils/pagination.util';
 import {
   ApiBearerAuth,
   ApiBody,
@@ -8,7 +8,7 @@ import {
   ApiQuery,
   ApiResponse,
   ApiTags,
-} from '@/common/openapi/decorators';
+} from '@bb/common/openapi/decorators';
 import type { CheckoutService } from './checkout.service';
 import type { PaymentService } from './payment.service';
 import type { VoucherService } from './voucher.service';

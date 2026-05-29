@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@bb/common':
+        specifier: workspace:*
+        version: link:packages/common
       '@bb/db':
         specifier: workspace:*
         version: link:packages/db
@@ -174,6 +177,64 @@ importers:
       vitest:
         specifier: ^2.1.4
         version: 2.1.9(@types/node@22.19.17)
+
+  packages/common:
+    dependencies:
+      '@bb/db':
+        specifier: workspace:*
+        version: link:../db
+      '@prisma/client':
+        specifier: ^5.22.0
+        version: 5.22.0(prisma@5.22.0)
+      bcryptjs:
+        specifier: ^2.4.3
+        version: 2.4.3
+      class-transformer:
+        specifier: ^0.5.1
+        version: 0.5.1
+      class-validator:
+        specifier: ^0.14.1
+        version: 0.14.4
+      express:
+        specifier: ^4.21.1
+        version: 4.22.1
+      express-rate-limit:
+        specifier: ^7.5.0
+        version: 7.5.1(express@4.22.1)
+      jsonwebtoken:
+        specifier: ^9.0.2
+        version: 9.0.3
+      nodemailer:
+        specifier: ^8.0.7
+        version: 8.0.7
+      pino:
+        specifier: ^9.5.0
+        version: 9.14.0
+      swagger-ui-express:
+        specifier: ^5.0.1
+        version: 5.0.1(express@4.22.1)
+      xendit-node:
+        specifier: ^7.0.0
+        version: 7.0.0
+    devDependencies:
+      '@types/bcryptjs':
+        specifier: ^2.4.6
+        version: 2.4.6
+      '@types/express':
+        specifier: ^4.17.21
+        version: 4.17.25
+      '@types/jsonwebtoken':
+        specifier: ^9.0.7
+        version: 9.0.10
+      '@types/node':
+        specifier: ^22.9.0
+        version: 22.19.17
+      '@types/nodemailer':
+        specifier: ^8.0.0
+        version: 8.0.0
+      '@types/swagger-ui-express':
+        specifier: ^4.1.8
+        version: 4.1.8
 
   packages/db:
     dependencies:

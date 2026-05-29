@@ -1,4 +1,4 @@
-import type { AppModule } from '@/core/module.interface';
+import type { AppModule } from '@bb/common/core/module.interface';
 import { networkRoutes } from './network.routes';
 
 export const NetworkModule: AppModule = {

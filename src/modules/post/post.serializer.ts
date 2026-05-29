@@ -1,6 +1,6 @@
 import type { Member, Post, Topic } from '@prisma/client';
-import { serializeMember } from '@/common/serializers/member-lite.serializer';
-import { dateAgoString, timeAgoString } from '@/common/serializers/time-format';
+import { serializeMember } from '@bb/common/serializers/member-lite.serializer';
+import { dateAgoString, timeAgoString } from '@bb/common/serializers/time-format';
 
 interface PostWithRelations extends Post {
   author?: Member | null;

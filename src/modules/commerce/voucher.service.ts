@@ -1,5 +1,5 @@
 import { prisma } from '@bb/db';
-import { BadRequestException } from '@/common/exceptions';
+import { BadRequestException } from '@bb/common/exceptions';
 
 export interface VoucherCheckResult {
   valid: boolean;

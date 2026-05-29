@@ -1,7 +1,7 @@
 import { Router, type Response } from 'express';
 import bcrypt from 'bcryptjs';
-import { asyncHandler } from '@/common/utils/async-handler';
-import { NotFoundException } from '@/common/exceptions';
+import { asyncHandler } from '@bb/common/utils/async-handler';
+import { NotFoundException } from '@bb/common/exceptions';
 import type { AdminRequest } from '../admin.types';
 import { renderAdmin } from './view';
 import { setFlash } from './flash';

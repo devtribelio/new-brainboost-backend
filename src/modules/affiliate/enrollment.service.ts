@@ -1,5 +1,5 @@
 import { prisma } from '@bb/db';
-import { NotFoundException, BadRequestException } from '@/common/exceptions';
+import { NotFoundException, BadRequestException } from '@bb/common/exceptions';
 import { assignMemberAffiliateCode } from './utils/code-generator';
 
 export class EnrollmentService {

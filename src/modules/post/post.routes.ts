@@ -1,8 +1,8 @@
 import { Router } from 'express';
 import { PostController } from './post.controller';
 import { PostService } from './post.service';
-import { authGuard } from '@/common/middlewares/auth.middleware';
-import { bindRoute } from '@/common/openapi/route-binder';
+import { authGuard } from '@bb/common/middlewares/auth.middleware';
+import { bindRoute } from '@bb/common/openapi/route-binder';
 
 export function postRoutes(): Router {
   const router = Router();

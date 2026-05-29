@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import request from 'supertest';
 import { buildApp } from '@/app';
 import { prisma } from '@bb/db';
-import { commerceEvents } from '@/common/events/commerce-events';
+import { commerceEvents } from '@bb/common/events/commerce-events';
 import {
   createTestMember,
   createTestProduct,

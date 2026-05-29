@@ -1,4 +1,4 @@
-import { ApiPropertyOptional } from '@/common/openapi/decorators';
+import { ApiPropertyOptional } from '@bb/common/openapi/decorators';
 
 // Mobile sends `code`. Legacy clients also sent `networkCode` / `networkId`.
 // Exactly one is required at runtime; all are marked optional in the schema

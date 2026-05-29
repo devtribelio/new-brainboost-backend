@@ -1,8 +1,8 @@
 import { Router } from 'express';
 import { MemberController } from './member.controller';
 import { MemberService } from './member.service';
-import { optionalAuthGuard } from '@/common/middlewares/auth.middleware';
-import { bindRoute } from '@/common/openapi/route-binder';
+import { optionalAuthGuard } from '@bb/common/middlewares/auth.middleware';
+import { bindRoute } from '@bb/common/openapi/route-binder';
 
 export function memberRoutes(): Router {
   const router = Router();

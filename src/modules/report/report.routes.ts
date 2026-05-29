@@ -1,8 +1,8 @@
 import { Router } from 'express';
 import { ReportController } from './report.controller';
 import { ReportService } from './report.service';
-import { authGuard } from '@/common/middlewares/auth.middleware';
-import { bindRoute } from '@/common/openapi/route-binder';
+import { authGuard } from '@bb/common/middlewares/auth.middleware';
+import { bindRoute } from '@bb/common/openapi/route-binder';
 
 export function reportRoutes(): Router {
   const router = Router();

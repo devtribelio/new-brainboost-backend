@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { isUuid, assertUuid } from '@/common/utils/uuid.util';
-import { BadRequestException } from '@/common/exceptions';
+import { isUuid, assertUuid } from '@bb/common/utils/uuid.util';
+import { BadRequestException } from '@bb/common/exceptions';
 
 describe('isUuid', () => {
   it.each([

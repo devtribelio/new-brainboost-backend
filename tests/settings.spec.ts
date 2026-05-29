@@ -4,7 +4,7 @@
  */
 import { describe, it, expect, afterAll } from 'vitest';
 import { prisma } from '@bb/db';
-import { SettingsService, settingsService } from '@/common/services/settings.service';
+import { SettingsService, settingsService } from '@bb/common/services/settings.service';
 
 const TAG = `setting-${Date.now()}`;
 

@@ -1,5 +1,5 @@
 import { IsOptional, IsString, IsUUID } from 'class-validator';
-import { ApiProperty } from '@/common/openapi/decorators';
+import { ApiProperty } from '@bb/common/openapi/decorators';
 
 export class StartCheckoutDto {
   @ApiProperty({ format: 'uuid', example: '0190-...-uuid' })

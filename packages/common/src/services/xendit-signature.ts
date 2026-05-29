@@ -1,5 +1,5 @@
 import { randomUUID, timingSafeEqual } from 'node:crypto';
-import { env } from '@/config/env';
+import { env } from '@bb/common/config/env';
 
 export function verifyXenditCallbackToken(headerValue: string | undefined): boolean {
   const expected = env.xendit.callbackToken;

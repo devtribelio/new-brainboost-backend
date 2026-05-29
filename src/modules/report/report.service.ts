@@ -1,6 +1,6 @@
 import { prisma } from '@bb/db';
-import { BadRequestException, NotFoundException } from '@/common/exceptions';
-import { assertUuid } from '@/common/utils/uuid.util';
+import { BadRequestException, NotFoundException } from '@bb/common/exceptions';
+import { assertUuid } from '@bb/common/utils/uuid.util';
 
 export class ReportService {
   async listCategories(opts: { isActive?: boolean; orderBy?: 'name' | 'createdAt' } = {}) {

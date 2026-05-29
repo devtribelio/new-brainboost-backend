@@ -1,6 +1,6 @@
 import type { Request, Response } from 'express';
 import { AccountService } from './account.service';
-import { ok } from '@/common/utils/response.util';
+import { ok } from '@bb/common/utils/response.util';
 import {
   ApiBearerAuth,
   ApiBody,
@@ -8,10 +8,10 @@ import {
   ApiQuery,
   ApiResponse,
   ApiTags,
-} from '@/common/openapi/decorators';
-import { ErrorEnvelopeDto, GenericOkDto } from '@/common/openapi/common.dto';
-import type { AuthenticatedRequest } from '@/common/interfaces/authenticated-request';
-import { UnauthorizedException } from '@/common/exceptions';
+} from '@bb/common/openapi/decorators';
+import { ErrorEnvelopeDto, GenericOkDto } from '@bb/common/openapi/common.dto';
+import type { AuthenticatedRequest } from '@bb/common/interfaces/authenticated-request';
+import { UnauthorizedException } from '@bb/common/exceptions';
 import { PreRegistrationDto } from './dto/pre-registration.dto';
 import { LogoutDto } from './dto/logout.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';

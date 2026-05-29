@@ -1,7 +1,7 @@
 import rateLimit from 'express-rate-limit';
 import type { RequestHandler } from 'express';
-import { fail } from '@/common/utils/response.util';
-import { env } from '@/config/env';
+import { fail } from '@bb/common/utils/response.util';
+import { env } from '@bb/common/config/env';
 
 // Brute-force / abuse throttling for unauthenticated, credential-facing
 // endpoints (oauth token, register, forgot-password, OTP, admin login).
@@ -47,21 +47,21 @@ function makeRateLimiter(limit: number, windowMs: number = WINDOW_MS): RequestHa
 }
 
 // --- OTP-guess endpoints — lowest budget; code-guessing is the attack -------
-export const validateOtpRateLimiter = makeRateLimiter(3);
-export const validateOtpPhoneRateLimiter = makeRateLimiter(3);
-export const forgotPasswordVerifyRateLimiter = makeRateLimiter(3);
+export const validateOtpRateLimiter: RequestHandler = makeRateLimiter(3);
+export const validateOtpPhoneRateLimiter: RequestHandler = makeRateLimiter(3);
+export const forgotPasswordVerifyRateLimiter: RequestHandler = makeRateLimiter(3);
 
 // --- OTP/email SEND endpoints — medium budget; abuse = spamming a victim ----
-export const forgotPasswordRequestRateLimiter = makeRateLimiter(10);
-export const requestVerificationPhoneRateLimiter = makeRateLimiter(10);
+export const forgotPasswordRequestRateLimiter: RequestHandler = makeRateLimiter(10);
+export const requestVerificationPhoneRateLimiter: RequestHandler = makeRateLimiter(10);
 
 // --- Account creation -------------------------------------------------------
-export const registerRateLimiter = makeRateLimiter(15);
-export const registerByPhoneRateLimiter = makeRateLimiter(15);
+export const registerRateLimiter: RequestHandler = makeRateLimiter(15);
+export const registerByPhoneRateLimiter: RequestHandler = makeRateLimiter(15);
 
 // --- Login — looser; legit users mistype passwords -------------------------
-export const loginRateLimiter = makeRateLimiter(30);
-export const adminLoginRateLimiter = makeRateLimiter(10);
+export const loginRateLimiter: RequestHandler = makeRateLimiter(30);
+export const adminLoginRateLimiter: RequestHandler = makeRateLimiter(10);
 
 // --- Media download — per-member (or per-IP fallback). Anti-scrape budget on
 //     the signed-download endpoint; streaming is not throttled because legit

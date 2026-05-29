@@ -1,6 +1,6 @@
 import type { Response } from 'express';
-import { ok } from '@/common/utils/response.util';
-import { ApiOperation, ApiResponse, ApiTags } from '@/common/openapi/decorators';
+import { ok } from '@bb/common/utils/response.util';
+import { ApiOperation, ApiResponse, ApiTags } from '@bb/common/openapi/decorators';
 import { purchaseIngestService, type NormalizedPurchase } from './purchase-ingest.service';
 import type { CredentialedRequest } from './credential.guard';
 

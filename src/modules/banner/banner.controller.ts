@@ -1,9 +1,9 @@
 import type { Request, Response } from 'express';
 import { BannerService } from './banner.service';
-import { okPaginated } from '@/common/utils/response.util';
-import { parsePagination } from '@/common/utils/pagination.util';
+import { okPaginated } from '@bb/common/utils/response.util';
+import { parsePagination } from '@bb/common/utils/pagination.util';
 import { serializeBanner } from './banner.serializer';
-import { ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@/common/openapi/decorators';
+import { ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@bb/common/openapi/decorators';
 import { BannerDto } from './dto/banner.dto';
 
 @ApiTags('Banner')

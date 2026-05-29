@@ -4,9 +4,9 @@ import { Router } from 'express';
 import multer from 'multer';
 import { UploadController } from './upload.controller';
 import { UploadService } from './upload.service';
-import { authGuard } from '@/common/middlewares/auth.middleware';
-import { bindRoute } from '@/common/openapi/route-binder';
-import { env } from '@/config/env';
+import { authGuard } from '@bb/common/middlewares/auth.middleware';
+import { bindRoute } from '@bb/common/openapi/route-binder';
+import { env } from '@bb/common/config/env';
 
 fs.mkdirSync(env.upload.tempDir, { recursive: true });
 

@@ -1,5 +1,5 @@
 import { IsEmail, IsString, Length } from 'class-validator';
-import { ApiProperty } from '@/common/openapi/decorators';
+import { ApiProperty } from '@bb/common/openapi/decorators';
 
 export class RequestForgotPasswordDto {
   @ApiProperty({ format: 'email', example: 'john.doe@example.com' })

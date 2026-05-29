@@ -1,14 +1,14 @@
 import type { Request, Response } from 'express';
 import { LocationService } from './location.service';
-import { okPaginated } from '@/common/utils/response.util';
-import { parsePagination } from '@/common/utils/pagination.util';
+import { okPaginated } from '@bb/common/utils/response.util';
+import { parsePagination } from '@bb/common/utils/pagination.util';
 import {
   serializeCountry,
   serializeProvince,
   serializeCity,
   serializeDistrict,
 } from './location.serializer';
-import { ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@/common/openapi/decorators';
+import { ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@bb/common/openapi/decorators';
 import { CityDto, CountryDto, DistrictDto, ProvinceDto } from './dto/location.dto';
 
 function intOrUndef(v: unknown): number | undefined {

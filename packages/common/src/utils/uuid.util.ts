@@ -1,4 +1,4 @@
-import { BadRequestException } from '@/common/exceptions';
+import { BadRequestException } from '@bb/common/exceptions';
 
 // Repo PKs are UUID v7 (`@db.Uuid`). FE often passes legacyId/code instead.
 // Guard `findUnique({ where: { id } })` so a non-UUID input fails cleanly

@@ -1,5 +1,5 @@
 import { prisma } from '@bb/db';
-import { settingsService, SETTING_KEYS } from '@/common/services/settings.service';
+import { settingsService, SETTING_KEYS } from '@bb/common/services/settings.service';
 import { AFFILIATE_COOKIE_DAYS_DEFAULT } from './constants';
 
 /**

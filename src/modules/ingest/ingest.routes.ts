@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { IngestController } from './ingest.controller';
 import { credentialGuard } from './credential.guard';
-import { bindRoute } from '@/common/openapi/route-binder';
+import { bindRoute } from '@bb/common/openapi/route-binder';
 
 export function ingestRoutes(): Router {
   const router = Router();

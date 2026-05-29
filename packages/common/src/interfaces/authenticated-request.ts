@@ -1,5 +1,5 @@
 import type { Request } from 'express';
-import type { TokenScope } from '@/common/utils/jwt.util';
+import type { TokenScope } from '@bb/common/utils/jwt.util';
 
 export interface AuthenticatedUser {
   id: string;

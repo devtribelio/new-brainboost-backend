@@ -1,6 +1,6 @@
 import { Xendit } from 'xendit-node';
-import { env } from '@/config/env';
-import { logger } from '@/config/logger';
+import { env } from '@bb/common/config/env';
+import { logger } from '@bb/common/config/logger';
 
 let cached: Xendit | null = null;
 

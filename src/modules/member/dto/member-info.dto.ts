@@ -1,4 +1,4 @@
-import { ApiProperty, ApiPropertyOptional } from '@/common/openapi/decorators';
+import { ApiProperty, ApiPropertyOptional } from '@bb/common/openapi/decorators';
 
 export class CommunityEntryDto {
   @ApiProperty({ example: 'timeline', description: 'Network purpose tag (e.g. timeline, education)' })

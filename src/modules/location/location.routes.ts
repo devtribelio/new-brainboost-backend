@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { LocationController } from './location.controller';
 import { LocationService } from './location.service';
-import { bindRoute } from '@/common/openapi/route-binder';
+import { bindRoute } from '@bb/common/openapi/route-binder';
 
 export function locationRoutes(): Router {
   const router = Router();

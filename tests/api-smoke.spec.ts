@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import request from 'supertest';
 import { buildApp } from '../src/app';
-import { prisma } from '../src/config/prisma';
+import { prisma } from '@bb/db';
 
 describe('API smoke (envelope { success, data, meta, error })', () => {
   const app = buildApp();

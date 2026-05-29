@@ -1,5 +1,5 @@
 import { prisma } from '@bb/db';
-import { logger } from '@/config/logger';
+import { logger } from '@bb/common/config/logger';
 import { COOKIE_DAYS } from './constants';
 
 export interface VisitInput {

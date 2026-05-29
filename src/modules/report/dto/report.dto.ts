@@ -1,4 +1,4 @@
-import { ApiProperty, ApiPropertyOptional } from '@/common/openapi/decorators';
+import { ApiProperty, ApiPropertyOptional } from '@bb/common/openapi/decorators';
 
 export class ReportCategoryDto {
   @ApiProperty({ example: 1, description: 'Legacy id or backend uuid' })

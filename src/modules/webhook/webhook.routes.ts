@@ -1,6 +1,6 @@
 import { Router } from 'express';
-import { bindRoute } from '@/common/openapi/route-binder';
-import { validateDto } from '@/common/middlewares/validation.middleware';
+import { bindRoute } from '@bb/common/openapi/route-binder';
+import { validateDto } from '@bb/common/middlewares/validation.middleware';
 import { WebhookController } from './webhook.controller';
 import { XenditWebhookHandler } from './xendit.handler';
 import { xenditCallbackGuard } from './xendit-callback.guard';

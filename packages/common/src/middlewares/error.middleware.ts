@@ -1,9 +1,9 @@
 import type { ErrorRequestHandler, Request, Response, NextFunction, RequestHandler } from 'express';
 import { Prisma } from '@prisma/client';
-import { HttpException } from '@/common/exceptions';
-import { fail } from '@/common/utils/response.util';
-import { logger } from '@/config/logger';
-import { env } from '@/config/env';
+import { HttpException } from '@bb/common/exceptions';
+import { fail } from '@bb/common/utils/response.util';
+import { logger } from '@bb/common/config/logger';
+import { env } from '@bb/common/config/env';
 
 interface MappedError {
   status: number;

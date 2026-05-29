@@ -1,5 +1,5 @@
 import { prisma } from '@bb/db';
-import type { PaginationParams } from '@/common/utils/pagination.util';
+import type { PaginationParams } from '@bb/common/utils/pagination.util';
 
 export class BannerService {
   async listActive(p: PaginationParams) {

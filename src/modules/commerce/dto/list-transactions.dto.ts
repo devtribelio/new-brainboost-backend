@@ -1,6 +1,6 @@
 import { IsDateString, IsInt, IsOptional, IsString, MaxLength, Min } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
-import { ApiPropertyOptional } from '@/common/openapi/decorators';
+import { ApiPropertyOptional } from '@bb/common/openapi/decorators';
 
 const TX_STATUSES = ['PENDING', 'PAID', 'EXPIRED', 'FAILED', 'CANCELED', 'REFUNDED'] as const;
 export type TxStatus = (typeof TX_STATUSES)[number];

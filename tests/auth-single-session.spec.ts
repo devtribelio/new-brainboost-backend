@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import request from 'supertest';
 import { buildApp } from '../src/app';
-import { prisma } from '../src/config/prisma';
+import { prisma } from '@bb/db';
 
 describe('auth single-session enforcement', () => {
   const email = `single-session-${Date.now()}-${Math.floor(Math.random() * 1e6)}@test.local`;

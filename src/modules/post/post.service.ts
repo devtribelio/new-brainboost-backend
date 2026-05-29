@@ -1,9 +1,9 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '@bb/db';
-import { BadRequestException, ForbiddenException, NotFoundException } from '@/common/exceptions';
-import type { PaginationParams } from '@/common/utils/pagination.util';
-import { notificationEvents } from '@/common/events/notification-events';
-import { assertUuid } from '@/common/utils/uuid.util';
+import { BadRequestException, ForbiddenException, NotFoundException } from '@bb/common/exceptions';
+import type { PaginationParams } from '@bb/common/utils/pagination.util';
+import { notificationEvents } from '@bb/common/events/notification-events';
+import { assertUuid } from '@bb/common/utils/uuid.util';
 
 interface PostListQuery {
   keyword?: string;
