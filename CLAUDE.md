@@ -91,7 +91,8 @@ views/                   # EJS for /admin
 | `application/tribelio/default/controllers/network.php`, `networkAccount.php` + `libraries/TBNetwork.php` | `src/modules/network/` | Networks/communities |
 | `libraries/TBReport.php` | `src/modules/report/` | User report |
 | `libraries/TBNotification.php` | `src/modules/notification/` | Notification feed |
-| `tribelio-admin/` (separate legacy app) | `src/modules/admin/` | New admin: EJS server-side, JWT cookie, `crud-factory` |
+| `tribelio-admin/` (separate legacy app) | `src/modules/admin/` | New admin: EJS server-side, JWT cookie, `crud-factory`. Internal sysadmin scaffold over Prisma entities. |
+| `tribelio-admin/` product-ops controllers + `application/tribelio/default/libraries/TBApi/Oracle/Method/**` + `controllers/api.php::oracle()` dispatcher | `src/modules/backoffice/` | NEW. JSON-only REST under `/api/backoffice/*` consumed by external backoffice SPA. Reuses `Admin` table + bearer JWT + RBAC (4 roles) + 2FA + audit log. Plan: `docs/backoffice-port-plan.md` (+ per-cluster files in `docs/backoffice-port/`). |
 
 For deep symbol-level mapping see `docs/legacy-analysis.md`.
 
@@ -222,9 +223,10 @@ Module status (one-line summary; details in `docs/rewrite-progress.md`):
 - [x] network — CRUD, member list (empty-input lists-all parity)
 - [x] notification — list, read, producer (commerce/post/comment/like/network), FCM v1 push (fire-and-forget), mute. Pending: FCM live credentials + manual push QA. RabbitMQ outbox deferred (see `docs/notification-port.md §12`).
 - [x] report — submit
-- [x] admin — auth, dashboard, CRUD scaffolding via `crud-factory`
+- [x] admin — auth, dashboard, CRUD scaffolding via `crud-factory` (EJS internal sysadmin)
 - [x] commerce / purchase — Xendit-only (CC + VA + eWallet), 2-step checkout→payment, voucher bypass, webhook + cron expire, event-driven side effects (enrollment + affiliate commission + voucher redeem). See `docs/commerce-port.md`. Pending: manual Xendit sandbox QA
-- [ ] disbursement — payout to bank/e-wallet (NOT STARTED)
+- [ ] backoffice — JSON-only product-ops API under `/api/backoffice/*` (port of legacy Tribelio admin + Oracle methods). 6-sprint plan in `docs/backoffice-port-plan.md`. Distinct from `admin` (which is EJS-only). NOT STARTED
+- [ ] disbursement — payout to bank/e-wallet (NOT STARTED — folded into backoffice sprint 2)
 - [ ] chat / broadcast — drop or defer
 - [ ] certificate — drop or defer
 - [ ] cron / queue — drop (use Postgres LISTEN or external scheduler later)
