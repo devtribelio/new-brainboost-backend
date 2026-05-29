@@ -436,6 +436,7 @@ model Post {
   viewCount     Int       @default(0) @map("view_count")
   isPinned      Boolean   @default(false) @map("is_pinned")
   isCurated     Boolean   @default(false) @map("is_curated")
+  isAdminPost   Boolean   @default(false) @map("is_admin_post")
   engagedAt     DateTime? @map("engaged_at")
   isDeleted     Boolean   @default(false) @map("is_deleted")
   createdAt     DateTime  @default(now()) @map("created_at")
