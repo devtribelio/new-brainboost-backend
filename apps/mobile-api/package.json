@@ -4,7 +4,7 @@
   "private": true,
   "main": "dist/main.js",
   "scripts": {
-    "dev": "tsx watch --conditions=development src/main.ts",
+    "dev": "tsx watch --tsconfig tsconfig.build.json src/main.ts",
     "build": "tsup",
     "typecheck": "tsc --noEmit",
     "start": "node dist/main.js",

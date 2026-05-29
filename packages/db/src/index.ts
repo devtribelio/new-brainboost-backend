@@ -17,4 +17,7 @@ if (!isProduction) {
   global.__prisma = prisma;
 }
 
-export * from '@prisma/client';
+// NOTE: do not `export * from '@prisma/client'` here — re-exporting a CJS
+// module's star alongside `export const prisma` makes esbuild/tsx clobber the
+// named `prisma` export at runtime (becomes undefined). Consumers import types
+// from '@prisma/client' directly.
