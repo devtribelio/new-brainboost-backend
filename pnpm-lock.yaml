@@ -181,6 +181,58 @@ importers:
         specifier: ^2.1.4
         version: 2.1.9(@types/node@22.19.17)
 
+  apps/admin-ejs:
+    dependencies:
+      '@bb/common':
+        specifier: workspace:*
+        version: link:../../packages/common
+      '@bb/db':
+        specifier: workspace:*
+        version: link:../../packages/db
+      '@bb/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
+      '@prisma/client':
+        specifier: ^5.22.0
+        version: 5.22.0(prisma@5.22.0)
+      bcryptjs:
+        specifier: ^2.4.3
+        version: 2.4.3
+      class-transformer:
+        specifier: ^0.5.1
+        version: 0.5.1
+      class-validator:
+        specifier: ^0.14.1
+        version: 0.14.4
+      cookie-parser:
+        specifier: ^1.4.7
+        version: 1.4.7
+      ejs:
+        specifier: ^5.0.2
+        version: 5.0.2
+      express:
+        specifier: ^4.21.1
+        version: 4.22.1
+      express-rate-limit:
+        specifier: ^7.5.0
+        version: 7.5.1(express@4.22.1)
+      helmet:
+        specifier: ^8.0.0
+        version: 8.1.0
+      jsonwebtoken:
+        specifier: ^9.0.2
+        version: 9.0.3
+      morgan:
+        specifier: ^1.10.0
+        version: 1.10.1
+      reflect-metadata:
+        specifier: ^0.2.2
+        version: 0.2.2
+    devDependencies:
+      '@types/node':
+        specifier: ^22.9.0
+        version: 22.19.17
+
   apps/mobile-api:
     dependencies:
       '@bb/common':
