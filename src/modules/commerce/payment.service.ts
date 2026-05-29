@@ -1,4 +1,4 @@
-import { prisma } from '@/config/prisma';
+import { prisma } from '@bb/db';
 import { logger } from '@/config/logger';
 import { env } from '@/config/env';
 import { BadRequestException, ForbiddenException, NotFoundException } from '@/common/exceptions';

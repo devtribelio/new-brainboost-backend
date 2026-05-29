@@ -1,5 +1,5 @@
 import { Prisma } from '@prisma/client';
-import { prisma } from '@/config/prisma';
+import { prisma } from '@bb/db';
 import { BadRequestException, ForbiddenException, NotFoundException } from '@/common/exceptions';
 import type { PaginationParams } from '@/common/utils/pagination.util';
 import { notificationEvents } from '@/common/events/notification-events';

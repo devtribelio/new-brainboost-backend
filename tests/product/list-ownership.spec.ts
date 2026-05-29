@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { prisma } from '@/config/prisma';
+import { prisma } from '@bb/db';
 import { ProductService } from '@/modules/product/product.service';
 import { createTestMember, createTestProduct } from '../commerce/fixtures';
 

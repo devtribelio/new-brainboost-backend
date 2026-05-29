@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { prisma } from '@/config/prisma';
+import { prisma } from '@bb/db';
 
 export interface VerifiedCredential {
   id: string;

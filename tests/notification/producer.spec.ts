@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import * as bcrypt from 'bcryptjs';
-import { prisma } from '@/config/prisma';
+import { prisma } from '@bb/db';
 import { NotificationProducer } from '@/modules/notification/notification.producer';
 import { ActionLabel } from '@/modules/notification/action-labels';
 

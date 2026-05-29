@@ -1,4 +1,4 @@
-import { prisma } from '@/config/prisma';
+import { prisma } from '@bb/db';
 import { NotFoundException, BadRequestException } from '@/common/exceptions';
 import { assignMemberAffiliateCode } from './utils/code-generator';
 

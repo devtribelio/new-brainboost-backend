@@ -1,6 +1,6 @@
 import { ForbiddenException } from '@/common/exceptions';
 import { env } from '@/config/env';
-import { prisma } from '@/config/prisma';
+import { prisma } from '@bb/db';
 import type { MediaResolution } from './dto/media.dto';
 import { signBunnyHlsUrl, signBunnyMp4Url } from './bunny-sign.util';
 

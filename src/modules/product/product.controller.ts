@@ -4,7 +4,7 @@ import { ok, okPaginated } from '@/common/utils/response.util';
 import { BadRequestException } from '@/common/exceptions';
 import { parsePagination } from '@/common/utils/pagination.util';
 import { serializeProduct, serializeCourseDetailLegacy } from './product.serializer';
-import { prisma } from '@/config/prisma';
+import { prisma } from '@bb/db';
 import {
   ApiBearerAuth,
   ApiOperation,

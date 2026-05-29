@@ -1,4 +1,4 @@
-import { prisma } from '@/config/prisma';
+import { prisma } from '@bb/db';
 import { env } from '@/config/env';
 import { BadRequestException, NotFoundException } from '@/common/exceptions';
 import { computeTotals } from './utils/compute-totals';

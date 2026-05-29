@@ -1,5 +1,5 @@
 import { customAlphabet } from 'nanoid';
-import { prisma } from '@/config/prisma';
+import { prisma } from '@bb/db';
 import { AFFILIATE_CODE_LENGTH, PROGRAM_CODE_LENGTH, CODE_ALPHABET } from '../constants';
 
 const generateAffiliateCodeRaw = customAlphabet(CODE_ALPHABET, AFFILIATE_CODE_LENGTH);

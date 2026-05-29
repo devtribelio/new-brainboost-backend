@@ -1,4 +1,4 @@
-import { prisma } from '@/config/prisma';
+import { prisma } from '@bb/db';
 
 export function parseMentionUsernames(content: string): string[] {
   const matches = content.match(/@[A-Za-z0-9_]+/g);

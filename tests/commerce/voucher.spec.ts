@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { VoucherService } from '@/modules/commerce/voucher.service';
-import { prisma } from '@/config/prisma';
+import { prisma } from '@bb/db';
 
 describe('VoucherService', () => {
   const service = new VoucherService();

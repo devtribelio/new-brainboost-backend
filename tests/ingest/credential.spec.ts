@@ -3,7 +3,7 @@
  * tables (migration 20260521170000_ingestion_kernel) on the test DB.
  */
 import { describe, it, expect, afterAll } from 'vitest';
-import { prisma } from '@/config/prisma';
+import { prisma } from '@bb/db';
 import { credentialService } from '@/modules/ingest/credential.service';
 
 const TAG = `cred-${Date.now()}`;

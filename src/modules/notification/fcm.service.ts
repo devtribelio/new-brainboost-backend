@@ -1,5 +1,5 @@
 import { GoogleAuth } from 'google-auth-library';
-import { prisma } from '@/config/prisma';
+import { prisma } from '@bb/db';
 import { env } from '@/config/env';
 import { logger } from '@/config/logger';
 

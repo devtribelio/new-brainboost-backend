@@ -1,6 +1,6 @@
 import type { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
-import { prisma } from '@/config/prisma';
+import { prisma } from '@bb/db';
 import { env } from '@/config/env';
 import { signAdminToken } from './admin.jwt.util';
 import { setFlash, consumeFlash } from './util/flash';

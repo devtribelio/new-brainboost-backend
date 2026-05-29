@@ -1,5 +1,5 @@
 import type { Response } from 'express';
-import { prisma } from '@/config/prisma';
+import { prisma } from '@bb/db';
 import type { AdminRequest } from './admin.types';
 import { renderAdmin } from './util/view';
 

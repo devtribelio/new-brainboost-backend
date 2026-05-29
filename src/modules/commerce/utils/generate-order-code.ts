@@ -1,4 +1,4 @@
-import { prisma } from '@/config/prisma';
+import { prisma } from '@bb/db';
 import { ORDER_CODE_PREFIX } from '../constants';
 
 /**

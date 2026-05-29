@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import request from 'supertest';
 import { buildApp } from '@/app';
-import { prisma } from '@/config/prisma';
+import { prisma } from '@bb/db';
 
 describe('commerce checkout flow', () => {
   const app = buildApp();

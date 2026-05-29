@@ -1,4 +1,4 @@
-import { prisma } from '@/config/prisma';
+import { prisma } from '@bb/db';
 import type { SelectOption } from '../util/crud-factory';
 
 const LOAD_LIMIT = 500;

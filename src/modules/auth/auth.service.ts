@@ -1,7 +1,7 @@
 import bcrypt from 'bcryptjs';
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import passport from 'passport';
-import { prisma } from '@/config/prisma';
+import { prisma } from '@bb/db';
 import { env } from '@/config/env';
 import {
   signAccessToken,

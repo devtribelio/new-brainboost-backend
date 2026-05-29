@@ -1,4 +1,4 @@
-import { prisma } from '@/config/prisma';
+import { prisma } from '@bb/db';
 import { BadRequestException } from '@/common/exceptions';
 import { COMMISSION_STATUS, DISBURSEMENT_STATUS } from './constants';
 import { quoteDisbursement } from './utils/disbursement-calc';

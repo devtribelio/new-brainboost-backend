@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { PaymentService } from '@/modules/commerce/payment.service';
-import { prisma } from '@/config/prisma';
+import { prisma } from '@bb/db';
 import type { XenditGateway } from '@/common/services/xendit-gateway';
 import type { CreateInvoiceRequest, Invoice } from 'xendit-node/invoice/models';
 import {

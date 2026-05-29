@@ -1,4 +1,4 @@
-import { prisma } from '@/config/prisma';
+import { prisma } from '@bb/db';
 
 export class CommissionService {
   async summary(memberId: string) {

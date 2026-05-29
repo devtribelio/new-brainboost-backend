@@ -1,6 +1,6 @@
 import bcrypt from 'bcryptjs';
 import { createHash } from 'node:crypto';
-import { prisma } from '@/config/prisma';
+import { prisma } from '@bb/db';
 import {
   BadRequestException,
   NotFoundException,

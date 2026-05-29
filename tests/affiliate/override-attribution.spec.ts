@@ -8,7 +8,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import * as bcrypt from 'bcryptjs';
-import { prisma } from '@/config/prisma';
+import { prisma } from '@bb/db';
 import { AffiliatorService } from '@/modules/affiliate/affiliator.service';
 
 const TAG = `attr-${Date.now()}`;

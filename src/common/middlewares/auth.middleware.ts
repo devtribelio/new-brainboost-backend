@@ -2,7 +2,7 @@ import type { Response, NextFunction, RequestHandler } from 'express';
 import { UnauthorizedException } from '@/common/exceptions';
 import { verifyAccessToken } from '@/common/utils/jwt.util';
 import type { AuthenticatedRequest } from '@/common/interfaces/authenticated-request';
-import { prisma } from '@/config/prisma';
+import { prisma } from '@bb/db';
 import { REQUIRES_BEARER_AUTH } from '@/common/openapi/types';
 
 async function assertSessionActive(sid: string | undefined): Promise<void> {

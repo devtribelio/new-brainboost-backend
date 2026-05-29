@@ -1,6 +1,6 @@
 import { describe, it, expect, afterAll } from 'vitest';
 import { generateOrderCode } from '@/modules/commerce/utils/generate-order-code';
-import { prisma } from '@/config/prisma';
+import { prisma } from '@bb/db';
 
 describe('generateOrderCode', () => {
   afterAll(async () => {

@@ -1,5 +1,5 @@
 import type { Prisma, Product } from '@prisma/client';
-import { prisma } from '@/config/prisma';
+import { prisma } from '@bb/db';
 import { NotFoundException } from '@/common/exceptions';
 import type { PaginationParams } from '@/common/utils/pagination.util';
 import type { Ownership } from './dto/list-query.dto';

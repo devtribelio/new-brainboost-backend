@@ -1,4 +1,4 @@
-import { prisma } from '@/config/prisma';
+import { prisma } from '@bb/db';
 import { logger } from '@/config/logger';
 import { BadRequestException } from '@/common/exceptions';
 import { commerceEvents } from '@/common/events/commerce-events';

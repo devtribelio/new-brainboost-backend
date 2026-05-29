@@ -3,7 +3,7 @@
  * that has the app_settings table (migration 20260521160000_app_settings).
  */
 import { describe, it, expect, afterAll } from 'vitest';
-import { prisma } from '@/config/prisma';
+import { prisma } from '@bb/db';
 import { SettingsService, settingsService } from '@/common/services/settings.service';
 
 const TAG = `setting-${Date.now()}`;

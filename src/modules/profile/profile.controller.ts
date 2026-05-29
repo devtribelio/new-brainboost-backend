@@ -1,6 +1,6 @@
 import type { Response } from 'express';
 import { ProfileService } from './profile.service';
-import { prisma } from '@/config/prisma';
+import { prisma } from '@bb/db';
 import { ok } from '@/common/utils/response.util';
 import { UnauthorizedException } from '@/common/exceptions';
 import { serializeMemberFull } from '@/modules/member/member.serializer';

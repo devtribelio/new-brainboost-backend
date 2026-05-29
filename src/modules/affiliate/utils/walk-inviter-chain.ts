@@ -1,4 +1,4 @@
-import { prisma } from '@/config/prisma';
+import { prisma } from '@bb/db';
 import { GROWTH_MAX_DEPTH, AFFILIATE_BASED } from '../constants';
 
 export interface InviterChainNode {

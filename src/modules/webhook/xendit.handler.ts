@@ -1,4 +1,4 @@
-import { prisma } from '@/config/prisma';
+import { prisma } from '@bb/db';
 import { logger } from '@/config/logger';
 import { commerceEvents } from '@/common/events/commerce-events';
 import { mapInvoiceStatus } from '@/modules/commerce/payment.service';

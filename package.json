@@ -29,6 +29,7 @@
     "issue:credential": "tsx scripts/issue-credential.ts"
   },
   "dependencies": {
+    "@bb/db": "workspace:*",
     "@prisma/client": "^5.22.0",
     "bcryptjs": "^2.4.3",
     "class-transformer": "^0.5.1",

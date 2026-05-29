@@ -1,6 +1,6 @@
 import bcrypt from 'bcryptjs';
 import { randomInt } from 'node:crypto';
-import { prisma } from '@/config/prisma';
+import { prisma } from '@bb/db';
 import { BadRequestException } from '@/common/exceptions';
 import { logger } from '@/config/logger';
 import { mailer } from './mailer.service';

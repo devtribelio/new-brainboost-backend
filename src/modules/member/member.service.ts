@@ -1,4 +1,4 @@
-import { prisma } from '@/config/prisma';
+import { prisma } from '@bb/db';
 import { NotFoundException } from '@/common/exceptions';
 import { buildSystemConfig } from '@/common/services/system-config.service';
 

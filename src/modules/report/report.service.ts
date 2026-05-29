@@ -1,4 +1,4 @@
-import { prisma } from '@/config/prisma';
+import { prisma } from '@bb/db';
 import { BadRequestException, NotFoundException } from '@/common/exceptions';
 import { assertUuid } from '@/common/utils/uuid.util';
 

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { prisma } from '@/config/prisma';
+import { prisma } from '@bb/db';
 import { commerceEvents } from '@/common/events/commerce-events';
 import { registerCommerceListeners } from '@/modules/commerce/listeners/payment-success.listener';
 import * as bcrypt from 'bcryptjs';

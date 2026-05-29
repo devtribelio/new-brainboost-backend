@@ -1,6 +1,6 @@
 import type { Response } from 'express';
 import { MemberService } from './member.service';
-import { prisma } from '@/config/prisma';
+import { prisma } from '@bb/db';
 import { env } from '@/config/env';
 import { ok } from '@/common/utils/response.util';
 import type { AuthenticatedRequest } from '@/common/interfaces/authenticated-request';

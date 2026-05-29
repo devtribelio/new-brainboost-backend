@@ -1,4 +1,4 @@
-import { prisma } from '@/config/prisma';
+import { prisma } from '@bb/db';
 
 /**
  * Runtime-configurable settings backed by the `app_settings` table.

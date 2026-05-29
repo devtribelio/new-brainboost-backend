@@ -1,4 +1,4 @@
-import { prisma } from '@/config/prisma';
+import { prisma } from '@bb/db';
 import * as bcrypt from 'bcryptjs';
 
 export async function createTestMember(seed: string) {
