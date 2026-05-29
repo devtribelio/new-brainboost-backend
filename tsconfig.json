@@ -1,18 +1,11 @@
 {
-  "extends": "./tsconfig.base.json",
-  "compilerOptions": {
-    "outDir": "dist",
-    "rootDir": "src",
-    "baseUrl": ".",
-    "paths": {
-      "@/*": ["src/*"],
-      "@bb/common": ["packages/common/dist/index.d.ts"],
-      "@bb/common/*": ["packages/common/dist/*"],
-      "@bb/domain": ["packages/domain/dist/index.d.ts"],
-      "@bb/domain/*": ["packages/domain/dist/*"],
-      "@bb/db": ["packages/db/dist/index.d.ts"]
-    }
-  },
-  "include": ["src/**/*.ts"],
-  "exclude": ["node_modules", "dist", "tests", "**/*.spec.ts", "**/*.test.ts"]
+  "files": [],
+  "references": [
+    { "path": "packages/db" },
+    { "path": "packages/common" },
+    { "path": "packages/domain" },
+    { "path": "apps/mobile-api" },
+    { "path": "apps/admin-ejs" },
+    { "path": "apps/backoffice-api" }
+  ]
 }

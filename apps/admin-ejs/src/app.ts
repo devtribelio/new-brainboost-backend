@@ -36,9 +36,11 @@ export function buildApp(): Express {
     app.use(morgan(env.isProduction ? 'combined' : 'dev'));
   }
 
+  // Resolve views/static relative to this file (src in dev, dist in prod)
+  // so it works regardless of process.cwd() (e.g. vitest workspace runs).
   app.set('view engine', 'ejs');
-  app.set('views', path.join(process.cwd(), 'views'));
-  app.use('/admin/static', express.static(path.join(process.cwd(), 'public/admin')));
+  app.set('views', path.join(__dirname, '..', 'views'));
+  app.use('/admin/static', express.static(path.join(__dirname, '..', 'public', 'admin')));
 
   app.get('/health', (_req, res) => ok(res, { status: 'ok', service: 'admin-ejs' }));
 

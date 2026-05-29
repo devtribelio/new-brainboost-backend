@@ -23,6 +23,7 @@
   },
   "scripts": {
     "build": "tsc -b",
+    "typecheck": "tsc -b",
     "clean": "rm -rf dist tsconfig.tsbuildinfo"
   },
   "dependencies": {

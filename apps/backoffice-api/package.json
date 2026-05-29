@@ -5,7 +5,8 @@
   "main": "dist/main.js",
   "scripts": {
     "dev": "tsx --conditions=development watch src/main.ts",
-    "build": "tsc -b && tsc-alias -p tsconfig.json",
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
     "start": "node dist/main.js",
     "test": "vitest run",
     "test:watch": "vitest"
