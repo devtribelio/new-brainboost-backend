@@ -1,14 +1,14 @@
 import type { Request, Response } from 'express';
-import type { AffiliateProgramService } from './program.service';
-import type { AffiliatorService } from './affiliator.service';
-import type { EnrollmentService } from './enrollment.service';
-import type { DisbursementService } from './disbursement.service';
-import { VisitService } from './visit.service';
+import type { AffiliateProgramService } from '@bb/domain/affiliate/program.service';
+import type { AffiliatorService } from '@bb/domain/affiliate/affiliator.service';
+import type { EnrollmentService } from '@bb/domain/affiliate/enrollment.service';
+import type { DisbursementService } from '@bb/domain/affiliate/disbursement.service';
+import { VisitService } from '@bb/domain/affiliate/visit.service';
 import { ok, okCreated, okPaginated } from '@bb/common/utils/response.util';
 import { UnauthorizedException, BadRequestException } from '@bb/common/exceptions';
 import type { AuthenticatedRequest } from '@bb/common/interfaces/authenticated-request';
-import type { AffiliateBased } from './constants';
-import { AFFILIATE_COOKIE_NAME, AFFILIATE_COOKIE_DAYS_DEFAULT } from './constants';
+import type { AffiliateBased } from '@bb/domain/affiliate/constants';
+import { AFFILIATE_COOKIE_NAME, AFFILIATE_COOKIE_DAYS_DEFAULT } from '@bb/domain/affiliate/constants';
 import { settingsService, SETTING_KEYS } from '@bb/common/services/settings.service';
 import {
   ApiBearerAuth,

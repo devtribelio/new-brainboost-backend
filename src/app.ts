@@ -11,15 +11,13 @@ import { adminRoutes } from '@/modules/admin/admin.routes';
 import { mountSwagger } from '@bb/common/openapi/swagger.middleware';
 import { ok } from '@bb/common/utils/response.util';
 import { env } from '@bb/common/config/env';
-import { registerCommerceListeners } from '@/modules/commerce/listeners/payment-success.listener';
-import { registerNotificationListeners } from '@/modules/notification/listeners/register';
+import { registerDomainListeners } from '@bb/domain';
 
 let listenersRegistered = false;
 
 export function buildApp(): Express {
   if (!listenersRegistered) {
-    registerCommerceListeners();
-    registerNotificationListeners();
+    registerDomainListeners();
     listenersRegistered = true;
   }
   const app = express();

@@ -2,9 +2,9 @@ import { prisma } from '@bb/db';
 import { logger } from '@bb/common/config/logger';
 import { BadRequestException } from '@bb/common/exceptions';
 import { commerceEvents } from '@bb/common/events/commerce-events';
-import { generateOrderCode } from '@/modules/commerce/utils/generate-order-code';
-import { attributionService } from '@/modules/affiliate/attribution.service';
-import { COMMISSION_STATUS } from '@/modules/affiliate/constants';
+import { generateOrderCode } from '@bb/domain/commerce/utils/generate-order-code';
+import { attributionService } from '@bb/domain/affiliate/attribution.service';
+import { COMMISSION_STATUS } from '@bb/domain/affiliate/constants';
 import type { VerifiedCredential } from './credential.service';
 
 /** Provider-agnostic purchase shape. Adapters (edge functions) map their payload to this. */

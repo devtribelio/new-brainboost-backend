@@ -1,7 +1,7 @@
 import { prisma } from '@bb/db';
 import { logger } from '@bb/common/config/logger';
 import { commerceEvents } from '@bb/common/events/commerce-events';
-import { AffiliatorService } from '@/modules/affiliate/affiliator.service';
+import { AffiliatorService } from '@bb/domain/affiliate/affiliator.service';
 import { VoucherService } from '../voucher.service';
 
 const affiliatorService = new AffiliatorService();

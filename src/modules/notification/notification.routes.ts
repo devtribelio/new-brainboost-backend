@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { NotificationController } from './notification.controller';
-import { NotificationService } from './notification.service';
+import { NotificationService } from '@bb/domain/notification/notification.service';
 import { authGuard } from '@bb/common/middlewares/auth.middleware';
 import { bindRoute } from '@bb/common/openapi/route-binder';
 

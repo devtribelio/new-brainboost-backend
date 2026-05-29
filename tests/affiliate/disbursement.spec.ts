@@ -7,7 +7,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import * as bcrypt from 'bcryptjs';
 import { prisma } from '@bb/db';
-import { DisbursementService } from '@/modules/affiliate/disbursement.service';
+import { DisbursementService } from '@bb/domain/affiliate/disbursement.service';
 
 const TAG = `disb-${Date.now()}`;
 const svc = new DisbursementService();

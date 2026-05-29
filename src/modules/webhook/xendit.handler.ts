@@ -1,7 +1,7 @@
 import { prisma } from '@bb/db';
 import { logger } from '@bb/common/config/logger';
 import { commerceEvents } from '@bb/common/events/commerce-events';
-import { mapInvoiceStatus } from '@/modules/commerce/payment.service';
+import { mapInvoiceStatus } from '@bb/domain/commerce/payment.service';
 import type { CommercePaymentStatus } from '@prisma/client';
 
 type RawPayload = Record<string, unknown>;

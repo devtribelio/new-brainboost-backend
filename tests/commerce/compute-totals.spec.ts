@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeTotals } from '@/modules/commerce/utils/compute-totals';
+import { computeTotals } from '@bb/domain/commerce/utils/compute-totals';
 
 describe('computeTotals', () => {
   it('no voucher: amount = itemTotal', () => {

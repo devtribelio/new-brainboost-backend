@@ -9,7 +9,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import * as bcrypt from 'bcryptjs';
 import { prisma } from '@bb/db';
-import { AffiliatorService } from '@/modules/affiliate/affiliator.service';
+import { AffiliatorService } from '@bb/domain/affiliate/affiliator.service';
 
 const TAG = `attr-${Date.now()}`;
 const svc = new AffiliatorService();

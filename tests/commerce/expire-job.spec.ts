@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { prisma } from '@bb/db';
-import { expirePendingPayments } from '@/jobs/expire-pending-payments';
+import { expirePendingPayments } from '@bb/domain/jobs/expire-pending-payments';
 import {
   createTestMember,
   createTestProduct,

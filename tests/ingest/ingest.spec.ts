@@ -6,7 +6,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import * as bcrypt from 'bcryptjs';
 import { prisma } from '@bb/db';
-import { registerCommerceListeners } from '@/modules/commerce/listeners/payment-success.listener';
+import { registerCommerceListeners } from '@bb/domain/commerce/listeners/payment-success.listener';
 import { purchaseIngestService } from '@/modules/ingest/purchase-ingest.service';
 import { credentialService } from '@/modules/ingest/credential.service';
 

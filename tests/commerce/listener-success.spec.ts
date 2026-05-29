@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { prisma } from '@bb/db';
 import { commerceEvents } from '@bb/common/events/commerce-events';
-import { registerCommerceListeners } from '@/modules/commerce/listeners/payment-success.listener';
+import { registerCommerceListeners } from '@bb/domain/commerce/listeners/payment-success.listener';
 import * as bcrypt from 'bcryptjs';
 import { randomUUID } from 'node:crypto';
 

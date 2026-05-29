@@ -1,6 +1,6 @@
 import { IsIn, IsOptional, IsString } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@bb/common/openapi/decorators';
-import { AFFILIATE_BASED } from '../constants';
+import { AFFILIATE_BASED } from '@bb/domain/affiliate/constants';
 
 const AFFILIATE_BASED_VALUES = Object.values(AFFILIATE_BASED);
 

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { prisma } from '@bb/db';
-import { PaymentService } from '@/modules/commerce/payment.service';
+import { PaymentService } from '@bb/domain/commerce/payment.service';
 import { createTestMember, createTestProduct } from './fixtures';
 
 const svc = new PaymentService();

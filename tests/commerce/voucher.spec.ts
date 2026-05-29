@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { VoucherService } from '@/modules/commerce/voucher.service';
+import { VoucherService } from '@bb/domain/commerce/voucher.service';
 import { prisma } from '@bb/db';
 
 describe('VoucherService', () => {

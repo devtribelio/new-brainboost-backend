@@ -3,7 +3,7 @@ import * as bcrypt from 'bcryptjs';
 import { randomUUID } from 'node:crypto';
 import { prisma } from '@bb/db';
 import { commerceEvents } from '@bb/common/events/commerce-events';
-import { registerCommerceNotificationListener } from '@/modules/notification/listeners/commerce.listener';
+import { registerCommerceNotificationListener } from '@bb/domain/notification/listeners/commerce.listener';
 
 function uid(): string {
   return Math.random().toString(36).slice(2, 12);

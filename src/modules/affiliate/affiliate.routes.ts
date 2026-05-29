@@ -1,10 +1,10 @@
 import { Router } from 'express';
 import { AffiliateController } from './affiliate.controller';
-import { AffiliateProgramService } from './program.service';
-import { AffiliatorService } from './affiliator.service';
-import { EnrollmentService } from './enrollment.service';
-import { VisitService } from './visit.service';
-import { DisbursementService } from './disbursement.service';
+import { AffiliateProgramService } from '@bb/domain/affiliate/program.service';
+import { AffiliatorService } from '@bb/domain/affiliate/affiliator.service';
+import { EnrollmentService } from '@bb/domain/affiliate/enrollment.service';
+import { VisitService } from '@bb/domain/affiliate/visit.service';
+import { DisbursementService } from '@bb/domain/affiliate/disbursement.service';
 import { authGuard, optionalAuthGuard } from '@bb/common/middlewares/auth.middleware';
 import { bindRoute } from '@bb/common/openapi/route-binder';
 

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import * as bcrypt from 'bcryptjs';
 import { prisma } from '@bb/db';
-import { RecipientResolver } from '@/modules/notification/recipient.resolver';
+import { RecipientResolver } from '@bb/domain/notification/recipient.resolver';
 
 function uid(): string {
   return Math.random().toString(36).slice(2, 12);

@@ -1,5 +1,5 @@
 import { describe, it, expect, afterAll } from 'vitest';
-import { generateOrderCode } from '@/modules/commerce/utils/generate-order-code';
+import { generateOrderCode } from '@bb/domain/commerce/utils/generate-order-code';
 import { prisma } from '@bb/db';
 
 describe('generateOrderCode', () => {

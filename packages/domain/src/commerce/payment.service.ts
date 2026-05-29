@@ -6,8 +6,12 @@ import { commerceEvents } from '@bb/common/events/commerce-events';
 import { xenditGateway, type XenditGateway } from '@bb/common/services/xendit-gateway';
 import { generateExternalId } from '@bb/common/services/xendit-signature';
 import type { CreateInvoiceRequest } from 'xendit-node/invoice/models';
-import type { PayDto } from './dto/pay.dto';
 import type { CommercePaymentStatus, CommerceTransactionStatus, Prisma } from '@prisma/client';
+
+/** Domain input for creating a payment. The HTTP layer's PayDto satisfies this shape. */
+export interface CreatePaymentInput {
+  transactionId: string;
+}
 
 export interface CreatePaymentResult {
   paymentId: string;
@@ -35,7 +39,7 @@ type TransactionRow = {
 export class PaymentService {
   constructor(private readonly xendit: XenditGateway = xenditGateway) {}
 
-  async create(memberId: string, dto: PayDto): Promise<CreatePaymentResult> {
+  async create(memberId: string, dto: CreatePaymentInput): Promise<CreatePaymentResult> {
     const tx = await prisma.commerceTransaction.findUnique({
       where: { id: dto.transactionId },
     });

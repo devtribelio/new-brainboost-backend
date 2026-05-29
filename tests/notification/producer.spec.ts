@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import * as bcrypt from 'bcryptjs';
 import { prisma } from '@bb/db';
-import { NotificationProducer } from '@/modules/notification/notification.producer';
-import { ActionLabel } from '@/modules/notification/action-labels';
+import { NotificationProducer } from '@bb/domain/notification/notification.producer';
+import { ActionLabel } from '@bb/domain/notification/action-labels';
 
 function uid(): string {
   return Math.random().toString(36).slice(2, 12);

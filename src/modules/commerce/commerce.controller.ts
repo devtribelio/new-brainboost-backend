@@ -9,11 +9,11 @@ import {
   ApiResponse,
   ApiTags,
 } from '@bb/common/openapi/decorators';
-import type { CheckoutService } from './checkout.service';
-import type { PaymentService } from './payment.service';
-import type { VoucherService } from './voucher.service';
+import type { CheckoutService } from '@bb/domain/commerce/checkout.service';
+import type { PaymentService } from '@bb/domain/commerce/payment.service';
+import type { VoucherService } from '@bb/domain/commerce/voucher.service';
 import { StartCheckoutDto } from './dto/start-checkout.dto';
-import { AFFILIATE_COOKIE_NAME } from '@/modules/affiliate/constants';
+import { AFFILIATE_COOKIE_NAME } from '@bb/domain/affiliate/constants';
 import { PayDto, CancelTransactionDto, ValidateVoucherDto } from './dto/pay.dto';
 import { ListTransactionsQueryDto } from './dto/list-transactions.dto';
 import {

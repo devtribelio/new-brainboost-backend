@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { computeAmount, getPerformanceTier } from '@/modules/affiliate/utils/compute-amount';
-import { PBS_TIER2_THRESHOLD, PBS_TIER3_THRESHOLD } from '@/modules/affiliate/constants';
+import { computeAmount, getPerformanceTier } from '@bb/domain/affiliate/utils/compute-amount';
+import { PBS_TIER2_THRESHOLD, PBS_TIER3_THRESHOLD } from '@bb/domain/affiliate/constants';
 
 describe('computeAmount', () => {
   it('PERCENT 20% on Rp 1jt = Rp 200K', () => {

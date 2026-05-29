@@ -1,5 +1,5 @@
 import type { Response } from 'express';
-import { NotificationService } from './notification.service';
+import { NotificationService } from '@bb/domain/notification/notification.service';
 import { ok, okPaginated } from '@bb/common/utils/response.util';
 import { BadRequestException, UnauthorizedException } from '@bb/common/exceptions';
 import { parsePagination } from '@bb/common/utils/pagination.util';

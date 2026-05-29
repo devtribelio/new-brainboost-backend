@@ -1,6 +1,6 @@
 import { prisma } from '@bb/db';
 import { logger } from '@bb/common/config/logger';
-import { COMMISSION_STATUS, PENDING_TO_BALANCE_DAYS } from '@/modules/affiliate/constants';
+import { COMMISSION_STATUS, PENDING_TO_BALANCE_DAYS } from '@bb/domain/affiliate/constants';
 import { settingsService, SETTING_KEYS } from '@bb/common/services/settings.service';
 
 /**

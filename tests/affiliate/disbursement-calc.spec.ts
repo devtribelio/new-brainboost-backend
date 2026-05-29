@@ -1,10 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { quoteDisbursement } from '@/modules/affiliate/utils/disbursement-calc';
+import { quoteDisbursement } from '@bb/domain/affiliate/utils/disbursement-calc';
 import {
   DISBURSEMENT_FEE,
   DISBURSEMENT_MIN_BALANCE,
   DISBURSEMENT_MIN_NET,
-} from '@/modules/affiliate/constants';
+} from '@bb/domain/affiliate/constants';
 
 describe('quoteDisbursement (legacy payout rules)', () => {
   it('rejects balance below the minimum (15k)', () => {

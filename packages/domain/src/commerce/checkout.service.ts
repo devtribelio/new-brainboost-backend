@@ -4,7 +4,7 @@ import { BadRequestException, NotFoundException } from '@bb/common/exceptions';
 import { computeTotals } from './utils/compute-totals';
 import { generateOrderCode } from './utils/generate-order-code';
 import { VoucherService } from './voucher.service';
-import { attributionService } from '@/modules/affiliate/attribution.service';
+import { attributionService } from '@bb/domain/affiliate/attribution.service';
 
 export interface StartCheckoutInput {
   memberId: string;
