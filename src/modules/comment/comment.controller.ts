@@ -1,5 +1,5 @@
 import type { Response } from 'express';
-import { CommentService } from './comment.service';
+import { CommentService } from '@bb/domain/comment/comment.service';
 import { ok, okCreated, okPaginated } from '@bb/common/utils/response.util';
 import { BadRequestException, UnauthorizedException } from '@bb/common/exceptions';
 import { parsePagination } from '@bb/common/utils/pagination.util';

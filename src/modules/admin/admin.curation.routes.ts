@@ -1,7 +1,7 @@
 import { Router, type Response } from 'express';
 import { asyncHandler } from '@bb/common/utils/async-handler';
-import { PostService } from '@/modules/post/post.service';
-import { CommentService } from '@/modules/comment/comment.service';
+import { PostService } from '@bb/domain/post/post.service';
+import { CommentService } from '@bb/domain/comment/comment.service';
 import type { AdminRequest } from './admin.types';
 import { setFlash } from './util/flash';
 

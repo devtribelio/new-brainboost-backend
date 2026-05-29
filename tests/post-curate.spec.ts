@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import * as bcrypt from 'bcryptjs';
 import { prisma } from '@bb/db';
-import { PostService } from '@/modules/post/post.service';
+import { PostService } from '@bb/domain/post/post.service';
 import { NotFoundException } from '@bb/common/exceptions';
 import { parsePagination } from '@bb/common/utils/pagination.util';
 

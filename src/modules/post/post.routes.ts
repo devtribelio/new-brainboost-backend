@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { PostController } from './post.controller';
-import { PostService } from './post.service';
+import { PostService } from '@bb/domain/post/post.service';
 import { authGuard } from '@bb/common/middlewares/auth.middleware';
 import { bindRoute } from '@bb/common/openapi/route-binder';
 

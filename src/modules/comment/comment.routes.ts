@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { CommentController } from './comment.controller';
-import { CommentService } from './comment.service';
+import { CommentService } from '@bb/domain/comment/comment.service';
 import { authGuard, optionalAuthGuard } from '@bb/common/middlewares/auth.middleware';
 import { bindRoute } from '@bb/common/openapi/route-binder';
 

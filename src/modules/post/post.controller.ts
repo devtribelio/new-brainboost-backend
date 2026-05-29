@@ -1,5 +1,5 @@
 import type { Response } from 'express';
-import { PostService } from './post.service';
+import { PostService } from '@bb/domain/post/post.service';
 import { ReportService } from '@/modules/report/report.service';
 import { ok, okCreated, okPaginated } from '@bb/common/utils/response.util';
 import { BadRequestException, UnauthorizedException } from '@bb/common/exceptions';
