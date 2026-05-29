@@ -4,6 +4,12 @@ Per-module status for the `tribelio-platform` → `bb-backend-new` rewrite. Upda
 
 Legend: `[ ]` not started · `[~]` in progress · `[x]` parity met for current scope · `[!]` blocked
 
+> **2026-05-29 — monorepo extraction (ADR-0001) landed** on `chore/monorepo-split`.
+> Module paths below moved: `src/modules/<f>/` → `apps/mobile-api/src/modules/<f>/`;
+> service/rule layer → `packages/domain/`; `src/common`+`config` → `packages/common/`;
+> prisma client → `packages/db/`; admin → `apps/admin-ejs/`; new `apps/backoffice-api/`
+> scaffold. 40 test files / 238 tests green on new layout.
+
 ---
 
 ## Done ([x])
