@@ -61,8 +61,18 @@ describe('OpenAPI doc — response examples', () => {
     expect(doc.components.schemas.PaginationMetaDto.properties.totalPages).toBeDefined();
     expect(doc.components.schemas.CommissionSummaryDto.properties.currency.example).toBe('IDR');
     expect(doc.components.schemas.UploadedFileDto.properties.url.example).toBe(
-      '/static/temporary/tmp-abc123.jpg',
+      'public/uploads/01935f.../a1b2c3.webp',
     );
+
+    // Upload endpoint documents a multipart/form-data body with a binary `image` field.
+    const uploadOp = doc.paths['/api/member/upload/temporary'].post;
+    const uploadBody = uploadOp.requestBody.content['multipart/form-data'].schema;
+    expect(uploadBody.properties.image.items.format).toBe('binary');
+    expect(uploadBody.required).toContain('image');
+    // ...and a `kind` query param enumerating the folder kinds.
+    const kindParam = uploadOp.parameters.find((p: { name: string }) => p.name === 'kind');
+    expect(kindParam.in).toBe('query');
+    expect(kindParam.schema.enum).toContain('avatar');
 
     // Error envelope: { success:false, data:null, meta:null, error: { code, message, details? } }.
     expect(doc.components.schemas.ErrorEnvelopeDto.properties.success.type).toBe('boolean');

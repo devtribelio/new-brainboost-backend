@@ -219,7 +219,7 @@ Module status (one-line summary; details in `docs/rewrite-progress.md`):
 - [x] member — info, list
 - [x] profile — view, update
 - [x] location — country/province/city/district
-- [x] upload — multipart, temp storage
+- [x] upload — multipart → S3 (sharp webp re-encode + resize + EXIF strip; `public/*` CDN, `private/*` presigned-ready). Replaces local disk + `/static/temporary`. See `docs/upload-s3-port.md`
 - [x] banner — list
 - [x] product — course detail (legacy parity — see `feat/base-update`)
 - [x] media — BunnyCDN Stream MP4 proxy; opaque token hides `guid`/`library_id`; preview-free / enrollment-gated. Integration tests pending host Postgres

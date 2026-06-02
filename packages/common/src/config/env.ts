@@ -51,6 +51,31 @@ export const env = {
     publicBaseUrl: optional('UPLOAD_PUBLIC_BASE_URL', ''),
     maxBytes: Number.parseInt(optional('UPLOAD_MAX_BYTES', String(10 * 1024 * 1024)), 10),
   },
+  s3: {
+    // Custom endpoint for S3-compatible backends (MinIO/R2). Empty = AWS default.
+    endpoint: optional('S3_ENDPOINT', ''),
+    region: optional('S3_REGION', 'ap-southeast-3'),
+    // Credentials. Required in prod; in dev/test fall back to empty so the
+    // client constructs without throwing (calls fail until configured).
+    accessKeyId:
+      nodeEnv === 'production' ? required('S3_ACCESS_KEY_ID') : optional('S3_ACCESS_KEY_ID', ''),
+    secretAccessKey:
+      nodeEnv === 'production'
+        ? required('S3_SECRET_ACCESS_KEY')
+        : optional('S3_SECRET_ACCESS_KEY', ''),
+    bucket: nodeEnv === 'production' ? required('S3_BUCKET') : optional('S3_BUCKET', 'bb-uploads'),
+    // true for MinIO / path-style backends, false for AWS virtual-host style.
+    forcePathStyle: optional('S3_FORCE_PATH_STYLE', 'false') === 'true',
+    // Public base URL (CDN or S3) prepended to `public/*` object keys.
+    // e.g. https://cdn.brainboost.com  →  <base>/public/avatars/<id>.webp
+    publicBaseUrl: optional('S3_PUBLIC_BASE_URL', ''),
+    // Default presigned-GET lifetime for `private/*` objects, seconds.
+    presignExpires: Number.parseInt(optional('S3_PRESIGN_EXPIRES', '900'), 10),
+    // Max image side (px) after resize. Larger inputs downscaled, no upscale.
+    imageMaxDimension: Number.parseInt(optional('S3_IMAGE_MAX_DIMENSION', '1024'), 10),
+    // webp quality 1-100 for re-encoded images.
+    imageWebpQuality: Number.parseInt(optional('S3_IMAGE_WEBP_QUALITY', '82'), 10),
+  },
   baseUrl: optional('BASE_URL', 'http://localhost:3000'),
   // Express `trust proxy` setting. Empty = off (req.ip = socket address).
   // Set to a hop count ("1") behind a reverse proxy / LB so req.ip reflects

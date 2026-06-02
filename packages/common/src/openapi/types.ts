@@ -51,9 +51,14 @@ export interface ApiQueryOptions {
 }
 
 export interface ApiBodyOptions {
-  type: () => unknown;
+  /** DTO class thunk → emitted as a `$ref`. Omit when `schema` is provided. */
+  type?: () => unknown;
   description?: string;
   isArray?: boolean;
+  /** Request content type. Defaults to `application/json`. e.g. `multipart/form-data`. */
+  contentType?: string;
+  /** Raw inline JSON schema; used instead of a DTO `$ref` (e.g. binary file uploads). */
+  schema?: Record<string, unknown>;
 }
 
 export interface ApiBearerAuthOptions {
