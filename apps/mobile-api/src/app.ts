@@ -1,4 +1,3 @@
-import path from 'node:path';
 import express, { type Express } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -48,7 +47,7 @@ export function buildApp(): Express {
     app.use(morgan(env.isProduction ? 'combined' : 'dev'));
   }
 
-  app.use('/static/temporary', express.static(path.resolve(process.cwd(), env.upload.tempDir)));
+  // Uploads now live in S3 (public/* served via CDN) — no local static serving.
 
   app.get('/health', (_req, res) => ok(res, { status: 'ok', service: env.appName }));
 

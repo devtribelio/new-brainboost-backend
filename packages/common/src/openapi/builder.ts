@@ -113,17 +113,26 @@ function operationFromRoute(
   }
 
   if (body) {
-    const bodyCtor = body.type();
-    if (typeof bodyCtor === 'function') {
-      collectedDtos.add(bodyCtor);
-      const ref = `#/components/schemas/${(bodyCtor as { name: string }).name}`;
-      const refSchema: Record<string, unknown> = body.isArray
-        ? { type: 'array', items: { $ref: ref } }
-        : { $ref: ref };
+    const contentType = body.contentType ?? 'application/json';
+    let schema: Record<string, unknown> | undefined;
+
+    if (body.schema) {
+      // Raw inline schema (e.g. multipart binary upload) — no DTO collection.
+      schema = body.schema;
+    } else if (body.type) {
+      const bodyCtor = body.type();
+      if (typeof bodyCtor === 'function') {
+        collectedDtos.add(bodyCtor);
+        const ref = `#/components/schemas/${(bodyCtor as { name: string }).name}`;
+        schema = body.isArray ? { type: 'array', items: { $ref: ref } } : { $ref: ref };
+      }
+    }
+
+    if (schema) {
       spec.requestBody = {
         required: true,
         description: body.description,
-        content: { 'application/json': { schema: refSchema } },
+        content: { [contentType]: { schema } },
       };
     }
   }

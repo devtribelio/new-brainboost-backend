@@ -27,6 +27,8 @@
     "clean": "rm -rf dist tsconfig.tsbuildinfo"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1058.0",
+    "@aws-sdk/s3-request-presigner": "^3.1058.0",
     "@bb/db": "workspace:*",
     "@prisma/client": "^5.22.0",
     "bcryptjs": "^2.4.3",
@@ -37,6 +39,7 @@
     "jsonwebtoken": "^9.0.2",
     "nodemailer": "^8.0.7",
     "pino": "^9.5.0",
+    "sharp": "^0.34.5",
     "swagger-ui-express": "^5.0.1",
     "xendit-node": "^7.0.0"
   },
@@ -46,6 +49,7 @@
     "@types/jsonwebtoken": "^9.0.7",
     "@types/node": "^22.9.0",
     "@types/nodemailer": "^8.0.0",
-    "@types/swagger-ui-express": "^4.1.8"
+    "@types/swagger-ui-express": "^4.1.8",
+    "aws-sdk-client-mock": "^4.1.0"
   }
 }
