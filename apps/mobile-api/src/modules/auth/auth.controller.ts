@@ -14,6 +14,7 @@ import {
 } from './dto/register-by-phone.dto';
 import { RequestVerificationPhoneDto } from './dto/request-verification-phone.dto';
 import { ValidateOtpPhoneDto } from './dto/validate-otp-phone.dto';
+import { VerifyEmailDto } from './dto/verify-email.dto';
 import { ok, okCreated } from '@bb/common/utils/response.util';
 import type { AuthenticatedRequest } from '@bb/common/interfaces/authenticated-request';
 import { UnauthorizedException } from '@bb/common/exceptions';
@@ -156,6 +157,28 @@ export class AuthController {
   @ApiResponse({ status: 200, type: () => GenericOkDto })
   validateOtpPhone = async (req: Request, res: Response) => {
     const result = await this.authService.validateOtpPhone(req.body as ValidateOtpPhoneDto);
+    return ok(res, result);
+  };
+
+  @ApiOperation({
+    summary: 'Request email verification OTP',
+    description: 'Send a 6-digit OTP to the authenticated member\'s email. Requires auth.',
+  })
+  @ApiResponse({ status: 200, type: () => GenericOkDto })
+  requestVerifyEmail = async (req: Request, res: Response) => {
+    const user = (req as AuthenticatedRequest).user;
+    if (!user) throw new UnauthorizedException('Authentication required');
+    const result = await this.authService.requestVerifyEmail(user.id);
+    return ok(res, result);
+  };
+
+  @ApiOperation({ summary: 'Submit OTP and mark member.isVerified=true' })
+  @ApiBody({ type: () => VerifyEmailDto })
+  @ApiResponse({ status: 200, type: () => GenericOkDto })
+  verifyEmail = async (req: Request, res: Response) => {
+    const user = (req as AuthenticatedRequest).user;
+    if (!user) throw new UnauthorizedException('Authentication required');
+    const result = await this.authService.verifyEmail(user.id, (req.body as VerifyEmailDto).code);
     return ok(res, result);
   };
 }
