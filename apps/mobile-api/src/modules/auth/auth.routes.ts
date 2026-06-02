@@ -24,6 +24,7 @@ import {
 import { RegisterByPhoneDto } from './dto/register-by-phone.dto';
 import { RequestVerificationPhoneDto } from './dto/request-verification-phone.dto';
 import { ValidateOtpPhoneDto } from './dto/validate-otp-phone.dto';
+import { VerifyEmailDto } from './dto/verify-email.dto';
 import { bindRoute } from '@bb/common/openapi/route-binder';
 
 export function authRoutes(): Router {
@@ -111,6 +112,23 @@ export function authRoutes(): Router {
     path: '/auth/validateOtpPhone',
     handlerKey: 'validateOtpPhone',
     middlewares: [validateOtpPhoneRateLimiter, validateDto(ValidateOtpPhoneDto)],
+  });
+
+  bindRoute({
+    router,
+    controller: ctrl,
+    method: 'post',
+    path: '/auth/requestVerifyEmail',
+    handlerKey: 'requestVerifyEmail',
+    middlewares: [authGuard],
+  });
+  bindRoute({
+    router,
+    controller: ctrl,
+    method: 'post',
+    path: '/auth/verifyEmail',
+    handlerKey: 'verifyEmail',
+    middlewares: [authGuard, validateDto(VerifyEmailDto)],
   });
 
   return router;

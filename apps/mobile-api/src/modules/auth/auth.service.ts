@@ -25,6 +25,7 @@ import type { RegisterByPhoneDto } from './dto/register-by-phone.dto';
 import type { RequestVerificationPhoneDto } from './dto/request-verification-phone.dto';
 import type { ValidateOtpPhoneDto } from './dto/validate-otp-phone.dto';
 import { logger } from '@bb/common/config/logger';
+import { mailer } from '@bb/common/services/mailer.service';
 
 interface TokenBundle {
   access_token: string;
@@ -655,6 +656,40 @@ export class AuthService {
       phone: target,
       expired_date: expiresAt.toISOString(),
     };
+  }
+
+  async requestVerifyEmail(memberId: string) {
+    const member = await prisma.member.findUnique({ where: { id: memberId } });
+    if (!member) throw new NotFoundException('Member not found');
+    if (member.isVerified) throw new BadRequestException('Email already verified');
+
+    const { code } = await otpService.issue({ target: member.email, purpose: 'verify-email' });
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+    logger.info({ memberId, email: member.email, otpCode: code }, 'verify-email OTP issued');
+
+    await mailer.send({
+      to: member.email,
+      subject: 'Verify your email',
+      text: `Your verification code is: ${code}. Valid for 10 minutes.`,
+      html: `<p>Your verification code is: <strong>${code}</strong></p><p>Valid for 10 minutes.</p>`,
+    });
+
+    return { email: member.email, expired_date: expiresAt.toISOString() };
+  }
+
+  async verifyEmail(memberId: string, code: string) {
+    const member = await prisma.member.findUnique({ where: { id: memberId } });
+    if (!member) throw new NotFoundException('Member not found');
+    if (member.isVerified) throw new BadRequestException('Email already verified');
+
+    await otpService.consume(member.email, code, 'verify-email');
+
+    await prisma.member.update({
+      where: { id: memberId },
+      data: { isVerified: true },
+    });
+
+    return { email: member.email, verified: true };
   }
 
   async validateOtpPhone(dto: ValidateOtpPhoneDto) {
