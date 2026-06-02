@@ -89,6 +89,7 @@ export class PurchaseIngestService {
             acceptedAmount: gross,
             status: 'SUCCESS',
             paidAt: new Date(),
+            activeSlotTxId: tx.id, // occupy slot — invariant: every active payment holds its tx slot
           },
           select: { id: true },
         });

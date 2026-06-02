@@ -95,6 +95,9 @@ export class XenditWebhookHandler {
           vaNumber: (payload['payment_destination'] as string) ?? payment.vaNumber,
           logResponse: payload as unknown as object,
           paidAt: nextStatus === 'SUCCESS' ? now : payment.paidAt,
+          // Free the transaction's active slot on EXPIRED so a retry can reclaim it.
+          // SUCCESS keeps the slot occupied (a paid transaction must never get a new payment).
+          activeSlotTxId: nextStatus === 'EXPIRED' ? null : payment.activeSlotTxId,
           updatedAt: now,
         },
       });
