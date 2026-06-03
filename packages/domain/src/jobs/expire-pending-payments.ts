@@ -18,7 +18,7 @@ export async function expirePendingPayments(now: Date = new Date()): Promise<{ e
       await prisma.$transaction(async (txdb) => {
         await txdb.commercePayment.update({
           where: { id: p.id },
-          data: { status: 'EXPIRED', updatedAt: now },
+          data: { status: 'EXPIRED', updatedAt: now, activeSlotTxId: null },
         });
         await txdb.commercePaymentEvent.create({
           data: {

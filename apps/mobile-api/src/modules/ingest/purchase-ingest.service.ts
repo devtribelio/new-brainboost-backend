@@ -89,6 +89,7 @@ export class PurchaseIngestService {
             acceptedAmount: gross,
             status: 'SUCCESS',
             paidAt: new Date(),
+            activeSlotTxId: tx.id, // occupy slot — invariant: every active payment holds its tx slot
           },
           select: { id: true },
         });
@@ -140,7 +141,12 @@ export class PurchaseIngestService {
 
     const tx = await prisma.commerceTransaction.findUnique({
       where: { provider_providerEventId: { provider: cred.name, providerEventId: originalEventId } },
-      select: { id: true, payments: { select: { id: true } } },
+      select: {
+        id: true,
+        memberId: true,
+        payments: { select: { id: true } },
+        product: { select: { type: true, course: { select: { id: true } } } },
+      },
     });
     if (!tx) return { status: 'refund_target_not_found' };
 
@@ -150,7 +156,24 @@ export class PurchaseIngestService {
       data: { status: COMMISSION_STATUS.VOIDED, voidedAt: new Date(), voidedReason: `refund:${input.providerEventId}` },
     });
     await prisma.commerceTransaction.update({ where: { id: tx.id }, data: { status: 'REFUNDED' } });
-    logger.info({ txId: tx.id, voided: res.count }, '[ingest] refund voided commissions');
+
+    // Revoke course access so `isPurchased` flips back to false. All read paths
+    // (product list, course detail, media gating) key on enrollment existence,
+    // so a hard delete is the single point that revokes access everywhere. A
+    // later re-purchase re-creates the enrollment via the success listener.
+    // Idempotent: deleteMany is a no-op if already revoked.
+    let revokedEnrollments = 0;
+    if (tx.product?.type === 'course' && tx.product.course) {
+      const del = await prisma.courseEnrollment.deleteMany({
+        where: { memberId: tx.memberId, courseId: tx.product.course.id },
+      });
+      revokedEnrollments = del.count;
+    }
+
+    logger.info(
+      { txId: tx.id, voided: res.count, revokedEnrollments },
+      '[ingest] refund voided commissions + revoked enrollment',
+    );
     return { status: 'refunded', transactionId: tx.id, voidedCommissions: res.count };
   }
 

@@ -105,6 +105,16 @@ export const env = {
       'http://localhost:3000/checkout/failed',
     ),
   },
+  revenuecat: {
+    // Shared secret RevenueCat sends as the `Authorization` header on each
+    // webhook (configured in the RC dashboard). Empty disables the endpoint
+    // (guard fails closed → 401). Optional (like xendit.callbackToken) so apps
+    // that never serve this webhook still boot in prod.
+    webhookAuth: optional('REVENUECAT_WEBHOOK_AUTH', ''),
+    // ThirdPartyCredential.name row the handler loads for per-channel toggles
+    // (triggersAffiliate / canIngestRefund). Must match the seeded credential.
+    providerName: optional('REVENUECAT_PROVIDER_NAME', 'revenuecat'),
+  },
   commerce: {
     transactionExpiryHours: Number.parseInt(
       optional('COMMERCE_TRANSACTION_EXPIRY_HOURS', '24'),

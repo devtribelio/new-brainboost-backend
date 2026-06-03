@@ -6,7 +6,8 @@ import { commerceEvents } from '@bb/common/events/commerce-events';
 import { xenditGateway, type XenditGateway } from '@bb/common/services/xendit-gateway';
 import { generateExternalId } from '@bb/common/services/xendit-signature';
 import type { CreateInvoiceRequest } from 'xendit-node/invoice/models';
-import type { CommercePaymentStatus, CommerceTransactionStatus, Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import type { CommercePaymentStatus, CommerceTransactionStatus } from '@prisma/client';
 
 /** Domain input for creating a payment. The HTTP layer's PayDto satisfies this shape. */
 export interface CreatePaymentInput {
@@ -66,6 +67,31 @@ export class PaymentService {
   ): Promise<CreatePaymentResult> {
     const externalId = generateExternalId();
     const expiredAt = new Date(Date.now() + env.commerce.invoiceExpiryHours * 60 * 60 * 1000);
+
+    // 1. Claim the transaction's active slot BEFORE the (expensive, non-idempotent) Xendit
+    //    call. The `activeSlotTxId` unique index serializes concurrent checkouts so only the
+    //    winner creates an invoice — a loser gets P2002 and returns the existing payment.
+    let payment: { id: string };
+    try {
+      payment = await prisma.commercePayment.create({
+        data: {
+          transactionId: tx.id,
+          memberId,
+          paymentType: 'invoice',
+          amount: tx.amount,
+          fee: 0,
+          status: 'PENDING',
+          externalId,
+          expiredAt,
+          activeSlotTxId: tx.id,
+        },
+        select: { id: true },
+      });
+    } catch (e) {
+      if (isActiveSlotConflict(e)) return this.returnExistingActivePayment(tx);
+      throw e;
+    }
+
     const member = await prisma.member.findUnique({
       where: { id: memberId },
       select: { email: true, fullName: true },
@@ -89,29 +115,34 @@ export class PaymentService {
       metadata: { transactionId: tx.id, memberId },
     };
 
-    const result = await this.xendit.createInvoice(params);
+    // 2. Only the winner reaches Xendit. On failure, free the slot (mark FAILED) so the
+    //    member can retry checkout instead of being permanently blocked by a dead claim.
+    let result;
+    try {
+      result = await this.xendit.createInvoice(params);
+    } catch (e) {
+      await prisma.commercePayment
+        .update({ where: { id: payment.id }, data: { status: 'FAILED', activeSlotTxId: null } })
+        .catch((err) =>
+          logger.error({ err, paymentId: payment.id }, '[commerce] failed to release slot after Xendit error'),
+        );
+      throw e;
+    }
 
-    const payment = await prisma.$transaction(async (txdb) => {
-      const p = await txdb.commercePayment.create({
+    // 3. Persist invoice references + audit event onto the already-claimed row.
+    await prisma.$transaction(async (txdb) => {
+      await txdb.commercePayment.update({
+        where: { id: payment.id },
         data: {
-          transactionId: tx.id,
-          memberId,
-          paymentType: 'invoice',
-          amount: tx.amount,
-          fee: 0,
-          status: 'PENDING',
-          externalId,
           xenditId: result.id ?? null,
           checkoutUrl: result.invoiceUrl ?? null,
-          expiredAt,
           logRequest: params as unknown as object,
           logResponse: result as unknown as object,
         },
       });
       await txdb.commercePaymentEvent.create({
-        data: { paymentId: p.id, source: 'checkout', toStatus: 'PENDING' },
+        data: { paymentId: payment.id, source: 'checkout', toStatus: 'PENDING' },
       });
-      return p;
     });
 
     return {
@@ -134,48 +165,85 @@ export class PaymentService {
     tx: TransactionRow,
   ): Promise<CreatePaymentResult> {
     const externalId = generateExternalId();
-    const result = await prisma.$transaction(async (txdb) => {
-      const payment = await txdb.commercePayment.create({
-        data: {
-          transactionId: tx.id,
-          memberId,
-          paymentType: 'voucher',
-          amount: 0,
-          acceptedAmount: 0,
-          status: 'SUCCESS',
-          externalId,
-          paidAt: new Date(),
-        },
+    let payment: { id: string };
+    try {
+      payment = await prisma.$transaction(async (txdb) => {
+        const p = await txdb.commercePayment.create({
+          data: {
+            transactionId: tx.id,
+            memberId,
+            paymentType: 'voucher',
+            amount: 0,
+            acceptedAmount: 0,
+            status: 'SUCCESS',
+            externalId,
+            paidAt: new Date(),
+            activeSlotTxId: tx.id, // occupy slot — a SUCCESS payment blocks any further payment
+          },
+          select: { id: true },
+        });
+        await txdb.commercePaymentEvent.create({
+          data: { paymentId: p.id, source: 'checkout', toStatus: 'SUCCESS' },
+        });
+        // Guard: only settle a still-PENDING transaction. A concurrent settle (webhook /
+        // ingest) updates 0 rows → abort and roll back this payment.
+        const settled = await txdb.commerceTransaction.updateMany({
+          where: { id: tx.id, status: 'PENDING' },
+          data: { status: 'PAID', paidAt: new Date() },
+        });
+        if (settled.count === 0) {
+          throw new BadRequestException('Transaction is no longer pending');
+        }
+        return p;
       });
-      await txdb.commercePaymentEvent.create({
-        data: { paymentId: payment.id, source: 'checkout', toStatus: 'SUCCESS' },
-      });
-      const updated = await txdb.commerceTransaction.update({
-        where: { id: tx.id },
-        data: { status: 'PAID', paidAt: new Date() },
-      });
-      return { payment, tx: updated };
-    });
+    } catch (e) {
+      if (isActiveSlotConflict(e)) return this.returnExistingActivePayment(tx);
+      throw e;
+    }
 
     commerceEvents.emit('commerce.payment.success', {
-      paymentId: result.payment.id,
-      transactionId: result.tx.id,
+      paymentId: payment.id,
+      transactionId: tx.id,
       memberId,
-      productId: result.tx.productId,
-      amount: result.tx.amount,
-      voucherAmount: result.tx.voucherAmount,
-      voucherId: result.tx.voucherId,
+      productId: tx.productId,
+      amount: tx.amount,
+      voucherAmount: tx.voucherAmount,
+      voucherId: tx.voucherId,
       affiliatorId: tx.affiliatorId,
       programId: tx.programId,
       attributedAffiliatorMemberId: tx.attributedAffiliatorMemberId,
     });
 
     return {
-      paymentId: result.payment.id,
+      paymentId: payment.id,
       paymentStatus: 'SUCCESS',
       transactionStatus: 'PAID',
       amount: 0,
       fee: 0,
+    };
+  }
+
+  /**
+   * A concurrent checkout already holds the transaction's active slot. Return that payment
+   * so the caller is idempotent (same invoice URL / status) instead of erroring.
+   */
+  private async returnExistingActivePayment(tx: TransactionRow): Promise<CreatePaymentResult> {
+    const existing = await prisma.commercePayment.findFirst({
+      where: { transactionId: tx.id, activeSlotTxId: tx.id },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (!existing) {
+      // Slot was freed between the conflict and this read (rare). Surface as retryable.
+      throw new BadRequestException('Payment is being processed, please retry');
+    }
+    return {
+      paymentId: existing.id,
+      paymentStatus: existing.status,
+      transactionStatus: existing.status === 'SUCCESS' ? 'PAID' : 'PENDING',
+      invoiceUrl: existing.checkoutUrl,
+      expiredAt: existing.expiredAt,
+      amount: existing.amount,
+      fee: existing.fee,
     };
   }
 
@@ -280,7 +348,7 @@ export class PaymentService {
       await prisma.$transaction([
         prisma.commercePayment.update({
           where: { id: pending.id },
-          data: { status: 'CANCELED' },
+          data: { status: 'CANCELED', activeSlotTxId: null },
         }),
         prisma.commercePaymentEvent.create({
           data: {
@@ -297,6 +365,19 @@ export class PaymentService {
       data: { status: 'CANCELED', canceledAt: new Date() },
     });
   }
+}
+
+/**
+ * True when an error is a unique-constraint violation on the `active_slot_tx_id` index —
+ * i.e. another concurrent checkout already claimed this transaction's active payment slot.
+ * On the claim INSERT no other unique column is set, so a bare P2002 is unambiguously ours.
+ */
+function isActiveSlotConflict(e: unknown): boolean {
+  if (!(e instanceof Prisma.PrismaClientKnownRequestError) || e.code !== 'P2002') return false;
+  const target = e.meta?.target;
+  if (target == null) return true;
+  const s = Array.isArray(target) ? target.join(',') : String(target);
+  return s.includes('active_slot_tx_id');
 }
 
 // ============================================================

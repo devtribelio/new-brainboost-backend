@@ -940,6 +940,11 @@ model CommercePayment {
   id                    String                @id @default(uuid(7)) @db.Uuid
   legacyId              Int?                  @unique @map("legacy_id")
   transactionId         String                @map("transaction_id") @db.Uuid
+  // Conditional-uniqueness guard: holds `transactionId` while this payment occupies the
+  // transaction's active slot (status PENDING or SUCCESS); NULL once EXPIRED/FAILED/CANCELED
+  // so a retry can reclaim the slot. The @unique index lets Postgres reject a second
+  // concurrent active payment for the same transaction (NULLs are distinct → retries allowed).
+  activeSlotTxId        String?               @unique @map("active_slot_tx_id") @db.Uuid
   memberId              String                @map("member_id") @db.Uuid
   paymentType           String                @map("payment_type") // "cc" | "va" | "eWallet" | "voucher"
   bank                  String? // BCA / BNI / MANDIRI / BRI / PERMATA

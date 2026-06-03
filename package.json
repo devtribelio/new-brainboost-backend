@@ -28,7 +28,8 @@
     "migrate:course-lessons": "tsx scripts/migrate-course-lessons.ts",
     "backfill:product-selling-points": "tsx scripts/backfill-product-selling-points.ts",
     "seed:settings": "tsx prisma/seed-settings.ts",
-    "issue:credential": "tsx scripts/issue-credential.ts"
+    "issue:credential": "tsx scripts/issue-credential.ts",
+    "seed:revenuecat-iap": "tsx scripts/seed-revenuecat-iap.ts"
   },
   "dependencies": {
     "@bb/common": "workspace:*",
