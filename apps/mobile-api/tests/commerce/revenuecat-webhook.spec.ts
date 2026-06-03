@@ -145,13 +145,16 @@ describe('RevenueCat webhook', () => {
     expect(enrollment).not.toBeNull();
   });
 
-  it('captures store commission + tax → acceptedAmount = net settled', async () => {
-    // 300_000 IDR gross, Apple 30% cut, 11% tax → 300_000 × 0.70 × 0.89 = 186_900
+  it('uses takehome_percentage when present → acceptedAmount = net settled', async () => {
+    // Mirrors a real ID sandbox event: gross 429k, takehome 0.7 → net 300_300.
+    // commission/tax also present but takehome is authoritative (RC precomputes
+    // regional handling; tax in ID is consumer-paid, not dev-side).
     const body = rcEvent({
       app_user_id: memberId,
-      price_in_purchased_currency: 300_000,
-      commission_percentage: 0.3, // 30% as decimal fraction
-      tax_percentage: 0.11, // 11% as decimal fraction
+      price_in_purchased_currency: 429_000,
+      takehome_percentage: 0.7,
+      commission_percentage: 0.2703,
+      tax_percentage: 0.0991,
     });
     const r = await request(app).post(ROUTE).set('authorization', `Bearer ${AUTH}`).send(body);
     expect(r.status).toBe(200);
@@ -162,11 +165,17 @@ describe('RevenueCat webhook', () => {
       where: { provider_providerEventId: { provider: 'revenuecat', providerEventId: txId } },
     });
     // amount (and affiliate base) stays on gross — store fee is Brainboost's cost.
-    expect(tx?.amount).toBe(300_000);
+    expect(tx?.amount).toBe(429_000);
 
     const payment = await prisma.commercePayment.findFirst({ where: { transactionId: tx!.id } });
-    expect(payment?.amount).toBe(300_000);
-    expect(payment?.acceptedAmount).toBe(186_900);
+    expect(payment?.amount).toBe(429_000);
+    expect(payment?.acceptedAmount).toBe(300_300);
+    // Raw payload persisted for audit / fee reconciliation
+    const logRequest = payment?.logRequest as Record<string, unknown> | null;
+    expect(logRequest).toBeTruthy();
+    expect(logRequest?.takehome_percentage).toBe(0.7);
+    expect(logRequest?.commission_percentage).toBe(0.2703);
+    expect(logRequest?.product_id).toBe(SKU);
   });
 
   it('idempotent: redelivered event (same transaction_id) → duplicate', async () => {

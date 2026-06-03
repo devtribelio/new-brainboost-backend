@@ -67,16 +67,24 @@ export class RevenueCatEventDto {
   currency?: string;
 
   @ApiPropertyOptional({
-    example: 0.3,
-    description: 'Store commission as decimal fraction (0.30 = 30% Apple/Google cut, 0.15 = 15% small biz)',
+    example: 0.7,
+    description: 'RC-computed net% that lands in developer pocket (decimal 0-1). Authoritative — already accounts for commission, tax, and regional handling. Prefer this over deriving from commission/tax.',
+  })
+  @IsOptional()
+  @IsNumber()
+  takehome_percentage?: number;
+
+  @ApiPropertyOptional({
+    example: 0.2703,
+    description: 'Store commission as decimal fraction (e.g. 0.2703). Informational — use takehome_percentage for net.',
   })
   @IsOptional()
   @IsNumber()
   commission_percentage?: number;
 
   @ApiPropertyOptional({
-    example: 0.11,
-    description: 'Tax as decimal fraction (0.11 = 11% PPN ID)',
+    example: 0.0991,
+    description: 'Tax as decimal fraction (e.g. 0.0991). Informational — in tax-inclusive regions like ID, this is consumer-paid PPN, NOT a deduction from developer share.',
   })
   @IsOptional()
   @IsNumber()
