@@ -59,17 +59,12 @@ async function grantCourseEnrollment(memberId: string, productId: string): Promi
     select: { id: true, type: true, course: { select: { id: true } } },
   });
   if (!product?.course || product.type !== 'course') return;
-  try {
-    await prisma.courseEnrollment.create({
-      data: {
-        memberId,
-        courseId: product.course.id,
-        dateStart: new Date(),
-      },
-    });
-  } catch (e) {
-    const code = (e as { code?: string }).code;
-    if (code !== 'P2002') throw e;
-    // unique (memberId, courseId) — already enrolled, idempotent skip
-  }
+  // createMany + skipDuplicates: idempotent without throwing on the
+  // (memberId, courseId) unique. `create`+catch worked but Prisma still logs
+  // the swallowed P2002 at error level (prisma:error noise on every re-purchase
+  // / redelivered IAP event) — skipDuplicates avoids the throw entirely.
+  await prisma.courseEnrollment.createMany({
+    data: [{ memberId, courseId: product.course.id, dateStart: new Date() }],
+    skipDuplicates: true,
+  });
 }
