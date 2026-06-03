@@ -72,6 +72,13 @@ export interface RevenueCatHandleResult {
  */
 export class RevenueCatWebhookHandler {
   async handle(event: RevenueCatEventDto): Promise<RevenueCatHandleResult> {
+    // Full event logged on entry — gives a forensic trail for fee/encoding
+    // surprises like the takehome_percentage discovery, without depending on
+    // any single field surviving DTO whitelist. App log retention is short;
+    // for long-term audit see `commerce_payments.log_request` (persisted in
+    // the ingest service on successful purchase).
+    logger.info({ event }, '[revenuecat] webhook received');
+
     const isPurchase = PURCHASE_EVENT_TYPES.has(event.type);
     const isRefund = REFUND_EVENT_TYPES.has(event.type);
 

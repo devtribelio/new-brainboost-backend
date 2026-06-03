@@ -113,6 +113,12 @@ export class PurchaseIngestService {
               paymentType: cred.name,
               amount: gross,
               acceptedAmount: accepted,
+              // Audit trail: full upstream payload so we can later reconcile
+              // unexpected `acceptedAmount` values, replay fee math when RC
+              // changes encoding, or cross-reference with Apple settlement
+              // reports. Mirrors `commerce_payments.log_response` on the
+              // Xendit path (which stores the provider's update payload).
+              logRequest: (input.raw ?? undefined) as object | undefined,
               status: 'SUCCESS',
               paidAt: new Date(),
               activeSlotTxId: tx.id, // occupy slot — invariant: every active payment holds its tx slot

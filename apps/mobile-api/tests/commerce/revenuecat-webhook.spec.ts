@@ -165,11 +165,17 @@ describe('RevenueCat webhook', () => {
       where: { provider_providerEventId: { provider: 'revenuecat', providerEventId: txId } },
     });
     // amount (and affiliate base) stays on gross — store fee is Brainboost's cost.
-    expect(tx?.amount).toBe(300_000);
+    expect(tx?.amount).toBe(429_000);
 
     const payment = await prisma.commercePayment.findFirst({ where: { transactionId: tx!.id } });
-    expect(payment?.amount).toBe(300_000);
-    expect(payment?.acceptedAmount).toBe(186_900);
+    expect(payment?.amount).toBe(429_000);
+    expect(payment?.acceptedAmount).toBe(300_300);
+    // Raw payload persisted for audit / fee reconciliation
+    const logRequest = payment?.logRequest as Record<string, unknown> | null;
+    expect(logRequest).toBeTruthy();
+    expect(logRequest?.takehome_percentage).toBe(0.7);
+    expect(logRequest?.commission_percentage).toBe(0.2703);
+    expect(logRequest?.product_id).toBe(SKU);
   });
 
   it('idempotent: redelivered event (same transaction_id) → duplicate', async () => {
