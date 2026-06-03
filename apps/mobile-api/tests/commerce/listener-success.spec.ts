@@ -117,6 +117,37 @@ describe('commerce.payment.success listener', () => {
     expect(voucherAfter?.used).toBe(1);
   });
 
+  it('uses acceptedAmount (net) as commission base when present — IAP markup does not leak to affiliator', async () => {
+    // Scenario: IAP price marked up to 429k to offset Apple's 30% cut so net
+    // ≈ web price (300_300). Commission must be rate × NET (not rate × gross),
+    // else markup leaks as bonus affiliator commission.
+    const paymentId = randomUUID();
+    const transactionId = randomUUID();
+    commerceEvents.emit('commerce.payment.success', {
+      paymentId,
+      transactionId,
+      memberId,
+      productId,
+      amount: 429_000, // gross — what customer paid via IAP
+      acceptedAmount: 300_300, // net — what we settle from Apple
+      voucherAmount: 0,
+      voucherId: null,
+      affiliatorId: null,
+      programId,
+    });
+    await wait(150);
+
+    const commission = await prisma.affiliateCommission.findFirst({
+      where: { buyerMemberId: memberId, paymentId },
+    });
+    expect(commission).not.toBeNull();
+    // PERFORMANCE T1 rate 20% applied to NET, not gross:
+    //   gross basis would be 0.2 × 429_000 = 85_800 (current behavior — WRONG for IAP)
+    //   net   basis      is 0.2 × 300_300 = 60_060 (correct — matches web 0.2 × 300_000)
+    expect(commission?.amount).toBe(Math.floor(300_300 * 0.2));
+    expect(commission?.amount).not.toBe(Math.floor(429_000 * 0.2));
+  });
+
   it('idempotent: re-emit same paymentId does not duplicate side effects', async () => {
     const paymentId = randomUUID();
     const transactionId = randomUUID();

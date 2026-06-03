@@ -160,6 +160,10 @@ export class PurchaseIngestService {
       memberId,
       productId,
       amount: gross,
+      // Only forward acceptedAmount when the channel actually derived it (RC
+      // takehome). For events without a net signal, leave undefined → listener
+      // falls back to `amount` (gross) and existing channels are unaffected.
+      acceptedAmount: input.netAmount != null ? accepted : undefined,
       voucherAmount,
       voucherId: null,
       affiliatorId: null,
@@ -235,7 +239,7 @@ export class PurchaseIngestService {
       if (p) return p.id;
     }
     if (ref?.bySku) {
-      const p = await prisma.product.findUnique({ where: { iapProductId: ref.bySku }, select: { id: true } });
+      const p = await prisma.product.findUnique({ where: { iosProductId: ref.bySku }, select: { id: true } });
       if (p) return p.id;
     }
     return null;

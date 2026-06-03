@@ -1,12 +1,12 @@
 /* eslint-disable no-console */
 /**
- * Seed `Product.iapProductId` from the RevenueCat product_id → legacy course_id
+ * Seed `Product.iosProductId` from the RevenueCat product_id → legacy course_id
  * map (ported from the Supabase edge function's productMap.ts). Bridge:
  *
  *   RC product_id ──map──▶ legacy course_id ──Course.legacyCourseId──▶ Product
  *
  * After this runs, the RevenueCat webhook resolves products purely via
- * `Product.iapProductId` (productRef.bySku) — no hardcoded map in app code.
+ * `Product.iosProductId` (productRef.bySku) — no hardcoded map in app code.
  *
  *   pnpm tsx scripts/seed-revenuecat-iap.ts            (apply)
  *   pnpm tsx scripts/seed-revenuecat-iap.ts --dry-run  (report only)
@@ -90,25 +90,25 @@ async function main() {
   for (const [sku, legacyCourseId] of Object.entries(RC_TO_COURSE_ID)) {
     const course = await prisma.course.findUnique({
       where: { legacyCourseId },
-      select: { product: { select: { id: true, iapProductId: true } } },
+      select: { product: { select: { id: true, iosProductId: true } } },
     });
     if (!course) {
       missing.push({ sku, courseId: legacyCourseId });
       continue;
     }
     const product = course.product;
-    if (product.iapProductId === sku) {
+    if (product.iosProductId === sku) {
       alreadySet++;
       continue;
     }
-    if (product.iapProductId && product.iapProductId !== sku) {
-      conflicts.push({ sku, reason: `product ${product.id} already has iapProductId=${product.iapProductId}` });
+    if (product.iosProductId && product.iosProductId !== sku) {
+      conflicts.push({ sku, reason: `product ${product.id} already has iosProductId=${product.iosProductId}` });
       continue;
     }
 
     // Guard the unique constraint: SKU may already sit on a different product.
     const taken = await prisma.product.findUnique({
-      where: { iapProductId: sku },
+      where: { iosProductId: sku },
       select: { id: true },
     });
     if (taken && taken.id !== product.id) {
@@ -117,7 +117,7 @@ async function main() {
     }
 
     if (!dryRun) {
-      await prisma.product.update({ where: { id: product.id }, data: { iapProductId: sku } });
+      await prisma.product.update({ where: { id: product.id }, data: { iosProductId: sku } });
     }
     applied++;
     console.log(`  ${dryRun ? 'would set' : 'set'} ${sku} → product ${product.id} (course ${legacyCourseId})`);

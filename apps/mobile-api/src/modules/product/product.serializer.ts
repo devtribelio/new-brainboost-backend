@@ -41,6 +41,8 @@ export function serializeProduct(
   return {
     id: p.id,
     networkAccountProductAffiliatorId: productId,
+    iosProductId: p.iosProductId,
+    androidProductId: p.androidProductId,
     productType: p.type,
     productTypeLabel: label,
     productCode: code,
@@ -368,6 +370,8 @@ export function serializeCourseDetailLegacy(
   return {
     id: p.id,
     courseId: courseLegacyId,
+    iosProductId: p.iosProductId,
+    androidProductId: p.androidProductId,
     code,
     name: stripBrainboostLabel(p.title),
     description: p.description,

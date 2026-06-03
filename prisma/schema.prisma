@@ -232,7 +232,8 @@ model Banner {
 model Product {
   id              String   @id @default(uuid(7)) @db.Uuid
   legacyId        Int?     @unique @map("legacy_id")
-  iapProductId    String?  @unique @map("iap_product_id") // store SKU (App Store/Play) → resolves a provider product_id (e.g. RevenueCat) to this Product
+  iosProductId     String?  @unique @map("ios_product_id") // App Store SKU → resolves a provider product_id (e.g. RevenueCat) to this Product
+  androidProductId String?  @unique @map("android_product_id") // Play Store SKU → resolves a provider product_id (e.g. RevenueCat) to this Product
   type            String
   code            String?  @unique // legacy `course.code` — short alphanumeric id
   slug            String? // SEO-friendly slug from legacy `course.slug`

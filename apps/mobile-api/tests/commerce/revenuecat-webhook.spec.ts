@@ -59,7 +59,7 @@ describe('RevenueCat webhook', () => {
     // isActive:false keeps this product out of the global `product.list`
     // (isActive:true filter) so it can't pollute other suites' ownership/list
     // counts under parallel execution. Ingest resolveProduct (findUnique by
-    // iapProductId) ignores isActive, so the webhook still resolves it.
+    // iosProductId) ignores isActive, so the webhook still resolves it.
     const product = await prisma.product.create({
       data: {
         type: 'course',
@@ -67,7 +67,7 @@ describe('RevenueCat webhook', () => {
         price: 149_000,
         isActive: false,
         status: 'inactive',
-        iapProductId: SKU,
+        iosProductId: SKU,
         course: { create: {} },
       },
       include: { course: true },
