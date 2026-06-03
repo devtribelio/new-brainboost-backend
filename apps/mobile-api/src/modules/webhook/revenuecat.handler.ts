@@ -19,22 +19,30 @@ const PURCHASE_EVENT_TYPES = new Set([
 const REFUND_EVENT_TYPES = new Set(['CANCELLATION']);
 
 /**
- * RC sends `commission_percentage` and `tax_percentage` as decimal fractions
- * in [0, 1] — e.g. Apple's 30% cut is `0.3`, Indonesia 11% PPN is `0.11`. Net
- * settled to us = gross × (1 - commission) × (1 - tax). Returns `undefined`
- * when neither field is present so the ingest service falls back to gross
- * (no fabricated net for events that lack the cuts).
+ * Compute the net amount Brainboost takes home from a RC purchase event.
  *
- * NOTE on earlier version of this function: a prior iteration assumed the
- * `value × 10000` encoding RC uses for *other* fields (mistaken). That
- * produced `acceptedAmount ≈ gross` (off by ~16 IDR on a 429k purchase)
- * because 0.30 was read as 0.003%. See commit log for the fix.
+ * **Source of truth: `takehome_percentage`** — RC precomputes this and it
+ * already accounts for commission, regional tax handling (e.g. tax-inclusive
+ * IDR pricing where consumer pays the PPN, not the developer), and currency
+ * conversion. Confirmed against a real ID sandbox event:
+ *   `gross=429000, takehome=0.7, commission=0.2703, tax=0.0991`
+ * RC's takehome (0.7 → net 300_300) ≠ multiplicative `(1-c)(1-t)` (→ net
+ * 282_018) because tax in ID is consumer-paid, not deducted from dev share.
+ *
+ * Fallback to multiplicative `(1-c)(1-t)` is only used when `takehome` is
+ * absent — older RC payloads or partial events. Returns `undefined` when
+ * nothing is available so `acceptedAmount` falls back to `gross` cleanly.
  */
 export function computeNetAmount(
   gross: number,
+  takehomePct?: number,
   commissionPct?: number,
   taxPct?: number,
 ): number | undefined {
+  if (takehomePct != null) {
+    const h = Math.max(0, Math.min(1, takehomePct));
+    return Math.floor(gross * h);
+  }
   if (commissionPct == null && taxPct == null) return undefined;
   const c = Math.max(0, Math.min(1, commissionPct ?? 0));
   const t = Math.max(0, Math.min(1, taxPct ?? 0));
@@ -113,7 +121,12 @@ export class RevenueCatWebhookHandler {
       productRef: { bySku: event.product_id },
       // Use local currency (IDR), NOT event.price which is in USD.
       grossAmount: gross,
-      netAmount: computeNetAmount(gross, event.commission_percentage, event.tax_percentage),
+      netAmount: computeNetAmount(
+        gross,
+        event.takehome_percentage,
+        event.commission_percentage,
+        event.tax_percentage,
+      ),
       currency: event.currency,
       occurredAt: undefined,
       raw: event,
