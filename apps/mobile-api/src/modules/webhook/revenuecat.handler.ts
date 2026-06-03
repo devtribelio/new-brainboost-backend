@@ -18,6 +18,24 @@ const PURCHASE_EVENT_TYPES = new Set([
 /** RC event types we treat as a refund (revoke access + void commission). */
 const REFUND_EVENT_TYPES = new Set(['CANCELLATION']);
 
+/**
+ * RC encodes `commission_percentage` and `tax_percentage` as `value × 10000`
+ * (e.g. 30% → 3000, 11% → 1100). Net settled to us = gross × (1 - commission) ×
+ * (1 - tax). Returns `undefined` when neither field is present so the ingest
+ * service falls back to gross (no fabricated net for events that lack the cuts).
+ */
+export function computeNetAmount(
+  gross: number,
+  commissionPct?: number,
+  taxPct?: number,
+): number | undefined {
+  if (commissionPct == null && taxPct == null) return undefined;
+  const c = Math.max(0, Math.min(10_000, commissionPct ?? 0));
+  const t = Math.max(0, Math.min(10_000, taxPct ?? 0));
+  // Integer math to keep rupiah exact: floor((gross * (10000-c) * (10000-t)) / 1e8)
+  return Math.floor((gross * (10_000 - c) * (10_000 - t)) / 100_000_000);
+}
+
 export interface RevenueCatHandleResult {
   handled: boolean;
   /** ingest outcome when handled, or the skip/error reason when not. */
@@ -79,6 +97,7 @@ export class RevenueCatWebhookHandler {
   }
 
   private toPurchase(event: RevenueCatEventDto): NormalizedPurchase {
+    const gross = event.price_in_purchased_currency ?? 0;
     return {
       // Key on the store transaction id so a later CANCELLATION (which carries the
       // same transaction_id, not the purchase's event id) can link back to it.
@@ -88,7 +107,8 @@ export class RevenueCatWebhookHandler {
       memberRef: { byId: event.app_user_id, byEmail: this.emailAttr(event) },
       productRef: { bySku: event.product_id },
       // Use local currency (IDR), NOT event.price which is in USD.
-      grossAmount: event.price_in_purchased_currency ?? 0,
+      grossAmount: gross,
+      netAmount: computeNetAmount(gross, event.commission_percentage, event.tax_percentage),
       currency: event.currency,
       occurredAt: undefined,
       raw: event,

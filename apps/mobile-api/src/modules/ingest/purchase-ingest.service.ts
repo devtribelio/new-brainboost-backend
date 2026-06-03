@@ -14,6 +14,17 @@ export interface NormalizedPurchase {
   memberRef: { byId?: string; byEmail?: string };
   productRef: { byId?: string; bySku?: string };
   grossAmount: number;
+  /**
+   * What the channel actually settles to us (gross minus store commission +
+   * tax). Optional — adapters compute it when the upstream payload exposes the
+   * cuts (e.g. RevenueCat's commission_percentage / tax_percentage). When
+   * omitted, `acceptedAmount` falls back to `grossAmount` (no regression for
+   * channels that don't carry the data).
+   *
+   * `amount` (and the affiliate base) stays on gross — Apple/Google's cut is a
+   * platform cost to Brainboost, not a deduction the affiliator should bear.
+   */
+  netAmount?: number;
   voucherAmount?: number;
   currency?: string;
   affiliatorCode?: string; // explicit per-purchase attribution (last-touch), optional
@@ -59,6 +70,12 @@ export class PurchaseIngestService {
 
     const gross = Math.max(0, Math.round(input.grossAmount));
     const voucherAmount = Math.max(0, Math.round(input.voucherAmount ?? 0));
+    // `acceptedAmount` = net settlement (after store cut + tax). When the
+    // adapter didn't compute it, mirror `gross` so reporting stays non-null and
+    // identical to legacy behavior.
+    const accepted = input.netAmount != null
+      ? Math.max(0, Math.min(gross, Math.round(input.netAmount)))
+      : gross;
 
     // RevenueCat can deliver a burst of events in the same instant (IAP restore
     // flood). The order code is count-derived → concurrent inserts collide on
@@ -95,7 +112,7 @@ export class PurchaseIngestService {
               memberId,
               paymentType: cred.name,
               amount: gross,
-              acceptedAmount: gross,
+              acceptedAmount: accepted,
               status: 'SUCCESS',
               paidAt: new Date(),
               activeSlotTxId: tx.id, // occupy slot — invariant: every active payment holds its tx slot
