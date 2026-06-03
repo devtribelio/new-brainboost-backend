@@ -36,11 +36,20 @@ export function registerCommerceListeners(): void {
     //    Skip when the channel is not affiliate-eligible (e.g. an ingested channel with
     //    triggersAffiliate=false). `undefined` (web/native) = eligible.
     if (e.affiliateEligible !== false) {
+      // Commission base = net we actually take home (when channel exposes it),
+      // not the gross customer paid. Required so affiliator rate × IAP equals
+      // rate × web for the SAME course — Brainboost marks up IAP price to
+      // offset Apple's cut, and using gross would let the markup leak through
+      // as bonus affiliator commission. `+ voucherAmount` reconstructs the
+      // pre-voucher base so `computeAmount` can subtract it again (legacy
+      // shape). When acceptedAmount is absent, falls back to gross (web /
+      // voucher bypass behavior unchanged).
+      const commissionBase = e.acceptedAmount ?? e.amount;
       await affiliatorService
         .commitCommissionsForPayment({
           paymentId: e.paymentId,
           productId: e.productId,
-          productPrice: e.amount + e.voucherAmount,
+          productPrice: commissionBase + e.voucherAmount,
           voucherAmount: e.voucherAmount,
           buyerMemberId: e.memberId,
           programId: e.programId ?? null,

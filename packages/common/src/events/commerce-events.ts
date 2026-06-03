@@ -6,6 +6,15 @@ export interface CommercePaymentSuccessEvent {
   memberId: string;
   productId: string;
   amount: number;
+  /**
+   * Net that lands in our pocket (post Apple/Google cut, post Xendit MDR).
+   * When present, the affiliate listener computes commission from this — so
+   * affiliator rate × IAP_net ≈ rate × web_price (since IAP price is marked
+   * up to offset Apple's cut, the markup nets out of the commission base).
+   * Optional: legacy/web channels that don't expose settlement amount fall
+   * back to `amount` (gross), preserving prior behavior.
+   */
+  acceptedAmount?: number;
   voucherAmount: number;
   voucherId?: string | null;
   affiliatorId?: string | null;
