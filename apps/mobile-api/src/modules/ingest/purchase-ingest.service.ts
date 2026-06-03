@@ -239,7 +239,7 @@ export class PurchaseIngestService {
       if (p) return p.id;
     }
     if (ref?.bySku) {
-      const p = await prisma.product.findUnique({ where: { iapProductId: ref.bySku }, select: { id: true } });
+      const p = await prisma.product.findUnique({ where: { iosProductId: ref.bySku }, select: { id: true } });
       if (p) return p.id;
     }
     return null;

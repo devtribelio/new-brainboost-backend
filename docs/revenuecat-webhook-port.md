@@ -50,7 +50,7 @@ Postgres via the kernel.
 
 - `memberRef.byId = event.app_user_id` (the new `Member.id` UUID set by the iOS
   SDK), fallback `byEmail = subscriber_attributes.$email`.
-- `productRef.bySku = event.product_id` → resolved against `Product.iapProductId`.
+- `productRef.bySku = event.product_id` → resolved against `Product.iosProductId`.
 - `grossAmount = event.price_in_purchased_currency` (local IDR, **not** `event.price`
   which is USD).
 - **Idempotency / refund linkage key:** PURCHASE keys on `transaction_id` (the RC
@@ -89,7 +89,7 @@ success listener. Idempotent (`deleteMany`).
 ## Product mapping seed
 
 The edge fn's hardcoded `productMap.ts` (66 entries: RC product_id → legacy
-course_id) is migrated into `Product.iapProductId` once via:
+course_id) is migrated into `Product.iosProductId` once via:
 
 ```
 pnpm seed:revenuecat-iap            # apply
@@ -97,7 +97,7 @@ pnpm tsx scripts/seed-revenuecat-iap.ts --dry-run   # report only
 ```
 
 Bridge: `RC product_id ──map──▶ legacy course_id ──Course.legacyCourseId──▶ Product`.
-After seeding, the webhook resolves products purely via `iapProductId` — no app-code
+After seeding, the webhook resolves products purely via `iosProductId` — no app-code
 map. Re-runnable; reports `missing` (no Course with that `legacyCourseId` — backfill
 `Course.legacyCourseId` first) and `conflicts`.
 

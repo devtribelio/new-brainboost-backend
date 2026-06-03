@@ -45,7 +45,7 @@ describe('purchase ingestion kernel', () => {
     buyerId = buyer.id;
     memberIds.push(buyerId);
     const product = await prisma.product.create({
-      data: { type: 'course', title: `${TAG}-p`, price: 0, iapProductId: `${TAG}-sku` },
+      data: { type: 'course', title: `${TAG}-p`, price: 0, iosProductId: `${TAG}-sku` },
     });
     productId = product.id;
     const a = await credentialService.issue(`${TAG}-rc`, { triggersAffiliate: true });

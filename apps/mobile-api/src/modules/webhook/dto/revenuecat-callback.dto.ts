@@ -17,7 +17,7 @@ import { ApiProperty, ApiPropertyOptional } from '@bb/common/openapi/decorators'
  * handler (which decides skip vs ingest), rather than 400-ing at validation.
  *
  * `app_user_id` carries the new `Member.id` (UUID) set by the iOS SDK.
- * `product_id` is the store SKU resolved against `Product.iapProductId`.
+ * `product_id` is the store SKU resolved against `Product.iosProductId`.
  * `transaction_id` is the idempotency / refund-linkage key.
  */
 export class RevenueCatEventDto {
