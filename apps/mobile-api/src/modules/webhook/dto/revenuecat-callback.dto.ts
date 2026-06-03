@@ -67,16 +67,16 @@ export class RevenueCatEventDto {
   currency?: string;
 
   @ApiPropertyOptional({
-    example: 3000,
-    description: 'Store commission % × 10000 (e.g. 3000 = 30% Apple/Google cut, 1500 = 15% small biz)',
+    example: 0.3,
+    description: 'Store commission as decimal fraction (0.30 = 30% Apple/Google cut, 0.15 = 15% small biz)',
   })
   @IsOptional()
   @IsNumber()
   commission_percentage?: number;
 
   @ApiPropertyOptional({
-    example: 1100,
-    description: 'Tax % × 10000 (e.g. 1100 = 11% VAT)',
+    example: 0.11,
+    description: 'Tax as decimal fraction (0.11 = 11% PPN ID)',
   })
   @IsOptional()
   @IsNumber()

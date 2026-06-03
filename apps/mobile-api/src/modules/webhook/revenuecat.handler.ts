@@ -19,10 +19,16 @@ const PURCHASE_EVENT_TYPES = new Set([
 const REFUND_EVENT_TYPES = new Set(['CANCELLATION']);
 
 /**
- * RC encodes `commission_percentage` and `tax_percentage` as `value × 10000`
- * (e.g. 30% → 3000, 11% → 1100). Net settled to us = gross × (1 - commission) ×
- * (1 - tax). Returns `undefined` when neither field is present so the ingest
- * service falls back to gross (no fabricated net for events that lack the cuts).
+ * RC sends `commission_percentage` and `tax_percentage` as decimal fractions
+ * in [0, 1] — e.g. Apple's 30% cut is `0.3`, Indonesia 11% PPN is `0.11`. Net
+ * settled to us = gross × (1 - commission) × (1 - tax). Returns `undefined`
+ * when neither field is present so the ingest service falls back to gross
+ * (no fabricated net for events that lack the cuts).
+ *
+ * NOTE on earlier version of this function: a prior iteration assumed the
+ * `value × 10000` encoding RC uses for *other* fields (mistaken). That
+ * produced `acceptedAmount ≈ gross` (off by ~16 IDR on a 429k purchase)
+ * because 0.30 was read as 0.003%. See commit log for the fix.
  */
 export function computeNetAmount(
   gross: number,
@@ -30,10 +36,9 @@ export function computeNetAmount(
   taxPct?: number,
 ): number | undefined {
   if (commissionPct == null && taxPct == null) return undefined;
-  const c = Math.max(0, Math.min(10_000, commissionPct ?? 0));
-  const t = Math.max(0, Math.min(10_000, taxPct ?? 0));
-  // Integer math to keep rupiah exact: floor((gross * (10000-c) * (10000-t)) / 1e8)
-  return Math.floor((gross * (10_000 - c) * (10_000 - t)) / 100_000_000);
+  const c = Math.max(0, Math.min(1, commissionPct ?? 0));
+  const t = Math.max(0, Math.min(1, taxPct ?? 0));
+  return Math.floor(gross * (1 - c) * (1 - t));
 }
 
 export interface RevenueCatHandleResult {
