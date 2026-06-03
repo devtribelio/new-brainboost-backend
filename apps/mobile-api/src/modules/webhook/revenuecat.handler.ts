@@ -18,6 +18,29 @@ const PURCHASE_EVENT_TYPES = new Set([
 /** RC event types we treat as a refund (revoke access + void commission). */
 const REFUND_EVENT_TYPES = new Set(['CANCELLATION']);
 
+/**
+ * RC sends `commission_percentage` and `tax_percentage` as decimal fractions
+ * in [0, 1] — e.g. Apple's 30% cut is `0.3`, Indonesia 11% PPN is `0.11`. Net
+ * settled to us = gross × (1 - commission) × (1 - tax). Returns `undefined`
+ * when neither field is present so the ingest service falls back to gross
+ * (no fabricated net for events that lack the cuts).
+ *
+ * NOTE on earlier version of this function: a prior iteration assumed the
+ * `value × 10000` encoding RC uses for *other* fields (mistaken). That
+ * produced `acceptedAmount ≈ gross` (off by ~16 IDR on a 429k purchase)
+ * because 0.30 was read as 0.003%. See commit log for the fix.
+ */
+export function computeNetAmount(
+  gross: number,
+  commissionPct?: number,
+  taxPct?: number,
+): number | undefined {
+  if (commissionPct == null && taxPct == null) return undefined;
+  const c = Math.max(0, Math.min(1, commissionPct ?? 0));
+  const t = Math.max(0, Math.min(1, taxPct ?? 0));
+  return Math.floor(gross * (1 - c) * (1 - t));
+}
+
 export interface RevenueCatHandleResult {
   handled: boolean;
   /** ingest outcome when handled, or the skip/error reason when not. */
@@ -79,6 +102,7 @@ export class RevenueCatWebhookHandler {
   }
 
   private toPurchase(event: RevenueCatEventDto): NormalizedPurchase {
+    const gross = event.price_in_purchased_currency ?? 0;
     return {
       // Key on the store transaction id so a later CANCELLATION (which carries the
       // same transaction_id, not the purchase's event id) can link back to it.
@@ -88,7 +112,8 @@ export class RevenueCatWebhookHandler {
       memberRef: { byId: event.app_user_id, byEmail: this.emailAttr(event) },
       productRef: { bySku: event.product_id },
       // Use local currency (IDR), NOT event.price which is in USD.
-      grossAmount: event.price_in_purchased_currency ?? 0,
+      grossAmount: gross,
+      netAmount: computeNetAmount(gross, event.commission_percentage, event.tax_percentage),
       currency: event.currency,
       occurredAt: undefined,
       raw: event,

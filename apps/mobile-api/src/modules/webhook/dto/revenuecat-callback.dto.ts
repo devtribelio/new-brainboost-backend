@@ -66,6 +66,22 @@ export class RevenueCatEventDto {
   @IsString()
   currency?: string;
 
+  @ApiPropertyOptional({
+    example: 0.3,
+    description: 'Store commission as decimal fraction (0.30 = 30% Apple/Google cut, 0.15 = 15% small biz)',
+  })
+  @IsOptional()
+  @IsNumber()
+  commission_percentage?: number;
+
+  @ApiPropertyOptional({
+    example: 0.11,
+    description: 'Tax as decimal fraction (0.11 = 11% PPN ID)',
+  })
+  @IsOptional()
+  @IsNumber()
+  tax_percentage?: number;
+
   @ApiPropertyOptional({ description: 'RC subscriber attributes ($email, $displayName, …)' })
   @IsOptional()
   @IsObject()
