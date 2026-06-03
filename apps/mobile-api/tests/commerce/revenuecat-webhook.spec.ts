@@ -2,8 +2,12 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import request from 'supertest';
 import { buildApp } from '@/app';
 import { prisma } from '@bb/db';
+import { CredentialService } from '@/modules/ingest/credential.service';
 
-const AUTH = 'test-rc-auth';
+// Distinct from the env fallback secret (tests/setup REVENUECAT_WEBHOOK_AUTH=
+// 'test-rc-auth') on purpose: every request below authenticates via the
+// DB-stored credential secret, proving the DB is the source of truth (not env).
+const AUTH = 'db-rc-secret-primary';
 const ROUTE = '/api/webhook/revenuecat';
 const SKU = `com.brainboost.ios.test_${Date.now()}`;
 
@@ -74,7 +78,9 @@ describe('RevenueCat webhook', () => {
     const cred = await prisma.thirdPartyCredential.create({
       data: {
         name: 'revenuecat',
-        keyHash: `test-rc-${Date.now()}`,
+        // The webhook shared secret lives here as the credential's keyHash.
+        // The guard verifies the Authorization header against it (rotatable).
+        keyHash: CredentialService.hash(AUTH),
         isActive: true,
         triggersAffiliate: false,
         canIngestRefund: true,
@@ -196,5 +202,31 @@ describe('RevenueCat webhook', () => {
       where: { memberId_courseId: { memberId, courseId } },
     });
     expect(enrollment).toBeNull();
+  });
+
+  // Kept last: it rotates the credential's keyHash, invalidating AUTH for any
+  // subsequent request.
+  it('rotated secret: old key rejected (401), new key authorizes', async () => {
+    const NEW = 'db-rc-secret-rotated';
+    await prisma.thirdPartyCredential.update({
+      where: { id: credentialId },
+      data: { keyHash: CredentialService.hash(NEW) },
+    });
+
+    // Old secret no longer matches the DB; the env fallback ('test-rc-auth')
+    // also differs → 401. Proves rotation takes effect with no redeploy.
+    const old = await request(app)
+      .post(ROUTE)
+      .set('authorization', AUTH)
+      .send(rcEvent({ type: 'EXPIRATION', app_user_id: memberId }));
+    expect(old.status).toBe(401);
+
+    // New secret authorizes (EXPIRATION → 200 skipped proves auth passed).
+    const fresh = await request(app)
+      .post(ROUTE)
+      .set('authorization', `Bearer ${NEW}`)
+      .send(rcEvent({ type: 'EXPIRATION', app_user_id: memberId }));
+    expect(fresh.status).toBe(200);
+    expect(fresh.body.status).toBe('skipped');
   });
 });

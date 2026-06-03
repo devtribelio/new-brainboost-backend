@@ -34,6 +34,38 @@ export class CredentialService {
   }
 
   /**
+   * Verify a presented secret against a SPECIFIC named credential's `keyHash`.
+   * Used by the RevenueCat webhook guard: the shared secret is stored as the
+   * `revenuecat` credential's key (hash only), so rotating it is a DB upsert
+   * (`pnpm issue:credential revenuecat ...`) — no redeploy. Constant-time hash
+   * compare; returns the credential (with toggles) on match, else null.
+   */
+  async verifySecret(name: string, presentedKey: string | undefined | null): Promise<VerifiedCredential | null> {
+    if (!presentedKey) return null;
+    const cred = await prisma.thirdPartyCredential.findUnique({
+      where: { name },
+      select: { id: true, name: true, keyHash: true, isActive: true, triggersAffiliate: true, canIngestRefund: true },
+    });
+    if (!cred || !cred.isActive) return null;
+
+    const presentedHash = Buffer.from(hashKey(presentedKey), 'hex');
+    const storedHash = Buffer.from(cred.keyHash, 'hex');
+    if (presentedHash.length !== storedHash.length || !crypto.timingSafeEqual(presentedHash, storedHash)) {
+      return null;
+    }
+
+    void prisma.thirdPartyCredential
+      .update({ where: { id: cred.id }, data: { lastUsedAt: new Date() } })
+      .catch(() => undefined);
+    return {
+      id: cred.id,
+      name: cred.name,
+      triggersAffiliate: cred.triggersAffiliate,
+      canIngestRefund: cred.canIngestRefund,
+    };
+  }
+
+  /**
    * Load an active credential by its `name` (not by key). For trusted in-backend
    * callers that authenticate the request themselves (e.g. the RevenueCat webhook,
    * verified by its own shared-secret guard) and only need the channel's toggles.

@@ -9,9 +9,12 @@ grants `CourseEnrollment` directly (→ `isPurchased: true`) and a refund revoke
 
 `POST /api/webhook/revenuecat`
 
-- Auth: `Authorization` header == `env.REVENUECAT_WEBHOOK_AUTH` (shared secret set
-  in the RC dashboard). Constant-time compare, fails closed (empty secret → 401).
-  Accepts the value with or without a `Bearer ` prefix.
+- Auth: `Authorization` header == the `revenuecat` credential's secret, stored
+  **in the DB** as `ThirdPartyCredential.keyHash` (hash only). The guard verifies
+  the header against it (constant-time), fails closed. Accepts the value with or
+  without a `Bearer ` prefix. `env.REVENUECAT_WEBHOOK_AUTH` is an OPTIONAL
+  bootstrap/emergency fallback (leave unset in steady state). **Leaked secret →
+  rotate via a single command, no redeploy** (see "Rotating the secret").
 - Body: RC webhook envelope `{ event: {...}, api_version }`. `event.type` + `event.id`
   required; rest optional.
 - Always returns `200` on a processed event (so RC stops retrying resolved
@@ -90,16 +93,37 @@ void/revoke):
 pnpm issue:credential revenuecat --refund        # triggersAffiliate=false, canIngestRefund=true
 ```
 
-The handler loads it by name (`credentialService.verifyByName`) — the request is
-already authenticated by the shared-secret guard, so no Bearer key is needed.
+The handler loads the row by name (`credentialService.verifyByName`) for its
+toggles. The **guard** authenticates the request against the same row's `keyHash`
+(`credentialService.verifySecret`). So the one `revenuecat` row does double duty:
+**auth** (keyHash) + **toggles** (triggersAffiliate / canIngestRefund).
+
+## Rotating the secret
+
+The shared secret IS the credential key — stored hashed, rotatable without a
+redeploy:
+
+```
+pnpm issue:credential revenuecat --refund   # upsert: prints a NEW key ONCE
+```
+
+1. Copy the printed `bbk_...` key (shown once; DB keeps only the hash).
+2. Paste it into the RC dashboard → webhook → Authorization header.
+3. The old key is dead immediately. Brief 401s during the swap are fine — RC
+   retries. No dual-secret window is implemented (kept simple).
+
+The same command is used for the very first issue. `--refund` →
+`canIngestRefund=true`; omitting `--affiliate` → `triggersAffiliate=false`.
 
 ## Env
 
-- `REVENUECAT_WEBHOOK_AUTH` — shared secret (optional in config; empty → endpoint
-  fails closed 401). **TODO: add to `.env.example`** (could not edit it this
-  session — permission denied).
+- `REVENUECAT_WEBHOOK_AUTH` — OPTIONAL bootstrap/emergency fallback secret. The
+  steady-state secret lives in the DB (`revenuecat` credential `keyHash`); leave
+  this unset once that row exists. If set, a matching header still passes (so the
+  endpoint isn't bricked when the DB row is missing). **TODO: add to `.env.example`**
+  (permission denied this session).
 - `REVENUECAT_PROVIDER_NAME` — defaults to `revenuecat`; must match the credential
-  row name.
+  row name (used by both the guard's `verifySecret` and the handler's toggle load).
 
 ## Files
 
