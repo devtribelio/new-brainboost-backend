@@ -130,6 +130,12 @@ describe('RevenueCat webhook', () => {
     expect(tx?.status).toBe('PAID');
     expect(tx?.amount).toBe(149_000);
 
+    // No commission/tax fields on this event → accepted mirrors gross
+    // (no regression for events that lack the cuts).
+    const payment = await prisma.commercePayment.findFirst({ where: { transactionId: tx!.id } });
+    expect(payment?.amount).toBe(149_000);
+    expect(payment?.acceptedAmount).toBe(149_000);
+
     // enrollment granted by the async success listener → isPurchased true
     const enrollment = await waitFor(() =>
       prisma.courseEnrollment.findUnique({
@@ -137,6 +143,30 @@ describe('RevenueCat webhook', () => {
       }),
     );
     expect(enrollment).not.toBeNull();
+  });
+
+  it('captures store commission + tax → acceptedAmount = net settled', async () => {
+    // 300_000 IDR gross, Apple 30% cut, 11% tax → 300_000 × 0.70 × 0.89 = 186_900
+    const body = rcEvent({
+      app_user_id: memberId,
+      price_in_purchased_currency: 300_000,
+      commission_percentage: 3000, // 30% × 10000
+      tax_percentage: 1100, // 11% × 10000
+    });
+    const r = await request(app).post(ROUTE).set('authorization', `Bearer ${AUTH}`).send(body);
+    expect(r.status).toBe(200);
+    expect(r.body.status).toBe('committed');
+
+    const txId = (body.event as { transaction_id: string }).transaction_id;
+    const tx = await prisma.commerceTransaction.findUnique({
+      where: { provider_providerEventId: { provider: 'revenuecat', providerEventId: txId } },
+    });
+    // amount (and affiliate base) stays on gross — store fee is Brainboost's cost.
+    expect(tx?.amount).toBe(300_000);
+
+    const payment = await prisma.commercePayment.findFirst({ where: { transactionId: tx!.id } });
+    expect(payment?.amount).toBe(300_000);
+    expect(payment?.acceptedAmount).toBe(186_900);
   });
 
   it('idempotent: redelivered event (same transaction_id) → duplicate', async () => {
