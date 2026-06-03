@@ -1,5 +1,61 @@
 import { ApiProperty, ApiPropertyOptional } from '@bb/common/openapi/decorators';
 
+/**
+ * Request body for POST /member/account/profile/update.
+ * Controller accepts canonical names + legacy aliases (name|fullName,
+ * biography|bio, imageUrl|avatarUrl, coverImageUrl|coverUrl). All optional —
+ * partial update. Documented here so swagger shows the request shape.
+ */
+export class UpdateProfileRequestDto {
+  @ApiPropertyOptional({ nullable: true, example: 'John Doe', description: 'Full name (alias: fullName).' })
+  name?: string | null;
+
+  @ApiPropertyOptional({ nullable: true, example: 'John' })
+  firstName?: string | null;
+
+  @ApiPropertyOptional({ nullable: true, example: 'Doe' })
+  lastName?: string | null;
+
+  @ApiPropertyOptional({ nullable: true, example: '81234567890' })
+  phone?: string | null;
+
+  @ApiPropertyOptional({ nullable: true, example: '+62' })
+  phoneCode?: string | null;
+
+  @ApiPropertyOptional({ nullable: true, example: 'Software engineer & lifelong learner.', description: 'Bio (alias: bio).' })
+  biography?: string | null;
+
+  @ApiPropertyOptional({ nullable: true, example: 'https://cdn.brainboost.com/avatars/john.jpg', description: 'Avatar URL (alias: avatarUrl).' })
+  imageUrl?: string | null;
+
+  @ApiPropertyOptional({ nullable: true, example: 'https://cdn.brainboost.com/covers/john.jpg', description: 'Cover URL (alias: coverUrl).' })
+  coverImageUrl?: string | null;
+}
+
+/**
+ * Request body for POST /member/account/profile/location.
+ * Location FK chain (string IDs) + address. All optional.
+ */
+export class UpdateLocationRequestDto {
+  @ApiPropertyOptional({ nullable: true, example: '101' })
+  countryId?: string | null;
+
+  @ApiPropertyOptional({ nullable: true, example: '102' })
+  provinceId?: string | null;
+
+  @ApiPropertyOptional({ nullable: true, example: '103' })
+  cityId?: string | null;
+
+  @ApiPropertyOptional({ nullable: true, example: '104' })
+  districtId?: string | null;
+
+  @ApiPropertyOptional({ nullable: true, example: 'Jl. Setiabudi No. 1' })
+  address?: string | null;
+
+  @ApiPropertyOptional({ nullable: true, example: '40142' })
+  postalCode?: string | null;
+}
+
 export class AffiliateConnectedDataDto {
   @ApiPropertyOptional({ nullable: true, example: null })
   memberNetworkConnectId?: number | string | null;
