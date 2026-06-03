@@ -150,8 +150,8 @@ describe('RevenueCat webhook', () => {
     const body = rcEvent({
       app_user_id: memberId,
       price_in_purchased_currency: 300_000,
-      commission_percentage: 3000, // 30% × 10000
-      tax_percentage: 1100, // 11% × 10000
+      commission_percentage: 0.3, // 30% as decimal fraction
+      tax_percentage: 0.11, // 11% as decimal fraction
     });
     const r = await request(app).post(ROUTE).set('authorization', `Bearer ${AUTH}`).send(body);
     expect(r.status).toBe(200);
