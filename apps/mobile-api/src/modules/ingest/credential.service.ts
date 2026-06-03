@@ -33,6 +33,28 @@ export class CredentialService {
     };
   }
 
+  /**
+   * Load an active credential by its `name` (not by key). For trusted in-backend
+   * callers that authenticate the request themselves (e.g. the RevenueCat webhook,
+   * verified by its own shared-secret guard) and only need the channel's toggles.
+   */
+  async verifyByName(name: string): Promise<VerifiedCredential | null> {
+    const cred = await prisma.thirdPartyCredential.findUnique({
+      where: { name },
+      select: { id: true, name: true, isActive: true, triggersAffiliate: true, canIngestRefund: true },
+    });
+    if (!cred || !cred.isActive) return null;
+    void prisma.thirdPartyCredential
+      .update({ where: { id: cred.id }, data: { lastUsedAt: new Date() } })
+      .catch(() => undefined);
+    return {
+      id: cred.id,
+      name: cred.name,
+      triggersAffiliate: cred.triggersAffiliate,
+      canIngestRefund: cred.canIngestRefund,
+    };
+  }
+
   /** Issue a new credential. Returns the PLAINTEXT key ONCE (only the hash is stored). */
   async issue(
     name: string,
