@@ -58,6 +58,24 @@ Postgres via the kernel.
   REFUND uses its own `event.id` as `providerEventId` and
   `refundOfProviderEventId = transaction_id`.
 
+## Burst handling (IAP-restore flood)
+
+RC can deliver many events in the same instant (e.g. an IAP restore replays
+every past `NON_RENEWING_PURCHASE`). Two consequences were hardened:
+
+- **Order-code collision.** `generateOrderCode` derives a per-day sequence from
+  a `COUNT(*)` → concurrent inserts read the same count and collide on the
+  `code` unique. `purchaseIngestService.ingest` now retries (up to 5×) with a
+  jittered code (`generateOrderCode(now, { jitter: true })` → random hex
+  suffix). Critically, a `code` P2002 is **no longer** misclassified as a
+  duplicate: on any P2002 the ingest disambiguates via the `(provider,
+  providerEventId)` idempotency key — only a real match returns `duplicate`,
+  otherwise it retries. (Before: a code collision was silently dropped as a
+  duplicate → member paid, no access.)
+- **Enrollment re-grant noise.** The success listener grants the enrollment via
+  `createMany({ skipDuplicates: true })` instead of `create`+catch, so a
+  re-delivered event no longer emits a swallowed `prisma:error` P2002 line.
+
 ## Refund revokes access
 
 `PurchaseIngestService.handleRefund` was extended to **delete** the buyer's

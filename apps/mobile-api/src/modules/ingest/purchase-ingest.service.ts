@@ -59,57 +59,71 @@ export class PurchaseIngestService {
 
     const gross = Math.max(0, Math.round(input.grossAmount));
     const voucherAmount = Math.max(0, Math.round(input.voucherAmount ?? 0));
-    const code = await generateOrderCode();
 
+    // RevenueCat can deliver a burst of events in the same instant (IAP restore
+    // flood). The order code is count-derived → concurrent inserts collide on
+    // the `code` unique. A blanket "any P2002 → duplicate" is WRONG: a code
+    // collision would be silently dropped as a duplicate (member paid, no
+    // access). So on P2002 we disambiguate by the idempotency key: if a tx with
+    // this (provider, providerEventId) exists it is a genuine redelivery →
+    // duplicate; otherwise it was a code collision → retry with a jittered code.
+    const MAX_ATTEMPTS = 5;
     let txId = '';
     let paymentId = '';
-    try {
-      const created = await prisma.$transaction(async (db) => {
-        const tx = await db.commerceTransaction.create({
-          data: {
-            code,
-            memberId,
-            productId,
-            itemTotal: gross,
-            amount: gross,
-            voucherAmount,
-            provider: cred.name,
-            providerEventId: input.providerEventId,
-            status: 'PAID',
-            paidAt: new Date(),
-          },
-          select: { id: true, productId: true, amount: true, voucherAmount: true },
+    for (let attempt = 1; ; attempt++) {
+      const code = await generateOrderCode(new Date(), { jitter: attempt > 1 });
+      try {
+        const created = await prisma.$transaction(async (db) => {
+          const tx = await db.commerceTransaction.create({
+            data: {
+              code,
+              memberId,
+              productId,
+              itemTotal: gross,
+              amount: gross,
+              voucherAmount,
+              provider: cred.name,
+              providerEventId: input.providerEventId,
+              status: 'PAID',
+              paidAt: new Date(),
+            },
+            select: { id: true, productId: true, amount: true, voucherAmount: true },
+          });
+          const payment = await db.commercePayment.create({
+            data: {
+              transactionId: tx.id,
+              memberId,
+              paymentType: cred.name,
+              amount: gross,
+              acceptedAmount: gross,
+              status: 'SUCCESS',
+              paidAt: new Date(),
+              activeSlotTxId: tx.id, // occupy slot — invariant: every active payment holds its tx slot
+            },
+            select: { id: true },
+          });
+          await db.commercePaymentEvent.create({
+            data: { paymentId: payment.id, source: 'ingest', toStatus: 'SUCCESS' },
+          });
+          return { tx, payment };
         });
-        const payment = await db.commercePayment.create({
-          data: {
-            transactionId: tx.id,
-            memberId,
-            paymentType: cred.name,
-            amount: gross,
-            acceptedAmount: gross,
-            status: 'SUCCESS',
-            paidAt: new Date(),
-            activeSlotTxId: tx.id, // occupy slot — invariant: every active payment holds its tx slot
-          },
-          select: { id: true },
-        });
-        await db.commercePaymentEvent.create({
-          data: { paymentId: payment.id, source: 'ingest', toStatus: 'SUCCESS' },
-        });
-        return { tx, payment };
-      });
-      txId = created.tx.id;
-      paymentId = created.payment.id;
-    } catch (e) {
-      // race on the unique (provider, providerEventId) → treat as duplicate
-      if ((e as { code?: string }).code === 'P2002') {
+        txId = created.tx.id;
+        paymentId = created.payment.id;
+        break;
+      } catch (e) {
+        if ((e as { code?: string }).code !== 'P2002') throw e;
+
+        // Genuine idempotency duplicate (provider, providerEventId already used)?
         const dup = await prisma.commerceTransaction.findUnique({
           where: { provider_providerEventId: { provider: cred.name, providerEventId: input.providerEventId } },
           select: { id: true },
         });
-        return { status: 'duplicate', transactionId: dup?.id };
+        if (dup) return { status: 'duplicate', transactionId: dup.id };
+
+        // Not the idempotency key → order-code collision. Retry with jitter.
+        if (attempt < MAX_ATTEMPTS) continue;
+        throw e;
       }
-      throw e;
     }
 
     // Affiliate override only resolved when the channel is allowed to pay commission.
