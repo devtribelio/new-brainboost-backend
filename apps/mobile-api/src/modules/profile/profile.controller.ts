@@ -44,7 +44,7 @@ export class ProfileController {
     const p = member.profile;
     return {
       // FE ProfileModel — canonical fields only
-      memberId: member.legacyId ?? member.id,
+      memberId: member.id,
       image: member.avatarUrl,
       name: member.fullName,
       phoneNumber: member.phone,
