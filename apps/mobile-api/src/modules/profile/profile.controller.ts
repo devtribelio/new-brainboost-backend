@@ -5,9 +5,9 @@ import { ok } from '@bb/common/utils/response.util';
 import { UnauthorizedException } from '@bb/common/exceptions';
 import { serializeMemberFull } from '@/modules/member/member.serializer';
 import type { AuthenticatedRequest } from '@bb/common/interfaces/authenticated-request';
-import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@bb/common/openapi/decorators';
+import { ApiBearerAuth, ApiBody, ApiOperation, ApiResponse, ApiTags } from '@bb/common/openapi/decorators';
 import { MemberFullDto } from '@bb/common/openapi/member.dto';
-import { MemberProfileDto } from './dto/profile.dto';
+import { MemberProfileDto, UpdateProfileRequestDto, UpdateLocationRequestDto } from './dto/profile.dto';
 
 @ApiTags('Profile')
 @ApiBearerAuth()
@@ -79,6 +79,7 @@ export class ProfileController {
   };
 
   @ApiOperation({ summary: 'Update my profile fields' })
+  @ApiBody({ type: () => UpdateProfileRequestDto })
   @ApiResponse({ status: 200, type: () => MemberFullDto })
   update = async (req: AuthenticatedRequest, res: Response) => {
     if (!req.user) throw new UnauthorizedException();
@@ -97,6 +98,7 @@ export class ProfileController {
   };
 
   @ApiOperation({ summary: 'Set my address / location FK chain' })
+  @ApiBody({ type: () => UpdateLocationRequestDto })
   @ApiResponse({ status: 200, type: () => MemberProfileDto })
   updateLocation = async (req: AuthenticatedRequest, res: Response) => {
     if (!req.user) throw new UnauthorizedException();
