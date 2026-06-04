@@ -173,6 +173,34 @@ export class AuthService {
       }
     }
 
+    // Pre-registration carry-over: if this register call didn't carry an
+    // affiliate code (e.g. mobile flow that only attached the code at the
+    // pre-reg step via deferred deeplink + AppsFlyer), recover it from the
+    // PraMember row keyed on email or phone. Without this, `PraMember.
+    // affiliateMemberId` is a dead column and post-install attribution from
+    // share-the-app links silently breaks at the register boundary.
+    if (!inviterId || !inviterNetworkId) {
+      const pra = await prisma.praMember.findFirst({
+        where: {
+          OR: [
+            dto.email ? { email: dto.email } : undefined,
+            dto.phone ? { phone: dto.phone } : undefined,
+          ].filter((c): c is NonNullable<typeof c> => c !== undefined),
+        },
+        orderBy: { createdAt: 'desc' },
+        select: { affiliateMemberId: true, networkId: true },
+      });
+      if (!inviterId && pra?.affiliateMemberId) {
+        // Defend against an orphaned id: the inviter must still exist.
+        const exists = await prisma.member.findUnique({
+          where: { id: pra.affiliateMemberId },
+          select: { id: true },
+        });
+        if (exists) inviterId = exists.id;
+      }
+      if (!inviterNetworkId && pra?.networkId) inviterNetworkId = pra.networkId;
+    }
+
     const passwordHash = await bcrypt.hash(dto.password, 10);
     const memberCode = await this.generateUniqueMemberCode();
 
