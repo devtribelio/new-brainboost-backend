@@ -156,6 +156,27 @@ export class ProductService {
         },
       });
     }
+    if (!product) {
+      // Slug fallback. Affiliate OneLinks/deeplinks historically put the
+      // product *slug* (from `/p/<slug>`) in the `product` param rather than the
+      // short `code`, so the mobile client opens `/course/detail/<slug>`. Resolve
+      // by slug too. `slug` is not unique, so take the first active match
+      // deterministically (UUID v7 ids are time-ordered).
+      product = await prisma.product.findFirst({
+        where: { slug: productInput },
+        orderBy: { id: 'asc' },
+        include: {
+          course: {
+            include: {
+              sections: {
+                orderBy: { order: 'asc' },
+                include: { lessons: { orderBy: { order: 'asc' } } },
+              },
+            },
+          },
+        },
+      });
+    }
     if (!product) throw new NotFoundException('Product not found');
 
     const [grouped, agg] = await Promise.all([
