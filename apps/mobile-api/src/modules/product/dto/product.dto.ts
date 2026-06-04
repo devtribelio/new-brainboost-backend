@@ -1,24 +1,18 @@
 import { ApiProperty, ApiPropertyOptional } from '@bb/common/openapi/decorators';
 
 /**
- * Wire shape for `serializeProduct()` per FE legacy ProductModel (audit §1.5
- * #55). Canonical names only (audit §3.1) — fallback aliases dropped.
+ * Wire shape for `serializeProduct()` — GET /member/product/list.
  *
- * FE legacy parser uses `??` chains; backend picks the leftmost-of-fallback:
- * - id ← `networkAccountProductAffiliatorId`
- * - type ← `productType`
- * - typeLabel ← `productTypeLabel`
- * - code ← `productCode`
- * - slug ← `productSlug`
- * - name ← `productName`
- * - price ← `productPrice`
- * - thumbnail ← `productImageUrl`
- * - lastUpdate ← `lastUpdated`
- * - shareUrl ← `productShareDetailUrl`
- * - commission ← `commisionFixAmount` (sic — legacy typo preserved)
+ * Clean field names aligned with product/course/detail (FE backend-contract
+ * audit P2). Legacy `product*`-prefixed keys renamed: productType→type,
+ * productTypeLabel→typeLabel, productCode→code, productSlug→slug,
+ * productName→name, productPrice→price, productImageUrl→imageUrl,
+ * productCategory→category, productShareDetailUrl→shareUrl. `lastUpdated`
+ * retained (FE accepts). `networkAccountProductAffiliatorId` retained pending
+ * P3 int-id removal — UUID `id` is the canonical product identifier.
  *
- * Once FE confirms it reads only these names, drop the `??` fallbacks
- * client-side.
+ * BREAKING wire change: coordinate FE deploy before flipping (FE follows the
+ * live shape and has dropped its `??` fallbacks).
  */
 export class ProductDto {
   @ApiProperty({
@@ -30,40 +24,40 @@ export class ProductDto {
 
   @ApiProperty({
     example: 456,
-    description: 'FE id (`?? productId`) — canonical key for ProductModel.id',
+    description: 'Legacy int id — pending P3 removal. Use `id` (UUID) instead.',
   })
   networkAccountProductAffiliatorId!: number | string;
 
   @ApiPropertyOptional({ nullable: true, example: 'course' })
-  productType?: string | null;
+  type?: string | null;
 
   @ApiProperty({ example: 'Course' })
-  productTypeLabel!: string;
+  typeLabel!: string;
 
   @ApiProperty({ example: 'react-fundamentals' })
-  productCode!: string;
+  code!: string;
 
   @ApiProperty({ example: 'react-fundamentals' })
-  productSlug!: string;
+  slug!: string;
 
   @ApiPropertyOptional({ nullable: true, example: 'React Fundamentals' })
-  productName?: string | null;
+  name?: string | null;
 
   @ApiProperty({
     type: 'array',
     itemType: 'string',
     example: ['frontend', 'react', 'javascript'],
   })
-  productCategory!: string[];
+  category!: string[];
 
   @ApiPropertyOptional({ nullable: true, type: 'number', example: 299000 })
-  productPrice?: number | null;
+  price?: number | null;
 
   @ApiPropertyOptional({
     nullable: true,
     example: 'https://cdn.brainboost.com/products/react-fundamentals.jpg',
   })
-  productImageUrl?: string | null;
+  imageUrl?: string | null;
 
   @ApiProperty({ format: 'date-time', example: '2024-03-10T11:20:00.000Z' })
   lastUpdated!: string;
@@ -72,7 +66,7 @@ export class ProductDto {
   productPaymentUrl!: string;
 
   @ApiProperty({ example: 'https://brainboost.com/p/react-fundamentals' })
-  productShareDetailUrl!: string;
+  shareUrl!: string;
 
   @ApiPropertyOptional({
     nullable: true,
@@ -229,7 +223,12 @@ export class CourseDetailDto {
   })
   id!: string;
 
-  @ApiPropertyOptional({ nullable: true, type: 'integer', example: 123 })
+  @ApiPropertyOptional({
+    nullable: true,
+    type: 'integer',
+    example: 123,
+    description: 'Legacy int id — pending P3 removal. Use `id` (UUID) instead.',
+  })
   courseId?: number | null;
 
   @ApiProperty({ example: 'react-fundamentals' })

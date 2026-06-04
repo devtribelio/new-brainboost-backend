@@ -435,3 +435,43 @@ Two migrations created this session — apply on dev/staging/prod via `pnpm pris
 - `docs/api-fe.md` — frozen FE contract (61 endpoints).
 - `docs/legacy-providers.md` — external integrations not yet wired (Qontak, Bunny, S3, FCM, etc.).
 - `docs/legacy-analysis.md` — symbol-level legacy mapping + §8.1 FE coercion history.
+
+---
+
+## Phase BC — Backend Contract Alignment (FE audit 2026-06-03)
+
+FE audit vs staging — endpoints disagreeing with each other; aligning lets FE drop
+remaining `??` compat shims. Audited: profile/info, profile/update, product/list,
+product/course/detail, data/banner, data/location/*.
+
+- [x] **BC-P1** profile/update returns photo under `image` (was `imageUrl`) — live bug
+  (stale avatar after upload). `update()` now re-serializes via `serializeProfileLegacy`,
+  identical shape to GET /profile/info. `@ApiResponse` → `MemberProfileDto`. Dropped
+  `serializeMemberFull`/`MemberFullDto` imports. File: `apps/mobile-api/src/modules/profile/profile.controller.ts`.
+  - **No FE coordination needed** (additive — FE already reads `image`). FE follow-up:
+    delete `?? jsonMap['imageUrl']` in `ProfileModel.fromJsonAPI`.
+- [x] **BC-P2** product/list clean keys — renamed 9 legacy `product*`-prefixed keys to
+  match product/course/detail: productType→type, productTypeLabel→typeLabel,
+  productCode→code, productSlug→slug, productName→name, productPrice→price,
+  productImageUrl→imageUrl, productCategory→category, productShareDetailUrl→shareUrl.
+  `lastUpdated` kept. Files: `product.serializer.ts`, `dto/product.dto.ts`,
+  `tests/swagger-examples.spec.ts`.
+  - **⚠️ BREAKING wire change** — FE follows live shape, dropped `??` fallbacks.
+    Coordinate FE deploy before shipping.
+  - **⚠️ shareUrl ≠ detail**: FE table said `shareUrl`, but detail serializer emits
+    `productShareDetailUrl` (`product.serializer.ts:382`). List + detail now differ on
+    the share key. FE table internally inconsistent — confirm with FE; if true parity
+    wanted, rename detail too (separate breaking change).
+- [~] **BC-P3** remove legacy int product ids (`networkAccountProductAffiliatorId` on
+  list, `courseId` on detail). UUID `id` is canonical (FE decided). **Deletion BLOCKED**
+  on FE migrating product id int→String + local DB schema (FE: "scheduled after BE
+  confirms removal timeline"). Int id still read by app today → cannot delete yet.
+  - Done now: both fields doc-annotated "Legacy int id — pending P3 removal. Use `id`
+    (UUID)." in `dto/product.dto.ts`. Values still emitted.
+  - **BE action:** confirm removal timeline to FE; delete the 2 serializer lines once FE
+    migration ships.
+
+**Unrelated drift found:** test/staging DB missing `products.ios_product_id` (migration
+from commit `cd490ee` not applied) → product/list 500s until `pnpm prisma:migrate`.
+Also pre-existing typecheck error `apps/mobile-api/src/modules/ingest/purchase-ingest.service.ts:166`
+(`acceptedAmount` not on `CommercePaymentSuccessEvent`) — unrelated to this audit.

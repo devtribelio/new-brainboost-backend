@@ -48,7 +48,7 @@ describe('OpenAPI doc — response examples', () => {
     );
 
     const productDto = doc.components.schemas.ProductDto;
-    expect(productDto.properties.productName.example).toBe('React Fundamentals');
+    expect(productDto.properties.name.example).toBe('React Fundamentals');
 
     const accountChangePwBody =
       doc.paths['/api/member/account/changePassword'].post.requestBody.content['application/json']

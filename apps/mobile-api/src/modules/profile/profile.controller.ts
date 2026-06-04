@@ -3,10 +3,8 @@ import { ProfileService } from './profile.service';
 import { prisma } from '@bb/db';
 import { ok } from '@bb/common/utils/response.util';
 import { UnauthorizedException } from '@bb/common/exceptions';
-import { serializeMemberFull } from '@/modules/member/member.serializer';
 import type { AuthenticatedRequest } from '@bb/common/interfaces/authenticated-request';
 import { ApiBearerAuth, ApiBody, ApiOperation, ApiResponse, ApiTags } from '@bb/common/openapi/decorators';
-import { MemberFullDto } from '@bb/common/openapi/member.dto';
 import { MemberProfileDto, UpdateProfileRequestDto, UpdateLocationRequestDto } from './dto/profile.dto';
 
 @ApiTags('Profile')
@@ -80,11 +78,11 @@ export class ProfileController {
 
   @ApiOperation({ summary: 'Update my profile fields' })
   @ApiBody({ type: () => UpdateProfileRequestDto })
-  @ApiResponse({ status: 200, type: () => MemberFullDto })
+  @ApiResponse({ status: 200, type: () => MemberProfileDto })
   update = async (req: AuthenticatedRequest, res: Response) => {
     if (!req.user) throw new UnauthorizedException();
     const body = req.body ?? {};
-    const member = await this.profileService.updateInfo(req.user.id, {
+    await this.profileService.updateInfo(req.user.id, {
       fullName: body.name ?? body.fullName,
       firstName: body.firstName,
       lastName: body.lastName,
@@ -94,7 +92,9 @@ export class ProfileController {
       avatarUrl: body.imageUrl ?? body.avatarUrl,
       coverUrl: body.coverImageUrl ?? body.coverUrl,
     });
-    return ok(res, serializeMemberFull(member));
+    // Return ProfileModel shape identical to GET /profile/info so the photo
+    // comes back under `image` (not `imageUrl`). Mirrors updateLocation below.
+    return ok(res, await this.serializeProfileLegacy(req.user.id));
   };
 
   @ApiOperation({ summary: 'Set my address / location FK chain' })
