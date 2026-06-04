@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { ProductController } from './product.controller';
 import { ProductService } from './product.service';
+import { AffiliatorService } from '@bb/domain/affiliate/affiliator.service';
 import { authGuard, optionalAuthGuard } from '@bb/common/middlewares/auth.middleware';
 import { bindRoute } from '@bb/common/openapi/route-binder';
 import { validateDto } from '@bb/common/middlewares/validation.middleware';
@@ -8,7 +9,7 @@ import { ListProductsQueryDto } from './dto/list-query.dto';
 
 export function productRoutes(): Router {
   const router = Router();
-  const ctrl = new ProductController(new ProductService());
+  const ctrl = new ProductController(new ProductService(), new AffiliatorService());
 
   bindRoute({
     router,
