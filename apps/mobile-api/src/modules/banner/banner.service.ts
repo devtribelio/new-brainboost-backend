@@ -2,8 +2,11 @@ import { prisma } from '@bb/db';
 import type { PaginationParams } from '@bb/common/utils/pagination.util';
 
 export class BannerService {
-  async listActive(p: PaginationParams) {
-    const where = { isActive: true };
+  async listActive(p: PaginationParams, filter?: { isPopup?: boolean }) {
+    const where = {
+      isActive: true,
+      ...(filter?.isPopup !== undefined ? { isPopup: filter.isPopup } : {}),
+    };
     const [rows, total] = await Promise.all([
       prisma.banner.findMany({
         where,

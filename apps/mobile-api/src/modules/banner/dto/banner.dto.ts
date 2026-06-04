@@ -24,4 +24,7 @@ export class BannerDto {
 
   @ApiProperty({ type: 'boolean', example: true })
   isActive!: boolean;
+
+  @ApiProperty({ type: 'boolean', example: false })
+  isPopup!: boolean;
 }

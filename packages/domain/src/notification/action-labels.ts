@@ -9,6 +9,8 @@ export const ActionLabel = {
   MemberJoin: 'memberJoin',
   PaymentSuccess: 'paymentSuccess',
   PaymentPending: 'paymentPending',
+  PaymentRefunded: 'paymentRefunded',
+  SubscriptionRenewed: 'subscriptionRenewed',
   CommissionEarned: 'commissionEarned',
 } as const;
 

@@ -13,12 +13,22 @@ export function registerCommerceNotificationListener(): void {
         where: { id: e.productId },
         select: { title: true },
       });
-      const title = 'Payment successful';
-      const body = product ? `Your order for ${product.title} is paid.` : 'Your order is paid.';
+      const named = product ? product.title : null;
+
+      const type = e.isRenewal ? ActionLabel.SubscriptionRenewed : ActionLabel.PaymentSuccess;
+      const title = e.isRenewal ? 'Subscription renewed' : 'Payment successful';
+      const body = e.isRenewal
+        ? named
+          ? `Your subscription to ${named} was renewed.`
+          : 'Your subscription was renewed.'
+        : named
+          ? `Your order for ${named} is paid.`
+          : 'Your order is paid.';
+      const dedupePrefix = e.isRenewal ? 'subscriptionRenewed' : 'paymentSuccess';
 
       await producer.createForMember({
         memberId: e.memberId,
-        type: ActionLabel.PaymentSuccess,
+        type,
         notifGroup: NotifGroup.General,
         title,
         body,
@@ -29,10 +39,38 @@ export function registerCommerceNotificationListener(): void {
           productId: e.productId,
           amount: e.amount,
         },
-        dedupeKey: `paymentSuccess:${e.paymentId}:${e.memberId}`,
+        dedupeKey: `${dedupePrefix}:${e.paymentId}:${e.memberId}`,
       });
     } catch (err) {
       logger.error({ err, paymentId: e.paymentId }, '[notification] commerce listener failed');
+    }
+  });
+
+  commerceEvents.on('commerce.payment.refunded', async (e) => {
+    try {
+      const product = e.productId
+        ? await prisma.product.findUnique({ where: { id: e.productId }, select: { title: true } })
+        : null;
+      const body = product
+        ? `Your purchase of ${product.title} was refunded and access removed.`
+        : 'Your purchase was refunded and access removed.';
+
+      await producer.createForMember({
+        memberId: e.memberId,
+        type: ActionLabel.PaymentRefunded,
+        notifGroup: NotifGroup.General,
+        title: 'Purchase refunded',
+        body,
+        payload: {
+          refTable: 'commerce_payment',
+          refId: e.paymentId ?? null,
+          transactionId: e.transactionId,
+          productId: e.productId ?? null,
+        },
+        dedupeKey: `paymentRefunded:${e.transactionId}:${e.memberId}`,
+      });
+    } catch (err) {
+      logger.error({ err, transactionId: e.transactionId }, '[notification] commerce refund listener failed');
     }
   });
 }

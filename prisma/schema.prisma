@@ -228,6 +228,7 @@ model Banner {
   linkUrl   String?  @map("link_url")
   position  Int      @default(0)
   isActive  Boolean  @default(true) @map("is_active")
+  isPopup   Boolean  @default(false) @map("is_popup")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
