@@ -150,7 +150,7 @@ export class AccountService {
     if (!member.isActive) throw new UnauthorizedException('Member is not active');
 
     const matches = await this.verifyPassword(dto.oldPassword, member);
-    if (!matches) throw new UnauthorizedException('Old password is incorrect');
+    if (!matches) throw new BadRequestException('Old password is incorrect');
 
     if (dto.oldPassword === dto.newPassword) {
       throw new BadRequestException('New password must differ from old password');
