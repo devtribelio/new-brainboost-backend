@@ -8,5 +8,6 @@ export function serializeBanner(b: Banner): Record<string, unknown> {
     client: b.title,
     link: b.linkUrl ?? '',
     image: [b.imageUrl],
+    isPopup: b.isPopup,
   };
 }
