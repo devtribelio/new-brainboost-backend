@@ -146,6 +146,11 @@ model PraMember {
   affiliateMemberId String?  @map("affiliate_member_id") @db.Uuid
   networkId         String?  @map("network_id") @db.Uuid
   device            Json?
+  /// Full attribution context captured at pre-registration: programCode, utm_*,
+  /// adId, adNetwork, installReferrer, deviceId, platform, appVersion.
+  /// Carried to the register step so AffiliateVisit can be created with full
+  /// marketing fidelity bound to the new Member.id.
+  attributionContext Json?    @map("attribution_context")
   expiresAt         DateTime @map("expires_at")
   createdAt         DateTime @default(now()) @map("created_at")
 

@@ -47,4 +47,70 @@ export class PreRegistrationDto {
   @IsOptional()
   @IsString()
   networkId?: string;
+
+  // Attribution context — full AppsFlyer deferred deeplink payload.
+  // All fields optional; backward-compat for callers that don't send them.
+
+  @ApiPropertyOptional({ example: 'PROG2025', description: 'Affiliate program code from share link' })
+  @IsOptional()
+  @IsString()
+  programCode?: string;
+
+  @ApiPropertyOptional({ example: 'facebook', description: 'UTM source' })
+  @IsOptional()
+  @IsString()
+  utmSource?: string;
+
+  @ApiPropertyOptional({ example: 'social', description: 'UTM medium' })
+  @IsOptional()
+  @IsString()
+  utmMedium?: string;
+
+  @ApiPropertyOptional({ example: 'tahun-baru-2026', description: 'UTM campaign' })
+  @IsOptional()
+  @IsString()
+  utmCampaign?: string;
+
+  @ApiPropertyOptional({ example: 'story-ad-1', description: 'UTM content' })
+  @IsOptional()
+  @IsString()
+  utmContent?: string;
+
+  @ApiPropertyOptional({ example: 'kelas-online', description: 'UTM term' })
+  @IsOptional()
+  @IsString()
+  utmTerm?: string;
+
+  @ApiPropertyOptional({ example: '1234567890', description: 'Ad ID (gclid / fbclid / ttclid)' })
+  @IsOptional()
+  @IsString()
+  adId?: string;
+
+  @ApiPropertyOptional({ example: 'meta', description: 'Ad network identifier' })
+  @IsOptional()
+  @IsString()
+  adNetwork?: string;
+
+  @ApiPropertyOptional({
+    example: 'utm_source=facebook&utm_medium=social',
+    description: 'Raw install referrer string from AppsFlyer / Play Store',
+  })
+  @IsOptional()
+  @IsString()
+  installReferrer?: string;
+
+  @ApiPropertyOptional({ example: 'abc123-device-uuid', description: 'Device identifier' })
+  @IsOptional()
+  @IsString()
+  deviceId?: string;
+
+  @ApiPropertyOptional({ example: 'ios', description: 'Platform: ios | android | web' })
+  @IsOptional()
+  @IsString()
+  platform?: string;
+
+  @ApiPropertyOptional({ example: '1.2.3', description: 'App version string' })
+  @IsOptional()
+  @IsString()
+  appVersion?: string;
 }

@@ -127,6 +127,110 @@ export class VisitService {
   }
 
   /**
+   * Create an AffiliateVisit from the registration flow when attribution
+   * context was captured at pre-registration and carried forward to register.
+   *
+   * Differs from logVisit: callers already hold resolved IDs (no code→ID
+   * translation needed). Also handles the §3.5 fallback: when programCode is
+   * absent but affiliatorMemberId is set, auto-picks the program if the
+   * affiliator is enrolled in exactly one active program.
+   *
+   * Returns status: 'logged' | 'skipped' | 'error'. Never throws.
+   */
+  async createVisitFromRegistration(input: {
+    memberId: string;
+    affiliatorMemberId: string;
+    programCode?: string;
+    utmSource?: string;
+    utmMedium?: string;
+    utmCampaign?: string;
+    utmContent?: string;
+    utmTerm?: string;
+    adId?: string;
+    adNetwork?: string;
+    installReferrer?: string;
+    deviceId?: string;
+    platform?: string;
+    appVersion?: string;
+    ipAddress?: string | null;
+    userAgent?: string | null;
+  }): Promise<{ status: 'logged' | 'skipped' | 'error'; visitId?: string; reason?: string }> {
+    try {
+      let programId: string | null = null;
+
+      if (input.programCode) {
+        const program = await prisma.affiliateProgram.findUnique({
+          where: { code: input.programCode },
+          select: { id: true },
+        });
+        if (!program) {
+          logger.info(
+            { programCode: input.programCode, affiliatorMemberId: input.affiliatorMemberId },
+            'affiliate.visit.registration.unknown_program_code — skipping visit creation',
+          );
+          return { status: 'skipped', reason: 'unknown programCode' };
+        }
+        programId = program.id;
+      } else {
+        // §3.5 fallback: auto-pick if the affiliator is enrolled in exactly 1 active program.
+        const enrollments = await prisma.memberAffiliator.findMany({
+          where: { memberId: input.affiliatorMemberId, isActive: true },
+          select: { programId: true },
+        });
+        if (enrollments.length === 1) {
+          programId = enrollments[0]!.programId;
+          logger.info(
+            { affiliatorMemberId: input.affiliatorMemberId, programId },
+            'affiliate.visit.registration.fallback_single_program',
+          );
+        } else {
+          logger.info(
+            {
+              affiliatorMemberId: input.affiliatorMemberId,
+              enrollmentCount: enrollments.length,
+            },
+            'affiliate.visit.registration.ambiguous_program — skipping visit creation',
+          );
+          return {
+            status: 'skipped',
+            reason: `ambiguous: affiliator enrolled in ${enrollments.length} programs`,
+          };
+        }
+      }
+
+      const visit = await prisma.affiliateVisit.create({
+        data: {
+          programId,
+          affiliatorMemberId: input.affiliatorMemberId,
+          memberId: input.memberId,
+          utmSource: input.utmSource,
+          utmMedium: input.utmMedium,
+          utmCampaign: input.utmCampaign,
+          utmContent: input.utmContent,
+          utmTerm: input.utmTerm,
+          adId: input.adId,
+          adNetwork: input.adNetwork,
+          installReferrer: input.installReferrer,
+          deviceId: input.deviceId,
+          platform: input.platform,
+          appVersion: input.appVersion,
+          ipAddress: input.ipAddress ?? undefined,
+          userAgent: input.userAgent ?? undefined,
+        },
+      });
+
+      logger.info(
+        { visitId: visit.id, memberId: input.memberId, programId },
+        'affiliate.visit.registration.logged',
+      );
+      return { status: 'logged', visitId: visit.id };
+    } catch (err) {
+      logger.error({ err, input }, 'affiliate.visit.registration.write_failed');
+      return { status: 'error', reason: 'internal' };
+    }
+  }
+
+  /**
    * Find latest non-expired visit for (memberId, programId) — used at
    * commission generation time. Returns null if no active attribution.
    */

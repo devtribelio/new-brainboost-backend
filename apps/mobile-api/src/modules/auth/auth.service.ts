@@ -26,6 +26,7 @@ import type { RequestVerificationPhoneDto } from './dto/request-verification-pho
 import type { ValidateOtpPhoneDto } from './dto/validate-otp-phone.dto';
 import { logger } from '@bb/common/config/logger';
 import { mailer } from '@bb/common/services/mailer.service';
+import { VisitService } from '@bb/domain/affiliate/visit.service';
 
 interface TokenBundle {
   access_token: string;
@@ -179,6 +180,9 @@ export class AuthService {
     // PraMember row keyed on email or phone. Without this, `PraMember.
     // affiliateMemberId` is a dead column and post-install attribution from
     // share-the-app links silently breaks at the register boundary.
+    // Also capture attributionContext for AffiliateVisit creation below.
+    let praAttributionContext: Record<string, string> | null = null;
+
     if (!inviterId || !inviterNetworkId) {
       const pra = await prisma.praMember.findFirst({
         where: {
@@ -188,7 +192,7 @@ export class AuthService {
           ].filter((c): c is NonNullable<typeof c> => c !== undefined),
         },
         orderBy: { createdAt: 'desc' },
-        select: { affiliateMemberId: true, networkId: true },
+        select: { affiliateMemberId: true, networkId: true, attributionContext: true },
       });
       if (!inviterId && pra?.affiliateMemberId) {
         // Defend against an orphaned id: the inviter must still exist.
@@ -199,6 +203,9 @@ export class AuthService {
         if (exists) inviterId = exists.id;
       }
       if (!inviterNetworkId && pra?.networkId) inviterNetworkId = pra.networkId;
+      if (pra?.attributionContext && typeof pra.attributionContext === 'object') {
+        praAttributionContext = pra.attributionContext as Record<string, string>;
+      }
     }
 
     const passwordHash = await bcrypt.hash(dto.password, 10);
@@ -234,6 +241,46 @@ export class AuthService {
         where: { id: inviterNetworkId },
         data: { countMember: { increment: 1 } },
       });
+    }
+
+    // Best-effort: create AffiliateVisit from pre-registration attribution context.
+    // Only runs when inviterId was resolved AND attribution context was stored at
+    // pre-registration. Failures are logged but NEVER abort the register flow.
+    if (inviterId && praAttributionContext) {
+      try {
+        const visitService = new VisitService();
+        const ctx = praAttributionContext;
+        const visitResult = await visitService.createVisitFromRegistration({
+          memberId: member.id,
+          affiliatorMemberId: inviterId,
+          programCode: typeof ctx.programCode === 'string' ? ctx.programCode : undefined,
+          utmSource: typeof ctx.utmSource === 'string' ? ctx.utmSource : undefined,
+          utmMedium: typeof ctx.utmMedium === 'string' ? ctx.utmMedium : undefined,
+          utmCampaign: typeof ctx.utmCampaign === 'string' ? ctx.utmCampaign : undefined,
+          utmContent: typeof ctx.utmContent === 'string' ? ctx.utmContent : undefined,
+          utmTerm: typeof ctx.utmTerm === 'string' ? ctx.utmTerm : undefined,
+          adId: typeof ctx.adId === 'string' ? ctx.adId : undefined,
+          adNetwork: typeof ctx.adNetwork === 'string' ? ctx.adNetwork : undefined,
+          installReferrer: typeof ctx.installReferrer === 'string' ? ctx.installReferrer : undefined,
+          deviceId: typeof ctx.deviceId === 'string' ? ctx.deviceId : undefined,
+          platform: typeof ctx.platform === 'string' ? ctx.platform : undefined,
+          appVersion: typeof ctx.appVersion === 'string' ? ctx.appVersion : undefined,
+          // ipAddress and userAgent: AuthService.register receives a DTO with no
+          // req headers forwarded. The register controller could thread them in
+          // but that's a cross-cutting concern outside the current DTO contract.
+          // Leave null here; both fields are nullable on AffiliateVisit.
+          ipAddress: null,
+          userAgent: null,
+        });
+        if (visitResult.status !== 'logged') {
+          logger.warn(
+            { visitStatus: visitResult.status, reason: visitResult.reason, memberId: member.id },
+            'affiliate.visit.registration.not_logged',
+          );
+        }
+      } catch (err) {
+        logger.warn({ err, memberId: member.id }, 'affiliate.visit.registration.unexpected_error');
+      }
     }
 
     await this.autoJoinCommunityNetworks(member.id);

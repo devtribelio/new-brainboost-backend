@@ -96,6 +96,27 @@ export class AccountService {
     // `name` + `phoneCode` + `password` are not yet persisted (PraMember has no
     // columns for them). FE re-sends them on the final register step. Validated
     // here so a bad payload fails fast at the pre-registration boundary.
+
+    // Bundle attribution context if any attribution field was provided. Leave
+    // null when none present so behavior is byte-for-byte unchanged for callers
+    // that don't send the new fields.
+    const attributionContext: Record<string, string> | null = (() => {
+      const ctx: Record<string, string> = {};
+      if (dto.programCode) ctx.programCode = dto.programCode;
+      if (dto.utmSource) ctx.utmSource = dto.utmSource;
+      if (dto.utmMedium) ctx.utmMedium = dto.utmMedium;
+      if (dto.utmCampaign) ctx.utmCampaign = dto.utmCampaign;
+      if (dto.utmContent) ctx.utmContent = dto.utmContent;
+      if (dto.utmTerm) ctx.utmTerm = dto.utmTerm;
+      if (dto.adId) ctx.adId = dto.adId;
+      if (dto.adNetwork) ctx.adNetwork = dto.adNetwork;
+      if (dto.installReferrer) ctx.installReferrer = dto.installReferrer;
+      if (dto.deviceId) ctx.deviceId = dto.deviceId;
+      if (dto.platform) ctx.platform = dto.platform;
+      if (dto.appVersion) ctx.appVersion = dto.appVersion;
+      return Object.keys(ctx).length > 0 ? ctx : null;
+    })();
+
     const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
     await prisma.praMember.create({
       data: {
@@ -103,6 +124,7 @@ export class AccountService {
         phone: dto.phone,
         affiliateMemberId,
         networkId: dto.networkId,
+        attributionContext: attributionContext ?? undefined,
         expiresAt,
       },
     });
