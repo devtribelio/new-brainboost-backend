@@ -135,6 +135,7 @@ export class RevenueCatWebhookHandler {
         event.tax_percentage,
       ),
       currency: event.currency,
+      isRenewal: event.type === 'RENEWAL',
       occurredAt: undefined,
       raw: event,
     };

@@ -27,6 +27,21 @@ export interface CommercePaymentSuccessEvent {
    * grants enrollment/voucher but does NOT pay commission.
    */
   affiliateEligible?: boolean;
+  /**
+   * Subscription renewal (vs first purchase). RC `RENEWAL` event sets this; other
+   * channels leave it undefined. Notification listener emits `subscriptionRenewed`
+   * instead of `paymentSuccess` when true. Does not affect enrollment/commission.
+   */
+  isRenewal?: boolean;
+}
+
+export interface CommercePaymentRefundedEvent {
+  paymentId?: string | null;
+  transactionId: string;
+  memberId: string;
+  productId?: string | null;
+  /** Provider-side refund event id (idempotency / audit). */
+  providerEventId?: string;
 }
 
 export interface CommercePaymentExpiredEvent {
@@ -42,6 +57,7 @@ export interface CommercePaymentFailedEvent {
 
 export type CommerceEventMap = {
   'commerce.payment.success': CommercePaymentSuccessEvent;
+  'commerce.payment.refunded': CommercePaymentRefundedEvent;
   'commerce.payment.expired': CommercePaymentExpiredEvent;
   'commerce.payment.failed': CommercePaymentFailedEvent;
 };
