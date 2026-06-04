@@ -28,7 +28,7 @@ function deriveSlug(title: string | null): string {
 
 export function serializeProduct(
   p: Product,
-  opts: { ratingAvg?: number; isPurchased?: boolean } = {},
+  opts: { ratingAvg?: number; isPurchased?: boolean; commissionRate?: number } = {},
 ): Record<string, unknown> {
   const productId = p.legacyId ?? p.id;
   const label = productTypeLabel(p.type);
@@ -64,7 +64,13 @@ export function serializeProduct(
     lastUpdated: p.updatedAt.toISOString(),
     productPaymentUrl: `${baseUrl}/checkout/${code}`,
     shareUrl: productUrl,
-    commisionFixAmount: null,
+    // Affiliate-earning preview. Legacy mobile (TribeversityMobile/Product.php:208)
+    // used a flat 20%; here it is the caller's PERFORMANCE-tier rate (20/30/40,
+    // tier 1 = 20% default for anon/no-history members), applied globally — the new
+    // backend has no per-product `pbs_aff_*` overrides (per-program rate config not
+    // ported). `(int)` cast like legacy program/detail.blade.php:46 → Math.trunc.
+    commisionFixAmount:
+      p.price > 0 ? Math.trunc((p.price * (opts.commissionRate ?? 20)) / 100) : 0,
     productUrl,
     isPurchased: opts.isPurchased ?? false,
     productRatingAvg: opts.ratingAvg ?? 0,

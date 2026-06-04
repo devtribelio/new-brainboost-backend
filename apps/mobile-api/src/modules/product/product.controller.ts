@@ -1,5 +1,6 @@
 import type { Request, Response } from 'express';
 import { ProductService } from './product.service';
+import type { AffiliatorService } from '@bb/domain/affiliate/affiliator.service';
 import { ok, okPaginated } from '@bb/common/utils/response.util';
 import { BadRequestException } from '@bb/common/exceptions';
 import { parsePagination } from '@bb/common/utils/pagination.util';
@@ -17,7 +18,10 @@ import { ListProductsQueryDto, OWNERSHIP_VALUES } from './dto/list-query.dto';
 
 @ApiTags('Product')
 export class ProductController {
-  constructor(private readonly productService: ProductService) {}
+  constructor(
+    private readonly productService: ProductService,
+    private readonly affiliatorService: AffiliatorService,
+  ) {}
 
   @ApiOperation({ summary: 'List products' })
   @ApiQuery({ name: 'page', type: 'integer', required: false, example: 1 })
@@ -45,10 +49,16 @@ export class ProductController {
       p,
       { keyword: q.keyword, type: q.type, memberId, ownership: q.ownership },
     );
+    // PERFORMANCE-tier rate for commisionFixAmount preview. One lookup per request;
+    // anon (public list) → tier 1 (20%) default inside the serializer.
+    const commissionRate = memberId
+      ? await this.affiliatorService.getPerformanceRate(memberId)
+      : undefined;
     const items = rows.map((r) =>
       serializeProduct(r, {
         ratingAvg: ratingAvgByProduct.get(r.id) ?? 0,
         isPurchased: purchasedProductIds.has(r.id),
+        commissionRate,
       }),
     );
     return okPaginated(res, items, { page: p.page, perPage: p.perPage, total });

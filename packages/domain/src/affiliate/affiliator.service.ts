@@ -238,6 +238,17 @@ export class AffiliatorService {
     return null;
   }
 
+  /**
+   * PERFORMANCE-tier commission rate (20/30/40) for a member, derived from
+   * lifetime affiliator commission. Used as the flat affiliate-earning preview
+   * on product listings (`commisionFixAmount`). Members with no lifetime
+   * commission fall to tier 1 (20%), matching the legacy base rate.
+   */
+  async getPerformanceRate(memberId: string): Promise<number> {
+    const lifetime = await this.getLifetimeAmount(memberId);
+    return getPerformanceTier(lifetime).rate;
+  }
+
   private async getLifetimeAmount(memberId: string): Promise<number> {
     const agg = await prisma.affiliateCommission.aggregate({
       where: {
