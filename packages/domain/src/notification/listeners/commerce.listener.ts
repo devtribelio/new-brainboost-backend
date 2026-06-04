@@ -11,7 +11,7 @@ export function registerCommerceNotificationListener(): void {
     try {
       const product = await prisma.product.findUnique({
         where: { id: e.productId },
-        select: { title: true },
+        select: { title: true, code: true },
       });
       const named = product ? product.title : null;
 
@@ -37,6 +37,7 @@ export function registerCommerceNotificationListener(): void {
           refId: e.paymentId,
           transactionId: e.transactionId,
           productId: e.productId,
+          productCode: product?.code ?? null,
           amount: e.amount,
         },
         dedupeKey: `${dedupePrefix}:${e.paymentId}:${e.memberId}`,
@@ -49,7 +50,7 @@ export function registerCommerceNotificationListener(): void {
   commerceEvents.on('commerce.payment.refunded', async (e) => {
     try {
       const product = e.productId
-        ? await prisma.product.findUnique({ where: { id: e.productId }, select: { title: true } })
+        ? await prisma.product.findUnique({ where: { id: e.productId }, select: { title: true, code: true } })
         : null;
       const body = product
         ? `Your purchase of ${product.title} was refunded and access removed.`
@@ -66,6 +67,7 @@ export function registerCommerceNotificationListener(): void {
           refId: e.paymentId ?? null,
           transactionId: e.transactionId,
           productId: e.productId ?? null,
+          productCode: product?.code ?? null,
         },
         dedupeKey: `paymentRefunded:${e.transactionId}:${e.memberId}`,
       });
