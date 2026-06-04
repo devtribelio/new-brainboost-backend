@@ -36,29 +36,34 @@ export function serializeProduct(
   const code = p.code ?? String(productId);
   const baseUrl = process.env.PUBLIC_WEB_URL ?? 'https://brainboost.com';
   const productUrl = p.marketingLink ?? `${baseUrl}/p/${slug}`;
-  // FE ProductModel reads leftmost-of-fallback. Backend emits only the
-  // canonical (leftmost) name per audit §3.1 — aliases dropped.
+  // Clean field names aligned with product/course/detail convention (FE
+  // backend-contract audit P2). Legacy `product*`-prefixed keys renamed:
+  // productType→type, productTypeLabel→typeLabel, productCode→code,
+  // productSlug→slug, productName→name, productPrice→price,
+  // productImageUrl→imageUrl, productCategory→category,
+  // productShareDetailUrl→shareUrl. `lastUpdated` kept (FE accepts).
+  // `networkAccountProductAffiliatorId` retained pending P3 int-id removal.
   return {
     id: p.id,
     networkAccountProductAffiliatorId: productId,
     iosProductId: p.iosProductId,
     androidProductId: p.androidProductId,
-    productType: p.type,
-    productTypeLabel: label,
-    productCode: code,
-    productSlug: slug,
-    productName: p.title,
-    productCategory: p.tags
+    type: p.type,
+    typeLabel: label,
+    code,
+    slug,
+    name: p.title,
+    category: p.tags
       ? p.tags
           .split(',')
           .map((s) => s.trim())
           .filter(Boolean)
       : [],
-    productPrice: p.price,
-    productImageUrl: p.thumbnail,
+    price: p.price,
+    imageUrl: p.thumbnail,
     lastUpdated: p.updatedAt.toISOString(),
     productPaymentUrl: `${baseUrl}/checkout/${code}`,
-    productShareDetailUrl: productUrl,
+    shareUrl: productUrl,
     commisionFixAmount: null,
     productUrl,
     isPurchased: opts.isPurchased ?? false,
