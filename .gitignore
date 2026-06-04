@@ -5,6 +5,10 @@ coverage/
 .env.*
 !.env.example
 *.log
+
+# secrets — credential files (FCM service account, etc). Folder tracked via README only.
+secrets/*
+secrets/README.md
 .DS_Store
 .idea/
 .vscode/

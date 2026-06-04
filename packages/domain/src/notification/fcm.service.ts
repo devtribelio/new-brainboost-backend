@@ -61,14 +61,17 @@ export class FcmService {
       where: { memberId, fcmToken: { not: null } },
       select: { id: true, fcmToken: true },
     });
-    if (devices.length === 0) return;
+    if (devices.length === 0) {
+      logger.info({ memberId }, '[fcm] no devices with fcmToken — push skipped');
+      return;
+    }
 
     const client = await this.auth.getClient();
     const url = `https://fcm.googleapis.com/v1/projects/${this.projectId}/messages:send`;
 
-    await Promise.all(
+    const results = await Promise.all(
       devices.map(async (d) => {
-        if (!d.fcmToken) return;
+        if (!d.fcmToken) return false;
         try {
           await client.request({
             url,
@@ -81,11 +84,16 @@ export class FcmService {
               },
             },
           });
+          return true;
         } catch (err) {
           await this.handleSendError(d.id, d.fcmToken, err);
+          return false;
         }
       }),
     );
+
+    const sent = results.filter(Boolean).length;
+    logger.info({ memberId, devices: devices.length, sent, failed: devices.length - sent }, '[fcm] push sent');
   }
 
   private async handleSendError(deviceId: string, token: string, err: unknown): Promise<void> {

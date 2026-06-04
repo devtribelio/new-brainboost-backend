@@ -29,6 +29,8 @@ export interface NormalizedPurchase {
   currency?: string;
   affiliatorCode?: string; // explicit per-purchase attribution (last-touch), optional
   refundOfProviderEventId?: string; // for type=REFUND: the original purchase's providerEventId
+  /** Subscription renewal vs first purchase — drives `subscriptionRenewed` notif. */
+  isRenewal?: boolean;
   occurredAt?: string;
   raw?: unknown;
 }
@@ -170,6 +172,7 @@ export class PurchaseIngestService {
       programId: null,
       attributedAffiliatorMemberId: overrideAffiliatorMemberId, // listener maps → engine override
       affiliateEligible: cred.triggersAffiliate, // gate: false → enrollment yes, commission no
+      isRenewal: input.isRenewal,
     });
 
     return { status: 'committed', transactionId: txId, paymentId };
@@ -185,6 +188,7 @@ export class PurchaseIngestService {
       select: {
         id: true,
         memberId: true,
+        productId: true,
         payments: { select: { id: true } },
         product: { select: { type: true, course: { select: { id: true } } } },
       },
@@ -215,6 +219,15 @@ export class PurchaseIngestService {
       { txId: tx.id, voided: res.count, revokedEnrollments },
       '[ingest] refund voided commissions + revoked enrollment',
     );
+
+    commerceEvents.emit('commerce.payment.refunded', {
+      paymentId: paymentIds[0] ?? null,
+      transactionId: tx.id,
+      memberId: tx.memberId,
+      productId: tx.productId,
+      providerEventId: input.providerEventId,
+    });
+
     return { status: 'refunded', transactionId: tx.id, voidedCommissions: res.count };
   }
 

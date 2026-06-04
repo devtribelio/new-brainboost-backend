@@ -23,6 +23,20 @@ export class NotificationProducer {
     });
     if (!member || !member.isActive || !member.notificationsEnabled) return null;
 
+    // Pre-check dedupe so the common duplicate-event path doesn't hit the unique
+    // constraint — that would make Prisma log a `prisma:error` for an expected skip.
+    // The catch below still backstops the concurrent-insert race.
+    if (input.dedupeKey) {
+      const existing = await prisma.notification.findUnique({
+        where: { dedupeKey: input.dedupeKey },
+        select: { id: true },
+      });
+      if (existing) {
+        logger.debug({ dedupeKey: input.dedupeKey }, '[notification] dedupe skip');
+        return null;
+      }
+    }
+
     try {
       const row = await prisma.notification.create({
         data: {
@@ -37,6 +51,10 @@ export class NotificationProducer {
           dedupeKey: input.dedupeKey,
         },
       });
+      logger.info(
+        { notificationId: row.id, memberId: input.memberId, type: input.type, networkId: input.networkId ?? undefined },
+        '[notification] created',
+      );
       this.dispatchPush(input, row.id);
       return row;
     } catch (err) {
@@ -66,8 +84,12 @@ export class NotificationProducer {
   }
 
   private dispatchPush(input: CreateNotificationInput, notificationId: string): void {
-    if (!fcmService.isEnabled()) return;
+    if (!fcmService.isEnabled()) {
+      logger.debug({ notificationId }, '[notification] push skipped — fcm disabled');
+      return;
+    }
     setImmediate(() => {
+      logger.info({ notificationId, memberId: input.memberId, type: input.type }, '[notification] push firing');
       const data: Record<string, string> = {
         type: input.type,
         notificationId,
