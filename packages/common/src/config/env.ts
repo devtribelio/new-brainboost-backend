@@ -93,6 +93,24 @@ export const env = {
   log: {
     level: optional('LOG_LEVEL', 'info'),
   },
+  // Qontak WhatsApp Business API — OTP / transactional WA templates.
+  // Legacy delivered phone OTP via Qontak (TBQontak). Empty creds → the
+  // whatsapp service no-ops and logs the message (mirrors the mailer fallback),
+  // so dev/test boot without a live Qontak account.
+  qontak: {
+    baseUrl: optional('QONTAK_BASE_URL', 'https://service-chat.qontak.com'),
+    clientId: optional('QONTAK_CLIENT_ID', ''),
+    clientSecret: optional('QONTAK_CLIENT_SECRET', ''),
+    username: optional('QONTAK_USERNAME', ''),
+    password: optional('QONTAK_PASSWORD', ''),
+    // WhatsApp channel + template ids (carried over from legacy
+    // TBQontak_Engine_MemberVerificationOtpPhoneNumber).
+    channelIntegrationId: optional(
+      'QONTAK_CHANNEL_INTEGRATION_ID',
+      '9fe63a0f-e6c7-4a2e-b1ad-d12e69b5706c',
+    ),
+    otpTemplateId: optional('QONTAK_OTP_TEMPLATE_ID', '453e330c-64d6-434c-ba3e-900afd0da366'),
+  },
   xendit: {
     secretKey: optional('XENDIT_SECRET_KEY', ''),
     callbackToken: optional('XENDIT_CALLBACK_TOKEN', ''),

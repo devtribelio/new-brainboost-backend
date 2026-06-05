@@ -4,6 +4,7 @@ import { prisma } from '@bb/db';
 import { BadRequestException } from '@bb/common/exceptions';
 import { logger } from '@bb/common/config/logger';
 import { mailer } from './mailer.service';
+import { whatsappService } from './whatsapp.service';
 
 const MAX_OTP_ATTEMPTS = 5;
 
@@ -20,13 +21,29 @@ export interface IssueOtpInput {
   ttlSeconds?: number;
   emailSubject?: string;
   emailBody?: (code: string) => string;
+  /** Optional HTML email body (email targets only). */
+  emailHtml?: (code: string) => string;
+  /** WhatsApp recipient display name (phone targets only). */
+  recipientName?: string;
+  /**
+   * Max OTP requests allowed per target+purpose per calendar day. Mirrors
+   * legacy phone-OTP cap (TBApi MemberRequestVerificationPhone: 5/day).
+   * Omit to disable the daily cap.
+   */
+  maxPerDay?: number;
+  /**
+   * Reject the request while a still-valid (unused, unexpired) OTP exists for
+   * this target+purpose. Mirrors legacy resend guard (errCode 2113).
+   */
+  enforceResendGuard?: boolean;
 }
 
+// verify-phone is 2 min to match legacy (CCarbon::now()->addMinutes(2)).
 const DEFAULT_TTL: Record<OtpPurpose, number> = {
   'forgot-password': 10 * 60,
   'delete-account': 60,
   'pre-registration': 15 * 60,
-  'verify-phone': 10 * 60,
+  'verify-phone': 2 * 60,
   'verify-email': 10 * 60,
 };
 
@@ -39,11 +56,49 @@ function isEmail(target: string): boolean {
 }
 
 class OtpService {
-  async issue(input: IssueOtpInput): Promise<{ id: string; code: string }> {
+  async issue(input: IssueOtpInput): Promise<{ id: string; code: string; expiresAt: Date }> {
+    const now = new Date();
+
+    // Resend guard: a still-valid code must expire (or be consumed) first.
+    if (input.enforceResendGuard) {
+      const active = await prisma.otpCode.findFirst({
+        where: {
+          target: input.target,
+          purpose: input.purpose,
+          usedAt: null,
+          expiresAt: { gt: now },
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (active) {
+        throw new BadRequestException(
+          `An OTP was already sent. Please retry after ${active.expiresAt.toISOString()}.`,
+        );
+      }
+    }
+
+    // Daily cap per target+purpose (calendar day).
+    if (input.maxPerDay !== undefined) {
+      const startOfDay = new Date(now);
+      startOfDay.setHours(0, 0, 0, 0);
+      const issuedToday = await prisma.otpCode.count({
+        where: {
+          target: input.target,
+          purpose: input.purpose,
+          createdAt: { gte: startOfDay },
+        },
+      });
+      if (issuedToday >= input.maxPerDay) {
+        throw new BadRequestException(
+          'You have reached the maximum number of OTP requests for today. Please try again tomorrow.',
+        );
+      }
+    }
+
     const ttl = input.ttlSeconds ?? DEFAULT_TTL[input.purpose];
     const code = generateCode();
     const codeHash = await bcrypt.hash(code, 10);
-    const expiresAt = new Date(Date.now() + ttl * 1000);
+    const expiresAt = new Date(now.getTime() + ttl * 1000);
 
     const row = await prisma.otpCode.create({
       data: {
@@ -57,10 +112,14 @@ class OtpService {
     if (isEmail(input.target)) {
       const subject = input.emailSubject ?? this.defaultSubject(input.purpose);
       const body = input.emailBody?.(code) ?? this.defaultBody(input.purpose, code);
-      await mailer.send({ to: input.target, subject, text: body });
+      const html = input.emailHtml?.(code);
+      await mailer.send({ to: input.target, subject, text: body, ...(html ? { html } : {}) });
+    } else {
+      // Phone target → WhatsApp via Qontak (fire-and-forget; failures logged).
+      await whatsappService.sendOtp(input.target, input.recipientName ?? '', code);
     }
 
-    return { id: row.id, code };
+    return { id: row.id, code, expiresAt };
   }
 
   /**
