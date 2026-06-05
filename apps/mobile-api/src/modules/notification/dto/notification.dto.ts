@@ -47,6 +47,30 @@ export class NotificationDto {
   type?: string | null;
 }
 
+export class NotificationSeenDto {
+  @ApiPropertyOptional({
+    format: 'uuid',
+    example: 'notification-uuid-1234',
+    description: 'Mark a single notification as seen.',
+  })
+  notificationId?: string;
+
+  @ApiPropertyOptional({
+    type: 'array',
+    itemType: 'string',
+    example: ['notification-uuid-1234', 'notification-uuid-5678'],
+    description: 'Mark several notifications as seen.',
+  })
+  notificationIds?: string[];
+
+  @ApiPropertyOptional({
+    type: 'boolean',
+    example: true,
+    description: 'Mark ALL my notifications as seen. Overrides the id fields.',
+  })
+  markAllRead?: boolean;
+}
+
 export class NotificationSeenResultDto {
   @ApiProperty({ type: 'integer', example: 3, description: 'Number of notification rows updated' })
   updated!: number;

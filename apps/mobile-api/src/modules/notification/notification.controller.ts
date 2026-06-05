@@ -7,6 +7,7 @@ import { serializeNotification } from './notification.serializer';
 import type { AuthenticatedRequest } from '@bb/common/interfaces/authenticated-request';
 import {
   ApiBearerAuth,
+  ApiBody,
   ApiOperation,
   ApiQuery,
   ApiResponse,
@@ -14,6 +15,7 @@ import {
 } from '@bb/common/openapi/decorators';
 import {
   NotificationDto,
+  NotificationSeenDto,
   NotificationSeenResultDto,
 } from './dto/notification.dto';
 
@@ -63,6 +65,7 @@ export class NotificationController {
   };
 
   @ApiOperation({ summary: 'Mark notifications as seen (single id, ids array, or markAllRead)' })
+  @ApiBody({ type: () => NotificationSeenDto })
   @ApiResponse({ status: 200, type: () => NotificationSeenResultDto })
   seen = async (req: AuthenticatedRequest, res: Response) => {
     if (!req.user) throw new UnauthorizedException();
