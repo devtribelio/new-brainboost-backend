@@ -1,5 +1,6 @@
 import { env } from '@bb/common/config/env';
 import { logger } from '@bb/common/config/logger';
+import { isValidPhone, toMsisdn } from '@bb/common/utils/phone.util';
 
 /**
  * Qontak WhatsApp Business sender. Ports the delivery half of legacy
@@ -32,9 +33,9 @@ class WhatsAppService {
     return Boolean(q.clientId && q.clientSecret && q.username && q.password);
   }
 
-  /** Strip formatting; Qontak expects digits only (e.g. 62812...). */
+  /** Digits-only form Qontak expects (e.g. 62812...), via E.164 normalize. */
   private normalizePhone(raw: string): string {
-    return raw.replace(/[^0-9]/g, '');
+    return toMsisdn(raw);
   }
 
   private async getToken(): Promise<string | null> {
@@ -84,6 +85,11 @@ class WhatsAppService {
     params: WhatsAppTemplateParams;
     languageCode?: string;
   }): Promise<boolean> {
+    if (!isValidPhone(input.to)) {
+      logger.warn({ to: input.to }, '[whatsapp] invalid phone number — not sending');
+      return false;
+    }
+
     const phone = this.normalizePhone(input.to);
 
     if (!this.isConfigured()) {
