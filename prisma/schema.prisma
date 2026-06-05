@@ -229,6 +229,8 @@ model Banner {
   position  Int      @default(0)
   isActive  Boolean  @default(true) @map("is_active")
   isPopup   Boolean  @default(false) @map("is_popup")
+  startedAt DateTime? @map("started_at") // window open; null = no lower bound
+  endedAt   DateTime? @map("ended_at") // window close; null = no upper bound
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
