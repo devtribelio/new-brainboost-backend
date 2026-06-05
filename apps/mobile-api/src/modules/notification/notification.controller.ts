@@ -40,8 +40,14 @@ export class NotificationController {
     required: false,
     example: 'network-uuid-1234',
   })
-  @ApiQuery({ name: 'isUnreadOnly', type: 'boolean', required: false, example: false })
-  @ApiQuery({ name: 'isReadOnly', type: 'boolean', required: false, example: false })
+  @ApiQuery({
+    name: 'readStatus',
+    type: 'string',
+    required: false,
+    enum: ['all', 'read', 'unread'],
+    example: 'all',
+    description: 'Default all. read | unread filters by read state.',
+  })
   @ApiResponse({ status: 200, type: () => NotificationDto, isArray: true, envelope: 'paginated' })
   list = async (req: AuthenticatedRequest, res: Response) => {
     if (!req.user) throw new UnauthorizedException();
@@ -49,13 +55,19 @@ export class NotificationController {
     const p = parsePagination(req.query as Record<string, unknown>, { perPage: 50 });
     const group = req.query.group as 'general' | 'creator' | 'all' | undefined;
     const networkId = (req.query.networkId as string) ?? undefined;
+    const readStatus = (['all', 'read', 'unread'] as const).includes(
+      req.query.readStatus as 'all' | 'read' | 'unread',
+    )
+      ? (req.query.readStatus as 'all' | 'read' | 'unread')
+      : undefined;
+    // Legacy fallbacks — only honoured when readStatus is absent (service precedence).
     const isUnreadOnly = req.query.isUnreadOnly === '1' || req.query.isUnreadOnly === 'true';
     const isReadOnly = req.query.isReadOnly === '1' || req.query.isReadOnly === 'true';
 
     const { rows, total, totalAll, unread } = await this.notificationService.listForMember(
       p,
       req.user.id,
-      { group, networkId, isUnreadOnly, isReadOnly },
+      { group, networkId, readStatus, isUnreadOnly, isReadOnly },
     );
 
     const items = rows.map(serializeNotification);

@@ -2,12 +2,24 @@ import { prisma } from '@bb/db';
 import type { PaginationParams } from '@bb/common/utils/pagination.util';
 
 export type NotificationGroup = 'general' | 'creator' | 'all';
+export type ReadStatus = 'all' | 'read' | 'unread';
 
 interface ListOptions {
   group?: NotificationGroup;
-  isUnreadOnly?: boolean;
-  isReadOnly?: boolean;
   networkId?: string;
+  readStatus?: ReadStatus;
+  /** @deprecated use readStatus. Kept for back-compat; mapped to readStatus. */
+  isUnreadOnly?: boolean;
+  /** @deprecated use readStatus. Kept for back-compat; mapped to readStatus. */
+  isReadOnly?: boolean;
+}
+
+/** readStatus wins; fall back to the legacy booleans, then 'all'. */
+function resolveReadStatus(opts: ListOptions): ReadStatus {
+  if (opts.readStatus) return opts.readStatus;
+  if (opts.isUnreadOnly) return 'unread';
+  if (opts.isReadOnly) return 'read';
+  return 'all';
 }
 
 const TIME_BUCKETS = ['today', 'thisWeek', 'thisMonth', 'earlier'] as const;
@@ -27,8 +39,9 @@ export class NotificationService {
     const where: Record<string, unknown> = { memberId };
     if (opts.networkId) where.networkId = opts.networkId;
     if (opts.group && opts.group !== 'all') where.notifGroup = opts.group;
-    if (opts.isUnreadOnly) where.readAt = null;
-    if (opts.isReadOnly) where.readAt = { not: null };
+    const readStatus = resolveReadStatus(opts);
+    if (readStatus === 'unread') where.readAt = null;
+    else if (readStatus === 'read') where.readAt = { not: null };
 
     const [rows, total, totalAll, unread] = await Promise.all([
       prisma.notification.findMany({
