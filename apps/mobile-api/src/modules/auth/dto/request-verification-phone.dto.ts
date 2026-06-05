@@ -13,7 +13,7 @@ export class RequestVerificationPhoneDto {
     enum: ['sms', 'whatsapp'],
     example: 'whatsapp',
     description:
-      "Delivery channel hint. Backend dispatcher not yet wired — value logged for future SMS/WA provider integration.",
+      'Delivery channel hint. OTP is delivered via WhatsApp (Qontak); a dedicated SMS provider is not yet integrated, so this value is currently advisory.',
   })
   @IsOptional()
   @IsString()
