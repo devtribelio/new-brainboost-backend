@@ -4,6 +4,11 @@
   "description": "Brainboost platform monorepo (mobile-api + backoffice-api + admin-ejs over shared packages)",
   "private": true,
   "type": "commonjs",
+  "pnpm": {
+    "overrides": {
+      "qs@>=6.11.1 <=6.15.1": ">=6.15.2"
+    }
+  },
   "scripts": {
     "dev:mobile": "pnpm -F @bb/mobile-api dev",
     "dev:backoffice": "pnpm -F @bb/backoffice-api dev",
