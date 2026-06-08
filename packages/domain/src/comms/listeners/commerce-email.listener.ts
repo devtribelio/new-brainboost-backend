@@ -32,6 +32,38 @@ export function registerCommsEmailListeners(): void {
     }
   });
 
+  commerceEvents.on('commerce.payment.refunded', async (e) => {
+    try {
+      await enqueueComms({
+        type: 'CommerceRefunded',
+        channel: 'email',
+        priority: 'normal',
+        refId: e.transactionId,
+      });
+    } catch (err) {
+      logger.error(
+        { err, transactionId: e.transactionId },
+        '[comms-email] failed to enqueue CommerceRefunded',
+      );
+    }
+  });
+
+  commerceEvents.on('commerce.payment.expired', async (e) => {
+    try {
+      await enqueueComms({
+        type: 'CommercePaymentExpired',
+        channel: 'email',
+        priority: 'normal',
+        refId: e.transactionId,
+      });
+    } catch (err) {
+      logger.error(
+        { err, transactionId: e.transactionId },
+        '[comms-email] failed to enqueue CommercePaymentExpired',
+      );
+    }
+  });
+
   // Email the earner when an affiliate commission is created (one per chain level).
   affiliateEvents.on('affiliate.commission.created', async (e) => {
     try {
