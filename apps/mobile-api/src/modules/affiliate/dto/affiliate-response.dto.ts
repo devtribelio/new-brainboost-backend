@@ -27,6 +27,24 @@ export class SetModeResultDto {
   affiliateBased!: string;
 }
 
+/** Recent commission entry embedded in the affiliator summary (merged legacy commisionSummary). */
+export class AffiliatorSummaryRecentEntryDto {
+  @ApiProperty({ format: 'uuid' })
+  id!: string;
+
+  @ApiProperty({ type: 'integer', example: 500_000 })
+  amount!: number;
+
+  @ApiProperty({ enum: COMMISSION_STATUS_ENUM, example: 'PENDING' })
+  status!: string;
+
+  @ApiPropertyOptional({ nullable: true, example: 'DEEPLINK', description: 'Origin of the commission entry.' })
+  source?: string | null;
+
+  @ApiProperty({ format: 'date-time', example: '2026-05-10T00:00:00.000Z' })
+  createdAt!: string;
+}
+
 /** `GET /affiliate/me/summary` — affiliator dashboard aggregate. */
 export class AffiliatorSummaryDto {
   @ApiProperty({ type: 'integer', example: 7_500_000, description: 'Lifetime commission, excludes VOIDED + INACTIVE.' })
@@ -52,6 +70,34 @@ export class AffiliatorSummaryDto {
 
   @ApiPropertyOptional({ nullable: true, example: 'SCHEMA_2', enum: ['SCHEMA_1', 'SCHEMA_2', 'SCHEMA_3'] })
   schemaType?: string | null;
+
+  // --- Merged legacy commisionSummary fields (FE legacy CommisionModel — typos preserved) ---
+  @ApiProperty({
+    type: 'integer',
+    example: 5_000_000,
+    description: 'Sum of PENDING + BALANCE commission amounts (incl INACTIVE). FE legacy `totalSales`.',
+  })
+  totalCommision!: number;
+
+  @ApiProperty({
+    type: 'integer',
+    example: 25_000_000,
+    description: 'Sum of productPrice across PENDING + BALANCE commissions (gross transaction sales).',
+  })
+  totalTransactionSales!: number;
+
+  @ApiProperty({ type: 'integer', example: 5_000_000, description: 'Modern alias of `totalCommision`.' })
+  total!: number;
+
+  @ApiProperty({ type: 'integer', example: 12, description: 'Count of PENDING + BALANCE commission rows.' })
+  count!: number;
+
+  @ApiProperty({
+    type: 'array',
+    itemType: () => AffiliatorSummaryRecentEntryDto,
+    description: 'Up to 10 most recent commission entries (all statuses).',
+  })
+  recent!: AffiliatorSummaryRecentEntryDto[];
 }
 
 /** Program summary embedded in a commission row. */
