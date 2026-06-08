@@ -82,35 +82,12 @@ export const env = {
   // the real client IP — required for per-IP rate limiting to work correctly.
   // Also accepts Express values like "loopback" or a CIDR list.
   trustProxy: optional('TRUST_PROXY', ''),
-  smtp: {
-    host: optional('SMTP_HOST', ''),
-    port: Number.parseInt(optional('SMTP_PORT', '587'), 10),
-    user: optional('SMTP_USER', ''),
-    pass: optional('SMTP_PASS', ''),
-    from: optional('SMTP_FROM', 'no-reply@brainboost.local'),
-    secure: optional('SMTP_SECURE', 'false') === 'true',
-  },
   log: {
     level: optional('LOG_LEVEL', 'info'),
   },
-  // Qontak WhatsApp Business API — OTP / transactional WA templates.
-  // Legacy delivered phone OTP via Qontak (TBQontak). Empty creds → the
-  // whatsapp service no-ops and logs the message (mirrors the mailer fallback),
-  // so dev/test boot without a live Qontak account.
-  qontak: {
-    baseUrl: optional('QONTAK_BASE_URL', 'https://service-chat.qontak.com'),
-    clientId: optional('QONTAK_CLIENT_ID', ''),
-    clientSecret: optional('QONTAK_CLIENT_SECRET', ''),
-    username: optional('QONTAK_USERNAME', ''),
-    password: optional('QONTAK_PASSWORD', ''),
-    // WhatsApp channel + template ids (carried over from legacy
-    // TBQontak_Engine_MemberVerificationOtpPhoneNumber).
-    channelIntegrationId: optional(
-      'QONTAK_CHANNEL_INTEGRATION_ID',
-      '9fe63a0f-e6c7-4a2e-b1ad-d12e69b5706c',
-    ),
-    otpTemplateId: optional('QONTAK_OTP_TEMPLATE_ID', '453e330c-64d6-434c-ba3e-900afd0da366'),
-  },
+  // NOTE: SMTP (email) + Qontak (WhatsApp) delivery moved OUT to the separate
+  // bb-comms worker (ADR-0002). bb-platform only enqueues to the comms outbox;
+  // those provider creds live in bb-comms' env now, not here.
   xendit: {
     secretKey: optional('XENDIT_SECRET_KEY', ''),
     callbackToken: optional('XENDIT_CALLBACK_TOKEN', ''),
