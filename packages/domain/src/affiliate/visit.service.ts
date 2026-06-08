@@ -1,6 +1,5 @@
 import { prisma } from '@bb/db';
 import { logger } from '@bb/common/config/logger';
-import { COOKIE_DAYS } from './constants';
 
 export interface VisitInput {
   programCode: string;
@@ -228,22 +227,6 @@ export class VisitService {
       logger.error({ err, input }, 'affiliate.visit.registration.write_failed');
       return { status: 'error', reason: 'internal' };
     }
-  }
-
-  /**
-   * Find latest non-expired visit for (memberId, programId) — used at
-   * commission generation time. Returns null if no active attribution.
-   */
-  async findActiveAttribution(memberId: string, programId: string) {
-    const cutoff = new Date(Date.now() - COOKIE_DAYS * 86_400_000);
-    return prisma.affiliateVisit.findFirst({
-      where: {
-        memberId,
-        programId,
-        createdAt: { gt: cutoff },
-      },
-      orderBy: { createdAt: 'desc' },
-    });
   }
 
   /**

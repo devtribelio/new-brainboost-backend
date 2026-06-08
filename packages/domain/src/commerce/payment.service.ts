@@ -212,6 +212,7 @@ export class PaymentService {
       affiliatorId: tx.affiliatorId,
       programId: tx.programId,
       attributedAffiliatorMemberId: tx.attributedAffiliatorMemberId,
+      channel: 'xendit',
     });
 
     return {

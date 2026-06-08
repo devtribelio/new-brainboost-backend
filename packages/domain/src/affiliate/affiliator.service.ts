@@ -122,6 +122,8 @@ export class AffiliatorService {
     programId?: string | null;
     /** Per-purchase override: the affiliate link used at checkout (supersedes inviter). */
     overrideAffiliatorMemberId?: string | null;
+    /** Payment channel / provider: "xendit" | "revenuecat" | "scalev" | "lynkid" | null (legacy/web). */
+    channel?: string | null;
   }): Promise<{ committed: number }> {
     // Option B: any product is affiliate-able — `programId` is optional metadata, not a gate.
     // Recipient seed (Model: A permanent + per-purchase link override):
@@ -187,6 +189,7 @@ export class AffiliatorService {
             voucherAmount: input.voucherAmount,
             commissionRate: rate,
             amount,
+            channel: input.channel ?? null,
             status: COMMISSION_STATUS.PENDING,
           },
         });

@@ -28,6 +28,13 @@ export interface CommercePaymentSuccessEvent {
    */
   affiliateEligible?: boolean;
   /**
+   * Payment channel / provider identifier: "xendit" | "revenuecat" | "scalev" | "lynkid".
+   * `undefined` or `null` = legacy / web checkout (pre-channel tagging).
+   * Used by the affiliate pending-to-balance cron to apply per-channel hold windows
+   * (IAP channels settle monthly → longer hold than Xendit).
+   */
+  channel?: string | null;
+  /**
    * Subscription renewal (vs first purchase). RC `RENEWAL` event sets this; other
    * channels leave it undefined. Notification listener emits `subscriptionRenewed`
    * instead of `paymentSuccess` when true. Does not affect enrollment/commission.
