@@ -3,7 +3,6 @@ import { randomInt } from 'node:crypto';
 import { prisma } from '@bb/db';
 import { BadRequestException } from '@bb/common/exceptions';
 import { logger } from '@bb/common/config/logger';
-import { mailer } from './mailer.service';
 import { enqueueComms } from './comms-outbox';
 
 const MAX_OTP_ATTEMPTS = 5;
@@ -102,11 +101,21 @@ class OtpService {
 
     const emailTarget = isEmail(input.target);
 
-    // Phone OTP: write the otp row AND the comms outbox row in one transaction
-    // (transactional outbox — no dual-write race). The comms-relay publishes the
-    // outbox row to RabbitMQ; bb-comms delivers via WhatsApp (Qontak). The
-    // plaintext code rides inline in the payload because otp_codes holds only the
-    // hash. See docs/adr/0002.
+    // OTP code is sensitive + can't be re-derived (otp_codes holds only the hash),
+    // so it rides inline in the outbox payload. Email subject/body are computed
+    // here (the caller's closures can't cross to bb-comms) and carried inline too.
+    const emailPayload = emailTarget
+      ? {
+          code,
+          subject: input.emailSubject ?? this.defaultSubject(input.purpose),
+          text: input.emailBody?.(code) ?? this.defaultBody(input.purpose, code),
+          ...(input.emailHtml ? { html: input.emailHtml(code) } : {}),
+        }
+      : null;
+
+    // Write the otp row AND the comms outbox row in one transaction (transactional
+    // outbox — no dual-write race). The comms-relay publishes to RabbitMQ; bb-comms
+    // delivers (WhatsApp via Qontak / email via SES). See docs/adr/0002.
     const row = await prisma.$transaction(async (tx) => {
       const created = await tx.otpCode.create({
         data: {
@@ -116,29 +125,18 @@ class OtpService {
           expiresAt,
         },
       });
-      if (!emailTarget) {
-        await enqueueComms(
-          {
-            type: 'otp',
-            channel: 'whatsapp',
-            priority: 'urgent',
-            recipient: input.target,
-            payload: { code, name: input.recipientName ?? '', ttl },
-          },
-          tx,
-        );
-      }
+      await enqueueComms(
+        {
+          type: 'otp',
+          channel: emailTarget ? 'email' : 'whatsapp',
+          priority: 'urgent',
+          recipient: input.target,
+          payload: emailPayload ?? { code, name: input.recipientName ?? '', ttl },
+        },
+        tx,
+      );
       return created;
     });
-
-    // Email OTP still sends inline (SMTP). Moves to the comms outbox in F4 once
-    // bb-comms has the SES + MJML email handler. See docs/email-scope.md §4.
-    if (emailTarget) {
-      const subject = input.emailSubject ?? this.defaultSubject(input.purpose);
-      const body = input.emailBody?.(code) ?? this.defaultBody(input.purpose, code);
-      const html = input.emailHtml?.(code);
-      await mailer.send({ to: input.target, subject, text: body, ...(html ? { html } : {}) });
-    }
 
     return { id: row.id, code, expiresAt };
   }
