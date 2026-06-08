@@ -140,8 +140,16 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` parity met for current s
 - **F1 done (producer foundation):** `NotificationOutbox` + `comms_delivery` + `comms_idempotency` tables (migration `20260608133956_comms_outbox`); `@bb/common/mq` (comms-contract + topology + amqplib publisher); `enqueueComms()` helper (tx-aware); `comms-relay` daemon (`pnpm relay:comms`, log-only when `RABBITMQ_URL` unset); env rabbitmq block. Tests 300/300 green.
 - **F3 done (phone OTP cutover):** `otp.service.issue()` writes otp row + comms outbox row in one txn for phone targets → relay → RabbitMQ → bb-comms → Qontak. Live e2e proven end-to-end (outbox→relay→queue→consume→delivery log). bb-comms scaffold runs as consumer. Email OTP still inline (moves F4).
 - **F4 first slice done (CoursePaymentSuccess email):** bb-comms has SES sender (dev-noop w/o creds) + MJML/Handlebars renderer + a buyer-receipt handler that reads `commerce_transactions ⋈ members ⋈ products` by refId (Kysely, generated types). bb-platform listener enqueues on `commerce.payment.success`. Live e2e proven (outbox→relay→queue→PG join→MJML→SES dev-noop→delivery log). **Scope note:** transactional templates are NOT 1:1 legacy ports — legacy `CoursePaymentSuccess` was the multitenant SELLER notice; the new one is a clean buyer receipt from the new schema. Most legacy seller/chief/network templates are out of mobile scope.
-- **F4 progress:** templates done + e2e proven — CoursePaymentSuccess (buyer), AffiliatorCommisionCourse (earner). **All OTP now via outbox** (phone WhatsApp + email both enqueue; inline SMTP/Qontak dropped from otp.service). → `mailer.service.ts` + `whatsapp.service.ts` are now **dead in bb-platform** (F5 removes them + smtp/qontak env).
-- **Pending:** F4 remaining templates (withdraw/disbursement/voucher/social — replicate the slice), F5 cleanup (delete dead mailer/whatsapp services + smtp/qontak env), F6 deploy bb-comms. Full checklist: `docs/email-scope.md §4`.
+- **F4 templates DONE (every type with a real producer hook), all e2e proven:**
+  - `otp` (phone WhatsApp + email) — all OTP now via outbox; inline SMTP/Qontak dropped from otp.service.
+  - `CoursePaymentSuccess` (buyer receipt) ← commerce.payment.success
+  - `AffiliatorCommisionCourse` (earner) ← affiliate.commission.created (new affiliateEvents)
+  - `CommerceRefunded` (buyer) ← commerce.payment.refunded
+  - `CommercePaymentExpired` (buyer) ← commerce.payment.expired
+  - bb-comms has a shared `makeCommerceTxnEmailHandler` factory for simple txn-keyed buyer emails.
+- **NOT built — no trigger in the simplified backend (not a gap):** disbursement/withdraw emails (disbursement module NOT STARTED), reminder emails (no scheduler), social Post/Comment (in-app notification, email out of scope per product), network (single-tenant simplified), AffiliateJoin (enroll has no event; marginal), all seller/chief/multitenant legacy templates (out of scope). Revisit when those modules/schedulers land.
+- → `mailer.service.ts` + `whatsapp.service.ts` are now **dead in bb-platform** (F5 removes them + smtp/qontak env).
+- **Pending:** F5 cleanup (delete dead mailer/whatsapp services + smtp/qontak env), F6 deploy bb-comms (set remote, Dockerfile, pm2). Full checklist: `docs/email-scope.md §4`.
 - OTP gen/store/verify/consume + in-app feed + FCM push **stay** here.
 - bb-comms scaffold lives at `/home/cold/code/werk/bb/bb-comms` (separate git repo).
 - ⚠️ Migration gotcha: `migrate dev` shadow replay is blocked by pre-existing broken migration `20260525075123` (`affiliate_visits_program_id_fkey` missing). New migrations must be authored via `migrate diff --from-url` + `migrate deploy` until that's fixed.
