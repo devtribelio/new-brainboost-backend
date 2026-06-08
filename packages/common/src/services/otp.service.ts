@@ -4,7 +4,7 @@ import { prisma } from '@bb/db';
 import { BadRequestException } from '@bb/common/exceptions';
 import { logger } from '@bb/common/config/logger';
 import { mailer } from './mailer.service';
-import { whatsappService } from './whatsapp.service';
+import { enqueueComms } from './comms-outbox';
 
 const MAX_OTP_ATTEMPTS = 5;
 
@@ -100,23 +100,44 @@ class OtpService {
     const codeHash = await bcrypt.hash(code, 10);
     const expiresAt = new Date(now.getTime() + ttl * 1000);
 
-    const row = await prisma.otpCode.create({
-      data: {
-        target: input.target,
-        code: codeHash,
-        purpose: input.purpose,
-        expiresAt,
-      },
+    const emailTarget = isEmail(input.target);
+
+    // Phone OTP: write the otp row AND the comms outbox row in one transaction
+    // (transactional outbox — no dual-write race). The comms-relay publishes the
+    // outbox row to RabbitMQ; bb-comms delivers via WhatsApp (Qontak). The
+    // plaintext code rides inline in the payload because otp_codes holds only the
+    // hash. See docs/adr/0002.
+    const row = await prisma.$transaction(async (tx) => {
+      const created = await tx.otpCode.create({
+        data: {
+          target: input.target,
+          code: codeHash,
+          purpose: input.purpose,
+          expiresAt,
+        },
+      });
+      if (!emailTarget) {
+        await enqueueComms(
+          {
+            type: 'otp',
+            channel: 'whatsapp',
+            priority: 'urgent',
+            recipient: input.target,
+            payload: { code, name: input.recipientName ?? '', ttl },
+          },
+          tx,
+        );
+      }
+      return created;
     });
 
-    if (isEmail(input.target)) {
+    // Email OTP still sends inline (SMTP). Moves to the comms outbox in F4 once
+    // bb-comms has the SES + MJML email handler. See docs/email-scope.md §4.
+    if (emailTarget) {
       const subject = input.emailSubject ?? this.defaultSubject(input.purpose);
       const body = input.emailBody?.(code) ?? this.defaultBody(input.purpose, code);
       const html = input.emailHtml?.(code);
       await mailer.send({ to: input.target, subject, text: body, ...(html ? { html } : {}) });
-    } else {
-      // Phone target → WhatsApp via Qontak (fire-and-forget; failures logged).
-      await whatsappService.sendOtp(input.target, input.recipientName ?? '', code);
     }
 
     return { id: row.id, code, expiresAt };
