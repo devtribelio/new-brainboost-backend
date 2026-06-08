@@ -857,6 +857,7 @@ model AffiliateCommission {
   voidedReason       String?   @map("voided_reason")
   source             String? // DEEPLINK | WEB | INSTALL_REFERRER
   attributionVisitId String?   @map("attribution_visit_id") @db.Uuid
+  channel            String? // payment channel: "xendit" | "revenuecat" | "scalev" | "lynkid" | null (legacy/web)
   createdAt          DateTime  @default(now()) @map("created_at")
   updatedAt          DateTime  @updatedAt @map("updated_at")
 
@@ -870,6 +871,7 @@ model AffiliateCommission {
   @@index([programId])
   @@index([buyerMemberId])
   @@index([status])
+  @@index([status, channel])
   @@map("affiliate_commissions")
 }
 

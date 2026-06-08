@@ -56,5 +56,21 @@ module.exports = {
       env: { NODE_ENV: 'production' },
       max_memory_restart: '200M',
     },
+    {
+      // Scheduled jobs (affiliate PENDING->BALANCE, expire stale payments).
+      // One-shot per cron tick: PM2 spawns it, it runs every job once and exits,
+      // PM2 waits for the next tick (autorestart:false + cron_restart). Single
+      // instance = jobs fire exactly once. To move off PM2 later (ECS), point
+      // EventBridge → ECS RunTask at the SAME dist/jobs-runner.js — no code change.
+      name: 'bb-cron',
+      cwd: root,
+      script: 'apps/mobile-api/dist/jobs-runner.js',
+      exec_mode: 'fork',
+      instances: 1,
+      autorestart: false,
+      cron_restart: '0 * * * *', // hourly at :00 (holds are in days; cheap to run often)
+      env: { NODE_ENV: 'production' },
+      max_memory_restart: '300M',
+    },
   ],
 };

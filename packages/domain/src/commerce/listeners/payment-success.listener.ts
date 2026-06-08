@@ -54,6 +54,7 @@ export function registerCommerceListeners(): void {
           buyerMemberId: e.memberId,
           programId: e.programId ?? null,
           overrideAffiliatorMemberId: e.attributedAffiliatorMemberId ?? null,
+          channel: e.channel ?? null,
         })
         .catch((err) =>
           logger.error({ err, paymentId: e.paymentId }, '[commerce] commission commit failed'),
