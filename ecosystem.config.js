@@ -43,5 +43,18 @@ module.exports = {
       env: { NODE_ENV: 'production', ADMIN_PORT: 3002 },
       max_memory_restart: '400M',
     },
+    {
+      // Comms outbox → RabbitMQ relay (producer side of bb-comms; ADR-0002).
+      // instances:1 is REQUIRED — the poll uses a plain PENDING→SENT flip, so a
+      // second instance would double-publish (no FOR UPDATE SKIP LOCKED yet).
+      // Idle-safe: with RABBITMQ_URL unset it logs once and leaves rows PENDING.
+      name: 'bb-comms-relay',
+      cwd: root,
+      script: 'apps/mobile-api/dist/workers/comms-relay.js',
+      exec_mode: 'fork',
+      instances: 1,
+      env: { NODE_ENV: 'production' },
+      max_memory_restart: '200M',
+    },
   ],
 };
