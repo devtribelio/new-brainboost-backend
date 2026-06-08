@@ -25,7 +25,6 @@ import type { RegisterByPhoneDto } from './dto/register-by-phone.dto';
 import type { RequestVerificationPhoneDto } from './dto/request-verification-phone.dto';
 import type { ValidateOtpPhoneDto } from './dto/validate-otp-phone.dto';
 import { logger } from '@bb/common/config/logger';
-import { mailer } from '@bb/common/services/mailer.service';
 import { VisitService } from '@bb/domain/affiliate/visit.service';
 
 interface TokenBundle {
@@ -694,12 +693,14 @@ export class AuthService {
 
     await this.autoJoinCommunityNetworks(member.id);
 
-    const otp = await otpService.issue({ target, purpose: 'verify-phone' });
-    const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
-    logger.info(
-      { memberId: member.id, target, otpCode: otp.code },
-      'phone-register OTP issued — SMS/WA dispatcher not yet wired',
-    );
+    const { expiresAt } = await otpService.issue({
+      target,
+      purpose: 'verify-phone',
+      recipientName: dto.name,
+      maxPerDay: 5,
+      enforceResendGuard: true,
+    });
+    logger.info({ memberId: member.id, target }, 'phone-register OTP issued (WhatsApp)');
 
     return {
       member_id: member.legacyId ?? member.id,
@@ -719,11 +720,16 @@ export class AuthService {
     }
 
     const target = this.phoneTarget(member.phoneCode, member.phone);
-    const otp = await otpService.issue({ target, purpose: 'verify-phone' });
-    const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+    const { expiresAt } = await otpService.issue({
+      target,
+      purpose: 'verify-phone',
+      recipientName: member.fullName ?? undefined,
+      maxPerDay: 5,
+      enforceResendGuard: true,
+    });
     logger.info(
-      { memberId: member.id, channel: dto.channel ?? 'sms', target, otpCode: otp.code },
-      'verify-phone OTP issued — SMS/WA dispatcher not yet wired',
+      { memberId: member.id, channel: dto.channel ?? 'whatsapp', target },
+      'verify-phone OTP issued (WhatsApp)',
     );
 
     return {
@@ -738,16 +744,17 @@ export class AuthService {
     if (!member) throw new NotFoundException('Member not found');
     if (member.isVerified) throw new BadRequestException('Email already verified');
 
-    const { code } = await otpService.issue({ target: member.email, purpose: 'verify-email' });
-    const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
-    logger.info({ memberId, email: member.email, otpCode: code }, 'verify-email OTP issued');
-
-    await mailer.send({
-      to: member.email,
-      subject: 'Verify your email',
-      text: `Your verification code is: ${code}. Valid for 10 minutes.`,
-      html: `<p>Your verification code is: <strong>${code}</strong></p><p>Valid for 10 minutes.</p>`,
+    // issue() sends the email itself for email targets — supply the custom
+    // subject/body/html here so it goes out exactly once.
+    const { expiresAt } = await otpService.issue({
+      target: member.email,
+      purpose: 'verify-email',
+      emailSubject: 'Verify your email',
+      emailBody: (code) => `Your verification code is: ${code}. Valid for 10 minutes.`,
+      emailHtml: (code) =>
+        `<p>Your verification code is: <strong>${code}</strong></p><p>Valid for 10 minutes.</p>`,
     });
+    logger.info({ memberId, email: member.email }, 'verify-email OTP issued');
 
     return { email: member.email, expired_date: expiresAt.toISOString() };
   }

@@ -27,4 +27,20 @@ export class BannerDto {
 
   @ApiProperty({ type: 'boolean', example: false })
   isPopup!: boolean;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    format: 'date-time',
+    example: '2024-06-01T00:00:00.000Z',
+    description: 'Display window open; null = no lower bound',
+  })
+  startedAt?: string | null;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    format: 'date-time',
+    example: '2024-08-31T23:59:59.000Z',
+    description: 'Display window close; null = no upper bound',
+  })
+  endedAt?: string | null;
 }

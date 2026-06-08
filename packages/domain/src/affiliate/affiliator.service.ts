@@ -61,7 +61,7 @@ export class AffiliatorService {
    * `getPerformanceSchemaPercent` query semantics).
    */
   async getSummary(memberId: string) {
-    const [agg, balanceAgg, pendingAgg, voidedAgg] = await Promise.all([
+    const [agg, balanceAgg, pendingAgg, voidedAgg, commisionAgg, recent] = await Promise.all([
       prisma.affiliateCommission.aggregate({
         where: {
           recipientId: memberId,
@@ -82,10 +82,27 @@ export class AffiliatorService {
         where: { recipientId: memberId, status: COMMISSION_STATUS.VOIDED },
         _sum: { amount: true },
       }),
+      // Legacy `commisionSummary` aggregate (merged in). Mirrors CommissionService.summary
+      // exactly: PENDING + BALANCE across ALL affiliateBased (incl INACTIVE).
+      prisma.affiliateCommission.aggregate({
+        where: {
+          recipientId: memberId,
+          status: { in: [COMMISSION_STATUS.PENDING, COMMISSION_STATUS.BALANCE] },
+        },
+        _sum: { amount: true, productPrice: true },
+        _count: true,
+      }),
+      prisma.affiliateCommission.findMany({
+        where: { recipientId: memberId },
+        orderBy: { createdAt: 'desc' },
+        take: 10,
+      }),
     ]);
 
     const lifetimeAmount = agg._sum.amount ?? 0;
     const tier = getPerformanceTier(lifetimeAmount);
+    const totalCommision = commisionAgg._sum.amount ?? 0;
+    const totalTransactionSales = commisionAgg._sum.productPrice ?? 0;
 
     return {
       lifetimeAmount,
@@ -96,6 +113,18 @@ export class AffiliatorService {
       currentTier: tier.tier,
       currentRate: tier.rate,
       schemaType: tier.schemaType,
+      // Merged legacy commisionSummary fields (FE legacy CommisionModel — typos preserved).
+      totalCommision,
+      totalTransactionSales,
+      total: totalCommision,
+      count: commisionAgg._count,
+      recent: recent.map((e) => ({
+        id: e.id,
+        amount: e.amount,
+        status: e.status,
+        source: e.source,
+        createdAt: e.createdAt,
+      })),
     };
   }
 
