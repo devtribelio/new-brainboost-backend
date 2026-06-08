@@ -139,6 +139,64 @@ model OtpCode {
   @@map("otp_codes")
 }
 
+/// Outbound message outbox (transactional). Producer writes a row in the same
+/// transaction as the domain mutation; the comms-relay daemon polls PENDING and
+/// publishes to RabbitMQ → at-least-once, no dual-write race. The row id is the
+/// message id used downstream for idempotency (bb-comms). Serves external comms
+/// now (whatsapp/email/sms) and is forward-compatible with FCM push.
+/// See docs/adr/0002 + docs/email-scope.md §4.
+model NotificationOutbox {
+  id          String    @id @default(uuid(7)) @db.Uuid
+  /// Template/handler discriminator: 'otp' | 'CoursePaymentSuccess' | …
+  type        String
+  /// 'whatsapp' | 'email' | 'sms' | (future) 'fcm'
+  channel     String
+  /// 'urgent' | 'normal' — maps to the RabbitMQ routing key / queue tier.
+  priority    String    @default("normal")
+  /// Entity id the worker reads bb-platform PG by (transactional types).
+  refId       String?   @map("ref_id")
+  /// Direct recipient when no PG lookup (OTP: phone/email).
+  recipient   String?
+  /// Inline data. OTP only: { code, name?, ttl? } (otp_codes holds only the hash).
+  payload     Json?
+  status      String    @default("PENDING") /// PENDING | SENT | FAILED
+  attempts    Int       @default(0)
+  lastError   String?   @map("last_error")
+  scheduledAt DateTime  @default(now()) @map("scheduled_at")
+  sentAt      DateTime? @map("sent_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  @@index([status, scheduledAt])
+  @@map("notification_outbox")
+}
+
+/// Delivery log — comms-owned (written by bb-comms), declared here because
+/// bb-platform schema.prisma is the single migration authority (ADR-0001).
+/// One row per send attempt (SENT | FAILED) for observability/audit.
+model CommsDelivery {
+  id               String   @id @default(uuid(7)) @db.Uuid
+  messageId        String   @map("message_id") /// = NotificationOutbox.id
+  channel          String
+  type             String
+  recipient        String?
+  status           String   /// SENT | FAILED
+  providerResponse String?  @map("provider_response")
+  attempt          Int      @default(1)
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  @@index([messageId])
+  @@map("comms_delivery")
+}
+
+/// Idempotency guard — comms-owned (written by bb-comms). One row per message
+/// that was successfully delivered; blocks at-least-once redelivery double-sends.
+model CommsIdempotency {
+  messageId String   @id @map("message_id")
+  sentAt    DateTime @default(now()) @map("sent_at")
+
+  @@map("comms_idempotency")
+}
+
 model PraMember {
   id                String   @id @default(uuid(7)) @db.Uuid
   email             String?

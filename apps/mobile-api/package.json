@@ -8,6 +8,7 @@
     "build": "tsup",
     "typecheck": "tsc --noEmit",
     "start": "node dist/main.js",
+    "relay:comms": "tsx --conditions=development src/workers/comms-relay.ts",
     "test": "vitest run",
     "test:watch": "vitest"
   },
