@@ -175,15 +175,13 @@ export const env = {
     // the Bunny CDN signed URL.
     downloadTtlSeconds: Number.parseInt(optional('MEDIA_DOWNLOAD_TTL_SECONDS', '86400'), 10),
   },
-  // RabbitMQ — comms outbox publisher (bb-comms worker consumes). Names must match
-  // bb-comms env defaults. Empty RABBITMQ_URL = relay runs in log-only dev mode.
-  // See docs/adr/0002 + memory feedback_messaging_config (dedicated vhost).
+  // RabbitMQ — comms outbox publisher (bb-comms worker consumes). Only CONNECTION
+  // params live here; topology names (exchange/queues/routing keys) are code
+  // constants in mq/topology.ts (memory feedback_messaging_config). Empty
+  // RABBITMQ_URL = relay runs in log-only dev mode. See docs/adr/0002.
   rabbitmq: {
     url: optional('RABBITMQ_URL', ''),
     vhost: optional('RABBITMQ_VHOST', 'comms'),
-    exchange: optional('COMMS_EXCHANGE', 'comms.exchange'),
-    queueUrgent: optional('COMMS_QUEUE_URGENT', 'comms.urgent'),
-    queueNormal: optional('COMMS_QUEUE_NORMAL', 'comms.normal'),
     // Relay daemon poll interval + batch size.
     relayIntervalMs: Number.parseInt(optional('COMMS_RELAY_INTERVAL_MS', '2000'), 10),
     relayBatchSize: Number.parseInt(optional('COMMS_RELAY_BATCH_SIZE', '50'), 10),
