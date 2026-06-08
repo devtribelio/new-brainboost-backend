@@ -134,12 +134,14 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` parity met for current s
 - Scope: list balance, request payout, bank/e-wallet routing (Indonesian rails).
 - Blocking: needs commerce → commission → balance pipeline complete.
 
-### comms / outbound messaging (producer side)
+### comms / outbound messaging (producer side) — [~] F1 done
 - Legacy: `TBEmail` (SES, 4 SQS tiers) + `TBQontak` (WhatsApp OTP).
 - Decision: outbound delivery (email + WhatsApp + future SMS) lives in a **separate repo `bb-comms`** (ADR-0002), not this monorepo. This repo is producer-only.
-- This-repo work: `NotificationOutbox` table + enqueue helper + RabbitMQ publisher + relay daemon; `otp.service.issue()` publishes instead of sends; **move out** `whatsapp.service.ts` + `mailer.service.ts` + `smtp`/`qontak` env. Full checklist: `docs/email-scope.md §4`.
+- **F1 done (producer foundation):** `NotificationOutbox` + `comms_delivery` + `comms_idempotency` tables (migration `20260608133956_comms_outbox`); `@bb/common/mq` (comms-contract + topology + amqplib publisher); `enqueueComms()` helper (tx-aware); `comms-relay` daemon (`pnpm relay:comms`, log-only when `RABBITMQ_URL` unset); env rabbitmq block. Tests 300/300 green.
+- **Pending:** F3 cutover (`otp.service.issue()` → enqueue), F4 transactional email + template-contract extraction, F5 cleanup (**move out** `whatsapp.service.ts` + `mailer.service.ts` + `smtp`/`qontak` env). Full checklist: `docs/email-scope.md §4`.
 - OTP gen/store/verify/consume + in-app feed + FCM push **stay** here.
-- Deferred until first transactional email port OR Qontak wiring (`legacy-providers.md` T1.4). First slice = OTP-over-WhatsApp through the queue.
+- bb-comms scaffold lives at `/home/cold/code/werk/bb/bb-comms` (separate git repo).
+- ⚠️ Migration gotcha: `migrate dev` shadow replay is blocked by pre-existing broken migration `20260525075123` (`affiliate_visits_program_id_fkey` missing). New migrations must be authored via `migrate diff --from-url` + `migrate deploy` until that's fixed.
 
 ### chat / broadcast
 - Legacy: `TBChat`, `TBBroadcast`, `TBAgora` (live).
