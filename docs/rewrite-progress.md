@@ -148,8 +148,8 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` parity met for current s
   - `CommercePaymentExpired` (buyer) ← commerce.payment.expired
   - bb-comms has a shared `makeCommerceTxnEmailHandler` factory for simple txn-keyed buyer emails.
 - **NOT built — no trigger in the simplified backend (not a gap):** disbursement/withdraw emails (disbursement module NOT STARTED), reminder emails (no scheduler), social Post/Comment (in-app notification, email out of scope per product), network (single-tenant simplified), AffiliateJoin (enroll has no event; marginal), all seller/chief/multitenant legacy templates (out of scope). Revisit when those modules/schedulers land.
-- → `mailer.service.ts` + `whatsapp.service.ts` are now **dead in bb-platform** (F5 removes them + smtp/qontak env).
-- **Pending:** F5 cleanup (delete dead mailer/whatsapp services + smtp/qontak env), F6 deploy bb-comms (set remote, Dockerfile, pm2). Full checklist: `docs/email-scope.md §4`.
+- **F5 cleanup DONE:** deleted `mailer.service.ts` + `whatsapp.service.ts`, dropped `smtp.*`/`qontak.*` env blocks + `nodemailer` dep. bb-platform is now a **pure comms producer** — it enqueues to the outbox, never sends. (`phone.util.ts` kept — own spec, pure util.)
+- **Pending:** F6 deploy bb-comms (set git remote `devtribelio/bb-comms`, Dockerfile, pm2/CI, prod migrate). Full checklist: `docs/email-scope.md §4`.
 - OTP gen/store/verify/consume + in-app feed + FCM push **stay** here.
 - bb-comms scaffold lives at `/home/cold/code/werk/bb/bb-comms` (separate git repo).
 - ⚠️ Migration gotcha: `migrate dev` shadow replay is blocked by pre-existing broken migration `20260525075123` (`affiliate_visits_program_id_fkey` missing). New migrations must be authored via `migrate diff --from-url` + `migrate deploy` until that's fixed.
