@@ -164,6 +164,7 @@ export class XenditWebhookHandler {
           affiliatorId: tx.affiliatorId,
           programId: tx.programId,
           attributedAffiliatorMemberId: tx.attributedAffiliatorMemberId,
+          channel: 'xendit',
         });
       }
     } else if (nextStatus === 'EXPIRED') {

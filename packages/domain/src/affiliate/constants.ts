@@ -11,8 +11,12 @@ export const GROWTH_MAX_DEPTH = 4;
 export const INACTIVE_RATE = 20;
 
 // Attribution & status flow
-export const COOKIE_DAYS = 30;
 export const PENDING_TO_BALANCE_DAYS = 7; // marketing-facing: "5 hari kerja"
+// IAP (Apple/Google via RevenueCat) settles monthly; hold longer before allowing payout.
+// Runtime-configurable via app_settings key `affiliate.iapHoldDays` (this is the fallback).
+export const AFFILIATE_IAP_HOLD_DAYS = 35;
+// Channels that route through Apple/Google IAP — apply the longer hold window.
+export const IAP_CHANNELS = ['revenuecat'] as const;
 
 // Affiliate attribution cookie (legacy parity: TB_BRAINBOOST_COOKIE, 1-year, last-touch sticky).
 // Web flow: set on affiliate-link click, read at checkout. Apps pass affiliateCode explicitly instead.

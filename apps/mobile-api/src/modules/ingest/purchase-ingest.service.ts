@@ -172,6 +172,7 @@ export class PurchaseIngestService {
       programId: null,
       attributedAffiliatorMemberId: overrideAffiliatorMemberId, // listener maps → engine override
       affiliateEligible: cred.triggersAffiliate, // gate: false → enrollment yes, commission no
+      channel: cred.name, // e.g. "revenuecat", "scalev", "lynkid" — used for per-channel hold
       isRenewal: input.isRenewal,
     });
 
