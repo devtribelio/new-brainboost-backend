@@ -51,19 +51,25 @@ otp.service / domain event
 
 | Layer | bb-platform (producer) | bb-comms (worker) |
 |---|---|---|
-| Lang / runtime | TS / Node 20 | TS / Node 20 |
-| Package mgr | pnpm (monorepo) | pnpm (pinned 10.33.2) |
-| DB | **Prisma** (owns schema + migrations) | **Kysely** + `kysely-codegen` (reads schema it doesn't own; `types.generated.ts` committed) |
-| Queue | amqplib (publisher) | amqplib (consumer) |
-| Email | — (removed in F5) | **SES** `@aws-sdk/client-ses` |
-| WhatsApp | — (removed in F5) | **Qontak** (fetch) |
-| Templates | — | **MJML + Handlebars** (inline TS strings) |
-| Logger / Build / Test | pino / tsup / vitest | pino / tsup / vitest |
-| Deploy | pm2 (relay = 4th app in `ecosystem.config.js`) | **Docker** (validated) + pm2 + GitHub Actions CI |
+| Lang / runtime | TS / Node 20 | **Go 1.26** |
+| DB | **Prisma** (owns schema + migrations) | **pgx/v5** (reads schema it doesn't own; raw SQL + Scan) |
+| Queue | amqplib (publisher) | **amqp091-go** (consumer) |
+| Email | — (removed in F5) | **SES** `aws-sdk-go-v2/service/ses` |
+| WhatsApp | — (removed in F5) | **Qontak** (`net/http`) |
+| Templates | — | MJML (authored) → **precompiled HTML** + `html/template` (`go:embed`, no Node at build/runtime) |
+| Logger / Build / Test | pino / tsup / vitest | `slog` / `go build` / `go test` |
+| Deploy | pm2 (relay = 4th app in `ecosystem.config.js`) | **Docker distroless static (~29MB)** + pm2 + GitHub Actions CI |
+
+> **bb-comms was originally written in TypeScript (F2–F6) then reimplemented in Go**
+> — the worker shares no code with bb-platform (only the message contract + DB
+> schema), so the language is free (ADR-0002). Cross-stack e2e proven: TS producer
+> → RabbitMQ → Go consumer → render → delivery, all 5 types. The TS↔Go message
+> contract + topology constants are duplicated by design (no shared code); keep them
+> in sync.
 
 Transport: RabbitMQ, dedicated `comms` vhost. Topology names (exchange/queues/routing
-keys) are **code constants** (`mq/topology.ts`, identical in both repos); only
-connection params live in env (memory `feedback_messaging_config`).
+keys) are **code constants** (identical in both repos); only connection params live
+in env (memory `feedback_messaging_config`).
 
 ## Message types (5 — all e2e proven over a real broker)
 

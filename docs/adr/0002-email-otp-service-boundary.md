@@ -231,3 +231,24 @@ leaner and fresher. (OTP remains the lone inline-data exception, by necessity.)
   formalise the message + read contract as a versioned package.
 - Comms volume/latency needs co-location → reconsider folding back as
   `apps/notification-worker` (alternative A).
+
+## Addendum (2026-06-08) — bb-comms reimplemented in Go
+
+bb-comms was first built in TypeScript (F2–F6), then **reimplemented in Go 1.26**.
+The boundary this ADR established made it a no-brainer: the worker shares **no code**
+with bb-platform — only the message contract + DB read-schema — so the language is
+free. The Go port keeps everything identical (contract v1, topology constants,
+`comms_*` tables, idempotency + DLQ semantics, dev-noop senders) and was proven by a
+**cross-stack e2e**: TS bb-platform relay → RabbitMQ → Go bb-comms → render →
+SES/Qontak dev-noop → `comms_delivery` SENT, all 5 message types.
+
+- Stack: `amqp091-go`, `pgx/v5`, `aws-sdk-go-v2/ses`, `net/http` (Qontak),
+  `html/template`, `slog`.
+- **MJML handled by precompile**: templates authored in MJML (`templates_src/`),
+  compiled to HTML once (committed, `go:embed`); `html/template` fills the vars.
+  No Node/MJML at build or runtime — the "MJML is JS-only" concern is sidestepped.
+- Footprint: distroless static image ~29MB (vs ~258MB Node).
+- **Cost of the choice:** the message contract + topology constants are now
+  duplicated across languages (TS ↔ Go), not just TS ↔ TS — more drift risk. If a
+  third consumer appears, promote the contract to a published schema (proto/JSON
+  Schema) generating both sides (already a revisit trigger above).
