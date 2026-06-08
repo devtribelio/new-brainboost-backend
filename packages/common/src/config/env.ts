@@ -82,35 +82,12 @@ export const env = {
   // the real client IP — required for per-IP rate limiting to work correctly.
   // Also accepts Express values like "loopback" or a CIDR list.
   trustProxy: optional('TRUST_PROXY', ''),
-  smtp: {
-    host: optional('SMTP_HOST', ''),
-    port: Number.parseInt(optional('SMTP_PORT', '587'), 10),
-    user: optional('SMTP_USER', ''),
-    pass: optional('SMTP_PASS', ''),
-    from: optional('SMTP_FROM', 'no-reply@brainboost.local'),
-    secure: optional('SMTP_SECURE', 'false') === 'true',
-  },
   log: {
     level: optional('LOG_LEVEL', 'info'),
   },
-  // Qontak WhatsApp Business API — OTP / transactional WA templates.
-  // Legacy delivered phone OTP via Qontak (TBQontak). Empty creds → the
-  // whatsapp service no-ops and logs the message (mirrors the mailer fallback),
-  // so dev/test boot without a live Qontak account.
-  qontak: {
-    baseUrl: optional('QONTAK_BASE_URL', 'https://service-chat.qontak.com'),
-    clientId: optional('QONTAK_CLIENT_ID', ''),
-    clientSecret: optional('QONTAK_CLIENT_SECRET', ''),
-    username: optional('QONTAK_USERNAME', ''),
-    password: optional('QONTAK_PASSWORD', ''),
-    // WhatsApp channel + template ids (carried over from legacy
-    // TBQontak_Engine_MemberVerificationOtpPhoneNumber).
-    channelIntegrationId: optional(
-      'QONTAK_CHANNEL_INTEGRATION_ID',
-      '9fe63a0f-e6c7-4a2e-b1ad-d12e69b5706c',
-    ),
-    otpTemplateId: optional('QONTAK_OTP_TEMPLATE_ID', '453e330c-64d6-434c-ba3e-900afd0da366'),
-  },
+  // NOTE: SMTP (email) + Qontak (WhatsApp) delivery moved OUT to the separate
+  // bb-comms worker (ADR-0002). bb-platform only enqueues to the comms outbox;
+  // those provider creds live in bb-comms' env now, not here.
   xendit: {
     secretKey: optional('XENDIT_SECRET_KEY', ''),
     callbackToken: optional('XENDIT_CALLBACK_TOKEN', ''),
@@ -174,6 +151,17 @@ export const env = {
     // downloads don't outlive the token. Applies to the opaque media token AND
     // the Bunny CDN signed URL.
     downloadTtlSeconds: Number.parseInt(optional('MEDIA_DOWNLOAD_TTL_SECONDS', '86400'), 10),
+  },
+  // RabbitMQ — comms outbox publisher (bb-comms worker consumes). Only CONNECTION
+  // params live here; topology names (exchange/queues/routing keys) are code
+  // constants in mq/topology.ts (memory feedback_messaging_config). Empty
+  // RABBITMQ_URL = relay runs in log-only dev mode. See docs/adr/0002.
+  rabbitmq: {
+    url: optional('RABBITMQ_URL', ''),
+    vhost: optional('RABBITMQ_VHOST', 'comms'),
+    // Relay daemon poll interval + batch size.
+    relayIntervalMs: Number.parseInt(optional('COMMS_RELAY_INTERVAL_MS', '2000'), 10),
+    relayBatchSize: Number.parseInt(optional('COMMS_RELAY_BATCH_SIZE', '50'), 10),
   },
 } as const;
 

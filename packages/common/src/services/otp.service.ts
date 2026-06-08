@@ -3,8 +3,7 @@ import { randomInt } from 'node:crypto';
 import { prisma } from '@bb/db';
 import { BadRequestException } from '@bb/common/exceptions';
 import { logger } from '@bb/common/config/logger';
-import { mailer } from './mailer.service';
-import { whatsappService } from './whatsapp.service';
+import { enqueueComms } from './comms-outbox';
 
 const MAX_OTP_ATTEMPTS = 5;
 
@@ -100,24 +99,44 @@ class OtpService {
     const codeHash = await bcrypt.hash(code, 10);
     const expiresAt = new Date(now.getTime() + ttl * 1000);
 
-    const row = await prisma.otpCode.create({
-      data: {
-        target: input.target,
-        code: codeHash,
-        purpose: input.purpose,
-        expiresAt,
-      },
-    });
+    const emailTarget = isEmail(input.target);
 
-    if (isEmail(input.target)) {
-      const subject = input.emailSubject ?? this.defaultSubject(input.purpose);
-      const body = input.emailBody?.(code) ?? this.defaultBody(input.purpose, code);
-      const html = input.emailHtml?.(code);
-      await mailer.send({ to: input.target, subject, text: body, ...(html ? { html } : {}) });
-    } else {
-      // Phone target → WhatsApp via Qontak (fire-and-forget; failures logged).
-      await whatsappService.sendOtp(input.target, input.recipientName ?? '', code);
-    }
+    // OTP code is sensitive + can't be re-derived (otp_codes holds only the hash),
+    // so it rides inline in the outbox payload. Email subject/body are computed
+    // here (the caller's closures can't cross to bb-comms) and carried inline too.
+    const emailPayload = emailTarget
+      ? {
+          code,
+          subject: input.emailSubject ?? this.defaultSubject(input.purpose),
+          text: input.emailBody?.(code) ?? this.defaultBody(input.purpose, code),
+          ...(input.emailHtml ? { html: input.emailHtml(code) } : {}),
+        }
+      : null;
+
+    // Write the otp row AND the comms outbox row in one transaction (transactional
+    // outbox — no dual-write race). The comms-relay publishes to RabbitMQ; bb-comms
+    // delivers (WhatsApp via Qontak / email via SES). See docs/adr/0002.
+    const row = await prisma.$transaction(async (tx) => {
+      const created = await tx.otpCode.create({
+        data: {
+          target: input.target,
+          code: codeHash,
+          purpose: input.purpose,
+          expiresAt,
+        },
+      });
+      await enqueueComms(
+        {
+          type: 'otp',
+          channel: emailTarget ? 'email' : 'whatsapp',
+          priority: 'urgent',
+          recipient: input.target,
+          payload: emailPayload ?? { code, name: input.recipientName ?? '', ttl },
+        },
+        tx,
+      );
+      return created;
+    });
 
     return { id: row.id, code, expiresAt };
   }

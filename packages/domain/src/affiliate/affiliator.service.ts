@@ -12,6 +12,7 @@ import {
 } from './constants';
 import { computeAmount, getPerformanceTier } from './utils/compute-amount';
 import { walkInviterChain } from './utils/walk-inviter-chain';
+import { affiliateEvents } from '@bb/common/events/affiliate-events';
 
 export class AffiliatorService {
   /**
@@ -203,7 +204,7 @@ export class AffiliatorService {
           : null;
 
       try {
-        await prisma.affiliateCommission.create({
+        const created = await prisma.affiliateCommission.create({
           data: {
             recipientId: node.id,
             affiliatorId: affiliator?.id ?? null,
@@ -221,8 +222,17 @@ export class AffiliatorService {
             channel: input.channel ?? null,
             status: COMMISSION_STATUS.PENDING,
           },
+          select: { id: true },
         });
         committed++;
+        // Notify the comms producer (email to the earner). Best-effort; only fires
+        // on a real insert — the P2002 path below (redelivery) does not re-emit.
+        affiliateEvents.emit('affiliate.commission.created', {
+          commissionId: created.id,
+          recipientId: node.id,
+          paymentId: input.paymentId,
+          level,
+        });
       } catch (e) {
         // unique (paymentId, recipientId, level) — second emit is a no-op
         const code = (e as { code?: string }).code;
