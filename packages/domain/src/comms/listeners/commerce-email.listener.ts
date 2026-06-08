@@ -1,5 +1,6 @@
 import { logger } from '@bb/common/config/logger';
 import { commerceEvents } from '@bb/common/events/commerce-events';
+import { affiliateEvents } from '@bb/common/events/affiliate-events';
 import { enqueueComms } from '@bb/common/services/comms-outbox';
 
 /**
@@ -27,6 +28,23 @@ export function registerCommsEmailListeners(): void {
       logger.error(
         { err, transactionId: e.transactionId },
         '[comms-email] failed to enqueue CoursePaymentSuccess',
+      );
+    }
+  });
+
+  // Email the earner when an affiliate commission is created (one per chain level).
+  affiliateEvents.on('affiliate.commission.created', async (e) => {
+    try {
+      await enqueueComms({
+        type: 'AffiliatorCommisionCourse',
+        channel: 'email',
+        priority: 'normal',
+        refId: e.commissionId, // bb-comms reads affiliate_commissions by this id
+      });
+    } catch (err) {
+      logger.error(
+        { err, commissionId: e.commissionId },
+        '[comms-email] failed to enqueue AffiliatorCommisionCourse',
       );
     }
   });
