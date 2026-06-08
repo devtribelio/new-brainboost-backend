@@ -134,11 +134,12 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` parity met for current s
 - Scope: list balance, request payout, bank/e-wallet routing (Indonesian rails).
 - Blocking: needs commerce → commission → balance pipeline complete.
 
-### comms / outbound messaging (producer side) — [~] F1 done
+### comms / outbound messaging (producer side) — [~] F1 + F3 done, e2e proven
 - Legacy: `TBEmail` (SES, 4 SQS tiers) + `TBQontak` (WhatsApp OTP).
 - Decision: outbound delivery (email + WhatsApp + future SMS) lives in a **separate repo `bb-comms`** (ADR-0002), not this monorepo. This repo is producer-only.
 - **F1 done (producer foundation):** `NotificationOutbox` + `comms_delivery` + `comms_idempotency` tables (migration `20260608133956_comms_outbox`); `@bb/common/mq` (comms-contract + topology + amqplib publisher); `enqueueComms()` helper (tx-aware); `comms-relay` daemon (`pnpm relay:comms`, log-only when `RABBITMQ_URL` unset); env rabbitmq block. Tests 300/300 green.
-- **Pending:** F3 cutover (`otp.service.issue()` → enqueue), F4 transactional email + template-contract extraction, F5 cleanup (**move out** `whatsapp.service.ts` + `mailer.service.ts` + `smtp`/`qontak` env). Full checklist: `docs/email-scope.md §4`.
+- **F3 done (phone OTP cutover):** `otp.service.issue()` writes otp row + comms outbox row in one txn for phone targets → relay → RabbitMQ → bb-comms → Qontak. Live e2e proven end-to-end (outbox→relay→queue→consume→delivery log). bb-comms scaffold runs as consumer. Email OTP still inline (moves F4).
+- **Pending:** F4 transactional email + template-contract extraction, F5 cleanup (**move out** `whatsapp.service.ts` + `mailer.service.ts` + `smtp`/`qontak` env), F6 deploy bb-comms. Full checklist: `docs/email-scope.md §4`.
 - OTP gen/store/verify/consume + in-app feed + FCM push **stay** here.
 - bb-comms scaffold lives at `/home/cold/code/werk/bb/bb-comms` (separate git repo).
 - ⚠️ Migration gotcha: `migrate dev` shadow replay is blocked by pre-existing broken migration `20260525075123` (`affiliate_visits_program_id_fkey` missing). New migrations must be authored via `migrate diff --from-url` + `migrate deploy` until that's fixed.
