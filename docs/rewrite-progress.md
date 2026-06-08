@@ -134,6 +134,13 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` parity met for current s
 - Scope: list balance, request payout, bank/e-wallet routing (Indonesian rails).
 - Blocking: needs commerce → commission → balance pipeline complete.
 
+### comms / outbound messaging (producer side)
+- Legacy: `TBEmail` (SES, 4 SQS tiers) + `TBQontak` (WhatsApp OTP).
+- Decision: outbound delivery (email + WhatsApp + future SMS) lives in a **separate repo `bb-comms`** (ADR-0002), not this monorepo. This repo is producer-only.
+- This-repo work: `NotificationOutbox` table + enqueue helper + RabbitMQ publisher + relay daemon; `otp.service.issue()` publishes instead of sends; **move out** `whatsapp.service.ts` + `mailer.service.ts` + `smtp`/`qontak` env. Full checklist: `docs/email-scope.md §4`.
+- OTP gen/store/verify/consume + in-app feed + FCM push **stay** here.
+- Deferred until first transactional email port OR Qontak wiring (`legacy-providers.md` T1.4). First slice = OTP-over-WhatsApp through the queue.
+
 ### chat / broadcast
 - Legacy: `TBChat`, `TBBroadcast`, `TBAgora` (live).
 - Likely deferred or split to its own service. Confirm with product.
