@@ -104,11 +104,16 @@ class OtpService {
     // OTP code is sensitive + can't be re-derived (otp_codes holds only the hash),
     // so it rides inline in the outbox payload. Email subject/body are computed
     // here (the caller's closures can't cross to bb-comms) and carried inline too.
+    // text = body message WITHOUT the code — bb-comms renders the branded OTP
+    // template (legacy layout: greeting + message + prominent code + expiry).
+    // A caller may still pass emailHtml for a full override.
     const emailPayload = emailTarget
       ? {
           code,
           subject: input.emailSubject ?? this.defaultSubject(input.purpose),
-          text: input.emailBody?.(code) ?? this.defaultBody(input.purpose, code),
+          text: input.emailBody?.(code) ?? this.defaultMessage(input.purpose),
+          name: input.recipientName ?? '',
+          expiredIn: humanTtl(ttl),
           ...(input.emailHtml ? { html: input.emailHtml(code) } : {}),
         }
       : null;
@@ -208,18 +213,24 @@ class OtpService {
     }
   }
 
-  private defaultBody(purpose: OtpPurpose, code: string): string {
+  // Body message WITHOUT the code (the email template displays the code itself).
+  // Wording is the legacy TBEmailTemplate copy (MemberRequestForget / MemberVerification).
+  private defaultMessage(purpose: OtpPurpose): string {
     switch (purpose) {
       case 'forgot-password':
-        return `Your password reset code is ${code}. It expires in 10 minutes.`;
+        return 'Enter the OTP Code we sent to your email below to confirm your new password';
       case 'delete-account':
-        return `Your account deletion code is ${code}. It expires in 1 minute. If you did not request this, change your password immediately.`;
-      case 'pre-registration':
-        return `Your registration code is ${code}. It expires in 15 minutes.`;
+        return 'Enter the OTP Code below to confirm your account deletion';
       default:
-        return `Your verification code is ${code}.`;
+        return 'Enter the OTP Code below to verify your account :';
     }
   }
+}
+
+// TTL seconds → human-readable, e.g. 600 → "10 minutes".
+function humanTtl(seconds: number): string {
+  const minutes = Math.max(1, Math.round(seconds / 60));
+  return `${minutes} ${minutes === 1 ? 'minute' : 'minutes'}`;
 }
 
 export const otpService = new OtpService();
