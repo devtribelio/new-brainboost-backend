@@ -47,8 +47,24 @@ model Member {
   latitude             Float?
   longitude            Float?
   notificationsEnabled Boolean   @default(true) @map("notifications_enabled")
-  createdAt            DateTime  @default(now()) @map("created_at")
-  updatedAt            DateTime  @updatedAt @map("updated_at")
+
+  // --- Affiliate payout: default bank account stored on the profile (manual KYC flow) ---
+  bankCode          String? @map("bank_code")
+  bankAccountNumber String? @map("bank_account_number")
+  bankAccountName   String? @map("bank_account_name")
+
+  // --- Manual KYC (gate for affiliate disbursement) ---
+  kycStatus         String    @default("NONE") @map("kyc_status") // NONE | PENDING | APPROVED | REJECTED
+  kycIdNumber       String?   @map("kyc_id_number")
+  kycIdCardUrl      String?   @map("kyc_id_card_url")
+  kycSelfieUrl      String?   @map("kyc_selfie_url")
+  kycSubmittedAt    DateTime? @map("kyc_submitted_at")
+  kycReviewedAt     DateTime? @map("kyc_reviewed_at")
+  kycReviewedBy     String?   @map("kyc_reviewed_by") @db.Uuid
+  kycRejectedReason String?   @map("kyc_rejected_reason")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   profile                MemberProfile?
   devices                Device[]
@@ -310,6 +326,7 @@ model Product {
   descriptionHtml String?  @map("description_html") // legacy `course.description_html` — rich HTML
   thumbnail       String? // legacy resource (model_type=TBModel_Course, collection=courseImage)
   price           Int      @default(0)
+  iosPrice        Int?     @map("ios_price") // gross iOS IAP price (marked up to offset Apple's cut); null = same as `price`. Used for the affiliate commission range preview.
   marketingLink   String?  @map("marketing_link") // legacy `course.marketing_link`
   sellingPoints   Json?    @map("selling_points") // legacy `course.selling_point` — JSONB string[]
   status          String   @default("active") // legacy: active|inactive|draft|archived
@@ -923,14 +940,28 @@ model AffiliateDisbursement {
   grossAmount   Int       @default(0) @map("gross_amount") // withdrawable balance consumed by this payout
   fee           Int       @default(0) // flat platform fee
   netAmount     Int       @default(0) @map("net_amount") // paid to member = gross - fee
-  status        String    @default("PENDING") // PENDING | PAID | FAILED | VOIDED
+  // PENDING (awaiting manual approval) | PROCESSING (Xendit called, awaiting callback) | PAID | FAILED | REJECTED | VOIDED
+  status        String    @default("PENDING")
+  mode          String? // AUTO | MANUAL — how this payout was routed (see TBWithdraw::validateStatus parity)
   provider      String? // "xendit"
   providerRef   String?   @map("provider_ref") // provider disbursement id
+  externalId    String?   @unique @map("external_id") // our idempotency key sent to Xendit; callback matches on this
   failureReason String?   @map("failure_reason")
-  requestedAt   DateTime  @default(now()) @map("requested_at")
-  paidAt        DateTime? @map("paid_at")
-  createdAt     DateTime  @default(now()) @map("created_at")
-  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  // Bank snapshot at request time (member profile bank may change later).
+  bankCode          String? @map("bank_code")
+  bankAccountNumber String? @map("bank_account_number")
+  bankAccountName   String? @map("bank_account_name")
+
+  // Approval audit (MANUAL flow, or AUTO self-approval timestamp).
+  approvedBy     String?   @map("approved_by") @db.Uuid
+  approvedAt     DateTime? @map("approved_at")
+  rejectedReason String?   @map("rejected_reason")
+
+  requestedAt DateTime  @default(now()) @map("requested_at")
+  paidAt      DateTime? @map("paid_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
 
   member Member @relation("MemberDisbursements", fields: [memberId], references: [id], onDelete: Cascade)
 

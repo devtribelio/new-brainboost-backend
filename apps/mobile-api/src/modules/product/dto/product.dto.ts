@@ -75,6 +75,20 @@ export class ProductDto {
   })
   commisionFixAmount?: number | null;
 
+  @ApiPropertyOptional({
+    nullable: true,
+    example: 55860,
+    description: 'Affiliate commission range — min (iOS net basis, after store cut).',
+  })
+  commissionMin?: number | null;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    example: 59600,
+    description: 'Affiliate commission range — max (web price basis; equals commisionFixAmount).',
+  })
+  commissionMax?: number | null;
+
   @ApiProperty({ example: 'https://brainboost.com/p/react-fundamentals' })
   productUrl!: string;
 

@@ -250,7 +250,14 @@ export class MemberAffiliatorDto {
   updatedAt!: string;
 }
 
-const DISBURSEMENT_STATUS_ENUM = ['PENDING', 'PAID', 'FAILED', 'VOIDED'] as const;
+const DISBURSEMENT_STATUS_ENUM = [
+  'PENDING',
+  'PROCESSING',
+  'PAID',
+  'FAILED',
+  'REJECTED',
+  'VOIDED',
+] as const;
 
 /** One affiliate payout request. */
 export class AffiliateDisbursementDto {
@@ -271,6 +278,18 @@ export class AffiliateDisbursementDto {
 
   @ApiProperty({ enum: DISBURSEMENT_STATUS_ENUM, example: 'PENDING' })
   status!: string;
+
+  @ApiPropertyOptional({ nullable: true, enum: ['AUTO', 'MANUAL'], example: 'MANUAL', description: 'How this payout was routed.' })
+  mode?: string | null;
+
+  @ApiPropertyOptional({ nullable: true, example: 'BCA' })
+  bankCode?: string | null;
+
+  @ApiPropertyOptional({ nullable: true, example: '1234567890' })
+  bankAccountNumber?: string | null;
+
+  @ApiPropertyOptional({ nullable: true, example: 'BUDI SANTOSO' })
+  bankAccountName?: string | null;
 
   @ApiPropertyOptional({ nullable: true, example: 'xendit' })
   provider?: string | null;
@@ -305,11 +324,53 @@ export class DisbursementSummaryDto {
   @ApiProperty({ type: 'integer', example: 45_000, description: 'Projected net payout = balance - fee.' })
   netAmount!: number;
 
+  @ApiProperty({ enum: ['NONE', 'PENDING', 'APPROVED', 'REJECTED'], example: 'APPROVED' })
+  kycStatus!: string;
+
+  @ApiProperty({ example: true, description: 'True when bankCode + number + name are all set.' })
+  hasBankAccount!: boolean;
+
   @ApiProperty({ example: false })
   hasPendingDisbursement!: boolean;
 
   @ApiPropertyOptional({ nullable: true, type: () => AffiliateDisbursementDto })
   pendingDisbursement?: AffiliateDisbursementDto | null;
+}
+
+/** `GET`/`PUT /affiliate/me/bank-account` — payout bank account. */
+export class BankAccountDto {
+  @ApiPropertyOptional({ nullable: true, example: 'BCA' })
+  bankCode?: string | null;
+
+  @ApiPropertyOptional({ nullable: true, example: '1234567890' })
+  bankAccountNumber?: string | null;
+
+  @ApiPropertyOptional({ nullable: true, example: 'BUDI SANTOSO' })
+  bankAccountName?: string | null;
+}
+
+/** `GET`/`POST /affiliate/me/kyc` — manual KYC status + submitted fields. */
+export class KycDto {
+  @ApiProperty({ enum: ['NONE', 'PENDING', 'APPROVED', 'REJECTED'], example: 'PENDING' })
+  kycStatus!: string;
+
+  @ApiPropertyOptional({ nullable: true, example: '3201010101010001' })
+  kycIdNumber?: string | null;
+
+  @ApiPropertyOptional({ nullable: true })
+  kycIdCardUrl?: string | null;
+
+  @ApiPropertyOptional({ nullable: true })
+  kycSelfieUrl?: string | null;
+
+  @ApiPropertyOptional({ nullable: true, format: 'date-time' })
+  kycSubmittedAt?: string | null;
+
+  @ApiPropertyOptional({ nullable: true, format: 'date-time' })
+  kycReviewedAt?: string | null;
+
+  @ApiPropertyOptional({ nullable: true, description: 'Reason when kycStatus is REJECTED.' })
+  kycRejectedReason?: string | null;
 }
 
 /** `POST /affiliate/visits` & `POST /affiliate/attribution` — visit log outcome. */

@@ -20,6 +20,7 @@ export const SETTING_KEYS = {
   affiliateCookieDays: 'affiliate.cookieDays',
   affiliateHoldDays: 'affiliate.holdDays',
   affiliateIapHoldDays: 'affiliate.iapHoldDays',
+  disbursementAutoApproveMax: 'disbursement.autoApproveMax',
 } as const;
 
 export class SettingsService {

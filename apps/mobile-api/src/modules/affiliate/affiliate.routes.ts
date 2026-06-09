@@ -6,7 +6,9 @@ import { EnrollmentService } from '@bb/domain/affiliate/enrollment.service';
 import { VisitService } from '@bb/domain/affiliate/visit.service';
 import { DisbursementService } from '@bb/domain/affiliate/disbursement.service';
 import { authGuard, optionalAuthGuard } from '@bb/common/middlewares/auth.middleware';
+import { validateDto } from '@bb/common/middlewares/validation.middleware';
 import { bindRoute } from '@bb/common/openapi/route-binder';
+import { SetBankAccountDto, SubmitKycDto } from './dto/affiliate-request.dto';
 
 export function affiliateRoutes(): Router {
   const router = Router();
@@ -31,6 +33,14 @@ export function affiliateRoutes(): Router {
   // Visit + attribution (visit endpoint is public/optional-auth, attribution requires auth)
   bindRoute({ router, controller: ctrl, method: 'post', path: '/affiliate/visits', handlerKey: 'logVisit', middlewares: [optionalAuthGuard] });
   bindRoute({ router, controller: ctrl, method: 'post', path: '/affiliate/attribution', handlerKey: 'logAttribution', middlewares: [authGuard] });
+
+  // Bank account (payout destination)
+  bindRoute({ router, controller: ctrl, method: 'get', path: '/affiliate/me/bank-account', handlerKey: 'getBankAccount', middlewares: [authGuard] });
+  bindRoute({ router, controller: ctrl, method: 'put', path: '/affiliate/me/bank-account', handlerKey: 'setBankAccount', middlewares: [authGuard, validateDto(SetBankAccountDto)] });
+
+  // KYC (manual review gate for payouts)
+  bindRoute({ router, controller: ctrl, method: 'get', path: '/affiliate/me/kyc', handlerKey: 'getKyc', middlewares: [authGuard] });
+  bindRoute({ router, controller: ctrl, method: 'post', path: '/affiliate/me/kyc', handlerKey: 'submitKyc', middlewares: [authGuard, validateDto(SubmitKycDto)] });
 
   // Disbursement / payout
   bindRoute({ router, controller: ctrl, method: 'get', path: '/affiliate/me/disbursement', handlerKey: 'getDisbursementSummary', middlewares: [authGuard] });

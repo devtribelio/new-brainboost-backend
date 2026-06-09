@@ -25,7 +25,14 @@ describe('DisbursementService', () => {
     });
     programId = program.id;
     const m = await prisma.member.create({
-      data: { email: `${TAG}@disb.local`, passwordHash: await bcrypt.hash('x', 4) },
+      data: {
+        email: `${TAG}@disb.local`,
+        passwordHash: await bcrypt.hash('x', 4),
+        kycStatus: 'APPROVED',
+        bankCode: 'BCA',
+        bankAccountNumber: '1234567890',
+        bankAccountName: 'TEST USER',
+      },
     });
     memberId = m.id;
 
