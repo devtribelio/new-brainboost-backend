@@ -18,14 +18,22 @@ import {
   ApiResponse,
   ApiTags,
 } from '@bb/common/openapi/decorators';
-import { LogAttributionDto, LogVisitDto, SetModeDto } from './dto/affiliate-request.dto';
+import {
+  LogAttributionDto,
+  LogVisitDto,
+  SetBankAccountDto,
+  SetModeDto,
+  SubmitKycDto,
+} from './dto/affiliate-request.dto';
 import {
   AffiliateCommissionDto,
   AffiliateDisbursementDto,
   AffiliateProgramDto,
   AffiliatorProfileDto,
   AffiliatorSummaryDto,
+  BankAccountDto,
   DisbursementSummaryDto,
+  KycDto,
   MemberAffiliatorDto,
   SetModeResultDto,
   VisitLogResultDto,
@@ -227,6 +235,58 @@ export class AffiliateController {
     const perPage = Math.min(100, Math.max(1, Number(req.query.perPage) || 20));
     const { rows, total } = await this.disbursementService.listDisbursements(req.user.id, page, perPage);
     return okPaginated(res, rows, { page, perPage, total });
+  };
+
+  // ---- bank account --------------------------------------------------------
+
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get my payout bank account' })
+  @ApiResponse({ status: 200, type: () => BankAccountDto })
+  getBankAccount = async (req: AuthenticatedRequest, res: Response) => {
+    if (!req.user) throw new UnauthorizedException();
+    const bank = await this.disbursementService.getBankAccount(req.user.id);
+    return ok(res, bank);
+  };
+
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Set / update my payout bank account' })
+  @ApiBody({ type: () => SetBankAccountDto })
+  @ApiResponse({ status: 200, type: () => BankAccountDto })
+  setBankAccount = async (req: AuthenticatedRequest, res: Response) => {
+    if (!req.user) throw new UnauthorizedException();
+    const { bankCode, bankAccountNumber, bankAccountName } = req.body as SetBankAccountDto;
+    const bank = await this.disbursementService.setBankAccount(req.user.id, {
+      bankCode,
+      bankAccountNumber,
+      bankAccountName,
+    });
+    return ok(res, bank);
+  };
+
+  // ---- KYC -----------------------------------------------------------------
+
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get my KYC status' })
+  @ApiResponse({ status: 200, type: () => KycDto })
+  getKyc = async (req: AuthenticatedRequest, res: Response) => {
+    if (!req.user) throw new UnauthorizedException();
+    const kyc = await this.disbursementService.getKyc(req.user.id);
+    return ok(res, kyc);
+  };
+
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Submit manual KYC (status → PENDING, admin reviews)' })
+  @ApiBody({ type: () => SubmitKycDto })
+  @ApiResponse({ status: 200, type: () => KycDto })
+  submitKyc = async (req: AuthenticatedRequest, res: Response) => {
+    if (!req.user) throw new UnauthorizedException();
+    const { idNumber, idCardUrl, selfieUrl } = req.body as SubmitKycDto;
+    const kyc = await this.disbursementService.submitKyc(req.user.id, {
+      idNumber,
+      idCardUrl,
+      selfieUrl,
+    });
+    return ok(res, kyc);
   };
 }
 

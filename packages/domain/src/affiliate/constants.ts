@@ -29,13 +29,32 @@ export const DISBURSEMENT_MIN_BALANCE = 15_000; // IDR — minimum withdrawable 
 export const DISBURSEMENT_FEE = 5_000; // IDR — flat platform fee per payout
 export const DISBURSEMENT_MIN_NET = 10_000; // IDR — net (balance - fee) must be strictly greater than this
 
+// AUTO-approval cap (legacy TBWithdraw::AMOUNT_MIN_NEED_APPROVAL was 10,000,000).
+// We pick a conservative default; runtime-overridable via app_settings
+// `disbursement.autoApproveMax`. A payout whose NET exceeds this always goes MANUAL.
+export const DISBURSEMENT_AUTO_APPROVE_MAX = 1_000_000; // IDR
+
+// AUTO-approval velocity limits (legacy TBWithdraw::validateStatus: <=1 today, <=3 this week).
+export const DISBURSEMENT_AUTO_MAX_PER_DAY = 1;
+export const DISBURSEMENT_AUTO_MAX_PER_WEEK = 3;
+
 // Disbursement status
 export const DISBURSEMENT_STATUS = {
-  PENDING: 'PENDING', // requested, awaiting payout
-  PAID: 'PAID', // successfully paid out by provider
+  PENDING: 'PENDING', // requested, awaiting MANUAL approval (held — counts against balance)
+  PROCESSING: 'PROCESSING', // Xendit called, awaiting callback (held — counts against balance)
+  PAID: 'PAID', // successfully paid out by provider (held — counts against balance)
   FAILED: 'FAILED', // provider rejected — balance released back
+  REJECTED: 'REJECTED', // admin rejected — balance released back
   VOIDED: 'VOIDED', // cancelled — balance released back
 } as const;
+
+// Statuses that HOLD (consume) withdrawable balance. Anything NOT here frees it.
+// In-flight + paid = held; FAILED / REJECTED / VOIDED = released.
+export const DISBURSEMENT_HOLD_STATUSES = [
+  'PENDING',
+  'PROCESSING',
+  'PAID',
+] as const;
 export type DisbursementStatus = (typeof DISBURSEMENT_STATUS)[keyof typeof DISBURSEMENT_STATUS];
 
 // Affiliate modes

@@ -1,78 +1,167 @@
 import { prisma } from '@bb/db';
-import { BadRequestException } from '@bb/common/exceptions';
-import { COMMISSION_STATUS, DISBURSEMENT_STATUS } from './constants';
+import { BadRequestException, NotFoundException } from '@bb/common/exceptions';
+import { logger } from '@bb/common/config/logger';
+import { settingsService, SETTING_KEYS } from '@bb/common/services/settings.service';
+import {
+  createDisbursement,
+  type CreateDisbursementResult,
+} from '@bb/common/services/xendit.client';
+import { generateExternalId } from '@bb/common/services/xendit-signature';
+import {
+  COMMISSION_STATUS,
+  DISBURSEMENT_STATUS,
+  DISBURSEMENT_HOLD_STATUSES,
+  DISBURSEMENT_AUTO_APPROVE_MAX,
+  DISBURSEMENT_AUTO_MAX_PER_DAY,
+  DISBURSEMENT_AUTO_MAX_PER_WEEK,
+} from './constants';
 import { quoteDisbursement } from './utils/disbursement-calc';
 
+// Mutable array → Prisma `in` filter for HOLD statuses.
+const HOLD: string[] = [...DISBURSEMENT_HOLD_STATUSES];
+
+type Tx = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
+
+interface BalanceInputs {
+  cleared: number; // SUM(commission.amount where BALANCE)
+  consumed: number; // SUM(disbursement.grossAmount where status HELD)
+}
+
+/** Minimal shape needed to fire a payout to Xendit. */
+interface DisbursableRow {
+  id: string;
+  netAmount: number;
+  externalId: string | null;
+  bankCode: string | null;
+  bankAccountName: string | null;
+  bankAccountNumber: string | null;
+}
+
 /**
- * Affiliate payout (disbursement) domain.
+ * Affiliate payout (disbursement) domain — REAL MONEY.
  *
- * Ledger model (no separate wallet table): withdrawable balance =
- *   SUM(commission.amount where status = BALANCE)            // cleared earnings
- *   - SUM(disbursement.grossAmount where status in PENDING|PAID)  // in-flight / paid out
- * FAILED / VOIDED disbursements release their balance automatically (excluded above).
+ * Ledger model (no separate wallet table). Withdrawable balance =
+ *   SUM(commission.amount where status = BALANCE)                              // cleared earnings
+ *   - SUM(disbursement.grossAmount where status in {PENDING,PROCESSING,PAID})  // HELD
+ *
+ * HELD statuses (DISBURSEMENT_HOLD_STATUSES) are the ONLY ones that subtract.
+ * FAILED / REJECTED / VOIDED are excluded, so a rejected or failed payout
+ * automatically frees the balance again (no manual credit-back, no double-spend).
  */
 export class DisbursementService {
-  async getWithdrawableBalance(memberId: string): Promise<number> {
+  // ---- balance ------------------------------------------------------------
+
+  private async balanceInputs(
+    memberId: string,
+    db: Tx | typeof prisma = prisma,
+  ): Promise<BalanceInputs> {
     const [commissionAgg, disbursementAgg] = await Promise.all([
-      prisma.affiliateCommission.aggregate({
+      db.affiliateCommission.aggregate({
         where: { recipientId: memberId, status: COMMISSION_STATUS.BALANCE },
         _sum: { amount: true },
       }),
-      prisma.affiliateDisbursement.aggregate({
-        where: {
-          memberId,
-          status: { in: [DISBURSEMENT_STATUS.PENDING, DISBURSEMENT_STATUS.PAID] },
-        },
+      db.affiliateDisbursement.aggregate({
+        where: { memberId, status: { in: HOLD } },
         _sum: { grossAmount: true },
       }),
     ]);
-    const cleared = commissionAgg._sum.amount ?? 0;
-    const consumed = disbursementAgg._sum.grossAmount ?? 0;
+    return {
+      cleared: commissionAgg._sum.amount ?? 0,
+      consumed: disbursementAgg._sum.grossAmount ?? 0,
+    };
+  }
+
+  async getWithdrawableBalance(memberId: string): Promise<number> {
+    const { cleared, consumed } = await this.balanceInputs(memberId);
     return Math.max(0, cleared - consumed);
   }
 
   async getSummary(memberId: string) {
+    const member = await prisma.member.findUnique({
+      where: { id: memberId },
+      select: {
+        kycStatus: true,
+        bankCode: true,
+        bankAccountNumber: true,
+        bankAccountName: true,
+      },
+    });
+
     const balance = await this.getWithdrawableBalance(memberId);
     const quote = quoteDisbursement(balance);
-    const pendingDisbursement = await prisma.affiliateDisbursement.findFirst({
-      where: { memberId, status: DISBURSEMENT_STATUS.PENDING },
+
+    // An OPEN payout (PENDING awaiting approval, or PROCESSING awaiting callback)
+    // blocks a new request.
+    const openDisbursement = await prisma.affiliateDisbursement.findFirst({
+      where: {
+        memberId,
+        status: { in: [DISBURSEMENT_STATUS.PENDING, DISBURSEMENT_STATUS.PROCESSING] },
+      },
       orderBy: { requestedAt: 'desc' },
     });
+
+    const kycApproved = member?.kycStatus === 'APPROVED';
+    const hasBank = !!(member?.bankCode && member?.bankAccountNumber && member?.bankAccountName);
+
+    let reason = quote.reason ?? null;
+    if (!kycApproved) reason = 'KYC belum disetujui';
+    else if (!hasBank) reason = 'Rekening belum diisi';
+    else if (openDisbursement) reason = 'You already have a pending withdrawal';
+
     return {
       withdrawableBalance: balance,
-      eligible: quote.eligible && !pendingDisbursement,
-      reason: pendingDisbursement ? 'You already have a pending withdrawal' : quote.reason,
+      eligible: quote.eligible && kycApproved && hasBank && !openDisbursement,
+      reason,
       fee: quote.fee,
       netAmount: quote.netAmount,
-      hasPendingDisbursement: !!pendingDisbursement,
-      pendingDisbursement,
+      kycStatus: member?.kycStatus ?? 'NONE',
+      hasBankAccount: hasBank,
+      hasPendingDisbursement: !!openDisbursement,
+      pendingDisbursement: openDisbursement,
     };
   }
 
+  // ---- request ------------------------------------------------------------
+
   /**
    * Create a payout request consuming the full withdrawable balance.
-   * Blocks concurrent PENDING payouts. Wrapped in a transaction to narrow the race window.
+   *
+   * Gates: KYC APPROVED + bank account on profile. Decides AUTO vs MANUAL via
+   * legacy TBWithdraw::validateStatus parity. The row is created (status PENDING)
+   * inside a concurrency-guarded transaction. If AUTO, Xendit is called AFTER
+   * the transaction commits (network I/O must not hold a DB tx open).
    */
   async requestDisbursement(memberId: string) {
-    return prisma.$transaction(async (tx) => {
+    const member = await prisma.member.findUnique({
+      where: { id: memberId },
+      select: {
+        kycStatus: true,
+        bankCode: true,
+        bankAccountNumber: true,
+        bankAccountName: true,
+      },
+    });
+    if (!member) throw new NotFoundException('Member not found');
+    if (member.kycStatus !== 'APPROVED') throw new BadRequestException('KYC belum disetujui');
+    if (!member.bankCode || !member.bankAccountNumber || !member.bankAccountName) {
+      throw new BadRequestException('Rekening belum diisi');
+    }
+
+    const created = await prisma.$transaction(async (tx) => {
       const existing = await tx.affiliateDisbursement.findFirst({
-        where: { memberId, status: DISBURSEMENT_STATUS.PENDING },
+        where: {
+          memberId,
+          status: { in: [DISBURSEMENT_STATUS.PENDING, DISBURSEMENT_STATUS.PROCESSING] },
+        },
       });
       if (existing) throw new BadRequestException('You already have a pending withdrawal');
 
-      const [commissionAgg, disbursementAgg] = await Promise.all([
-        tx.affiliateCommission.aggregate({
-          where: { recipientId: memberId, status: COMMISSION_STATUS.BALANCE },
-          _sum: { amount: true },
-        }),
-        tx.affiliateDisbursement.aggregate({
-          where: { memberId, status: { in: [DISBURSEMENT_STATUS.PENDING, DISBURSEMENT_STATUS.PAID] } },
-          _sum: { grossAmount: true },
-        }),
-      ]);
-      const balance = Math.max(0, (commissionAgg._sum.amount ?? 0) - (disbursementAgg._sum.grossAmount ?? 0));
+      const { cleared, consumed } = await this.balanceInputs(memberId, tx);
+      const balance = Math.max(0, cleared - consumed);
       const quote = quoteDisbursement(balance);
       if (!quote.eligible) throw new BadRequestException(quote.reason ?? 'Not eligible for withdrawal');
+
+      const mode = await this.decideMode(memberId, quote.netAmount, tx);
 
       return tx.affiliateDisbursement.create({
         data: {
@@ -81,10 +170,187 @@ export class DisbursementService {
           fee: quote.fee,
           netAmount: quote.netAmount,
           status: DISBURSEMENT_STATUS.PENDING,
+          mode,
+          externalId: generateExternalId('disb'),
+          bankCode: member.bankCode,
+          bankAccountNumber: member.bankAccountNumber,
+          bankAccountName: member.bankAccountName,
         },
       });
     });
+
+    // AUTO → self-approve + fire to Xendit immediately. The row already HOLDS the
+    // balance (PENDING is a HOLD status), so a failed Xendit call frees it again
+    // by flipping to FAILED. No money is created or lost by this ordering.
+    if (created.mode === 'AUTO') {
+      const approved = await prisma.affiliateDisbursement.update({
+        where: { id: created.id },
+        data: { approvedAt: new Date() },
+      });
+      return this.disburseViaXendit(approved);
+    }
+
+    return created;
   }
+
+  /**
+   * AUTO vs MANUAL — port of legacy TBWithdraw::validateStatus.
+   * AUTO requires ALL of:
+   *   1. member has a prior PAID disbursement (first-time is ALWAYS manual)
+   *   2. netAmount <= autoApproveMax (app_settings `disbursement.autoApproveMax`)
+   *   3. <=1 disbursement today AND <=3 this week (counting PROCESSING|PAID)
+   * Otherwise MANUAL.
+   */
+  private async decideMode(
+    memberId: string,
+    netAmount: number,
+    db: Tx | typeof prisma = prisma,
+  ): Promise<'AUTO' | 'MANUAL'> {
+    // (1) prior successful payout? First-time withdrawers are always reviewed.
+    const priorPaid = await db.affiliateDisbursement.count({
+      where: { memberId, status: DISBURSEMENT_STATUS.PAID },
+    });
+    if (priorPaid === 0) return 'MANUAL';
+
+    // (2) under the auto cap?
+    const autoMax = await settingsService.getNumber(
+      SETTING_KEYS.disbursementAutoApproveMax,
+      DISBURSEMENT_AUTO_APPROVE_MAX,
+    );
+    if (netAmount > autoMax) return 'MANUAL';
+
+    // (3) velocity: count in-flight + paid payouts today / this week.
+    const now = new Date();
+    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+    const startOfWeek = startOfWeekMonday(now);
+    const velocityStatuses = [DISBURSEMENT_STATUS.PROCESSING, DISBURSEMENT_STATUS.PAID];
+
+    const [todayCount, weekCount] = await Promise.all([
+      db.affiliateDisbursement.count({
+        where: { memberId, status: { in: velocityStatuses }, requestedAt: { gte: startOfDay } },
+      }),
+      db.affiliateDisbursement.count({
+        where: { memberId, status: { in: velocityStatuses }, requestedAt: { gte: startOfWeek } },
+      }),
+    ]);
+    if (todayCount > DISBURSEMENT_AUTO_MAX_PER_DAY - 1) return 'MANUAL';
+    if (weekCount > DISBURSEMENT_AUTO_MAX_PER_WEEK - 1) return 'MANUAL';
+
+    return 'AUTO';
+  }
+
+  // ---- provider (Xendit) --------------------------------------------------
+
+  /**
+   * Call Xendit and move the row PENDING -> PROCESSING. On any error we flip the
+   * row to FAILED (which frees the held balance) and swallow — the caller still
+   * gets a row back describing the outcome. The provider callback later moves
+   * PROCESSING -> PAID / FAILED.
+   */
+  async disburseViaXendit(row: DisbursableRow) {
+    const externalId = row.externalId;
+    if (!externalId || !row.bankCode || !row.bankAccountNumber || !row.bankAccountName) {
+      // Should never happen (set at request time) — fail safe + free the balance.
+      logger.error({ disbursementId: row.id }, '[disbursement] missing bank snapshot / externalId');
+      return prisma.affiliateDisbursement.update({
+        where: { id: row.id },
+        data: { status: DISBURSEMENT_STATUS.FAILED, failureReason: 'Missing bank/external_id' },
+      });
+    }
+
+    let result: CreateDisbursementResult;
+    try {
+      result = await createDisbursement({
+        externalId,
+        amount: row.netAmount,
+        bankCode: row.bankCode,
+        accountHolderName: row.bankAccountName,
+        accountNumber: row.bankAccountNumber,
+        description: `Affiliate payout ${externalId}`,
+      });
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : 'Xendit disbursement failed';
+      logger.error(
+        { disbursementId: row.id, externalId, err: reason },
+        '[disbursement] xendit call failed',
+      );
+      return prisma.affiliateDisbursement.update({
+        where: { id: row.id },
+        data: { status: DISBURSEMENT_STATUS.FAILED, failureReason: reason },
+      });
+    }
+
+    logger.info(
+      { disbursementId: row.id, externalId, xenditId: result.id, status: result.status },
+      '[disbursement] xendit accepted',
+    );
+    return prisma.affiliateDisbursement.update({
+      where: { id: row.id },
+      data: {
+        status: DISBURSEMENT_STATUS.PROCESSING,
+        provider: 'xendit',
+        providerRef: result.id || null,
+      },
+    });
+  }
+
+  // ---- provider callback (webhook) ----------------------------------------
+  //
+  // Idempotent by externalId + a status guard. A replayed callback updates 0 rows
+  // (the row is already terminal) so it can NEVER double-pay or double-flip.
+
+  /** COMPLETED callback → PAID. Only transitions a non-terminal row. */
+  async markPaidByExternalId(externalId: string, providerRef?: string, now: Date = new Date()) {
+    const updated = await prisma.affiliateDisbursement.updateMany({
+      where: {
+        externalId,
+        status: { in: [DISBURSEMENT_STATUS.PENDING, DISBURSEMENT_STATUS.PROCESSING] },
+      },
+      data: {
+        status: DISBURSEMENT_STATUS.PAID,
+        provider: 'xendit',
+        ...(providerRef ? { providerRef } : {}),
+        paidAt: now,
+      },
+    });
+    if (updated.count === 0) {
+      logger.info({ externalId }, '[disbursement] markPaid noop (unknown/terminal)');
+    }
+    return updated;
+  }
+
+  /** FAILED callback → FAILED (frees balance). Only transitions a non-terminal row. */
+  async markFailedByExternalId(externalId: string, reason: string) {
+    const updated = await prisma.affiliateDisbursement.updateMany({
+      where: {
+        externalId,
+        status: { in: [DISBURSEMENT_STATUS.PENDING, DISBURSEMENT_STATUS.PROCESSING] },
+      },
+      data: { status: DISBURSEMENT_STATUS.FAILED, failureReason: reason },
+    });
+    if (updated.count === 0) {
+      logger.info({ externalId }, '[disbursement] markFailed noop (unknown/terminal)');
+    }
+    return updated;
+  }
+
+  // ---- legacy by-id helpers (kept for existing callers / tests) ------------
+
+  async markPaid(id: string, providerRef: string, now: Date = new Date()) {
+    return prisma.affiliateDisbursement.update({
+      where: { id },
+      data: { status: DISBURSEMENT_STATUS.PAID, provider: 'xendit', providerRef, paidAt: now },
+    });
+  }
+
+  async markFailed(id: string, reason: string) {
+    return prisma.affiliateDisbursement.update({
+      where: { id },
+      data: { status: DISBURSEMENT_STATUS.FAILED, failureReason: reason },
+    });
+  }
+
+  // ---- listing ------------------------------------------------------------
 
   async listDisbursements(memberId: string, page = 1, perPage = 20) {
     const [rows, total] = await Promise.all([
@@ -99,22 +365,81 @@ export class DisbursementService {
     return { rows, total };
   }
 
-  // --- Payout provider integration point (Xendit) -------------------------------
-  // The actual money movement is intentionally NOT wired here. A processor/worker
-  // should claim PENDING rows, call the Xendit Disbursement API, then call
-  // markPaid / markFailed. markFailed releases the held balance (FAILED is excluded
-  // from getWithdrawableBalance).
-  async markPaid(id: string, providerRef: string, now: Date = new Date()) {
-    return prisma.affiliateDisbursement.update({
-      where: { id },
-      data: { status: DISBURSEMENT_STATUS.PAID, provider: 'xendit', providerRef, paidAt: now },
+  // ---- KYC -----------------------------------------------------------------
+
+  async submitKyc(
+    memberId: string,
+    input: { idNumber: string; idCardUrl: string; selfieUrl?: string },
+  ) {
+    const member = await prisma.member.findUnique({
+      where: { id: memberId },
+      select: { kycStatus: true },
+    });
+    if (!member) throw new NotFoundException('Member not found');
+    if (member.kycStatus === 'PENDING') throw new BadRequestException('KYC sedang ditinjau');
+    if (member.kycStatus === 'APPROVED') throw new BadRequestException('KYC sudah disetujui');
+    return prisma.member.update({
+      where: { id: memberId },
+      data: {
+        kycStatus: 'PENDING',
+        kycIdNumber: input.idNumber,
+        kycIdCardUrl: input.idCardUrl,
+        kycSelfieUrl: input.selfieUrl ?? null,
+        kycSubmittedAt: new Date(),
+        kycReviewedAt: null,
+        kycReviewedBy: null,
+        kycRejectedReason: null,
+      },
+      select: kycSelect,
     });
   }
 
-  async markFailed(id: string, reason: string) {
-    return prisma.affiliateDisbursement.update({
-      where: { id },
-      data: { status: DISBURSEMENT_STATUS.FAILED, failureReason: reason },
+  async getKyc(memberId: string) {
+    const member = await prisma.member.findUnique({ where: { id: memberId }, select: kycSelect });
+    if (!member) throw new NotFoundException('Member not found');
+    return member;
+  }
+
+  // ---- bank account --------------------------------------------------------
+
+  async getBankAccount(memberId: string) {
+    const member = await prisma.member.findUnique({
+      where: { id: memberId },
+      select: { bankCode: true, bankAccountNumber: true, bankAccountName: true },
+    });
+    if (!member) throw new NotFoundException('Member not found');
+    return member;
+  }
+
+  async setBankAccount(
+    memberId: string,
+    input: { bankCode: string; bankAccountNumber: string; bankAccountName: string },
+  ) {
+    return prisma.member.update({
+      where: { id: memberId },
+      data: {
+        bankCode: input.bankCode,
+        bankAccountNumber: input.bankAccountNumber,
+        bankAccountName: input.bankAccountName,
+      },
+      select: { bankCode: true, bankAccountNumber: true, bankAccountName: true },
     });
   }
+}
+
+const kycSelect = {
+  kycStatus: true,
+  kycIdNumber: true,
+  kycIdCardUrl: true,
+  kycSelfieUrl: true,
+  kycSubmittedAt: true,
+  kycReviewedAt: true,
+  kycRejectedReason: true,
+} as const;
+
+/** Monday 00:00 of the week containing `d` (legacy CCarbon::startOfWeek default = Monday). */
+function startOfWeekMonday(d: Date): Date {
+  const day = d.getDay(); // 0=Sun..6=Sat
+  const diff = (day + 6) % 7; // days since Monday
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate() - diff, 0, 0, 0, 0);
 }

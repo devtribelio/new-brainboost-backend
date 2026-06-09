@@ -1,8 +1,48 @@
-import { IsIn, IsOptional, IsString } from 'class-validator';
+import { IsIn, IsNotEmpty, IsOptional, IsString, MaxLength } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@bb/common/openapi/decorators';
 import { AFFILIATE_BASED } from '@bb/domain/affiliate/constants';
 
 const AFFILIATE_BASED_VALUES = Object.values(AFFILIATE_BASED);
+
+/** Body for `PUT /affiliate/me/bank-account`. The bank used for affiliate payouts. */
+export class SetBankAccountDto {
+  @ApiProperty({ example: 'BCA', description: 'Xendit bank code (e.g. BCA, MANDIRI, BNI, BRI).' })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(20)
+  bankCode!: string;
+
+  @ApiProperty({ example: '1234567890' })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(50)
+  bankAccountNumber!: string;
+
+  @ApiProperty({ example: 'BUDI SANTOSO', description: 'Account holder name as printed on the bank account.' })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(120)
+  bankAccountName!: string;
+}
+
+/** Body for `POST /affiliate/me/kyc`. Manual KYC submission (admin reviews). */
+export class SubmitKycDto {
+  @ApiProperty({ example: '3201010101010001', description: 'National ID (KTP) number.' })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(50)
+  idNumber!: string;
+
+  @ApiProperty({ example: 'https://cdn.example.com/private/kyc/idcard.jpg', description: 'Uploaded ID card image URL.' })
+  @IsString()
+  @IsNotEmpty()
+  idCardUrl!: string;
+
+  @ApiPropertyOptional({ example: 'https://cdn.example.com/private/kyc/selfie.jpg', description: 'Optional selfie-with-ID image URL.' })
+  @IsOptional()
+  @IsString()
+  selfieUrl?: string;
+}
 
 /** Body for `POST /affiliate/me/mode`. Controller accepts either field. */
 export class SetModeDto {
