@@ -43,6 +43,20 @@ export function serializeProduct(
   // productImageUrl→imageUrl, productCategory→category,
   // productShareDetailUrl→shareUrl. `lastUpdated` kept (FE accepts).
   // `networkAccountProductAffiliatorId` retained pending P3 int-id removal.
+  //
+  // Affiliate commission RANGE: an iOS purchase pays the affiliator on the NET we
+  // take home (gross iOS price minus Apple's ~30% store cut), so the same product
+  // earns slightly less via iOS than via web. max = web-price basis, min = iOS-net
+  // basis; min falls back to max when no iOS price is set.
+  const rate = opts.commissionRate ?? 20;
+  const IAP_STORE_CUT_PCT = 30;
+  const commissionMax = p.price > 0 ? Math.trunc((p.price * rate) / 100) : 0;
+  const iosNet =
+    p.iosPrice && p.iosPrice > 0
+      ? Math.trunc((p.iosPrice * (100 - IAP_STORE_CUT_PCT)) / 100)
+      : null;
+  const commissionMin = iosNet != null ? Math.trunc((iosNet * rate) / 100) : commissionMax;
+
   return {
     id: p.id,
     networkAccountProductAffiliatorId: productId,
@@ -69,8 +83,9 @@ export function serializeProduct(
     // tier 1 = 20% default for anon/no-history members), applied globally — the new
     // backend has no per-product `pbs_aff_*` overrides (per-program rate config not
     // ported). `(int)` cast like legacy program/detail.blade.php:46 → Math.trunc.
-    commisionFixAmount:
-      p.price > 0 ? Math.trunc((p.price * (opts.commissionRate ?? 20)) / 100) : 0,
+    commisionFixAmount: commissionMax, // legacy single value = web-price basis (= range max)
+    commissionMin,
+    commissionMax,
     productUrl,
     isPurchased: opts.isPurchased ?? false,
     productRatingAvg: opts.ratingAvg ?? 0,
