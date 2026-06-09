@@ -118,6 +118,10 @@ export class RevenueCatWebhookHandler {
 
   private toPurchase(event: RevenueCatEventDto): NormalizedPurchase {
     const gross = event.price_in_purchased_currency ?? 0;
+    // Affiliate attribution: the app sets this RC subscriber attribute from the
+    // captured deeplink affCode (IosIapService.setAffiliateCode). Without it the
+    // ingest has no explicit affiliator and silently falls back to the buyer's inviter.
+    const affiliatorCode = event.subscriber_attributes?.['affiliate_code']?.value?.trim() || undefined;
     return {
       // Key on the store transaction id so a later CANCELLATION (which carries the
       // same transaction_id, not the purchase's event id) can link back to it.
@@ -126,6 +130,7 @@ export class RevenueCatWebhookHandler {
       type: 'PURCHASE',
       memberRef: { byId: event.app_user_id, byEmail: this.emailAttr(event) },
       productRef: { bySku: event.product_id },
+      affiliatorCode,
       // Use local currency (IDR), NOT event.price which is in USD.
       grossAmount: gross,
       netAmount: computeNetAmount(
