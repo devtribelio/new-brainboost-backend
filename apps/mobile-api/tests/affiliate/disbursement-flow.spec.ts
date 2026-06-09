@@ -202,14 +202,6 @@ describe('DisbursementService — payout flow', () => {
 
   // ---- reject / fail frees balance ---------------------------------------
 
-  it('rejectDisbursement frees the held balance (REJECTED excluded)', async () => {
-    const id = await member({ balance: 100_000 });
-    const row = await svc.requestDisbursement(id); // MANUAL, PENDING, holds 100k
-    expect(await svc.getWithdrawableBalance(id)).toBe(0);
-    await svc.rejectDisbursement(row.id, randomUUID(), 'bad bank');
-    expect(await svc.getWithdrawableBalance(id)).toBe(100_000);
-  });
-
   it('failed Xendit call frees the held balance (FAILED excluded)', async () => {
     const id = await member({ balance: 50_000, priorPaid: true });
     createDisbursementMock.mockRejectedValueOnce(new Error('INSUFFICIENT_BALANCE'));

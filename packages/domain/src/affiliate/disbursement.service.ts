@@ -294,39 +294,6 @@ export class DisbursementService {
     });
   }
 
-  // ---- admin approve / reject (MANUAL flow) --------------------------------
-
-  /** Approve a PENDING payout → fire to Xendit. */
-  async approveDisbursement(id: string, adminId: string) {
-    const row = await prisma.affiliateDisbursement.findUnique({ where: { id } });
-    if (!row) throw new NotFoundException('Disbursement not found');
-    if (row.status !== DISBURSEMENT_STATUS.PENDING) {
-      throw new BadRequestException(`Cannot approve a disbursement in status ${row.status}`);
-    }
-    const approved = await prisma.affiliateDisbursement.update({
-      where: { id },
-      data: { approvedBy: adminId, approvedAt: new Date() },
-    });
-    return this.disburseViaXendit(approved);
-  }
-
-  /** Reject a PENDING payout → status REJECTED (balance frees automatically). */
-  async rejectDisbursement(id: string, adminId: string, reason: string) {
-    const row = await prisma.affiliateDisbursement.findUnique({ where: { id } });
-    if (!row) throw new NotFoundException('Disbursement not found');
-    if (row.status !== DISBURSEMENT_STATUS.PENDING) {
-      throw new BadRequestException(`Cannot reject a disbursement in status ${row.status}`);
-    }
-    return prisma.affiliateDisbursement.update({
-      where: { id },
-      data: {
-        status: DISBURSEMENT_STATUS.REJECTED,
-        rejectedReason: reason,
-        approvedBy: adminId, // reviewer (audit)
-      },
-    });
-  }
-
   // ---- provider callback (webhook) ----------------------------------------
   //
   // Idempotent by externalId + a status guard. A replayed callback updates 0 rows
@@ -431,42 +398,6 @@ export class DisbursementService {
     const member = await prisma.member.findUnique({ where: { id: memberId }, select: kycSelect });
     if (!member) throw new NotFoundException('Member not found');
     return member;
-  }
-
-  async approveKyc(memberId: string, adminId: string) {
-    const member = await prisma.member.findUnique({
-      where: { id: memberId },
-      select: { id: true },
-    });
-    if (!member) throw new NotFoundException('Member not found');
-    return prisma.member.update({
-      where: { id: memberId },
-      data: {
-        kycStatus: 'APPROVED',
-        kycReviewedAt: new Date(),
-        kycReviewedBy: adminId,
-        kycRejectedReason: null,
-      },
-      select: kycSelect,
-    });
-  }
-
-  async rejectKyc(memberId: string, adminId: string, reason: string) {
-    const member = await prisma.member.findUnique({
-      where: { id: memberId },
-      select: { id: true },
-    });
-    if (!member) throw new NotFoundException('Member not found');
-    return prisma.member.update({
-      where: { id: memberId },
-      data: {
-        kycStatus: 'REJECTED',
-        kycReviewedAt: new Date(),
-        kycReviewedBy: adminId,
-        kycRejectedReason: reason,
-      },
-      select: kycSelect,
-    });
   }
 
   // ---- bank account --------------------------------------------------------
