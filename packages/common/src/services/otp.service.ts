@@ -202,37 +202,35 @@ class OtpService {
   private defaultSubject(purpose: OtpPurpose): string {
     switch (purpose) {
       case 'forgot-password':
-        return 'Reset password Brainboost kamu';
+        return 'Reset your Brainboost password';
       case 'delete-account':
-        return 'Konfirmasi penghapusan akun Brainboost';
+        return 'Confirm Brainboost account deletion';
       case 'pre-registration':
-        return 'Verifikasi email Brainboost kamu';
+        return 'Verify your Brainboost email';
       case 'verify-phone':
       case 'verify-email':
-        return 'Kode verifikasi Brainboost';
+        return 'Brainboost verification code';
     }
   }
 
   // Body message WITHOUT the code (the email template displays the code itself).
-  // Wording mirrors legacy TBEmailTemplate (MemberRequestForget / MemberVerification).
+  // Wording is the legacy TBEmailTemplate copy (MemberRequestForget / MemberVerification).
   private defaultMessage(purpose: OtpPurpose): string {
     switch (purpose) {
       case 'forgot-password':
-        return 'Masukkan kode OTP berikut untuk mengkonfirmasi password baru kamu.';
+        return 'Enter the OTP Code we sent to your email below to confirm your new password';
       case 'delete-account':
-        return 'Masukkan kode OTP berikut untuk mengkonfirmasi penghapusan akun kamu.';
-      case 'pre-registration':
-        return 'Masukkan kode OTP berikut untuk memverifikasi email kamu.';
+        return 'Enter the OTP Code below to confirm your account deletion';
       default:
-        return 'Masukkan kode OTP berikut untuk memverifikasi akun kamu.';
+        return 'Enter the OTP Code below to verify your account :';
     }
   }
 }
 
-// TTL seconds → human-readable Indonesian, e.g. 600 → "10 menit".
+// TTL seconds → human-readable, e.g. 600 → "10 minutes".
 function humanTtl(seconds: number): string {
   const minutes = Math.max(1, Math.round(seconds / 60));
-  return `${minutes} menit`;
+  return `${minutes} ${minutes === 1 ? 'minute' : 'minutes'}`;
 }
 
 export const otpService = new OtpService();
