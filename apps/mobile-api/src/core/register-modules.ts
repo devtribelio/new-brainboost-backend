@@ -14,7 +14,6 @@ import { ProductModule } from '@/modules/product/product.module';
 import { MediaModule } from '@/modules/media/media.module';
 import { CommissionModule } from '@/modules/commission/commission.module';
 import { AffiliateModule } from '@/modules/affiliate/affiliate.module';
-import { AffiliateAdminModule } from '@/modules/affiliate/admin/affiliate-admin.module';
 import { TopicModule } from '@/modules/topic/topic.module';
 import { PostModule } from '@/modules/post/post.module';
 import { CommentModule } from '@/modules/comment/comment.module';
@@ -38,7 +37,6 @@ const modules: AppModule[] = [
   MediaModule,
   CommissionModule,
   AffiliateModule,
-  AffiliateAdminModule,
   CommerceModule,
   TopicModule,
   PostModule,
