@@ -565,20 +565,31 @@ export class AuthService {
   }
 
   async registerDevice(memberId: string, dto: RegisterDeviceDto) {
-    const device = await prisma.device.upsert({
-      where: { memberId_deviceId: { memberId, deviceId: dto.deviceId } },
-      update: {
-        platform: dto.platform,
-        fcmToken: dto.fcmToken,
-        lastSeenAt: new Date(),
-      },
-      create: {
-        memberId,
-        deviceId: dto.deviceId,
-        platform: dto.platform,
-        fcmToken: dto.fcmToken,
-      },
-    });
+    // Single active device: enrolling a device on app start makes it THE push
+    // target. Clear fcmToken on every OTHER device of this member so a phone that
+    // got session-revoked by a newer login (issueTokenBundle single-session kick)
+    // stops receiving push. fcm.sendToMember targets by memberId + fcmToken != null,
+    // so nulling the token here is what actually severs delivery.
+    const [device] = await prisma.$transaction([
+      prisma.device.upsert({
+        where: { memberId_deviceId: { memberId, deviceId: dto.deviceId } },
+        update: {
+          platform: dto.platform,
+          fcmToken: dto.fcmToken,
+          lastSeenAt: new Date(),
+        },
+        create: {
+          memberId,
+          deviceId: dto.deviceId,
+          platform: dto.platform,
+          fcmToken: dto.fcmToken,
+        },
+      }),
+      prisma.device.updateMany({
+        where: { memberId, deviceId: { not: dto.deviceId }, fcmToken: { not: null } },
+        data: { fcmToken: null },
+      }),
+    ]);
     // FE legacy reads `data.data.cloudMessagingId`; emit null cleanly when fcmToken absent.
     return { cloudMessagingId: device.fcmToken, deviceId: device.id };
   }
@@ -598,10 +609,18 @@ export class AuthService {
       );
     }
 
-    await prisma.device.update({
-      where: { id: device.id },
-      data: { fcmToken: dto.cloudMessagingId, lastSeenAt: new Date() },
-    });
+    // Same single-active-device rule as registerDevice: token rotation re-asserts
+    // this device as THE push target, so drop fcmToken on every other device.
+    await prisma.$transaction([
+      prisma.device.update({
+        where: { id: device.id },
+        data: { fcmToken: dto.cloudMessagingId, lastSeenAt: new Date() },
+      }),
+      prisma.device.updateMany({
+        where: { memberId, id: { not: device.id }, fcmToken: { not: null } },
+        data: { fcmToken: null },
+      }),
+    ]);
     return { cloudMessagingId: dto.cloudMessagingId, deviceId: device.id };
   }
 
