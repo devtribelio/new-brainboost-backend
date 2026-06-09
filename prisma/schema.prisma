@@ -310,6 +310,7 @@ model Product {
   descriptionHtml String?  @map("description_html") // legacy `course.description_html` — rich HTML
   thumbnail       String? // legacy resource (model_type=TBModel_Course, collection=courseImage)
   price           Int      @default(0)
+  iosPrice        Int?     @map("ios_price") // gross iOS IAP price (marked up to offset Apple's cut); null = same as `price`. Used for the affiliate commission range preview.
   marketingLink   String?  @map("marketing_link") // legacy `course.marketing_link`
   sellingPoints   Json?    @map("selling_points") // legacy `course.selling_point` — JSONB string[]
   status          String   @default("active") // legacy: active|inactive|draft|archived
