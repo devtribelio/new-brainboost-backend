@@ -56,7 +56,7 @@ otp.service / domain event
 | Queue | amqplib (publisher) | **amqp091-go** (consumer) |
 | Email | — (removed in F5) | **SES** `aws-sdk-go-v2/service/ses` |
 | WhatsApp | — (removed in F5) | **Qontak** (`net/http`) |
-| Templates | — | MJML (authored) → **precompiled HTML** + `html/template` (`go:embed`, no Node at build/runtime) |
+| Templates | — | **hand-authored HTML** (faithful legacy `TBEmailTemplate` port: orange `#F37429` header + "Download Our Apps" footer) + `html/template` (`go:embed`); shared shell in `_partials.html`. No MJML/Node. |
 | Logger / Build / Test | pino / tsup / vitest | `slog` / `go build` / `go test` |
 | Deploy | pm2 (relay = 4th app in `ecosystem.config.js`) | **Docker distroless static (~29MB)** + pm2 + GitHub Actions CI |
 
