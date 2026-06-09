@@ -244,9 +244,10 @@ SES/Qontak dev-noop → `comms_delivery` SENT, all 5 message types.
 
 - Stack: `amqp091-go`, `pgx/v5`, `aws-sdk-go-v2/ses`, `net/http` (Qontak),
   `html/template`, `slog`.
-- **MJML handled by precompile**: templates authored in MJML (`templates_src/`),
-  compiled to HTML once (committed, `go:embed`); `html/template` fills the vars.
-  No Node/MJML at build or runtime — the "MJML is JS-only" concern is sidestepped.
+- **Templates**: initially MJML-precompiled, then switched to **hand-authored HTML**
+  that faithfully ports the legacy `TBEmailTemplate` shell (orange `#F37429` header +
+  "Download Our Apps" footer + content card). Shared shell in `_partials.html`;
+  `html/template` + `go:embed`. No MJML/Node — the "MJML is JS-only" concern is moot.
 - Footprint: distroless static image ~29MB (vs ~258MB Node).
 - **Cost of the choice:** the message contract + topology constants are now
   duplicated across languages (TS ↔ Go), not just TS ↔ TS — more drift risk. If a

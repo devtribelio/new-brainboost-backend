@@ -744,15 +744,12 @@ export class AuthService {
     if (!member) throw new NotFoundException('Member not found');
     if (member.isVerified) throw new BadRequestException('Email already verified');
 
-    // issue() sends the email itself for email targets — supply the custom
-    // subject/body/html here so it goes out exactly once.
+    // issue() enqueues the email; bb-comms renders the branded OTP template
+    // (default subject + message + the code). recipientName drives the greeting.
     const { expiresAt } = await otpService.issue({
       target: member.email,
       purpose: 'verify-email',
-      emailSubject: 'Verify your email',
-      emailBody: (code) => `Your verification code is: ${code}. Valid for 10 minutes.`,
-      emailHtml: (code) =>
-        `<p>Your verification code is: <strong>${code}</strong></p><p>Valid for 10 minutes.</p>`,
+      recipientName: member.fullName ?? undefined,
     });
     logger.info({ memberId, email: member.email }, 'verify-email OTP issued');
 
