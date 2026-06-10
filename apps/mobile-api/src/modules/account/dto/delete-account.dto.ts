@@ -9,7 +9,7 @@ export class RequestDeleteAccountDto {
 }
 
 export class VerificationDeleteAccountDto {
-  @ApiProperty({ example: '123456', description: 'OTP delivered to email' })
+  @ApiProperty({ example: '1234', description: '4-digit OTP delivered to email' })
   @IsString()
   @Length(4, 8)
   otpCode!: string;

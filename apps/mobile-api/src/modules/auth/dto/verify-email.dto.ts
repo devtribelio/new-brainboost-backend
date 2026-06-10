@@ -2,8 +2,8 @@ import { IsString, Length } from 'class-validator';
 import { ApiProperty } from '@bb/common/openapi/decorators';
 
 export class VerifyEmailDto {
-  @ApiProperty({ example: '123456', description: '6-digit OTP sent to registered email' })
+  @ApiProperty({ example: '1234', description: '4-digit OTP sent to registered email' })
   @IsString()
-  @Length(6, 6)
+  @Length(4, 4)
   code!: string;
 }

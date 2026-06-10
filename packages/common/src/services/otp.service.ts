@@ -46,8 +46,10 @@ const DEFAULT_TTL: Record<OtpPurpose, number> = {
   'verify-email': 10 * 60,
 };
 
-function generateCode(): string {
-  return String(randomInt(100000, 1000000));
+// Email OTP is 4 digits; phone (WhatsApp) OTP stays 6 to match legacy.
+function generateCode(digits: 4 | 6): string {
+  const min = 10 ** (digits - 1);
+  return String(randomInt(min, min * 10));
 }
 
 function isEmail(target: string): boolean {
@@ -95,11 +97,10 @@ class OtpService {
     }
 
     const ttl = input.ttlSeconds ?? DEFAULT_TTL[input.purpose];
-    const code = generateCode();
+    const emailTarget = isEmail(input.target);
+    const code = generateCode(emailTarget ? 4 : 6);
     const codeHash = await bcrypt.hash(code, 10);
     const expiresAt = new Date(now.getTime() + ttl * 1000);
-
-    const emailTarget = isEmail(input.target);
 
     // OTP code is sensitive + can't be re-derived (otp_codes holds only the hash),
     // so it rides inline in the outbox payload. Email subject/body are computed
