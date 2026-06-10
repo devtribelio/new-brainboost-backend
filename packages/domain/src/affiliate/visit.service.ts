@@ -2,7 +2,7 @@ import { prisma } from '@bb/db';
 import { logger } from '@bb/common/config/logger';
 
 export interface VisitInput {
-  programCode: string;
+  programCode?: string; // optional — app product-link (OneLink) carries only affCode, no program
   affiliatorCode: string;
   memberId?: string | null;
   // marketing
@@ -55,17 +55,23 @@ export class VisitService {
    */
   async logVisit(input: VisitInput): Promise<VisitLogResult> {
     try {
-      if (!input.programCode || !input.affiliatorCode) {
+      if (!input.affiliatorCode) {
         logger.warn({ input }, 'affiliate.visit.invalid_payload');
-        return { status: 'invalid', reason: 'programCode and affiliatorCode required' };
+        return { status: 'invalid', reason: 'affiliatorCode required' };
       }
 
+      // programCode is OPTIONAL: the app product-link flow (OneLink = product + affCode)
+      // carries no program. Supplied-but-unknown → invalid; omitted → a program-less
+      // visit (programId=null), which the per-purchase resolver still finds by memberId
+      // (mirrors the engine's "program is optional metadata", Option B).
       const [program, affiliator] = await Promise.all([
-        prisma.affiliateProgram.findUnique({ where: { code: input.programCode } }),
+        input.programCode
+          ? prisma.affiliateProgram.findUnique({ where: { code: input.programCode } })
+          : Promise.resolve(null),
         prisma.member.findUnique({ where: { affiliateCode: input.affiliatorCode } }),
       ]);
 
-      if (!program) {
+      if (input.programCode && !program) {
         logger.warn({ code: input.programCode }, 'affiliate.visit.unknown_program');
         return { status: 'invalid', reason: 'unknown program' };
       }
@@ -86,7 +92,7 @@ export class VisitService {
 
       const visit = await prisma.affiliateVisit.create({
         data: {
-          programId: program.id,
+          programId: program?.id ?? null,
           affiliatorMemberId: affiliator.id,
           memberId: input.memberId ?? null,
           utmSource: input.utmSource,
