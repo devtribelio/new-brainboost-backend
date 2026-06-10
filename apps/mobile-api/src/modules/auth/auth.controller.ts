@@ -162,7 +162,7 @@ export class AuthController {
 
   @ApiOperation({
     summary: 'Request email verification OTP',
-    description: 'Send a 6-digit OTP to the authenticated member\'s email. Requires auth.',
+    description: 'Send a 4-digit OTP to the authenticated member\'s email. Requires auth.',
   })
   @ApiResponse({ status: 200, type: () => GenericOkDto })
   requestVerifyEmail = async (req: Request, res: Response) => {
