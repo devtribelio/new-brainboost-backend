@@ -30,6 +30,12 @@ export function sanitizePhone(phone: string, prefix = '62'): string {
   if (!phone.startsWith('+')) {
     phone = `+${prefix}${phone}`;
   }
+  // Defensive: drop a leading 0 left after the country code, e.g. a national
+  // number kept its 0 and got the dial code prepended (+62 + 0812 → +620812).
+  // Indonesian mobile numbers never start with 0 after the country code.
+  if (phone.startsWith(`+${prefix}0`)) {
+    phone = `+${prefix}${phone.slice(`+${prefix}0`.length)}`;
+  }
   return phone;
 }
 
