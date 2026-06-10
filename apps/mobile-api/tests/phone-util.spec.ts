@@ -7,6 +7,8 @@ describe('sanitizePhone (legacy TBUtils::sanitizePhone parity)', () => {
     ['628111111111', '+628111111111'], // already prefix -> add +
     ['+628111111111', '+628111111111'], // already E.164 -> unchanged
     ['8111111111', '+628111111111'], // bare national -> prepend +62
+    ['+6208111111111', '+628111111111'], // defensive: dial code + national-with-0 -> drop the 0
+    ['6208111111111', '+628111111111'], // country code + leading 0 -> drop the 0
     ['', ''], // empty stays empty
   ];
   it.each(cases)('%s -> %s', (input, expected) => {
