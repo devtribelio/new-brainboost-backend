@@ -17,9 +17,9 @@ export class RegisterByPhoneDto {
   @Length(4, 100)
   name!: string;
 
-  @ApiProperty({ format: 'password', example: 'secret123', description: 'min 6 chars' })
+  @ApiProperty({ format: 'password', example: 'secret123', description: 'min 8 chars' })
   @IsString()
-  @MinLength(6)
+  @MinLength(8)
   password!: string;
 }
 
