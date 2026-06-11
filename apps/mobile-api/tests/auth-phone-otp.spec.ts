@@ -64,6 +64,67 @@ describe('phone OTP flow (register → verify)', () => {
     expect(member?.isPhoneVerified).toBe(true);
   });
 
+  it('normalizes phone on register: leading-0 / bare dial code variants are one identity', async () => {
+    const app = buildApp();
+
+    // Register with the messy form: leading 0 + dial code without '+'.
+    const reg = await request(app).post('/api/member/auth/registerByPhone').send({
+      phone: `0${PHONE}`,
+      phoneCode: '62',
+      name: 'Phone Tester',
+      password: 'secret123',
+    });
+    expect([200, 201]).toContain(reg.status);
+    // Stored + returned in canonical form.
+    expect(reg.body.data.phone).toBe(TARGET);
+    const member = await prisma.member.findUnique({ where: { phone: PHONE } });
+    expect(member).not.toBeNull();
+    expect(member!.phoneCode).toBe(PHONE_CODE);
+
+    // Verify with the OTP that was targeted at the canonical form, then the
+    // canonical-form variant must collide, not create a second member.
+    const code = ((await latestOtpOutbox())!.payload as { code: string }).code;
+    const verify = await request(app).post('/api/member/auth/validateOtpPhone').send({
+      memberId: String(reg.body.data.member_id),
+      verifyCode: code,
+    });
+    expect(verify.status).toBe(200);
+
+    const dup = await request(app).post('/api/member/auth/registerByPhone').send({
+      phone: PHONE,
+      phoneCode: PHONE_CODE,
+      name: 'Phone Tester 2',
+      password: 'secret123',
+    });
+    expect(dup.status).toBe(400);
+    expect(await prisma.member.count({ where: { phone: PHONE } })).toBe(1);
+  });
+
+  it('logs in by phone typed with leading 0 after phone-register', async () => {
+    const app = buildApp();
+
+    const reg = await request(app).post('/api/member/auth/registerByPhone').send({
+      phone: PHONE,
+      phoneCode: PHONE_CODE,
+      name: 'Phone Tester',
+      password: 'secret123',
+    });
+    const code = ((await latestOtpOutbox())!.payload as { code: string }).code;
+    await request(app)
+      .post('/api/member/auth/validateOtpPhone')
+      .send({ memberId: String(reg.body.data.member_id), verifyCode: code });
+
+    for (const username of [PHONE, `0${PHONE}`, `62${PHONE}`]) {
+      const login = await request(app).post('/api/member/oauth/token').send({
+        grant_type: 'password',
+        username,
+        password: 'secret123',
+      });
+      expect(login.status, `login as ${username}`).toBe(200);
+      expect(login.body.data.access_token).toBeTruthy();
+    }
+  });
+
   it('rejects a wrong OTP code', async () => {
     const app = buildApp();
 

@@ -36,6 +36,16 @@ log in freely.
    FE logs in via `/oauth/token` after validating. Per `docs/api-fe.md` #38 the email
    register endpoint is likely dead in the mobile app — verify with PM.
 
+7. **Phone canonical form (added 2026-06-11).** Both register paths normalize via
+   `normalizePhonePair` (`packages/common/src/utils/phone.util.ts`) BEFORE lookup/store:
+   `phoneCode` → `+<digits>`; `phone` → digits only, leading 0 dropped, else a duplicated
+   dial-code prefix stripped (`+62811…`/`62811…` → `811…`). Branch order mirrors legacy
+   `sanitizePhone` — a leading 0 marks the rest as national, so `0622…` keeps its area
+   code. `phoneTarget` normalizes defensively too (pre-normalization rows still hit the
+   canonical OTP target). Password-grant login matches phone-shaped usernames against
+   raw + canonical forms, so `08111…`/`628111…` log in to the member stored as `8111…`.
+   Concurrent same-phone register: loser of the create race gets the same 400.
+
 ## API surface
 
 | Endpoint | Change |

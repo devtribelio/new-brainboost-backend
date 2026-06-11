@@ -16,6 +16,7 @@ import {
   UnauthorizedException,
 } from '@bb/common/exceptions';
 import { assertUuid } from '@bb/common/utils/uuid.util';
+import { normalizePhonePair } from '@bb/common/utils/phone.util';
 import {
   SYNTHETIC_EMAIL_DOMAIN,
   isReusableUnverifiedMember,
@@ -251,6 +252,15 @@ export class AuthService {
 
     const passwordHash = await bcrypt.hash(dto.password, 10);
 
+    // Same canonical phone forms as registerByPhone (the DTO even documents
+    // E.164 in `phone` — strip the duplicated dial code before storing).
+    const normalizedPhone = dto.phone
+      ? normalizePhonePair(dto.phone, dto.phoneCode ?? '')
+      : null;
+    if (normalizedPhone && normalizedPhone.phone.length < 6) {
+      throw new BadRequestException('Invalid phone number');
+    }
+
     // Members are born inactive + unverified; the verify-email OTP step
     // (validateOtpEmail) flips isActive=true. Reuse path overwrites the
     // abandoned placeholder in place — code/affiliateCode stay as allocated.
@@ -259,8 +269,8 @@ export class AuthService {
       passwordHash,
       passwordAlgo: 'bcrypt',
       fullName: dto.fullName,
-      phone: dto.phone,
-      phoneCode: dto.phoneCode,
+      phone: normalizedPhone?.phone ?? dto.phone,
+      phoneCode: normalizedPhone ? normalizedPhone.phoneCode || null : dto.phoneCode,
       username: dto.username,
       gender: dto.gender,
       birthdate: dto.birthdate ? new Date(dto.birthdate) : null,
@@ -415,10 +425,21 @@ export class AuthService {
       throw new BadRequestException('username and password required for password grant');
     }
 
-    const username = dto.username.trim().toLowerCase();
+    const rawUsername = dto.username.trim();
+    const username = rawUsername.toLowerCase();
+    // Phone-shaped input also matches its canonical stored form, so a user who
+    // registered as '8111…' can log in typing '08111…' or '+628111…'. Raw form
+    // is kept in the OR for legacy rows stored before normalization.
+    const phoneCandidates = /^\+?[0-9]{6,20}$/.test(rawUsername)
+      ? [rawUsername, normalizePhonePair(rawUsername, '+62').phone]
+      : [];
     const member = await prisma.member.findFirst({
       where: {
-        OR: [{ email: username }, { username: dto.username }, { phone: dto.username }],
+        OR: [
+          { email: username },
+          { username: dto.username },
+          ...phoneCandidates.map((phone) => ({ phone })),
+        ],
       },
     });
 
@@ -758,8 +779,11 @@ export class AuthService {
 
   private phoneTarget(phoneCode: string, phone: string): string {
     // Composite key avoids collision between same local-number across dial
-    // codes (e.g. +62 8111... vs +1 8111...).
-    return `${phoneCode}${phone}`;
+    // codes (e.g. +62 8111... vs +1 8111...). Normalized defensively so rows
+    // stored before normalization ('62' / '08111…' / '+628111…') still yield
+    // the canonical '+628111…' target — issue and consume both go through here.
+    const pair = normalizePhonePair(phone, phoneCode);
+    return `${pair.phoneCode}${pair.phone}`;
   }
 
   private async resolveMemberByAnyId(input: string) {
@@ -773,9 +797,15 @@ export class AuthService {
   }
 
   async registerByPhone(dto: RegisterByPhoneDto) {
-    const target = this.phoneTarget(dto.phoneCode, dto.phone);
+    // Canonical forms BEFORE any lookup/store: '08111…' and '8111…' must be
+    // the same identity, and phoneCode must be uniform ('62' → '+62').
+    const { phone, phoneCode } = normalizePhonePair(dto.phone, dto.phoneCode);
+    if (phone.length < 6 || !phoneCode) {
+      throw new BadRequestException('Invalid phone number');
+    }
+    const target = this.phoneTarget(phoneCode, phone);
 
-    const existing = await prisma.member.findUnique({ where: { phone: dto.phone } });
+    const existing = await prisma.member.findUnique({ where: { phone } });
     if (existing && !isReusableUnverifiedMember(existing)) {
       throw new BadRequestException('Phone already registered');
     }
@@ -793,7 +823,7 @@ export class AuthService {
           passwordHash,
           passwordAlgo: 'bcrypt',
           fullName: dto.name,
-          phoneCode: dto.phoneCode,
+          phoneCode,
         },
         select: { id: true, legacyId: true, phone: true, phoneCode: true },
       });
@@ -804,23 +834,32 @@ export class AuthService {
       // — synthesize a placeholder so the row is creatable. FE prompts the user
       // to set a real email in the post-OTP profile step. Tracker follow-up:
       // relax email to nullable, or add a separate sentinel column.
-      const syntheticEmail = `phone-${dto.phoneCode.replace(/[^0-9]/g, '')}-${dto.phone}${SYNTHETIC_EMAIL_DOMAIN}`;
+      const syntheticEmail = `phone-${phoneCode.replace(/[^0-9]/g, '')}-${phone}${SYNTHETIC_EMAIL_DOMAIN}`;
 
-      member = await prisma.member.create({
-        data: {
-          email: syntheticEmail,
-          passwordHash,
-          fullName: dto.name,
-          phone: dto.phone,
-          phoneCode: dto.phoneCode,
-          code: memberCode,
-          affiliateCode: memberCode,
-          isActive: false,
-          isVerified: false,
-          isPhoneVerified: false,
-        },
-        select: { id: true, legacyId: true, phone: true, phoneCode: true },
-      });
+      try {
+        member = await prisma.member.create({
+          data: {
+            email: syntheticEmail,
+            passwordHash,
+            fullName: dto.name,
+            phone,
+            phoneCode,
+            code: memberCode,
+            affiliateCode: memberCode,
+            isActive: false,
+            isVerified: false,
+            isPhoneVerified: false,
+          },
+          select: { id: true, legacyId: true, phone: true, phoneCode: true },
+        });
+      } catch (err) {
+        // Concurrent register with the same phone: the loser of the race hits
+        // the unique constraint — surface the same 400 as the up-front check.
+        if (this.isUniqueViolation(err)) {
+          throw new BadRequestException('Phone already registered');
+        }
+        throw err;
+      }
     }
 
     await this.autoJoinCommunityNetworks(member.id);
