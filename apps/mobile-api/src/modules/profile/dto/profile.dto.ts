@@ -98,6 +98,12 @@ export class MemberProfileDto {
   })
   email?: string | null;
 
+  @ApiPropertyOptional({ example: true })
+  isEmailVerified?: boolean;
+
+  @ApiPropertyOptional({ example: true })
+  isPhoneVerified?: boolean;
+
   @ApiPropertyOptional({ nullable: true, example: '81234567890' })
   phoneNumber?: string | null;
 

@@ -30,7 +30,7 @@ interface NetworkMemberRow {
   phone: string | null;
   gender: string | null;
   birthdate: Date | null;
-  isVerified: boolean;
+  isEmailVerified: boolean;
   isPhoneVerified: boolean;
   createdAt: Date;
   profile?: {
@@ -56,7 +56,7 @@ export function serializeNetworkMemberLegacy(
     email: m.email,
     phone: m.phone,
     gender: m.gender,
-    isEmailVerified: m.isVerified ? 1 : 0,
+    isEmailVerified: m.isEmailVerified ? 1 : 0,
     isPhoneVerified: m.isPhoneVerified ? 1 : 0,
     postalCode: p?.postalCode ?? null,
     imageUrl: m.avatarUrl,

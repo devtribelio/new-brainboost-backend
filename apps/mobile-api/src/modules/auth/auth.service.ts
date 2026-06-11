@@ -148,7 +148,7 @@ export class AuthService {
         phone: true,
         username: true,
         isActive: true,
-        isVerified: true,
+        isEmailVerified: true,
         isPhoneVerified: true,
         scheduledDeletionAt: true,
       },
@@ -278,7 +278,7 @@ export class AuthService {
       utmSource: dto.utmSource,
       utmContent: dto.utmContent,
       isActive: false,
-      isVerified: false,
+      isEmailVerified: false,
       isPhoneVerified: false,
     };
 
@@ -622,7 +622,7 @@ export class AuthService {
     if (email) {
       const byEmail = await prisma.member.findUnique({ where: { email } });
       if (byEmail) {
-        if (!byEmail.isVerified) {
+        if (!byEmail.isEmailVerified) {
           throw new BadRequestException('email_in_use_unverified');
         }
         if (!byEmail.isActive) throw new UnauthorizedException('Member not active');
@@ -636,7 +636,7 @@ export class AuthService {
 
     // Create path: brand-new social account. Sentinel passwordHash + algo=social
     // so loginWithPassword (verifyPassword guard) can never authenticate it.
-    // isVerified:true — the provider attested the identity (Apple-verified even
+    // isEmailVerified:true — the provider attested the identity (Apple-verified even
     // when the email is null / a private relay).
     const sentinelHash = `${randomUUID()}${randomUUID()}`;
     const memberCode = await this.generateUniqueMemberCode();
@@ -651,7 +651,7 @@ export class AuthService {
           username,
           passwordHash: sentinelHash,
           passwordAlgo: 'social',
-          isVerified: true,
+          isEmailVerified: true,
           code: memberCode,
           affiliateCode: memberCode,
           registerFrom: clientType,
@@ -668,7 +668,7 @@ export class AuthService {
         if (email) {
           const retryEmail = await prisma.member.findUnique({ where: { email } });
           if (retryEmail) {
-            if (!retryEmail.isVerified) throw new BadRequestException('email_in_use_unverified');
+            if (!retryEmail.isEmailVerified) throw new BadRequestException('email_in_use_unverified');
             const linked = await prisma.member.update({
               where: { id: retryEmail.id },
               data: subData,
@@ -935,7 +935,7 @@ export class AuthService {
             code: memberCode,
             affiliateCode: memberCode,
             isActive: false,
-            isVerified: false,
+            isEmailVerified: false,
             isPhoneVerified: false,
           },
           select: { id: true, legacyId: true, phone: true, phoneCode: true },
@@ -1019,7 +1019,7 @@ export class AuthService {
     const member = await prisma.member.findUnique({ where: { id: memberId } });
     if (!member) throw new NotFoundException('Member not found');
     if (!member.email) throw new BadRequestException('Member has no email on file');
-    if (member.isVerified) throw new BadRequestException('Email already verified');
+    if (member.isEmailVerified) throw new BadRequestException('Email already verified');
 
     // issue() enqueues the email; bb-comms renders the branded OTP template
     // (default subject + message + the code). recipientName drives the greeting.
@@ -1037,13 +1037,13 @@ export class AuthService {
     const member = await prisma.member.findUnique({ where: { id: memberId } });
     if (!member) throw new NotFoundException('Member not found');
     if (!member.email) throw new BadRequestException('Member has no email on file');
-    if (member.isVerified) throw new BadRequestException('Email already verified');
+    if (member.isEmailVerified) throw new BadRequestException('Email already verified');
 
     await otpService.consume(member.email, code, 'verify-email');
 
     await prisma.member.update({
       where: { id: memberId },
-      data: { isVerified: true },
+      data: { isEmailVerified: true },
     });
 
     return { email: member.email, verified: true };
@@ -1086,7 +1086,7 @@ export class AuthService {
     if (!member.email) {
       throw new BadRequestException('Member has no email on file');
     }
-    if (member.isVerified) {
+    if (member.isEmailVerified) {
       throw new BadRequestException('Email already verified');
     }
 
@@ -1121,7 +1121,7 @@ export class AuthService {
       // Activation point of the email-register flow. Never resurrect an
       // account that is pending deletion (isActive=false for another reason).
       data: {
-        isVerified: true,
+        isEmailVerified: true,
         ...(member.scheduledDeletionAt === null ? { isActive: true } : {}),
       },
     });

@@ -46,6 +46,8 @@ export class ProfileController {
       image: member.avatarUrl,
       name: member.fullName,
       email: member.email,
+      isEmailVerified: member.isEmailVerified,
+      isPhoneVerified: member.isPhoneVerified,
       phoneNumber: member.phone,
       phoneCode: member.phoneCode,
       firstName: member.firstName,

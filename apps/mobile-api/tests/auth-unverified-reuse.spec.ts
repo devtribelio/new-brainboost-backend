@@ -192,7 +192,7 @@ describe('inactive-until-verified register flow', () => {
 
       const afterFirst = await prisma.member.findUnique({ where: { email: EMAIL } });
       expect(afterFirst?.isActive).toBe(false);
-      expect(afterFirst?.isVerified).toBe(false);
+      expect(afterFirst?.isEmailVerified).toBe(false);
 
       // Re-register with the same email → row reused, not duplicated.
       const reg2 = await request(app).post('/api/member/auth/register').send({
@@ -220,7 +220,7 @@ describe('inactive-until-verified register flow', () => {
       });
       expect(wrong.status).toBe(400);
 
-      // Correct code → isVerified + isActive.
+      // Correct code → isEmailVerified + isActive.
       const code = await latestOtpCode(EMAIL);
       const verify = await request(app).post('/api/member/auth/validateOtpEmail').send({
         memberId: rows[0]!.id,
@@ -229,7 +229,7 @@ describe('inactive-until-verified register flow', () => {
       expect(verify.status).toBe(200);
 
       const activated = await prisma.member.findUnique({ where: { email: EMAIL } });
-      expect(activated?.isVerified).toBe(true);
+      expect(activated?.isEmailVerified).toBe(true);
       expect(activated?.isActive).toBe(true);
 
       // Login works; verified row no longer reusable.

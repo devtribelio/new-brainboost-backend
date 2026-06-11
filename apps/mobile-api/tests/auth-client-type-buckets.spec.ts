@@ -19,7 +19,7 @@ describe('auth client-type session buckets', () => {
     // directly — OTP delivery is not what this suite tests.
     await prisma.member.update({
       where: { email },
-      data: { isActive: true, isVerified: true },
+      data: { isActive: true, isEmailVerified: true },
     });
   });
 

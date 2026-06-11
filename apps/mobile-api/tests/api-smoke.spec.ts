@@ -19,7 +19,7 @@ describe('API smoke (envelope { success, data, meta, error })', () => {
     // directly — OTP delivery is not what this suite tests.
     await prisma.member.update({
       where: { email },
-      data: { isActive: true, isVerified: true },
+      data: { isActive: true, isEmailVerified: true },
     });
     const res = await request(app)
       .post('/api/member/oauth/token')

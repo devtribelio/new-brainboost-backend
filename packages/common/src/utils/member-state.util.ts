@@ -1,7 +1,7 @@
 export interface MemberVerificationState {
   legacyId: number | null;
   isActive: boolean;
-  isVerified: boolean;
+  isEmailVerified: boolean;
   isPhoneVerified: boolean;
   scheduledDeletionAt: Date | null;
 }
@@ -26,7 +26,7 @@ export function isReusableUnverifiedMember(member: MemberVerificationState): boo
   return (
     member.legacyId === null &&
     !member.isActive &&
-    !member.isVerified &&
+    !member.isEmailVerified &&
     !member.isPhoneVerified &&
     member.scheduledDeletionAt === null
   );

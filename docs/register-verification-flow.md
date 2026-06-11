@@ -7,14 +7,14 @@ log in freely.
 ## Rules
 
 1. **Members are born inactive.** Both register paths create the member with
-   `isActive=false`, `isVerified=false`, `isPhoneVerified=false`. The verify-OTP step is
+   `isActive=false`, `isEmailVerified=false`, `isPhoneVerified=false`. The verify-OTP step is
    the activation point:
    - phone: `validateOtpPhone` → `isPhoneVerified=true, isActive=true`
-   - email: `validateOtpEmail` → `isVerified=true, isActive=true`
+   - email: `validateOtpEmail` → `isEmailVerified=true, isActive=true`
    - Activation never resurrects an account pending deletion (`scheduledDeletionAt != null`
      keeps `isActive=false`).
 2. **Reusable placeholder.** A row may be overwritten by a fresh register with the same
-   email/phone iff ALL of: `legacyId=null`, `isActive=false`, `isVerified=false`,
+   email/phone iff ALL of: `legacyId=null`, `isActive=false`, `isEmailVerified=false`,
    `isPhoneVerified=false`, `scheduledDeletionAt=null`. (`legacyId != null` = migrated
    legacy account: legacy had no OTP gate, so inactive legacy members would otherwise
    look like abandoned placeholders and be takeover-able.) Predicate: `isReusableUnverifiedMember`
@@ -73,7 +73,7 @@ log in freely.
 | `POST /auth/registerByPhone` | inactive member; reuse guard (no more dead-end "Phone already registered" for placeholders) |
 | `POST /auth/validateOtpPhone` | also sets `isActive=true` |
 | `POST /auth/requestVerificationEmail` | **new** — pre-login resend `verify-email` OTP by memberId (no auth), mirror of `requestVerificationPhone` |
-| `POST /auth/validateOtpEmail` | **new** — pre-login consume OTP by memberId, sets `isVerified=true, isActive=true` |
+| `POST /auth/validateOtpEmail` | **new** — pre-login consume OTP by memberId, sets `isEmailVerified=true, isActive=true` |
 | `POST /oauth/token` (password) | unverified placeholder → generic 401 (`403 ACCOUNT_NOT_VERIFIED` discriminator written but disabled) |
 | `POST /account/preRegistration` | dedup check ignores reusable placeholders |
 | `/auth/requestVerifyEmail`, `/auth/verifyEmail` | unchanged — post-login pair (phone-registered users adding a real email later) |

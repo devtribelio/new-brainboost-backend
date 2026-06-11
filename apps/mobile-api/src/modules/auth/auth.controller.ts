@@ -60,7 +60,7 @@ export class AuthController {
   @ApiOperation({
     summary: 'Register a new member (email flow)',
     description: [
-      'Creates an INACTIVE member (`isActive=false`, `isVerified=false`) and sends a',
+      'Creates an INACTIVE member (`isActive=false`, `isEmailVerified=false`) and sends a',
       '`verify-email` OTP. No tokens are issued — follow up with `/auth/validateOtpEmail`',
       'to activate, then log in via `/oauth/token`. Re-registering with an email/phone that',
       'belongs to an abandoned unverified register reuses that row instead of erroring.',
@@ -192,7 +192,7 @@ export class AuthController {
   };
 
   @ApiOperation({
-    summary: 'Validate email OTP — marks isVerified=true and activates the member',
+    summary: 'Validate email OTP — marks isEmailVerified=true and activates the member',
     description:
       'Pre-login counterpart of `/auth/verifyEmail`. Mirror of `/auth/validateOtpPhone`.',
   })
@@ -215,7 +215,7 @@ export class AuthController {
     return ok(res, result);
   };
 
-  @ApiOperation({ summary: 'Submit OTP and mark member.isVerified=true' })
+  @ApiOperation({ summary: 'Submit OTP and mark member.isEmailVerified=true' })
   @ApiBody({ type: () => VerifyEmailDto })
   @ApiResponse({ status: 200, type: () => GenericOkDto })
   verifyEmail = async (req: Request, res: Response) => {
