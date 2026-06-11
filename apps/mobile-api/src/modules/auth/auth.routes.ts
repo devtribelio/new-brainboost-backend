@@ -10,8 +10,10 @@ import {
   forgotPasswordRequestRateLimiter,
   forgotPasswordVerifyRateLimiter,
   requestVerificationPhoneRateLimiter,
+  requestVerificationEmailRateLimiter,
   validateOtpRateLimiter,
   validateOtpPhoneRateLimiter,
+  validateOtpEmailRateLimiter,
 } from '@bb/common/middlewares/rate-limit.middleware';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
@@ -24,6 +26,8 @@ import {
 import { RegisterByPhoneDto } from './dto/register-by-phone.dto';
 import { RequestVerificationPhoneDto } from './dto/request-verification-phone.dto';
 import { ValidateOtpPhoneDto } from './dto/validate-otp-phone.dto';
+import { RequestVerificationEmailDto } from './dto/request-verification-email.dto';
+import { ValidateOtpEmailDto } from './dto/validate-otp-email.dto';
 import { VerifyEmailDto } from './dto/verify-email.dto';
 import { bindRoute } from '@bb/common/openapi/route-binder';
 
@@ -112,6 +116,25 @@ export function authRoutes(): Router {
     path: '/auth/validateOtpPhone',
     handlerKey: 'validateOtpPhone',
     middlewares: [validateOtpPhoneRateLimiter, validateDto(ValidateOtpPhoneDto)],
+  });
+
+  // Email-register flow: pre-login OTP resend + validate (mirror of the phone
+  // pair above; no authGuard — the member is inactive until validated).
+  bindRoute({
+    router,
+    controller: ctrl,
+    method: 'post',
+    path: '/auth/requestVerificationEmail',
+    handlerKey: 'requestVerificationEmail',
+    middlewares: [requestVerificationEmailRateLimiter, validateDto(RequestVerificationEmailDto)],
+  });
+  bindRoute({
+    router,
+    controller: ctrl,
+    method: 'post',
+    path: '/auth/validateOtpEmail',
+    handlerKey: 'validateOtpEmail',
+    middlewares: [validateOtpEmailRateLimiter, validateDto(ValidateOtpEmailDto)],
   });
 
   bindRoute({

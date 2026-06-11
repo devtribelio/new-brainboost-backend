@@ -14,6 +14,11 @@ import {
 } from './dto/register-by-phone.dto';
 import { RequestVerificationPhoneDto } from './dto/request-verification-phone.dto';
 import { ValidateOtpPhoneDto } from './dto/validate-otp-phone.dto';
+import {
+  EmailVerificationResponseDto,
+  RequestVerificationEmailDto,
+} from './dto/request-verification-email.dto';
+import { ValidateOtpEmailDto } from './dto/validate-otp-email.dto';
 import { VerifyEmailDto } from './dto/verify-email.dto';
 import { ok, okCreated } from '@bb/common/utils/response.util';
 import type { AuthenticatedRequest } from '@bb/common/interfaces/authenticated-request';
@@ -52,13 +57,21 @@ export class AuthController {
     return ok(res, tokens);
   };
 
-  @ApiOperation({ summary: 'Register a new member' })
+  @ApiOperation({
+    summary: 'Register a new member (email flow)',
+    description: [
+      'Creates an INACTIVE member (`isActive=false`, `isVerified=false`) and sends a',
+      '`verify-email` OTP. No tokens are issued — follow up with `/auth/validateOtpEmail`',
+      'to activate, then log in via `/oauth/token`. Re-registering with an email/phone that',
+      'belongs to an abandoned unverified register reuses that row instead of erroring.',
+    ].join(' '),
+  })
   @ApiBody({ type: () => RegisterDto })
-  @ApiResponse({ status: 201, description: 'Registered', type: () => TokenBundleDto })
+  @ApiResponse({ status: 201, description: 'Registered, OTP sent', type: () => EmailVerificationResponseDto })
   @ApiResponse({ status: 400, description: 'Validation error', type: () => ErrorEnvelopeDto, envelope: 'none' })
   register = async (req: Request, res: Response) => {
-    const tokens = await this.authService.register(req.body as RegisterDto);
-    return okCreated(res, tokens);
+    const result = await this.authService.register(req.body as RegisterDto);
+    return okCreated(res, result);
   };
 
   @ApiOperation({
@@ -152,11 +165,41 @@ export class AuthController {
     return ok(res, result);
   };
 
-  @ApiOperation({ summary: 'Validate phone OTP and mark member.isPhoneVerified=true' })
+  @ApiOperation({
+    summary: 'Validate phone OTP — marks isPhoneVerified=true and activates the member',
+  })
   @ApiBody({ type: () => ValidateOtpPhoneDto })
   @ApiResponse({ status: 200, type: () => GenericOkDto })
   validateOtpPhone = async (req: Request, res: Response) => {
     const result = await this.authService.validateOtpPhone(req.body as ValidateOtpPhoneDto);
+    return ok(res, result);
+  };
+
+  @ApiOperation({
+    summary: 'Re-issue email verification OTP (pre-login, by memberId)',
+    description: [
+      'Resend the `verify-email` OTP for an unverified member from the email-register flow.',
+      'No auth — the member cannot log in yet. Mirror of `/auth/requestVerificationPhone`.',
+    ].join(' '),
+  })
+  @ApiBody({ type: () => RequestVerificationEmailDto })
+  @ApiResponse({ status: 200, type: () => EmailVerificationResponseDto })
+  requestVerificationEmail = async (req: Request, res: Response) => {
+    const result = await this.authService.requestVerificationEmail(
+      req.body as RequestVerificationEmailDto,
+    );
+    return ok(res, result);
+  };
+
+  @ApiOperation({
+    summary: 'Validate email OTP — marks isVerified=true and activates the member',
+    description:
+      'Pre-login counterpart of `/auth/verifyEmail`. Mirror of `/auth/validateOtpPhone`.',
+  })
+  @ApiBody({ type: () => ValidateOtpEmailDto })
+  @ApiResponse({ status: 200, type: () => GenericOkDto })
+  validateOtpEmail = async (req: Request, res: Response) => {
+    const result = await this.authService.validateOtpEmail(req.body as ValidateOtpEmailDto);
     return ok(res, result);
   };
 

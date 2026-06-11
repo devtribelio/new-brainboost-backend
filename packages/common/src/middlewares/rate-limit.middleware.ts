@@ -49,11 +49,13 @@ function makeRateLimiter(limit: number, windowMs: number = WINDOW_MS): RequestHa
 // --- OTP-guess endpoints — lowest budget; code-guessing is the attack -------
 export const validateOtpRateLimiter: RequestHandler = makeRateLimiter(3);
 export const validateOtpPhoneRateLimiter: RequestHandler = makeRateLimiter(3);
+export const validateOtpEmailRateLimiter: RequestHandler = makeRateLimiter(3);
 export const forgotPasswordVerifyRateLimiter: RequestHandler = makeRateLimiter(3);
 
 // --- OTP/email SEND endpoints — medium budget; abuse = spamming a victim ----
 export const forgotPasswordRequestRateLimiter: RequestHandler = makeRateLimiter(10);
 export const requestVerificationPhoneRateLimiter: RequestHandler = makeRateLimiter(10);
+export const requestVerificationEmailRateLimiter: RequestHandler = makeRateLimiter(10);
 
 // --- Account creation -------------------------------------------------------
 export const registerRateLimiter: RequestHandler = makeRateLimiter(15);

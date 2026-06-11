@@ -15,6 +15,12 @@ describe('auth client-type session buckets', () => {
       fullName: 'Bucket Tester',
     });
     expect([200, 201]).toContain(res.status);
+    // Register creates the member inactive (verify-email gate); activate
+    // directly — OTP delivery is not what this suite tests.
+    await prisma.member.update({
+      where: { email },
+      data: { isActive: true, isVerified: true },
+    });
   });
 
   afterAll(async () => {

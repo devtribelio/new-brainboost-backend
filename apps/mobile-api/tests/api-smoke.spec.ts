@@ -15,6 +15,12 @@ describe('API smoke (envelope { success, data, meta, error })', () => {
       password,
       fullName: 'Smoke Tester',
     });
+    // Register creates the member inactive (verify-email gate); activate
+    // directly — OTP delivery is not what this suite tests.
+    await prisma.member.update({
+      where: { email },
+      data: { isActive: true, isVerified: true },
+    });
     const res = await request(app)
       .post('/api/member/oauth/token')
       .send({ grant_type: 'password', username: email, password });

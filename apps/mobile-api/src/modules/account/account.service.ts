@@ -7,6 +7,7 @@ import {
   UnauthorizedException,
 } from '@bb/common/exceptions';
 import { otpService } from '@bb/common/services/otp.service';
+import { isReusableUnverifiedMember } from '@bb/common/utils/member-state.util';
 import type { PreRegistrationDto } from './dto/pre-registration.dto';
 import type { LogoutDto } from './dto/logout.dto';
 import type { ChangePasswordDto } from './dto/change-password.dto';
@@ -78,12 +79,22 @@ export class AccountService {
       throw new BadRequestException('password and confirmation do not match');
     }
 
-    const existing = await prisma.member.findFirst({
+    // Reusable unverified placeholders (abandoned-at-OTP registers) must not
+    // block a fresh pre-registration — the register step will reuse their row.
+    const existing = await prisma.member.findMany({
       where: {
         OR: [{ email: dto.email }, { phone: dto.phone }],
       },
+      select: {
+        isActive: true,
+        isVerified: true,
+        isPhoneVerified: true,
+        scheduledDeletionAt: true,
+      },
     });
-    if (existing) throw new BadRequestException('Email or phone already registered');
+    if (existing.some((m) => !isReusableUnverifiedMember(m))) {
+      throw new BadRequestException('Email or phone already registered');
+    }
 
     let affiliateMemberId: string | undefined;
     if (dto.affiliateCode) {
