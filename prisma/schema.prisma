@@ -30,7 +30,7 @@ model Member {
   coverUrl             String?   @map("cover_url")
   bio                  String?
   isActive             Boolean   @default(true) @map("is_active")
-  isVerified           Boolean   @default(false) @map("is_verified")
+  isEmailVerified      Boolean   @default(false) @map("is_email_verified")
   isPhoneVerified      Boolean   @default(false) @map("is_phone_verified")
   isMuted              Boolean   @default(false) @map("is_muted")
   isBanned             Boolean   @default(false) @map("is_banned")

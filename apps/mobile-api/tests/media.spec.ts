@@ -57,7 +57,7 @@ beforeAll(async () => {
       email: enrolledEmail,
       passwordHash: await bcrypt.hash(PASSWORD, 4),
       fullName: 'Media Enrolled',
-      isVerified: true,
+      isEmailVerified: true,
     },
   });
   const stranger = await prisma.member.create({
@@ -65,7 +65,7 @@ beforeAll(async () => {
       email: strangerEmail,
       passwordHash: await bcrypt.hash(PASSWORD, 4),
       fullName: 'Media Stranger',
-      isVerified: true,
+      isEmailVerified: true,
     },
   });
   enrolledMemberId = enrolled.id;

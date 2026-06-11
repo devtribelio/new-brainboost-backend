@@ -60,7 +60,7 @@ export class NetworkService {
             phone: true,
             gender: true,
             birthdate: true,
-            isVerified: true,
+            isEmailVerified: true,
             isPhoneVerified: true,
             createdAt: true,
             code: true,

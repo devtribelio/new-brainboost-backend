@@ -89,7 +89,7 @@ export class AccountService {
       select: {
         legacyId: true,
         isActive: true,
-        isVerified: true,
+        isEmailVerified: true,
         isPhoneVerified: true,
         scheduledDeletionAt: true,
       },

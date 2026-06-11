@@ -18,8 +18,8 @@ export function serializeMemberFull(m: Member): Record<string, unknown> {
     gender: m.gender,
     birthdate: m.birthdate,
     isActive: m.isActive,
-    isVerified: m.isVerified,
-    isEmailVerified: m.isVerified, // legacy alias
+    isVerified: m.isEmailVerified, // legacy alias (FE pre-rename)
+    isEmailVerified: m.isEmailVerified,
     isPhoneVerified: m.isPhoneVerified,
     dateRegister: m.createdAt, // legacy alias
     createdAt: m.createdAt,

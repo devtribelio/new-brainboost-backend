@@ -300,7 +300,7 @@ async function migrateMembers(legacy: Connection) {
         avatarUrl: nonEmpty(r.image_url),
         bio: nonEmpty(r.biography),
         isActive: bool(r.is_active),
-        isVerified: email ? bool(r.is_email_verified) : false,
+        isEmailVerified: email ? bool(r.is_email_verified) : false,
         createdAt: date(r.date_register) ?? new Date(),
       });
     }

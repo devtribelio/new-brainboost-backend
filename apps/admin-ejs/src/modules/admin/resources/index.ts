@@ -26,7 +26,7 @@ const memberResource: ResourceConfig = {
     { field: 'fullName', label: 'Full Name' },
     { field: 'phone', label: 'Phone' },
     { field: 'isActive', label: 'Active' },
-    { field: 'isVerified', label: 'Verified' },
+    { field: 'isEmailVerified', label: 'Verified' },
     { field: 'createdAt', label: 'Created' },
   ],
   fields: [
@@ -45,7 +45,7 @@ const memberResource: ResourceConfig = {
     { name: 'avatarUrl', label: 'Avatar URL', type: 'text' },
     { name: 'bio', label: 'Bio', type: 'textarea' },
     { name: 'isActive', label: 'Is Active', type: 'boolean' },
-    { name: 'isVerified', label: 'Is Verified', type: 'boolean' },
+    { name: 'isEmailVerified', label: 'Is Verified', type: 'boolean' },
   ],
 };
 

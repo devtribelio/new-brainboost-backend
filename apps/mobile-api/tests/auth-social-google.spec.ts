@@ -103,7 +103,7 @@ describe('auth social google grant', () => {
     expect(res.body.error.message).toBe('google_email_not_verified');
   });
 
-  it('new email creates member with isVerified=true and passwordAlgo=social', async () => {
+  it('new email creates member with isEmailVerified=true and passwordAlgo=social', async () => {
     const email = trackedEmail('create');
     const sub = `gs-${Date.now()}-create`;
     setGoogleResponse({ sub, email, email_verified: true, name: 'Creator' });
@@ -117,7 +117,7 @@ describe('auth social google grant', () => {
     expect(res.status).toBe(200);
     const member = await prisma.member.findUnique({ where: { email } });
     expect(member).toBeTruthy();
-    expect(member!.isVerified).toBe(true);
+    expect(member!.isEmailVerified).toBe(true);
     expect(member!.passwordAlgo).toBe('social');
     expect(member!.googleSub).toBe(sub);
   });
@@ -156,7 +156,7 @@ describe('auth social google grant', () => {
 
     await prisma.member.update({
       where: { email },
-      data: { isVerified: true, isActive: true },
+      data: { isEmailVerified: true, isActive: true },
     });
 
     const sub = `gs-${Date.now()}-link`;
@@ -181,7 +181,7 @@ describe('auth social google grant', () => {
       .post('/api/member/auth/register')
       .send({ email, password, fullName: 'Unverified Local' });
     expect([200, 201]).toContain(reg.status);
-    // Member.isVerified default = false; do NOT flip.
+    // Member.isEmailVerified default = false; do NOT flip.
 
     setGoogleResponse({
       sub: `gs-${Date.now()}-take`,
