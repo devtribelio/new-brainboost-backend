@@ -46,9 +46,9 @@ const DEFAULT_TTL: Record<OtpPurpose, number> = {
   'verify-email': 10 * 60,
 };
 
-// Email OTP is 4 digits; phone (WhatsApp) OTP stays 6 to match legacy.
-function generateCode(digits: 4 | 6): string {
-  const min = 10 ** (digits - 1);
+// 6 digits on every channel (email used to be 4 — unified 2026-06-11).
+function generateCode(): string {
+  const min = 10 ** 5;
   return String(randomInt(min, min * 10));
 }
 
@@ -98,7 +98,7 @@ class OtpService {
 
     const ttl = input.ttlSeconds ?? DEFAULT_TTL[input.purpose];
     const emailTarget = isEmail(input.target);
-    const code = generateCode(emailTarget ? 4 : 6);
+    const code = generateCode();
     const codeHash = await bcrypt.hash(code, 10);
     const expiresAt = new Date(now.getTime() + ttl * 1000);
 

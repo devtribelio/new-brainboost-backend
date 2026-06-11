@@ -12,7 +12,7 @@ export class ForgotPasswordVerificationDto {
   @IsEmail()
   email!: string;
 
-  @ApiProperty({ description: '4-digit OTP', example: '1234' })
+  @ApiProperty({ description: '6-digit OTP', example: '123456' })
   @IsString()
   @Length(4, 8)
   code!: string;
