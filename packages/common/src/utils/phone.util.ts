@@ -40,6 +40,53 @@ export function sanitizePhone(phone: string, prefix = '62'): string {
 }
 
 /**
+ * Canonical dial-code form: `+<digits>` (`'62'`, `' +62 '` → `'+62'`).
+ * Empty/garbage input collapses to `''`.
+ */
+export function normalizeDialCode(code: string): string {
+  const digits = code.replace(/[^0-9]/g, '');
+  return digits ? `+${digits}` : '';
+}
+
+/**
+ * Canonical national-number form: digits only, leading zeros dropped
+ * (`'08111…'` → `'8111…'`). The schema stores `phone` WITHOUT the dial code;
+ * a kept leading 0 would create a second identity for the same number and
+ * break exact-match lookups (unique constraint, login by phone).
+ */
+export function normalizeNationalPhone(phone: string): string {
+  return phone.replace(/[^0-9]/g, '').replace(/^0+/, '');
+}
+
+/**
+ * Canonicalize a stored `(phone, phoneCode)` pair:
+ *   - `phoneCode` → `'+<digits>'`
+ *   - `phone`     → digits only; a leading 0 is dropped, OTHERWISE a duplicated
+ *                   dial code is stripped (`'+628111…'`/`'628111…'` with code
+ *                   `+62` → `'8111…'`).
+ *
+ * Branch order mirrors legacy `sanitizePhone`: a leading 0 marks the rest as
+ * national (so `0622…` Pematangsiantar keeps its `622` area code), only a
+ * 0-less number starting with the dial-code digits counts as E.164-prefixed.
+ */
+export function normalizePhonePair(
+  phone: string,
+  phoneCode: string,
+): { phone: string; phoneCode: string } {
+  const code = normalizeDialCode(phoneCode);
+  let national = phone.replace(/[^0-9]/g, '');
+  if (national.startsWith('0')) {
+    national = national.replace(/^0+/, '');
+  } else {
+    const codeDigits = code.slice(1);
+    if (codeDigits && national.startsWith(codeDigits)) {
+      national = national.slice(codeDigits.length).replace(/^0+/, '');
+    }
+  }
+  return { phone: national, phoneCode: code };
+}
+
+/**
  * True when the (sanitized) number is a plausible E.164 number:
  * `+` followed by 7–15 digits. Mirrors legacy regex
  * `^\+(?:[0-9]){6,14}[0-9]$`.

@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsString, Length, Matches, MinLength } from 'class-validator';
+import { IsString, Length, Matches, MinLength } from 'class-validator';
 import { ApiProperty } from '@bb/common/openapi/decorators';
 
 export class RegisterByPhoneDto {
@@ -9,7 +9,7 @@ export class RegisterByPhoneDto {
 
   @ApiProperty({ example: '+62', description: 'Country dial code' })
   @IsString()
-  @IsNotEmpty()
+  @Matches(/^\+?[0-9]{1,4}$/, { message: 'phoneCode must be 1-4 digits, optional leading +' })
   phoneCode!: string;
 
   @ApiProperty({ example: 'Jane Doe', description: '4-100 chars' })
