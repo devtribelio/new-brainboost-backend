@@ -80,6 +80,8 @@ describe('phone OTP flow (register → verify)', () => {
     const member = await prisma.member.findUnique({ where: { phone: PHONE } });
     expect(member).not.toBeNull();
     expect(member!.phoneCode).toBe(PHONE_CODE);
+    // No synthetic placeholder email — phone-register rows are born email-less.
+    expect(member!.email).toBeNull();
 
     // Verify with the OTP that was targeted at the canonical form, then the
     // canonical-form variant must collide, not create a second member.

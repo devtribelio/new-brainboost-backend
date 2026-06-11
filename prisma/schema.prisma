@@ -15,7 +15,7 @@ model Member {
   id                   String    @id @default(uuid(7)) @db.Uuid
   legacyId             Int?      @unique @map("legacy_id")
   code                 String?   @unique
-  email                String    @unique
+  email                String?   @unique
   username             String?   @unique
   phone                String?   @unique
   phoneCode            String?   @map("phone_code")

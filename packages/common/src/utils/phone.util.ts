@@ -87,6 +87,16 @@ export function normalizePhonePair(
 }
 
 /**
+ * Canonical OTP target for a phone-channel OTP (`otp_codes.target` /
+ * `notification_outbox.recipient`): `'+628111…'`. Issue and consume must both
+ * build the target through here or the codes never match.
+ */
+export function otpPhoneTarget(phoneCode: string, phone: string): string {
+  const pair = normalizePhonePair(phone, phoneCode);
+  return `${pair.phoneCode}${pair.phone}`;
+}
+
+/**
  * True when the (sanitized) number is a plausible E.164 number:
  * `+` followed by 7–15 digits. Mirrors legacy regex
  * `^\+(?:[0-9]){6,14}[0-9]$`.

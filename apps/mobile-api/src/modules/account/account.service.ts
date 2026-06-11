@@ -8,6 +8,7 @@ import {
 } from '@bb/common/exceptions';
 import { otpService } from '@bb/common/services/otp.service';
 import { isReusableUnverifiedMember } from '@bb/common/utils/member-state.util';
+import { otpPhoneTarget } from '@bb/common/utils/phone.util';
 import type { PreRegistrationDto } from './dto/pre-registration.dto';
 import type { LogoutDto } from './dto/logout.dto';
 import type { ChangePasswordDto } from './dto/change-password.dto';
@@ -86,6 +87,7 @@ export class AccountService {
         OR: [{ email: dto.email }, { phone: dto.phone }],
       },
       select: {
+        legacyId: true,
         isActive: true,
         isVerified: true,
         isPhoneVerified: true,
@@ -229,6 +231,21 @@ export class AccountService {
     };
   }
 
+  /**
+   * Where the delete-account OTP goes: email when the member has one,
+   * otherwise their phone (WhatsApp) — phone-registered members have email
+   * NULL. otpService routes channel by target shape ('@' → email).
+   */
+  private deleteAccountOtpTarget(member: {
+    email: string | null;
+    phone: string | null;
+    phoneCode: string | null;
+  }): string {
+    if (member.email) return member.email;
+    if (member.phone && member.phoneCode) return otpPhoneTarget(member.phoneCode, member.phone);
+    throw new BadRequestException('Member has no email or phone on file');
+  }
+
   async requestDeleteAccount(memberId: string, dto: RequestDeleteAccountDto) {
     if (dto.agree === false) {
       throw new BadRequestException('Confirmation required to proceed');
@@ -237,8 +254,9 @@ export class AccountService {
     if (!member) throw new NotFoundException('Member not found');
 
     await otpService.issue({
-      target: member.email,
+      target: this.deleteAccountOtpTarget(member),
       purpose: 'delete-account',
+      recipientName: member.fullName ?? undefined,
     });
     return { memberId };
   }
@@ -247,7 +265,7 @@ export class AccountService {
     const member = await prisma.member.findUnique({ where: { id: memberId } });
     if (!member) throw new NotFoundException('Member not found');
 
-    await otpService.consume(member.email, dto.otpCode, 'delete-account');
+    await otpService.consume(this.deleteAccountOtpTarget(member), dto.otpCode, 'delete-account');
 
     const scheduledDeletionAt = new Date(
       Date.now() + SCHEDULED_DELETION_DAYS * 24 * 60 * 60 * 1000,

@@ -14,8 +14,10 @@ log in freely.
    - Activation never resurrects an account pending deletion (`scheduledDeletionAt != null`
      keeps `isActive=false`).
 2. **Reusable placeholder.** A row may be overwritten by a fresh register with the same
-   email/phone iff ALL of: `isActive=false`, `isVerified=false`, `isPhoneVerified=false`,
-   `scheduledDeletionAt=null`. Predicate: `isReusableUnverifiedMember`
+   email/phone iff ALL of: `legacyId=null`, `isActive=false`, `isVerified=false`,
+   `isPhoneVerified=false`, `scheduledDeletionAt=null`. (`legacyId != null` = migrated
+   legacy account: legacy had no OTP gate, so inactive legacy members would otherwise
+   look like abandoned placeholders and be takeover-able.) Predicate: `isReusableUnverifiedMember`
    (`packages/common/src/utils/member-state.util.ts`). This is what lets a user who closed
    the app at the OTP screen register again instead of hitting "already registered".
    Reuse updates name/password/etc in place; `code`/`affiliateCode` stay as allocated;
@@ -45,6 +47,23 @@ log in freely.
    canonical OTP target). Password-grant login matches phone-shaped usernames against
    raw + canonical forms, so `08111…`/`628111…` log in to the member stored as `8111…`.
    Concurrent same-phone register: loser of the create race gets the same 400.
+
+8. **Email is nullable — no synthetic placeholder (added 2026-06-11).** `Member.email`
+   is `String? @unique` (migration `20260611000000_member_email_nullable`); phone-register
+   creates the row with `email = NULL`. The old `phone-…@phone.brainboost.local` synthetic
+   scheme (`SYNTHETIC_EMAIL_DOMAIN` / `isSyntheticEmail`) is removed; the migration nulls
+   existing synthetic rows. Consequences:
+   - Email-OTP endpoints guard `!member.email` → 400 "Member has no email on file"
+     (was: `isSyntheticEmail` check on the pre-login pair only — post-login
+     `requestVerifyEmail`/`verifyEmail` silently emailed the synthetic address).
+   - Delete-account OTP falls back to the phone target (WhatsApp) when email is NULL —
+     `deleteAccountOtpTarget` in `account.service.ts`; channel is routed by target shape.
+   - JWT access-token claim stays `email: string` with `''` for email-less members
+     (same convention as the anon client-credentials token).
+   - Serializers now emit `email: null` for phone-only members — **FE must null-check**
+     (was an ugly-but-non-null synthetic string). Confirm with FE/PM.
+   - `scripts/migrate-from-legacy.ts` migrates email-less legacy members too (email OR
+     phone required); phone is stored canonical via `normalizePhonePair` + `phoneCode`.
 
 ## API surface
 

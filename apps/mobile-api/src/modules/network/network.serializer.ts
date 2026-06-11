@@ -20,7 +20,7 @@ export function serializeNetwork(
 interface NetworkMemberRow {
   id: string;
   legacyId: number | null;
-  email: string;
+  email: string | null;
   fullName: string | null;
   firstName: string | null;
   lastName: string | null;

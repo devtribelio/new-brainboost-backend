@@ -12,6 +12,7 @@
 import 'dotenv/config';
 import type { Connection, RowDataPacket } from 'mysql2/promise';
 import { PrismaClient } from '@prisma/client';
+import { normalizePhonePair } from '@bb/common/utils/phone.util';
 import { connectLegacyDb } from './legacy-db';
 
 const BATCH = Number.parseInt(process.env.MIGRATE_BATCH ?? '1000', 10);
@@ -233,10 +234,12 @@ async function migrateBanners(legacy: Connection) {
 
 async function migrateMembers(legacy: Connection) {
   log('members: streaming');
-  // Distinct emails: keep lowest member_id per email
+  // Member.email is nullable: email-less legacy members migrate too, as long
+  // as they have SOME identity (email or phone). Lowest member_id wins a
+  // duplicate email/phone.
   const baseSql = `SELECT member_id, email, name, first_name, last_name, phone,
     password, image_url, biography, is_active, is_email_verified, date_register
-    FROM member WHERE email <> '' AND email IS NOT NULL
+    FROM member WHERE ((email <> '' AND email IS NOT NULL) OR (phone <> '' AND phone IS NOT NULL))
       AND password IS NOT NULL AND password <> ''
       AND status=1`;
 
@@ -252,22 +255,35 @@ async function migrateMembers(legacy: Connection) {
     const data: any[] = [];
     for (const r of rows as any[]) {
       scanned++;
-      const email = nonEmpty(r.email)?.toLowerCase();
-      if (!email) {
+      const email = nonEmpty(r.email)?.toLowerCase() ?? null;
+
+      // Canonical (phone, phoneCode) — the same forms the API stores (rules
+      // #7/#8, docs/register-verification-flow.md). Legacy kept E.164-ish
+      // strings ('+628…'/'628…'/'08…'); too short after canonicalizing = junk.
+      const rawPhone = nonEmpty(r.phone);
+      const pair = rawPhone ? normalizePhonePair(rawPhone, '+62') : null;
+      const canonicalPhone = pair && pair.phone.length >= 6 ? pair.phone : null;
+
+      if (!email && !canonicalPhone) {
         skipped++;
         continue;
       }
-      if (seenEmail.has(email)) {
+      if (email && seenEmail.has(email)) {
         skipped++;
         continue;
       }
-      const phone = nonEmpty(r.phone);
-      const phoneKey = phone ?? '';
-      if (phone && seenPhone.has(phoneKey)) {
-        // dup phone — drop phone but still insert member
+      // Duplicate phone: drop the phone but keep the member when an email
+      // remains; a phone-only row with a dup phone has no identity left — skip.
+      let phone = canonicalPhone;
+      if (phone && seenPhone.has(phone)) {
+        if (!email) {
+          skipped++;
+          continue;
+        }
+        phone = null;
       }
-      seenEmail.add(email);
-      if (phone) seenPhone.add(phoneKey);
+      if (email) seenEmail.add(email);
+      if (phone) seenPhone.add(phone);
 
       const fullName =
         nonEmpty(r.name) ??
@@ -276,14 +292,15 @@ async function migrateMembers(legacy: Connection) {
       data.push({
         legacyId: r.member_id as number,
         email,
-        phone: seenPhone.size === 0 || !phone ? phone : phone, // simplified
+        phone,
+        phoneCode: phone ? pair!.phoneCode : null,
         fullName,
         passwordHash: String(r.password),
         passwordAlgo: 'legacy',
         avatarUrl: nonEmpty(r.image_url),
         bio: nonEmpty(r.biography),
         isActive: bool(r.is_active),
-        isVerified: bool(r.is_email_verified),
+        isVerified: email ? bool(r.is_email_verified) : false,
         createdAt: date(r.date_register) ?? new Date(),
       });
     }
@@ -302,11 +319,16 @@ async function migrateMembers(legacy: Connection) {
             });
             inserted++;
           } catch (e) {
-            // duplicate phone -> retry without phone
+            // Duplicate phone -> retry without phone, but only when an email
+            // remains; a phone-only row would be left with no identity.
+            if (!row.email) {
+              skipped++;
+              continue;
+            }
             try {
               await prisma.member.upsert({
                 where: { legacyId: row.legacyId },
-                create: { ...row, phone: null },
+                create: { ...row, phone: null, phoneCode: null },
                 update: {},
               });
               inserted++;

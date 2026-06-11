@@ -146,6 +146,34 @@ describe('inactive-until-verified register flow', () => {
       });
       expect(reg.status).toBe(400);
     });
+
+    it('does not reuse a migrated legacy row, even when inactive and unverified', async () => {
+      const app = buildApp();
+
+      // Inactive legacy member: legacy had no OTP gate, so the flags look like
+      // an abandoned placeholder — legacyId must block the takeover.
+      await request(app).post('/api/member/auth/registerByPhone').send({
+        phone: PHONE,
+        phoneCode: PHONE_CODE,
+        name: 'Legacy User',
+        password: 'secret123',
+      });
+      await prisma.member.update({
+        where: { phone: PHONE },
+        data: { legacyId: 99887766 },
+      });
+
+      const reg = await request(app).post('/api/member/auth/registerByPhone').send({
+        phone: PHONE,
+        phoneCode: PHONE_CODE,
+        name: 'Hijacker',
+        password: 'hijack123',
+      });
+      expect(reg.status).toBe(400);
+
+      const member = await prisma.member.findUnique({ where: { phone: PHONE } });
+      expect(member!.fullName).toBe('Legacy User');
+    });
   });
 
   describe('email path', () => {

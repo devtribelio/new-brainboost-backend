@@ -16,12 +16,8 @@ import {
   UnauthorizedException,
 } from '@bb/common/exceptions';
 import { assertUuid } from '@bb/common/utils/uuid.util';
-import { normalizePhonePair } from '@bb/common/utils/phone.util';
-import {
-  SYNTHETIC_EMAIL_DOMAIN,
-  isReusableUnverifiedMember,
-  isSyntheticEmail,
-} from '@bb/common/utils/member-state.util';
+import { normalizePhonePair, otpPhoneTarget } from '@bb/common/utils/phone.util';
+import { isReusableUnverifiedMember } from '@bb/common/utils/member-state.util';
 import { otpService } from '@bb/common/services/otp.service';
 import type { GoogleIdTokenPayload } from './social/google-verifier';
 import type { LoginDto } from './dto/login.dto';
@@ -146,6 +142,7 @@ export class AuthService {
       },
       select: {
         id: true,
+        legacyId: true,
         email: true,
         phone: true,
         username: true,
@@ -370,15 +367,15 @@ export class AuthService {
     // No tokens at register: the member is inactive until the verify-email OTP
     // is validated (validateOtpEmail). FE logs in afterwards.
     const { expiresAt } = await otpService.issue({
-      target: member.email,
+      target: dto.email,
       purpose: 'verify-email',
       recipientName: member.fullName ?? undefined,
     });
-    logger.info({ memberId: member.id, email: member.email }, 'register verify-email OTP issued');
+    logger.info({ memberId: member.id, email: dto.email }, 'register verify-email OTP issued');
 
     return {
       member_id: member.legacyId ?? member.id,
-      email: member.email,
+      email: dto.email,
       expired_date: expiresAt.toISOString(),
     };
   }
@@ -457,13 +454,17 @@ export class AuthService {
       //   throw new HttpException(403, 'ACCOUNT_NOT_VERIFIED', 'Account not verified', {
       //     member_id: member.legacyId ?? member.id,
       //     phone: member.phone ? this.phoneTarget(member.phoneCode ?? '', member.phone) : null,
-      //     email: isSyntheticEmail(member.email) ? null : member.email,
+      //     email: member.email ?? '',
       //   });
       // }
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    return this.issueTokenBundle(member.id, member.email, normalizeClientType(dto.client_type));
+    return this.issueTokenBundle(
+      member.id,
+      member.email ?? '',
+      normalizeClientType(dto.client_type),
+    );
   }
 
   /**
@@ -533,7 +534,7 @@ export class AuthService {
     return this.rotateRefreshToken(
       stored.id,
       member.id,
-      member.email,
+      member.email ?? '',
       normalizeClientType(stored.clientType),
     );
   }
@@ -558,7 +559,7 @@ export class AuthService {
     const bySub = await prisma.member.findUnique({ where: { googleSub: payload.sub } });
     if (bySub) {
       if (!bySub.isActive) throw new UnauthorizedException('Member not active');
-      return this.issueTokenBundle(bySub.id, bySub.email, clientType);
+      return this.issueTokenBundle(bySub.id, bySub.email ?? '', clientType);
     }
 
     // Link path: existing local account by email. Only allow if local account
@@ -576,7 +577,7 @@ export class AuthService {
         where: { id: byEmail.id },
         data: { googleSub: payload.sub },
       });
-      return this.issueTokenBundle(linked.id, linked.email, clientType);
+      return this.issueTokenBundle(linked.id, linked.email ?? '', clientType);
     }
 
     // Create path: brand-new social account. Sentinel passwordHash + algo=social
@@ -601,13 +602,13 @@ export class AuthService {
         },
       });
       await this.autoJoinCommunityNetworks(created.id);
-      return this.issueTokenBundle(created.id, created.email, clientType);
+      return this.issueTokenBundle(created.id, created.email ?? '', clientType);
     } catch (err) {
       // Race: a concurrent request created the same email/google_sub first.
       // Re-resolve via the same priority (google_sub then email) and link/issue.
       if (this.isUniqueViolation(err)) {
         const retrySub = await prisma.member.findUnique({ where: { googleSub: payload.sub } });
-        if (retrySub) return this.issueTokenBundle(retrySub.id, retrySub.email, clientType);
+        if (retrySub) return this.issueTokenBundle(retrySub.id, retrySub.email ?? '', clientType);
         const retryEmail = await prisma.member.findUnique({ where: { email } });
         if (retryEmail) {
           if (!retryEmail.isVerified) throw new BadRequestException('email_in_use_unverified');
@@ -615,7 +616,7 @@ export class AuthService {
             where: { id: retryEmail.id },
             data: { googleSub: payload.sub },
           });
-          return this.issueTokenBundle(linked.id, linked.email, clientType);
+          return this.issueTokenBundle(linked.id, linked.email ?? '', clientType);
         }
       }
       throw err;
@@ -782,8 +783,7 @@ export class AuthService {
     // codes (e.g. +62 8111... vs +1 8111...). Normalized defensively so rows
     // stored before normalization ('62' / '08111…' / '+628111…') still yield
     // the canonical '+628111…' target — issue and consume both go through here.
-    const pair = normalizePhonePair(phone, phoneCode);
-    return `${pair.phoneCode}${pair.phone}`;
+    return otpPhoneTarget(phoneCode, phone);
   }
 
   private async resolveMemberByAnyId(input: string) {
@@ -815,8 +815,8 @@ export class AuthService {
     let member;
     if (existing) {
       // Abandoned-at-OTP placeholder: overwrite in place instead of erroring.
-      // Email is kept as-is (real one from an email-register attempt, or the
-      // synthetic placeholder below); code/affiliateCode stay as allocated.
+      // Email is kept as-is (real one from an email-register attempt, or NULL
+      // from a phone-register); code/affiliateCode stay as allocated.
       member = await prisma.member.update({
         where: { id: existing.id },
         data: {
@@ -830,16 +830,11 @@ export class AuthService {
     } else {
       const memberCode = await this.generateUniqueMemberCode();
 
-      // Member.email is `String @unique` (NOT NULL). Phone-register has no email
-      // — synthesize a placeholder so the row is creatable. FE prompts the user
-      // to set a real email in the post-OTP profile step. Tracker follow-up:
-      // relax email to nullable, or add a separate sentinel column.
-      const syntheticEmail = `phone-${phoneCode.replace(/[^0-9]/g, '')}-${phone}${SYNTHETIC_EMAIL_DOMAIN}`;
-
+      // Phone-register collects no email — the row is created with email NULL
+      // (FE prompts for a real one in the post-OTP profile step).
       try {
         member = await prisma.member.create({
           data: {
-            email: syntheticEmail,
             passwordHash,
             fullName: dto.name,
             phone,
@@ -930,12 +925,13 @@ export class AuthService {
   async requestVerifyEmail(memberId: string) {
     const member = await prisma.member.findUnique({ where: { id: memberId } });
     if (!member) throw new NotFoundException('Member not found');
+    if (!member.email) throw new BadRequestException('Member has no email on file');
     if (member.isVerified) throw new BadRequestException('Email already verified');
 
     // issue() enqueues the email; bb-comms renders the branded OTP template
     // (default subject + message + the code). recipientName drives the greeting.
     const { expiresAt } = await otpService.issue({
-      target: member.email,
+      target: member.email ?? '',
       purpose: 'verify-email',
       recipientName: member.fullName ?? undefined,
     });
@@ -947,6 +943,7 @@ export class AuthService {
   async verifyEmail(memberId: string, code: string) {
     const member = await prisma.member.findUnique({ where: { id: memberId } });
     if (!member) throw new NotFoundException('Member not found');
+    if (!member.email) throw new BadRequestException('Member has no email on file');
     if (member.isVerified) throw new BadRequestException('Email already verified');
 
     await otpService.consume(member.email, code, 'verify-email');
@@ -993,7 +990,7 @@ export class AuthService {
   async requestVerificationEmail(dto: RequestVerificationEmailDto) {
     const member = await this.resolveMemberByAnyId(dto.memberId);
     if (!member) throw new NotFoundException('Member not found');
-    if (isSyntheticEmail(member.email)) {
+    if (!member.email) {
       throw new BadRequestException('Member has no email on file');
     }
     if (member.isVerified) {
@@ -1001,7 +998,7 @@ export class AuthService {
     }
 
     const { expiresAt } = await otpService.issue({
-      target: member.email,
+      target: member.email ?? '',
       purpose: 'verify-email',
       recipientName: member.fullName ?? undefined,
     });
@@ -1012,7 +1009,7 @@ export class AuthService {
 
     return {
       member_id: member.legacyId ?? member.id,
-      email: member.email,
+      email: member.email ?? '',
       expired_date: expiresAt.toISOString(),
     };
   }
@@ -1020,7 +1017,7 @@ export class AuthService {
   async validateOtpEmail(dto: ValidateOtpEmailDto) {
     const member = await this.resolveMemberByAnyId(dto.memberId);
     if (!member) throw new NotFoundException('Member not found');
-    if (isSyntheticEmail(member.email)) {
+    if (!member.email) {
       throw new BadRequestException('Member has no email on file');
     }
 
