@@ -91,6 +91,13 @@ export class MemberProfileDto {
   @ApiPropertyOptional({ nullable: true, example: 'John Doe' })
   name?: string | null;
 
+  @ApiPropertyOptional({
+    nullable: true,
+    example: 'john@example.com',
+    description: 'Null for phone-registered members that have not set an email.',
+  })
+  email?: string | null;
+
   @ApiPropertyOptional({ nullable: true, example: '81234567890' })
   phoneNumber?: string | null;
 

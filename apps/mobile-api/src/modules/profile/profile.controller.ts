@@ -45,6 +45,7 @@ export class ProfileController {
       memberId: member.id,
       image: member.avatarUrl,
       name: member.fullName,
+      email: member.email,
       phoneNumber: member.phone,
       phoneCode: member.phoneCode,
       firstName: member.firstName,
