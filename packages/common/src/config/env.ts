@@ -41,6 +41,15 @@ export const env = {
       .map((s) => s.trim())
       .filter(Boolean),
   },
+  apple: {
+    // Sign in with Apple `aud` is the iOS bundle id(s) (e.g. com.brainboost.ios).
+    // Optional: empty when unset, which makes the Apple flow report
+    // "not configured" rather than breaking app startup.
+    audiences: optional('APPLE_CLIENT_IDS', '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
+  },
   admin: {
     jwtSecret: required('ADMIN_JWT_SECRET'),
     jwtTtl: optional('ADMIN_JWT_TTL', '8h'),

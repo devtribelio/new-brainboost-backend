@@ -20,6 +20,7 @@ import { normalizePhonePair, otpPhoneTarget } from '@bb/common/utils/phone.util'
 import { isReusableUnverifiedMember } from '@bb/common/utils/member-state.util';
 import { otpService } from '@bb/common/services/otp.service';
 import type { GoogleIdTokenPayload } from './social/google-verifier';
+import { verifyAppleIdentityToken } from './social/apple-verifier';
 import type { LoginDto } from './dto/login.dto';
 import type { RegisterDto } from './dto/register.dto';
 import type { CloudMessagingDto, RegisterDeviceDto } from './dto/device.dto';
@@ -540,23 +541,73 @@ export class AuthService {
   }
 
   private async loginWithSocial(dto: LoginDto): Promise<TokenBundle> {
-    if (dto.provider !== 'google') {
-      throw new BadRequestException('Only provider=google is supported');
-    }
     if (!dto.social_token) {
       throw new BadRequestException('social_token required for social grant');
     }
 
-    const payload = await this.authenticateViaPassport(dto.social_token);
-    if (!payload.emailVerified) {
-      throw new UnauthorizedException('google_email_not_verified');
+    const clientType = normalizeClientType(dto.client_type);
+
+    if (dto.provider === 'google') {
+      const payload = await this.authenticateViaPassport(dto.social_token);
+      // Google flow keeps its strict policy: a present-but-unverified email is
+      // rejected rather than silently linked.
+      if (!payload.emailVerified) {
+        throw new UnauthorizedException('google_email_not_verified');
+      }
+      return this.resolveOrCreateSocialMember({
+        provider: 'google',
+        sub: payload.sub,
+        email: payload.email,
+        name: payload.name,
+        clientType,
+      });
     }
 
-    const clientType = normalizeClientType(dto.client_type);
-    const email = payload.email.trim().toLowerCase();
+    if (dto.provider === 'apple') {
+      const payload = await verifyAppleIdentityToken(dto.social_token);
+      // Apple identity is established by token signature + appleSub. Email may be
+      // absent (repeat logins) and private-relay addresses arrive with
+      // email_verified=true, so we don't hard-block on emailVerified here — the
+      // appleSub fast path covers re-logins regardless of email.
+      return this.resolveOrCreateSocialMember({
+        provider: 'apple',
+        sub: payload.sub,
+        email: payload.email,
+        name: payload.name,
+        clientType,
+      });
+    }
 
-    // Fast path: known google_sub → straight to issue.
-    const bySub = await prisma.member.findUnique({ where: { googleSub: payload.sub } });
+    // facebook etc. not implemented.
+    throw new BadRequestException('Unsupported social provider');
+  }
+
+  /**
+   * Shared resolve-or-create for every social provider. Priority:
+   *   1. fast path  — known provider sub → issue.
+   *   2. link path  — existing verified local account by email → attach sub.
+   *   3. create path— brand-new social account (sentinel hash, algo=social).
+   * Falls back to a unique-violation race re-resolve (sub then email).
+   *
+   * `email` may be null (Apple omits it on repeat logins / nullable column), in
+   * which case the email link path is skipped and the member is created with a
+   * null email. Provider determines which sub column (`googleSub` | `appleSub`)
+   * is read/written throughout.
+   */
+  private async resolveOrCreateSocialMember(opts: {
+    provider: 'google' | 'apple';
+    sub: string;
+    email: string | null;
+    name: string | null;
+    clientType: ReturnType<typeof normalizeClientType>;
+  }): Promise<TokenBundle> {
+    const { provider, sub, name, clientType } = opts;
+    const email = opts.email ? opts.email.trim().toLowerCase() : null;
+    const subWhere = provider === 'google' ? { googleSub: sub } : { appleSub: sub };
+    const subData = provider === 'google' ? { googleSub: sub } : { appleSub: sub };
+
+    // Fast path: known provider sub → straight to issue.
+    const bySub = await prisma.member.findUnique({ where: subWhere });
     if (bySub) {
       if (!bySub.isActive) throw new UnauthorizedException('Member not active');
       return this.issueTokenBundle(bySub.id, bySub.email ?? '', clientType);
@@ -564,34 +615,39 @@ export class AuthService {
 
     // Link path: existing local account by email. Only allow if local account
     // already passed email verification, otherwise an attacker could claim an
-    // unverified-registered email by signing in with Google. Check verification
+    // unverified-registered email by signing in socially. Check verification
     // BEFORE isActive: unverified register placeholders are also inactive, and
-    // email_in_use_unverified is the actionable error for them.
-    const byEmail = await prisma.member.findUnique({ where: { email } });
-    if (byEmail) {
-      if (!byEmail.isVerified) {
-        throw new BadRequestException('email_in_use_unverified');
+    // email_in_use_unverified is the actionable error for them. Skipped entirely
+    // when the provider gave us no email (Apple repeat login).
+    if (email) {
+      const byEmail = await prisma.member.findUnique({ where: { email } });
+      if (byEmail) {
+        if (!byEmail.isVerified) {
+          throw new BadRequestException('email_in_use_unverified');
+        }
+        if (!byEmail.isActive) throw new UnauthorizedException('Member not active');
+        const linked = await prisma.member.update({
+          where: { id: byEmail.id },
+          data: subData,
+        });
+        return this.issueTokenBundle(linked.id, linked.email ?? '', clientType);
       }
-      if (!byEmail.isActive) throw new UnauthorizedException('Member not active');
-      const linked = await prisma.member.update({
-        where: { id: byEmail.id },
-        data: { googleSub: payload.sub },
-      });
-      return this.issueTokenBundle(linked.id, linked.email ?? '', clientType);
     }
 
     // Create path: brand-new social account. Sentinel passwordHash + algo=social
     // so loginWithPassword (verifyPassword guard) can never authenticate it.
+    // isVerified:true — the provider attested the identity (Apple-verified even
+    // when the email is null / a private relay).
     const sentinelHash = `${randomUUID()}${randomUUID()}`;
     const memberCode = await this.generateUniqueMemberCode();
-    const username = await this.deriveUniqueUsernameFromEmail(email);
+    const username = await this.deriveUniqueUsernameFromEmail(email ?? `${provider}${sub}`);
 
     try {
       const created = await prisma.member.create({
         data: {
           email,
-          googleSub: payload.sub,
-          fullName: payload.name,
+          ...subData,
+          fullName: name,
           username,
           passwordHash: sentinelHash,
           passwordAlgo: 'social',
@@ -604,19 +660,21 @@ export class AuthService {
       await this.autoJoinCommunityNetworks(created.id);
       return this.issueTokenBundle(created.id, created.email ?? '', clientType);
     } catch (err) {
-      // Race: a concurrent request created the same email/google_sub first.
-      // Re-resolve via the same priority (google_sub then email) and link/issue.
+      // Race: a concurrent request created the same email/provider-sub first.
+      // Re-resolve via the same priority (provider sub then email) and link/issue.
       if (this.isUniqueViolation(err)) {
-        const retrySub = await prisma.member.findUnique({ where: { googleSub: payload.sub } });
+        const retrySub = await prisma.member.findUnique({ where: subWhere });
         if (retrySub) return this.issueTokenBundle(retrySub.id, retrySub.email ?? '', clientType);
-        const retryEmail = await prisma.member.findUnique({ where: { email } });
-        if (retryEmail) {
-          if (!retryEmail.isVerified) throw new BadRequestException('email_in_use_unverified');
-          const linked = await prisma.member.update({
-            where: { id: retryEmail.id },
-            data: { googleSub: payload.sub },
-          });
-          return this.issueTokenBundle(linked.id, linked.email ?? '', clientType);
+        if (email) {
+          const retryEmail = await prisma.member.findUnique({ where: { email } });
+          if (retryEmail) {
+            if (!retryEmail.isVerified) throw new BadRequestException('email_in_use_unverified');
+            const linked = await prisma.member.update({
+              where: { id: retryEmail.id },
+              data: subData,
+            });
+            return this.issueTokenBundle(linked.id, linked.email ?? '', clientType);
+          }
         }
       }
       throw err;
