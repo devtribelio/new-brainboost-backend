@@ -738,23 +738,58 @@ export class AuthService {
     return { cloudMessagingId: dto.cloudMessagingId, deviceId: device.id };
   }
 
-  async requestForgotPassword(dto: RequestForgotPasswordDto) {
-    const member = await prisma.member.findUnique({ where: { email: dto.email } });
-    if (!member || !member.isActive) {
-      throw new NotFoundException('Email not registered');
+  /**
+   * Resolve the member + OTP target for the forgot-password pair. email wins
+   * when both are supplied; the same rule on both steps keeps issue/consume on
+   * one channel. The phone target is rebuilt from the member ROW (canonical),
+   * so '0811…' at request and '+62811…' at verification still match.
+   */
+  private async resolveForgotPasswordMember(dto: { email?: string; phone?: string }) {
+    if (dto.email) {
+      const member = await prisma.member.findUnique({ where: { email: dto.email } });
+      if (!member) return null;
+      return { member, target: dto.email, channel: 'email' as const };
     }
+    if (dto.phone) {
+      const candidates = [dto.phone, normalizePhonePair(dto.phone, '+62').phone];
+      const member = await prisma.member.findFirst({
+        where: { OR: candidates.map((phone) => ({ phone })) },
+      });
+      if (!member?.phone) return null;
+      return {
+        member,
+        target: otpPhoneTarget(member.phoneCode ?? '+62', member.phone),
+        channel: 'phone' as const,
+      };
+    }
+    throw new BadRequestException('email or phone required');
+  }
+
+  async requestForgotPassword(dto: RequestForgotPasswordDto) {
+    const resolved = await this.resolveForgotPasswordMember(dto);
+    if (!resolved || !resolved.member.isActive) {
+      throw new NotFoundException('Account not registered');
+    }
+    const { member, target, channel } = resolved;
+    // WA messages cost per send — cap + resend guard on both channels.
     const { id } = await otpService.issue({
-      target: dto.email,
+      target,
       purpose: 'forgot-password',
+      recipientName: member.fullName ?? undefined,
+      maxPerDay: 5,
+      enforceResendGuard: true,
     });
-    return { email: dto.email, requestId: id };
+    return channel === 'email'
+      ? { email: target, requestId: id }
+      : { phone: target, requestId: id };
   }
 
   async forgotPasswordVerification(dto: ForgotPasswordVerificationDto) {
-    const member = await prisma.member.findUnique({ where: { email: dto.email } });
-    if (!member) throw new NotFoundException('Email not registered');
+    const resolved = await this.resolveForgotPasswordMember(dto);
+    if (!resolved) throw new NotFoundException('Account not registered');
+    const { member, target, channel } = resolved;
 
-    await otpService.consume(dto.email, dto.code, 'forgot-password');
+    await otpService.consume(target, dto.code, 'forgot-password');
 
     const passwordHash = await bcrypt.hash(dto.newPassword, 10);
     await prisma.member.update({
@@ -765,7 +800,7 @@ export class AuthService {
       where: { memberId: member.id, revokedAt: null },
       data: { revokedAt: new Date() },
     });
-    return { email: dto.email };
+    return channel === 'email' ? { email: target } : { phone: target };
   }
 
   async validateOtp(dto: ValidateOtpDto) {

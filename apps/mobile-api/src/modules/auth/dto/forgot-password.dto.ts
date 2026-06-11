@@ -1,16 +1,35 @@
-import { IsEmail, IsString, Length } from 'class-validator';
-import { ApiProperty } from '@bb/common/openapi/decorators';
+import { IsEmail, IsOptional, IsString, Length, Matches } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@bb/common/openapi/decorators';
+
+// email/phone: at least one required (checked in the service — class-validator
+// has no clean either-or). Both present → email wins; the same priority is
+// applied on verification so issue/consume always target the same channel.
 
 export class RequestForgotPasswordDto {
-  @ApiProperty({ format: 'email', example: 'john.doe@example.com' })
+  @ApiPropertyOptional({ format: 'email', example: 'john.doe@example.com' })
+  @IsOptional()
   @IsEmail()
-  email!: string;
+  email?: string;
+
+  @ApiPropertyOptional({
+    example: '08111111111',
+    description: 'Phone number; any of 0811…/62811…/+62811… forms. OTP goes to WhatsApp.',
+  })
+  @IsOptional()
+  @Matches(/^\+?[0-9]{6,20}$/, { message: 'phone must be 6-20 digits, optional leading +' })
+  phone?: string;
 }
 
 export class ForgotPasswordVerificationDto {
-  @ApiProperty({ format: 'email', example: 'john.doe@example.com' })
+  @ApiPropertyOptional({ format: 'email', example: 'john.doe@example.com' })
+  @IsOptional()
   @IsEmail()
-  email!: string;
+  email?: string;
+
+  @ApiPropertyOptional({ example: '08111111111', description: 'Same rules as request step' })
+  @IsOptional()
+  @Matches(/^\+?[0-9]{6,20}$/, { message: 'phone must be 6-20 digits, optional leading +' })
+  phone?: string;
 
   @ApiProperty({ description: '6-digit OTP', example: '123456' })
   @IsString()
