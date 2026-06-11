@@ -17,7 +17,9 @@ export function productRoutes(): Router {
     method: 'get',
     path: '/product/list',
     handlerKey: 'list',
-    middlewares: [authGuard, validateDto(ListProductsQueryDto, 'query')],
+    // Guest mode (Apple 5.1.1): catalog browsing must not force login. The
+    // handler is already null-user-safe (same one serves /public).
+    middlewares: [optionalAuthGuard, validateDto(ListProductsQueryDto, 'query')],
   });
   bindRoute({
     router,
@@ -25,7 +27,7 @@ export function productRoutes(): Router {
     method: 'get',
     path: '/product/course/detail',
     handlerKey: 'courseDetail',
-    middlewares: [authGuard],
+    middlewares: [optionalAuthGuard],
   });
   bindRoute({
     router,
