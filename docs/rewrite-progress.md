@@ -19,7 +19,13 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` parity met for current s
 - Grants: `password`, `refresh_token`, `social` (Google/Facebook/Apple).
 - Forgot-password OTP flow: `requestForgotPassword` → `validateOtp` → `forgotPasswordVerification`.
 - Device + FCM token register.
-- Outstanding: parity tests against legacy social-login provider tokens.
+- Inactive-until-verified register flow (2026-06-11): members born `isActive=false`,
+  OTP validate activates; abandoned placeholders reusable on re-register; password
+  login on placeholder → generic 401 (403 discriminator written, disabled); `/auth/register` returns
+  `{member_id, email, expired_date}` instead of tokens; new pre-login pair
+  `requestVerificationEmail` / `validateOtpEmail`. See `docs/register-verification-flow.md`.
+- Outstanding: parity tests against legacy social-login provider tokens; cleanup cron
+  for stale unverified placeholders (optional — rows are reusable, no dead-end).
 
 ### account — `src/modules/account/`
 - Profile info/update, change-password, logout, pre-registration, delete-account, payment token, affiliate-connect.

@@ -9,8 +9,18 @@ import {
   signRefreshToken,
   verifyRefreshToken,
 } from '@bb/common/utils/jwt.util';
-import { BadRequestException, NotFoundException, UnauthorizedException } from '@bb/common/exceptions';
+import {
+  BadRequestException,
+  HttpException,
+  NotFoundException,
+  UnauthorizedException,
+} from '@bb/common/exceptions';
 import { assertUuid } from '@bb/common/utils/uuid.util';
+import {
+  SYNTHETIC_EMAIL_DOMAIN,
+  isReusableUnverifiedMember,
+  isSyntheticEmail,
+} from '@bb/common/utils/member-state.util';
 import { otpService } from '@bb/common/services/otp.service';
 import type { GoogleIdTokenPayload } from './social/google-verifier';
 import type { LoginDto } from './dto/login.dto';
@@ -24,6 +34,8 @@ import type {
 import type { RegisterByPhoneDto } from './dto/register-by-phone.dto';
 import type { RequestVerificationPhoneDto } from './dto/request-verification-phone.dto';
 import type { ValidateOtpPhoneDto } from './dto/validate-otp-phone.dto';
+import type { RequestVerificationEmailDto } from './dto/request-verification-email.dto';
+import type { ValidateOtpEmailDto } from './dto/validate-otp-email.dto';
 import { logger } from '@bb/common/config/logger';
 import { VisitService } from '@bb/domain/affiliate/visit.service';
 
@@ -122,8 +134,8 @@ export class AuthService {
     };
   }
 
-  async register(dto: RegisterDto): Promise<TokenBundle> {
-    const conflicts = await prisma.member.findFirst({
+  async register(dto: RegisterDto) {
+    const conflicts = await prisma.member.findMany({
       where: {
         OR: [
           { email: dto.email },
@@ -131,16 +143,46 @@ export class AuthService {
           dto.username ? { username: dto.username } : undefined,
         ].filter((c): c is NonNullable<typeof c> => c !== undefined),
       },
-      select: { email: true, phone: true, username: true },
+      select: {
+        id: true,
+        email: true,
+        phone: true,
+        username: true,
+        isActive: true,
+        isVerified: true,
+        isPhoneVerified: true,
+        scheduledDeletionAt: true,
+      },
     });
-    if (conflicts) {
-      if (conflicts.email === dto.email) throw new BadRequestException('Email already registered');
-      if (dto.phone && conflicts.phone === dto.phone) {
+
+    // Any conflicting row that is NOT a reusable unverified placeholder blocks
+    // the register, same precedence as before (email > phone > username).
+    for (const row of conflicts) {
+      if (isReusableUnverifiedMember(row)) continue;
+      if (row.email === dto.email) throw new BadRequestException('Email already registered');
+      if (dto.phone && row.phone === dto.phone) {
         throw new BadRequestException('Phone already registered');
       }
-      if (dto.username && conflicts.username === dto.username) {
+      if (dto.username && row.username === dto.username) {
         throw new BadRequestException('Username already registered');
       }
+    }
+
+    // All remaining conflicts are reusable placeholders (abandoned-at-OTP
+    // registers). Reuse the row holding this email, else the one holding the
+    // phone; release the colliding unique fields on any other placeholder so
+    // the create/update below can't hit P2002.
+    const reuseRow =
+      conflicts.find((r) => r.email === dto.email) ??
+      conflicts.find((r) => dto.phone && r.phone === dto.phone) ??
+      null;
+    for (const row of conflicts) {
+      if (row.id === reuseRow?.id) continue;
+      const release: { phone?: null; username?: null } = {};
+      if (dto.phone && row.phone === dto.phone) release.phone = null;
+      if (dto.username && row.username === dto.username) release.username = null;
+      if (Object.keys(release).length === 0) continue;
+      await prisma.member.update({ where: { id: row.id }, data: release });
     }
 
     if (dto.birthdate) {
@@ -208,38 +250,59 @@ export class AuthService {
     }
 
     const passwordHash = await bcrypt.hash(dto.password, 10);
-    const memberCode = await this.generateUniqueMemberCode();
 
-    const member = await prisma.member.create({
-      data: {
-        email: dto.email,
-        passwordHash,
-        fullName: dto.fullName,
-        phone: dto.phone,
-        phoneCode: dto.phoneCode,
-        username: dto.username,
-        gender: dto.gender,
-        birthdate: dto.birthdate ? new Date(dto.birthdate) : null,
-        code: memberCode,
-        affiliateCode: memberCode,
-        inviterId,
-        inviterNetworkId,
-        registerFrom: dto.registerFrom,
-        utmSource: dto.utmSource,
-        utmContent: dto.utmContent,
-      },
-    });
+    // Members are born inactive + unverified; the verify-email OTP step
+    // (validateOtpEmail) flips isActive=true. Reuse path overwrites the
+    // abandoned placeholder in place — code/affiliateCode stay as allocated.
+    const memberData = {
+      email: dto.email,
+      passwordHash,
+      passwordAlgo: 'bcrypt',
+      fullName: dto.fullName,
+      phone: dto.phone,
+      phoneCode: dto.phoneCode,
+      username: dto.username,
+      gender: dto.gender,
+      birthdate: dto.birthdate ? new Date(dto.birthdate) : null,
+      inviterId,
+      inviterNetworkId,
+      registerFrom: dto.registerFrom,
+      utmSource: dto.utmSource,
+      utmContent: dto.utmContent,
+      isActive: false,
+      isVerified: false,
+      isPhoneVerified: false,
+    };
+
+    let member;
+    if (reuseRow) {
+      member = await prisma.member.update({
+        where: { id: reuseRow.id },
+        data: memberData,
+      });
+    } else {
+      const memberCode = await this.generateUniqueMemberCode();
+      member = await prisma.member.create({
+        data: { ...memberData, code: memberCode, affiliateCode: memberCode },
+      });
+    }
 
     if (inviterNetworkId) {
-      await prisma.networkMember.upsert({
-        where: { networkId_memberId: { networkId: inviterNetworkId, memberId: member.id } },
-        create: { networkId: inviterNetworkId, memberId: member.id },
-        update: {},
-      });
-      await prisma.network.update({
-        where: { id: inviterNetworkId },
-        data: { countMember: { increment: 1 } },
-      });
+      // create-then-increment inside one transaction; a unique violation means
+      // the placeholder already joined on a previous attempt — skip the bump.
+      try {
+        await prisma.$transaction([
+          prisma.networkMember.create({
+            data: { networkId: inviterNetworkId, memberId: member.id },
+          }),
+          prisma.network.update({
+            where: { id: inviterNetworkId },
+            data: { countMember: { increment: 1 } },
+          }),
+        ]);
+      } catch (err) {
+        if (!this.isUniqueViolation(err)) throw err;
+      }
     }
 
     // Best-effort: create AffiliateVisit from pre-registration attribution context.
@@ -260,7 +323,8 @@ export class AuthService {
           utmTerm: typeof ctx.utmTerm === 'string' ? ctx.utmTerm : undefined,
           adId: typeof ctx.adId === 'string' ? ctx.adId : undefined,
           adNetwork: typeof ctx.adNetwork === 'string' ? ctx.adNetwork : undefined,
-          installReferrer: typeof ctx.installReferrer === 'string' ? ctx.installReferrer : undefined,
+          installReferrer:
+            typeof ctx.installReferrer === 'string' ? ctx.installReferrer : undefined,
           deviceId: typeof ctx.deviceId === 'string' ? ctx.deviceId : undefined,
           platform: typeof ctx.platform === 'string' ? ctx.platform : undefined,
           appVersion: typeof ctx.appVersion === 'string' ? ctx.appVersion : undefined,
@@ -293,7 +357,20 @@ export class AuthService {
       },
     });
 
-    return this.issueTokenBundle(member.id, member.email, normalizeClientType(dto.registerFrom));
+    // No tokens at register: the member is inactive until the verify-email OTP
+    // is validated (validateOtpEmail). FE logs in afterwards.
+    const { expiresAt } = await otpService.issue({
+      target: member.email,
+      purpose: 'verify-email',
+      recipientName: member.fullName ?? undefined,
+    });
+    logger.info({ memberId: member.id, email: member.email }, 'register verify-email OTP issued');
+
+    return {
+      member_id: member.legacyId ?? member.id,
+      email: member.email,
+      expired_date: expiresAt.toISOString(),
+    };
   }
 
   private async generateUniqueMemberCode(): Promise<string> {
@@ -345,12 +422,25 @@ export class AuthService {
       },
     });
 
-    if (!member || !member.isActive) {
+    if (!member) {
       throw new UnauthorizedException('Invalid credentials');
     }
 
     const matches = await this.verifyPassword(dto.password, member);
     if (!matches) throw new UnauthorizedException('Invalid credentials');
+
+    if (!member.isActive) {
+      // Only after the password matched: reveal the unverified state so FE can
+      // route to the OTP screen instead of a dead-end credentials error.
+      // if (isReusableUnverifiedMember(member)) {
+      //   throw new HttpException(403, 'ACCOUNT_NOT_VERIFIED', 'Account not verified', {
+      //     member_id: member.legacyId ?? member.id,
+      //     phone: member.phone ? this.phoneTarget(member.phoneCode ?? '', member.phone) : null,
+      //     email: isSyntheticEmail(member.email) ? null : member.email,
+      //   });
+      // }
+      throw new UnauthorizedException('Invalid credentials');
+    }
 
     return this.issueTokenBundle(member.id, member.email, normalizeClientType(dto.client_type));
   }
@@ -452,13 +542,15 @@ export class AuthService {
 
     // Link path: existing local account by email. Only allow if local account
     // already passed email verification, otherwise an attacker could claim an
-    // unverified-registered email by signing in with Google.
+    // unverified-registered email by signing in with Google. Check verification
+    // BEFORE isActive: unverified register placeholders are also inactive, and
+    // email_in_use_unverified is the actionable error for them.
     const byEmail = await prisma.member.findUnique({ where: { email } });
     if (byEmail) {
-      if (!byEmail.isActive) throw new UnauthorizedException('Member not active');
       if (!byEmail.isVerified) {
         throw new BadRequestException('email_in_use_unverified');
       }
+      if (!byEmail.isActive) throw new UnauthorizedException('Member not active');
       const linked = await prisma.member.update({
         where: { id: byEmail.id },
         data: { googleSub: payload.sub },
@@ -684,33 +776,71 @@ export class AuthService {
     const target = this.phoneTarget(dto.phoneCode, dto.phone);
 
     const existing = await prisma.member.findUnique({ where: { phone: dto.phone } });
-    if (existing) throw new BadRequestException('Phone already registered');
+    if (existing && !isReusableUnverifiedMember(existing)) {
+      throw new BadRequestException('Phone already registered');
+    }
 
     const passwordHash = await bcrypt.hash(dto.password, 10);
-    const memberCode = await this.generateUniqueMemberCode();
 
-    // Member.email is `String @unique` (NOT NULL). Phone-register has no email
-    // — synthesize a placeholder so the row is creatable. FE prompts the user
-    // to set a real email in the post-OTP profile step. Tracker follow-up:
-    // relax email to nullable, or add a separate sentinel column.
-    const syntheticEmail = `phone-${dto.phoneCode.replace(/[^0-9]/g, '')}-${dto.phone}@phone.brainboost.local`;
+    let member;
+    if (existing) {
+      // Abandoned-at-OTP placeholder: overwrite in place instead of erroring.
+      // Email is kept as-is (real one from an email-register attempt, or the
+      // synthetic placeholder below); code/affiliateCode stay as allocated.
+      member = await prisma.member.update({
+        where: { id: existing.id },
+        data: {
+          passwordHash,
+          passwordAlgo: 'bcrypt',
+          fullName: dto.name,
+          phoneCode: dto.phoneCode,
+        },
+        select: { id: true, legacyId: true, phone: true, phoneCode: true },
+      });
+    } else {
+      const memberCode = await this.generateUniqueMemberCode();
 
-    const member = await prisma.member.create({
-      data: {
-        email: syntheticEmail,
-        passwordHash,
-        fullName: dto.name,
-        phone: dto.phone,
-        phoneCode: dto.phoneCode,
-        code: memberCode,
-        affiliateCode: memberCode,
-        isVerified: false,
-        isPhoneVerified: false,
-      },
-      select: { id: true, legacyId: true, phone: true, phoneCode: true },
-    });
+      // Member.email is `String @unique` (NOT NULL). Phone-register has no email
+      // — synthesize a placeholder so the row is creatable. FE prompts the user
+      // to set a real email in the post-OTP profile step. Tracker follow-up:
+      // relax email to nullable, or add a separate sentinel column.
+      const syntheticEmail = `phone-${dto.phoneCode.replace(/[^0-9]/g, '')}-${dto.phone}${SYNTHETIC_EMAIL_DOMAIN}`;
+
+      member = await prisma.member.create({
+        data: {
+          email: syntheticEmail,
+          passwordHash,
+          fullName: dto.name,
+          phone: dto.phone,
+          phoneCode: dto.phoneCode,
+          code: memberCode,
+          affiliateCode: memberCode,
+          isActive: false,
+          isVerified: false,
+          isPhoneVerified: false,
+        },
+        select: { id: true, legacyId: true, phone: true, phoneCode: true },
+      });
+    }
 
     await this.autoJoinCommunityNetworks(member.id);
+
+    // Reuse path within the OTP TTL: the previously sent code is still valid
+    // on the user's WhatsApp — return its expiry instead of tripping the
+    // resend guard (legacy errCode 2113) after the row was already updated.
+    if (existing) {
+      const activeOtp = await prisma.otpCode.findFirst({
+        where: { target, purpose: 'verify-phone', usedAt: null, expiresAt: { gt: new Date() } },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (activeOtp) {
+        return {
+          member_id: member.legacyId ?? member.id,
+          phone: target,
+          expired_date: activeOtp.expiresAt.toISOString(),
+        };
+      }
+    }
 
     const { expiresAt } = await otpService.issue({
       target,
@@ -802,7 +932,69 @@ export class AuthService {
 
     await prisma.member.update({
       where: { id: member.id },
-      data: { isPhoneVerified: true },
+      // Activation point of the phone-register flow. Never resurrect an
+      // account that is pending deletion (isActive=false for another reason).
+      data: {
+        isPhoneVerified: true,
+        ...(member.scheduledDeletionAt === null ? { isActive: true } : {}),
+      },
+    });
+
+    return { member_id: member.legacyId ?? member.id, verified: true };
+  }
+
+  // --------------------------------------------------------------------------
+  // Pre-login email verification (mirror of the phone pair above). Used by the
+  // email-register flow: register creates an inactive member, these two
+  // endpoints resend/validate the verify-email OTP by memberId — no auth, the
+  // member cannot log in yet. The authGuard'd requestVerifyEmail/verifyEmail
+  // pair stays for already-logged-in members verifying an email later.
+  // --------------------------------------------------------------------------
+
+  async requestVerificationEmail(dto: RequestVerificationEmailDto) {
+    const member = await this.resolveMemberByAnyId(dto.memberId);
+    if (!member) throw new NotFoundException('Member not found');
+    if (isSyntheticEmail(member.email)) {
+      throw new BadRequestException('Member has no email on file');
+    }
+    if (member.isVerified) {
+      throw new BadRequestException('Email already verified');
+    }
+
+    const { expiresAt } = await otpService.issue({
+      target: member.email,
+      purpose: 'verify-email',
+      recipientName: member.fullName ?? undefined,
+    });
+    logger.info(
+      { memberId: member.id, email: member.email },
+      'verify-email OTP issued (pre-login)',
+    );
+
+    return {
+      member_id: member.legacyId ?? member.id,
+      email: member.email,
+      expired_date: expiresAt.toISOString(),
+    };
+  }
+
+  async validateOtpEmail(dto: ValidateOtpEmailDto) {
+    const member = await this.resolveMemberByAnyId(dto.memberId);
+    if (!member) throw new NotFoundException('Member not found');
+    if (isSyntheticEmail(member.email)) {
+      throw new BadRequestException('Member has no email on file');
+    }
+
+    await otpService.consume(member.email, dto.verifyCode, 'verify-email');
+
+    await prisma.member.update({
+      where: { id: member.id },
+      // Activation point of the email-register flow. Never resurrect an
+      // account that is pending deletion (isActive=false for another reason).
+      data: {
+        isVerified: true,
+        ...(member.scheduledDeletionAt === null ? { isActive: true } : {}),
+      },
     });
 
     return { member_id: member.legacyId ?? member.id, verified: true };

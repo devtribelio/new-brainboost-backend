@@ -18,6 +18,12 @@ describe('commerce checkout flow', () => {
     await request(app)
       .post('/api/member/auth/register')
       .send({ email, password, fullName: 'Checkout Tester' });
+    // Register creates the member inactive (verify-email gate); activate
+    // directly — OTP delivery is not what this suite tests.
+    await prisma.member.update({
+      where: { email },
+      data: { isActive: true, isVerified: true },
+    });
     const tokenRes = await request(app)
       .post('/api/member/oauth/token')
       .send({ grant_type: 'password', username: email, password });

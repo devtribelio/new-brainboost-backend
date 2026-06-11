@@ -191,6 +191,8 @@ Critical rules surfaced from legacy that **must be preserved exactly** in the re
 - **Network member list** edge: `/network/member` with empty `input` lists **all** members (mirrors legacy tag filter behavior — see commit `95a40c2`).
 - **Media access (BunnyCDN):** course audio + video both live in one Bunny **Stream** library (id `157244`, CDN `vz-5439ef3e-878.b-cdn.net`) — there is no separate Storage zone. Bunny's only protection is referrer-gating (any `Referer` header → `200`), which is hotlink protection, **not** access control. The `media` module proxies MP4 renditions and the product serializer emits an opaque `streamUrl` token so `guid`/`videoLibraryId` never reach the client. Preview lessons (`isPreview`) stream without enrollment; non-preview requires `CourseEnrollment`. See `docs/media-port.md`.
 
+- **Register = inactive-until-verified (NEW rule, not legacy):** both register paths create members `isActive=false`; the verify-OTP step (`validateOtpPhone` / `validateOtpEmail`) activates. A row with `isActive=false && isVerified=false && isPhoneVerified=false && scheduledDeletionAt=null` is a **reusable placeholder**: re-registering the same email/phone overwrites it (predicate `isReusableUnverifiedMember` in `packages/common/src/utils/member-state.util.ts`). Password login on a placeholder → generic 401 (a `403 ACCOUNT_NOT_VERIFIED` discriminator exists in `loginWithPassword` but is commented out). `/auth/register` no longer returns tokens. Full spec: `docs/register-verification-flow.md`.
+
 For complete rule extraction per module, see `docs/legacy-analysis.md`.
 
 ---

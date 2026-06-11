@@ -154,7 +154,10 @@ describe('auth social google grant', () => {
       .send({ email, password, fullName: 'Link Target' });
     expect([200, 201]).toContain(reg.status);
 
-    await prisma.member.update({ where: { email }, data: { isVerified: true } });
+    await prisma.member.update({
+      where: { email },
+      data: { isVerified: true, isActive: true },
+    });
 
     const sub = `gs-${Date.now()}-link`;
     setGoogleResponse({ sub, email, email_verified: true, name: 'Link Target' });
