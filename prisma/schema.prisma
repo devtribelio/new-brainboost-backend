@@ -25,6 +25,7 @@ model Member {
   passwordHash         String    @map("password_hash")
   passwordAlgo         String    @default("bcrypt") @map("password_algo")
   googleSub            String?   @unique @map("google_sub")
+  appleSub             String?   @unique @map("apple_sub")
   avatarUrl            String?   @map("avatar_url")
   coverUrl             String?   @map("cover_url")
   bio                  String?
