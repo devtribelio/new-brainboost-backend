@@ -77,6 +77,7 @@ log in freely.
 | `POST /oauth/token` (password) | unverified placeholder → generic 401 (`403 ACCOUNT_NOT_VERIFIED` discriminator written but disabled) |
 | `POST /account/preRegistration` | dedup check ignores reusable placeholders |
 | `/auth/requestVerifyEmail`, `/auth/verifyEmail` | unchanged — post-login pair (phone-registered users adding a real email later) |
+| `POST /auth/requestForgotPassword` + `forgotPasswordVerification` | accept `email?` OR `phone?` (both → email wins, same rule both steps); phone OTP via WhatsApp, target rebuilt canonical from the member row so input format may differ between steps; now rate-limited (max 5/day + resend guard, both channels) |
 
 ## Not done / follow-ups
 
