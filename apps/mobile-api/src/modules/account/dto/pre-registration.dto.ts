@@ -1,5 +1,6 @@
 import { IsEmail, IsNotEmpty, IsOptional, IsString, Length, MinLength } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@bb/common/openapi/decorators';
+import { NormalizeEmail } from '@bb/common/utils/transform.util';
 
 export class PreRegistrationDto {
   @ApiProperty({ example: 'Jane Doe', description: '4-100 chars' })
@@ -13,6 +14,7 @@ export class PreRegistrationDto {
   phone!: string;
 
   @ApiProperty({ format: 'email', example: 'jane.doe@example.com' })
+  @NormalizeEmail()
   @IsEmail()
   email!: string;
 
