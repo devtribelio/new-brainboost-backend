@@ -373,6 +373,21 @@ export class KycDto {
   kycRejectedReason?: string | null;
 }
 
+/** `POST /affiliate/me/kyc/token` — Sumsub SDK session for the mobile SDK. */
+export class KycTokenDto {
+  @ApiProperty({ description: 'Short-lived Sumsub SDK access token. Hand to the mobile SDK as-is.' })
+  token!: string;
+
+  @ApiProperty({ description: 'Sumsub applicant id bound to this member.' })
+  applicantId!: string;
+
+  @ApiProperty({
+    enum: ['NONE', 'PENDING', 'APPROVED', 'REJECTED'],
+    description: 'kycStatus at token issuance. The /api/webhook/sumsub callback updates it after review.',
+  })
+  kycStatus!: string;
+}
+
 /** `POST /affiliate/visits` & `POST /affiliate/attribution` — visit log outcome. */
 export class VisitLogResultDto {
   @ApiProperty({

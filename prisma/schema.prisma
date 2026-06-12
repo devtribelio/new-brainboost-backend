@@ -63,6 +63,9 @@ model Member {
   kycReviewedAt     DateTime? @map("kyc_reviewed_at")
   kycReviewedBy     String?   @map("kyc_reviewed_by") @db.Uuid
   kycRejectedReason String?   @map("kyc_rejected_reason")
+  // Sumsub applicant bound to this member (externalUserId = member id).
+  // null = KYC never went through Sumsub (manual flow or none).
+  sumsubApplicantId String?   @unique @map("sumsub_applicant_id")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")

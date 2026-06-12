@@ -3,6 +3,7 @@ import { ApiBody, ApiOperation, ApiTags } from '@bb/common/openapi/decorators';
 import type { XenditWebhookHandler } from './xendit.handler';
 import type { RevenueCatWebhookHandler } from './revenuecat.handler';
 import type { XenditDisbursementWebhookHandler } from './xendit-disbursement.handler';
+import type { SumsubWebhookHandler, SumsubWebhookPayload } from './sumsub.handler';
 import { XenditInvoiceCallbackDto } from './dto/xendit-callback.dto';
 import { RevenueCatCallbackDto } from './dto/revenuecat-callback.dto';
 import { XenditDisbursementCallbackDto } from './dto/xendit-disbursement-callback.dto';
@@ -13,6 +14,7 @@ export class WebhookController {
     private readonly xendit: XenditWebhookHandler,
     private readonly revenuecat: RevenueCatWebhookHandler,
     private readonly xenditDisbursement: XenditDisbursementWebhookHandler,
+    private readonly sumsub: SumsubWebhookHandler,
   ) {}
 
   @ApiOperation({ summary: 'Xendit Invoice callback (paid / expired)' })
@@ -38,6 +40,16 @@ export class WebhookController {
   @ApiBody({ type: () => XenditDisbursementCallbackDto })
   xenditDisbursementCallback = async (req: Request, res: Response) => {
     const result = await this.xenditDisbursement.handle(req.body as Record<string, unknown>);
+    return res.status(200).json({ received: true, ...result });
+  };
+
+  @ApiOperation({
+    summary: 'Sumsub KYC webhook (applicantPending → PENDING, applicantReviewed → APPROVED/REJECTED)',
+  })
+  sumsubWebhook = async (req: Request, res: Response) => {
+    const result = await this.sumsub.handle(req.body as SumsubWebhookPayload);
+    // 200 even on ignored/unmatched events so Sumsub stops retrying them;
+    // transient failures (DB down) throw → errorHandler 5xx → Sumsub retries.
     return res.status(200).json({ received: true, ...result });
   };
 }
