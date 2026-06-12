@@ -10,6 +10,7 @@
  *   posts | comments | post-likes | comment-likes | products | reports
  */
 import 'dotenv/config';
+import { randomUUID } from 'node:crypto';
 import type { Connection, RowDataPacket } from 'mysql2/promise';
 import { PrismaClient } from '@prisma/client';
 import { normalizePhonePair } from '@bb/common/utils/phone.util';
@@ -236,15 +237,25 @@ async function migrateMembers(legacy: Connection) {
   log('members: streaming');
   // Member.email is nullable: email-less legacy members migrate too, as long
   // as they have SOME identity (email or phone). Lowest member_id wins a
-  // duplicate email/phone.
+  // duplicate email/phone/sub.
+  // Social-only members have NO password in legacy (MemberLoginSocialMedia
+  // never sets one) — a social id counts as a credential, otherwise they'd be
+  // skipped and their history (enrollments/commissions via legacyId) orphaned
+  // when they Google-login into a freshly created row.
   const baseSql = `SELECT member_id, email, name, first_name, last_name, phone,
-    password, image_url, biography, is_active, is_email_verified, date_register
+    password, image_url, biography, is_active, is_email_verified, is_phone_verified,
+    google_id, sign_in_with_apple_id, date_register
     FROM member WHERE ((email <> '' AND email IS NOT NULL) OR (phone <> '' AND phone IS NOT NULL))
-      AND password IS NOT NULL AND password <> ''
+      AND ((password IS NOT NULL AND password <> '')
+        OR (google_id IS NOT NULL AND google_id <> '')
+        OR (sign_in_with_apple_id IS NOT NULL AND sign_in_with_apple_id <> '')
+        OR (facebook_id IS NOT NULL AND facebook_id <> ''))
       AND status=1`;
 
   const seenEmail = new Set<string>();
   const seenPhone = new Set<string>();
+  const seenGoogleSub = new Set<string>();
+  const seenAppleSub = new Set<string>();
   let scanned = 0,
     inserted = 0,
     skipped = 0,
@@ -285,22 +296,43 @@ async function migrateMembers(legacy: Connection) {
       if (email) seenEmail.add(email);
       if (phone) seenPhone.add(phone);
 
+      // Legacy google_id / sign_in_with_apple_id hold the provider user id —
+      // the same value as the `sub` claim the new social login verifies, so
+      // they map 1:1 onto googleSub/appleSub (both unique; lowest member_id
+      // keeps a duplicated sub, the later row just loses the fast path and
+      // re-links by email on first login).
+      let googleSub = nonEmpty(r.google_id);
+      if (googleSub && seenGoogleSub.has(googleSub)) googleSub = null;
+      if (googleSub) seenGoogleSub.add(googleSub);
+      let appleSub = nonEmpty(r.sign_in_with_apple_id);
+      if (appleSub && seenAppleSub.has(appleSub)) appleSub = null;
+      if (appleSub) seenAppleSub.add(appleSub);
+
       const fullName =
         nonEmpty(r.name) ??
         ([nonEmpty(r.first_name), nonEmpty(r.last_name)].filter(Boolean).join(' ') || null);
+
+      // Social-only rows get the same never-authenticatable sentinel the new
+      // social register uses (verifyPassword rejects algo 'social').
+      const legacyPassword = nonEmpty(r.password);
 
       data.push({
         legacyId: r.member_id as number,
         email,
         phone,
         phoneCode: phone ? pair!.phoneCode : null,
+        googleSub,
+        appleSub,
         fullName,
-        passwordHash: String(r.password),
-        passwordAlgo: 'legacy',
+        passwordHash: legacyPassword ?? `${randomUUID()}${randomUUID()}`,
+        passwordAlgo: legacyPassword ? 'legacy' : 'social',
         avatarUrl: nonEmpty(r.image_url),
         bio: nonEmpty(r.biography),
         isActive: bool(r.is_active),
+        // Verified flags only carry over while the contact they attest to does
+        // (a dropped dup phone must not stay "verified").
         isEmailVerified: email ? bool(r.is_email_verified) : false,
+        isPhoneVerified: phone ? bool(r.is_phone_verified) : false,
         createdAt: date(r.date_register) ?? new Date(),
       });
     }
@@ -328,7 +360,7 @@ async function migrateMembers(legacy: Connection) {
             try {
               await prisma.member.upsert({
                 where: { legacyId: row.legacyId },
-                create: { ...row, phone: null, phoneCode: null },
+                create: { ...row, phone: null, phoneCode: null, isPhoneVerified: false },
                 update: {},
               });
               inserted++;

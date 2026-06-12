@@ -63,7 +63,18 @@ log in freely.
    - Serializers now emit `email: null` for phone-only members — **FE must null-check**
      (was an ugly-but-non-null synthetic string). Confirm with FE/PM.
    - `scripts/migrate-from-legacy.ts` migrates email-less legacy members too (email OR
-     phone required); phone is stored canonical via `normalizePhonePair` + `phoneCode`.
+     phone required); phone is stored canonical via `normalizePhonePair` + `phoneCode`;
+     verified flags only carry over with the contact they attest to (incl. legacy
+     `is_phone_verified`).
+   - Social-only legacy members (no password — `MemberLoginSocialMedia` never set one)
+     migrate with a random sentinel + `passwordAlgo='social'`; legacy `google_id` /
+     `sign_in_with_apple_id` map to `googleSub`/`appleSub` (same value as the token `sub`
+     claim). Rows without a sub (main-app legacy never wrote `google_id`) self-heal via
+     the email link path on first social login (`is_email_verified=1` from legacy).
+     **Cutover checklist:** Google `sub` is globally stable, but Apple `sub` (and
+     Hide-My-Email relay addresses) are scoped to the Apple Developer TEAM — if the new
+     app ships under a different team than legacy, drop the `appleSub` mapping and use
+     Apple's transfer-identifier flow instead. Verify team/bundle with ops before running.
 
 ## API surface
 
