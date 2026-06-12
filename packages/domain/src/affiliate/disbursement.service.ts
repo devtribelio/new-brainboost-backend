@@ -8,6 +8,12 @@ import {
 } from '@bb/common/services/xendit.client';
 import { generateExternalId } from '@bb/common/services/xendit-signature';
 import {
+  createApplicant,
+  generateSdkAccessToken,
+  getApplicantByExternalId,
+  isSumsubConfigured,
+} from '@bb/common/services/sumsub.client';
+import {
   COMMISSION_STATUS,
   DISBURSEMENT_STATUS,
   DISBURSEMENT_HOLD_STATUSES,
@@ -400,6 +406,129 @@ export class DisbursementService {
     return member;
   }
 
+  // ---- KYC via Sumsub --------------------------------------------------------
+
+  /**
+   * Start (or resume) a Sumsub KYC session: ensure an applicant exists for this
+   * member (externalUserId = our member UUID) and mint a short-lived SDK access
+   * token for the mobile SDK. kycStatus is NOT touched here — webhooks drive the
+   * transitions (applicantPending → PENDING, applicantReviewed → APPROVED/REJECTED).
+   */
+  async createSumsubKycSession(memberId: string) {
+    if (!isSumsubConfigured()) {
+      throw new BadRequestException('KYC provider not configured');
+    }
+    const member = await prisma.member.findUnique({
+      where: { id: memberId },
+      select: { kycStatus: true, sumsubApplicantId: true },
+    });
+    if (!member) throw new NotFoundException('Member not found');
+    if (member.kycStatus === 'APPROVED') throw new BadRequestException('KYC sudah disetujui');
+
+    let applicantId = member.sumsubApplicantId;
+    if (!applicantId) {
+      try {
+        const applicant = await createApplicant(memberId);
+        applicantId = applicant.id;
+      } catch (err) {
+        // 409 = applicant already exists for this externalUserId (e.g. retry
+        // after a crash before we stored the id) — resolve instead of failing.
+        if ((err as { status?: number }).status === 409) {
+          const existing = await getApplicantByExternalId(memberId);
+          applicantId = existing.id;
+        } else {
+          throw err;
+        }
+      }
+      await prisma.member.update({
+        where: { id: memberId },
+        data: { sumsubApplicantId: applicantId },
+      });
+    }
+
+    const accessToken = await generateSdkAccessToken(memberId);
+    return { token: accessToken.token, applicantId, kycStatus: member.kycStatus };
+  }
+
+  /**
+   * Webhook `applicantPending`: documents submitted, review started.
+   * Mirrors the manual submitKyc transition. No-op when already APPROVED.
+   */
+  async markSumsubPending(applicantId: string, externalUserId?: string) {
+    const member = await this.findMemberForSumsub(applicantId, externalUserId);
+    if (!member) return { handled: false, reason: 'member not found' };
+    if (member.kycStatus === 'APPROVED') return { handled: false, reason: 'already approved' };
+    await prisma.member.update({
+      where: { id: member.id },
+      data: {
+        kycStatus: 'PENDING',
+        sumsubApplicantId: applicantId,
+        kycSubmittedAt: new Date(),
+        kycReviewedAt: null,
+        kycReviewedBy: null,
+        kycRejectedReason: null,
+      },
+    });
+    return { handled: true, memberId: member.id, kycStatus: 'PENDING' };
+  }
+
+  /**
+   * Webhook `applicantReviewed`: GREEN → APPROVED, RED → REJECTED.
+   * RED + RETRY can re-submit through the same applicant; RED + FINAL is
+   * enforced by Sumsub itself (SDK refuses further attempts). Writes are
+   * absolute so webhook replays converge to the same state (idempotent).
+   */
+  async applySumsubReview(input: {
+    applicantId: string;
+    externalUserId?: string;
+    reviewAnswer: string; // GREEN | RED
+    rejectLabels?: string[];
+    reviewRejectType?: string; // FINAL | RETRY
+  }) {
+    const member = await this.findMemberForSumsub(input.applicantId, input.externalUserId);
+    if (!member) return { handled: false, reason: 'member not found' };
+
+    const approved = input.reviewAnswer === 'GREEN';
+    const rejectedReason = approved
+      ? null
+      : [input.reviewRejectType, (input.rejectLabels ?? []).join(', ')]
+          .filter(Boolean)
+          .join(': ') || 'REJECTED';
+
+    await prisma.member.update({
+      where: { id: member.id },
+      data: {
+        kycStatus: approved ? 'APPROVED' : 'REJECTED',
+        sumsubApplicantId: input.applicantId,
+        kycReviewedAt: new Date(),
+        kycReviewedBy: null, // reviewed by Sumsub, not an admin
+        kycRejectedReason: rejectedReason,
+      },
+    });
+    logger.info(
+      { memberId: member.id, applicantId: input.applicantId, reviewAnswer: input.reviewAnswer },
+      '[kyc] sumsub review applied',
+    );
+    return { handled: true, memberId: member.id, kycStatus: approved ? 'APPROVED' : 'REJECTED' };
+  }
+
+  /** Resolve the member a Sumsub webhook refers to: applicantId first, then externalUserId (our member UUID). */
+  private async findMemberForSumsub(applicantId: string, externalUserId?: string) {
+    const byApplicant = await prisma.member.findUnique({
+      where: { sumsubApplicantId: applicantId },
+      select: { id: true, kycStatus: true },
+    });
+    if (byApplicant) return byApplicant;
+    // externalUserId is our UUID — guard the cast so a foreign id can't blow up the query.
+    if (externalUserId && UUID_RE.test(externalUserId)) {
+      return prisma.member.findUnique({
+        where: { id: externalUserId },
+        select: { id: true, kycStatus: true },
+      });
+    }
+    return null;
+  }
+
   // ---- bank account --------------------------------------------------------
 
   async getBankAccount(memberId: string) {
@@ -426,6 +555,8 @@ export class DisbursementService {
     });
   }
 }
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const kycSelect = {
   kycStatus: true,

@@ -34,6 +34,7 @@ import {
   BankAccountDto,
   DisbursementSummaryDto,
   KycDto,
+  KycTokenDto,
   MemberAffiliatorDto,
   SetModeResultDto,
   VisitLogResultDto,
@@ -287,6 +288,17 @@ export class AffiliateController {
       selfieUrl,
     });
     return ok(res, kyc);
+  };
+
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Start Sumsub KYC session — creates the applicant (once) and mints an SDK access token',
+  })
+  @ApiResponse({ status: 200, type: () => KycTokenDto })
+  createKycToken = async (req: AuthenticatedRequest, res: Response) => {
+    if (!req.user) throw new UnauthorizedException();
+    const session = await this.disbursementService.createSumsubKycSession(req.user.id);
+    return ok(res, session);
   };
 }
 

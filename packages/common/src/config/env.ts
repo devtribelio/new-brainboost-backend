@@ -109,6 +109,21 @@ export const env = {
       'http://localhost:3000/checkout/failed',
     ),
   },
+  sumsub: {
+    // App token + secret pair from the Sumsub dashboard (Dev space → App tokens).
+    // Sandbox and production are DIFFERENT pairs — same base URL for both.
+    // Empty = Sumsub KYC disabled (token endpoint 503s, webhook guard fails closed).
+    appToken: optional('SUMSUB_APP_TOKEN', ''),
+    secretKey: optional('SUMSUB_SECRET_KEY', ''),
+    // Separate secret configured on the webhook endpoint (dashboard → Webhooks).
+    // Used for x-payload-digest HMAC verification — NOT the same as secretKey.
+    webhookSecret: optional('SUMSUB_WEBHOOK_SECRET', ''),
+    // Verification level name created in the dashboard (ID doc + selfie).
+    levelName: optional('SUMSUB_LEVEL_NAME', 'basic-kyc-idn'),
+    baseUrl: optional('SUMSUB_BASE_URL', 'https://api.sumsub.com'),
+    // SDK access token lifetime, seconds.
+    tokenTtlSeconds: Number.parseInt(optional('SUMSUB_TOKEN_TTL_SECONDS', '600'), 10),
+  },
   revenuecat: {
     // Shared secret RevenueCat sends as the `Authorization` header on each
     // webhook (configured in the RC dashboard). Empty disables the endpoint

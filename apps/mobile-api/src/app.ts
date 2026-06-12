@@ -40,7 +40,16 @@ export function buildApp(): Express {
   app.use(cors());
   app.use(compression());
   app.use(cookieParser());
-  app.use(express.json({ limit: '5mb' }));
+  app.use(
+    express.json({
+      limit: '5mb',
+      // Keep the raw body bytes: the Sumsub webhook digest is an HMAC over the
+      // payload AS SENT — re-serializing req.body would not round-trip.
+      verify: (req, _res, buf) => {
+        (req as express.Request & { rawBody?: Buffer }).rawBody = buf;
+      },
+    }),
+  );
   app.use(express.urlencoded({ extended: true }));
 
   if (!env.isTest) {
