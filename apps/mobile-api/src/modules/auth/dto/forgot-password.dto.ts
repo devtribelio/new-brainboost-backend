@@ -1,5 +1,6 @@
 import { IsEmail, IsOptional, IsString, Length, Matches } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@bb/common/openapi/decorators';
+import { NormalizeEmail } from '@bb/common/utils/transform.util';
 
 // email/phone: at least one required (checked in the service — class-validator
 // has no clean either-or). Both present → email wins; the same priority is
@@ -7,6 +8,7 @@ import { ApiProperty, ApiPropertyOptional } from '@bb/common/openapi/decorators'
 
 export class RequestForgotPasswordDto {
   @ApiPropertyOptional({ format: 'email', example: 'john.doe@example.com' })
+  @NormalizeEmail()
   @IsOptional()
   @IsEmail()
   email?: string;
@@ -22,6 +24,7 @@ export class RequestForgotPasswordDto {
 
 export class ForgotPasswordVerificationDto {
   @ApiPropertyOptional({ format: 'email', example: 'john.doe@example.com' })
+  @NormalizeEmail()
   @IsOptional()
   @IsEmail()
   email?: string;

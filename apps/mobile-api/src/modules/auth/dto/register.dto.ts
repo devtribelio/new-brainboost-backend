@@ -1,9 +1,11 @@
 import { IsEmail, IsOptional, IsString, Length, Matches, MinLength } from 'class-validator';
 import { Transform } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@bb/common/openapi/decorators';
+import { NormalizeEmail } from '@bb/common/utils/transform.util';
 
 export class RegisterDto {
   @ApiProperty({ format: 'email', example: 'user@example.com' })
+  @NormalizeEmail()
   @IsEmail()
   email!: string;
 
