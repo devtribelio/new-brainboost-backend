@@ -1015,38 +1015,73 @@ export class AuthService {
     };
   }
 
-  async requestVerifyEmail(memberId: string) {
-    const member = await prisma.member.findUnique({ where: { id: memberId } });
-    if (!member) throw new NotFoundException('Member not found');
-    if (!member.email) throw new BadRequestException('Member has no email on file');
-    if (member.isEmailVerified) throw new BadRequestException('Email already verified');
-
-    // issue() enqueues the email; bb-comms renders the branded OTP template
-    // (default subject + message + the code). recipientName drives the greeting.
-    const { expiresAt } = await otpService.issue({
-      target: member.email ?? '',
-      purpose: 'verify-email',
-      recipientName: member.fullName ?? undefined,
-    });
-    logger.info({ memberId, email: member.email }, 'verify-email OTP issued');
-
-    return { email: member.email, expired_date: expiresAt.toISOString() };
+  /**
+   * Post-login contact verification, one implementation for both channels.
+   * The pre-login pairs (validateOtpPhone/validateOtpEmail) stay separate:
+   * different auth model (by memberId, no token) and they carry the
+   * isActive=true activation step that must never run here.
+   */
+  private verifyChannel(
+    member: {
+      email: string | null;
+      phone: string | null;
+      phoneCode: string | null;
+      isEmailVerified: boolean;
+      isPhoneVerified: boolean;
+    },
+    type: 'email' | 'phone',
+  ) {
+    if (type === 'email') {
+      if (!member.email) throw new BadRequestException('Member has no email on file');
+      if (member.isEmailVerified) throw new BadRequestException('Email already verified');
+      return {
+        target: member.email,
+        purpose: 'verify-email' as const,
+        flag: { isEmailVerified: true },
+      };
+    }
+    if (!member.phone || !member.phoneCode) {
+      throw new BadRequestException('Member has no phone on file');
+    }
+    if (member.isPhoneVerified) throw new BadRequestException('Phone already verified');
+    return {
+      target: this.phoneTarget(member.phoneCode, member.phone),
+      purpose: 'verify-phone' as const,
+      flag: { isPhoneVerified: true },
+    };
   }
 
-  async verifyEmail(memberId: string, code: string) {
+  async requestVerify(memberId: string, type: 'email' | 'phone') {
     const member = await prisma.member.findUnique({ where: { id: memberId } });
     if (!member) throw new NotFoundException('Member not found');
-    if (!member.email) throw new BadRequestException('Member has no email on file');
-    if (member.isEmailVerified) throw new BadRequestException('Email already verified');
+    const ch = this.verifyChannel(member, type);
 
-    await otpService.consume(member.email, code, 'verify-email');
+    // Channel (email/WhatsApp) is routed by target shape inside issue().
+    const { expiresAt } = await otpService.issue({
+      target: ch.target,
+      purpose: ch.purpose,
+      recipientName: member.fullName ?? undefined,
+      maxPerDay: 5,
+      enforceResendGuard: true,
+    });
+    logger.info({ memberId, type, target: ch.target }, 'post-login verify OTP issued');
+
+    return { type, target: ch.target, expired_date: expiresAt.toISOString() };
+  }
+
+  async verify(memberId: string, type: 'email' | 'phone', code: string) {
+    const member = await prisma.member.findUnique({ where: { id: memberId } });
+    if (!member) throw new NotFoundException('Member not found');
+    const ch = this.verifyChannel(member, type);
+
+    await otpService.consume(ch.target, code, ch.purpose);
 
     await prisma.member.update({
       where: { id: memberId },
-      data: { isEmailVerified: true },
+      data: ch.flag,
     });
 
-    return { email: member.email, verified: true };
+    return { type, target: ch.target, verified: true };
   }
 
   async validateOtpPhone(dto: ValidateOtpPhoneDto) {
