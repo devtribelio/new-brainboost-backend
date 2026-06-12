@@ -126,8 +126,13 @@ export class MemberInfoDto {
   @ApiProperty({ format: 'uuid', example: '7a3c1a52-9f1b-4f8b-9d2a-1e0a7b1c4d51' })
   id!: string;
 
-  @ApiProperty({ format: 'email', example: 'john.doe@example.com' })
-  email!: string;
+  @ApiPropertyOptional({
+    format: 'email',
+    nullable: true,
+    example: 'john.doe@example.com',
+    description: 'Null for phone-registered members that have not set an email.',
+  })
+  email?: string | null;
 
   @ApiPropertyOptional({ nullable: true, example: 'John Doe' })
   name?: string | null;
@@ -141,8 +146,18 @@ export class MemberInfoDto {
   @ApiPropertyOptional({ nullable: true, example: 'https://cdn.brainboost.com/avatars/john.jpg' })
   imageUrl?: string | null;
 
-  @ApiProperty({ type: 'boolean', example: true })
+  @ApiProperty({
+    type: 'boolean',
+    example: true,
+    description: 'Legacy alias of `isEmailVerified` (FE pre-rename).',
+  })
   isVerified!: boolean;
+
+  @ApiProperty({ type: 'boolean', example: true })
+  isEmailVerified!: boolean;
+
+  @ApiProperty({ type: 'boolean', example: true })
+  isPhoneVerified!: boolean;
 
   @ApiProperty({ format: 'date-time', example: '2024-01-15T10:30:00.000Z' })
   createdAt!: string;
