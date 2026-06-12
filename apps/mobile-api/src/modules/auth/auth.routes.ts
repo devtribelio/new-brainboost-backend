@@ -28,7 +28,7 @@ import { RequestVerificationPhoneDto } from './dto/request-verification-phone.dt
 import { ValidateOtpPhoneDto } from './dto/validate-otp-phone.dto';
 import { RequestVerificationEmailDto } from './dto/request-verification-email.dto';
 import { ValidateOtpEmailDto } from './dto/validate-otp-email.dto';
-import { VerifyEmailDto } from './dto/verify-email.dto';
+import { RequestVerifyDto, VerifyDto } from './dto/verify-contact.dto';
 import { bindRoute } from '@bb/common/openapi/route-binder';
 
 export function authRoutes(): Router {
@@ -141,17 +141,17 @@ export function authRoutes(): Router {
     router,
     controller: ctrl,
     method: 'post',
-    path: '/auth/requestVerifyEmail',
-    handlerKey: 'requestVerifyEmail',
-    middlewares: [authGuard],
+    path: '/auth/requestVerify',
+    handlerKey: 'requestVerify',
+    middlewares: [authGuard, validateDto(RequestVerifyDto)],
   });
   bindRoute({
     router,
     controller: ctrl,
     method: 'post',
-    path: '/auth/verifyEmail',
-    handlerKey: 'verifyEmail',
-    middlewares: [authGuard, validateDto(VerifyEmailDto)],
+    path: '/auth/verify',
+    handlerKey: 'verify',
+    middlewares: [authGuard, validateDto(VerifyDto)],
   });
 
   return router;

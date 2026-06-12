@@ -76,7 +76,8 @@ log in freely.
 | `POST /auth/validateOtpEmail` | **new** — pre-login consume OTP by memberId, sets `isEmailVerified=true, isActive=true` |
 | `POST /oauth/token` (password) | unverified placeholder → generic 401 (`403 ACCOUNT_NOT_VERIFIED` discriminator written but disabled) |
 | `POST /account/preRegistration` | dedup check ignores reusable placeholders |
-| `/auth/requestVerifyEmail`, `/auth/verifyEmail` | unchanged — post-login pair (phone-registered users adding a real email later) |
+| `POST /auth/requestVerify` + `POST /auth/verify` | **replaces** `/auth/requestVerifyEmail`/`verifyEmail` (routes REMOVED) — generic post-login pair, body `{type: 'email'\|'phone'}`; OTP via SES/WhatsApp per type, sets `isEmailVerified`/`isPhoneVerified`; rate-limited (5/day + resend guard). Pre-login pairs stay separate (different auth model + activation step) |
+| `POST /account/profile/update` | phone canonicalized via `normalizePhonePair`; changing the number resets `isPhoneVerified=false` (re-verify via `/auth/verify`) |
 | `POST /auth/requestForgotPassword` + `forgotPasswordVerification` | accept `email?` OR `phone?` (both → email wins, same rule both steps); phone OTP via WhatsApp, target rebuilt canonical from the member row so input format may differ between steps; now rate-limited (max 5/day + resend guard, both channels) |
 
 ## Not done / follow-ups

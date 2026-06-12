@@ -19,7 +19,7 @@ import {
   RequestVerificationEmailDto,
 } from './dto/request-verification-email.dto';
 import { ValidateOtpEmailDto } from './dto/validate-otp-email.dto';
-import { VerifyEmailDto } from './dto/verify-email.dto';
+import { RequestVerifyDto, VerifyDto } from './dto/verify-contact.dto';
 import { ok, okCreated } from '@bb/common/utils/response.util';
 import type { AuthenticatedRequest } from '@bb/common/interfaces/authenticated-request';
 import { UnauthorizedException } from '@bb/common/exceptions';
@@ -204,24 +204,34 @@ export class AuthController {
   };
 
   @ApiOperation({
-    summary: 'Request email verification OTP',
-    description: 'Send a 6-digit OTP to the authenticated member\'s email. Requires auth.',
+    summary: 'Request contact verification OTP (email or phone)',
+    description:
+      "Send a 6-digit OTP to the authenticated member's email (SES) or phone (WhatsApp), " +
+      'per `type`. Replaces `/auth/requestVerifyEmail`.',
   })
+  @ApiBody({ type: () => RequestVerifyDto })
   @ApiResponse({ status: 200, type: () => GenericOkDto })
-  requestVerifyEmail = async (req: Request, res: Response) => {
+  requestVerify = async (req: Request, res: Response) => {
     const user = (req as AuthenticatedRequest).user;
     if (!user) throw new UnauthorizedException('Authentication required');
-    const result = await this.authService.requestVerifyEmail(user.id);
+    const result = await this.authService.requestVerify(
+      user.id,
+      (req.body as RequestVerifyDto).type,
+    );
     return ok(res, result);
   };
 
-  @ApiOperation({ summary: 'Submit OTP and mark member.isEmailVerified=true' })
-  @ApiBody({ type: () => VerifyEmailDto })
+  @ApiOperation({
+    summary: 'Submit contact verification OTP — sets isEmailVerified / isPhoneVerified',
+    description: 'Replaces `/auth/verifyEmail`.',
+  })
+  @ApiBody({ type: () => VerifyDto })
   @ApiResponse({ status: 200, type: () => GenericOkDto })
-  verifyEmail = async (req: Request, res: Response) => {
+  verify = async (req: Request, res: Response) => {
     const user = (req as AuthenticatedRequest).user;
     if (!user) throw new UnauthorizedException('Authentication required');
-    const result = await this.authService.verifyEmail(user.id, (req.body as VerifyEmailDto).code);
+    const body = req.body as VerifyDto;
+    const result = await this.authService.verify(user.id, body.type, body.code);
     return ok(res, result);
   };
 }

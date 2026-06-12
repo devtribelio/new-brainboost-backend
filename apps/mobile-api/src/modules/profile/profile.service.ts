@@ -1,6 +1,7 @@
 import { prisma } from '@bb/db';
 import { BadRequestException, NotFoundException } from '@bb/common/exceptions';
 import { assertUuid } from '@bb/common/utils/uuid.util';
+import { normalizePhonePair } from '@bb/common/utils/phone.util';
 
 export class ProfileService {
   async getInfo(memberId: string) {
@@ -53,12 +54,21 @@ export class ProfileService {
       }
     }
 
+    let phone = dto.phone;
+    let phoneCode = dto.phoneCode;
+    let phoneChanged = false;
     if (dto.phone) {
       if (!/^\+?[0-9]{6,20}$/.test(dto.phone)) {
         throw new BadRequestException('phone must be 6-20 digits, optional leading +');
       }
+      // Same canonical forms as register/login — dedup catches format variants.
+      const pair = normalizePhonePair(dto.phone, dto.phoneCode ?? member.phoneCode ?? '+62');
+      if (pair.phone.length < 6) throw new BadRequestException('Invalid phone number');
+      phone = pair.phone;
+      phoneCode = pair.phoneCode;
+      phoneChanged = pair.phone !== member.phone;
       const phoneTaken = await prisma.member.findFirst({
-        where: { phone: dto.phone, NOT: { id: memberId } },
+        where: { phone: pair.phone, NOT: { id: memberId } },
         select: { id: true },
       });
       if (phoneTaken) throw new BadRequestException('Phone already used by another member');
@@ -70,8 +80,10 @@ export class ProfileService {
         fullName: dto.fullName,
         firstName: dto.firstName,
         lastName: dto.lastName,
-        phone: dto.phone,
-        phoneCode: dto.phoneCode,
+        phone,
+        phoneCode,
+        // A new number was never OTP'd — verified status must not carry over.
+        ...(phoneChanged ? { isPhoneVerified: false } : {}),
         gender: dto.gender,
         ...(birthdate !== undefined ? { birthdate } : {}),
         bio: dto.bio,
