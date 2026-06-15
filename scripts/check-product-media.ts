@@ -4,7 +4,7 @@
  *
  * Run: pnpm exec tsx scripts/check-product-media.ts <productCode>
  */
-import { prisma } from '../src/config/prisma';
+import { prisma } from '@bb/db';
 
 const UUID = '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}';
 const EMBED_RE = new RegExp(`embed/(\\d+)/(${UUID})`);

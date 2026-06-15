@@ -18,7 +18,7 @@
  */
 import 'dotenv/config';
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
-import { prisma } from '../src/config/prisma';
+import { prisma } from '@bb/db';
 
 const ACCOUNT_KEY = process.env.BUNNY_ACCOUNT_API_KEY ?? '';
 const REFERER = process.env.BUNNY_REFERER || 'https://brainboost.id';
