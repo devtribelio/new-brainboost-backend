@@ -29,6 +29,7 @@
     "seed:admin": "tsx prisma/seed-admin.ts",
     "migrate:legacy": "tsx scripts/migrate-from-legacy.ts",
     "migrate:reviews": "tsx scripts/migrate-reviews.ts",
+    "migrate:courses": "tsx scripts/migrate-courses.ts",
     "backfill:course-legacy-id": "tsx scripts/backfill-course-legacy-id.ts",
     "migrate:course-sections": "tsx scripts/migrate-course-sections.ts",
     "migrate:course-lessons": "tsx scripts/migrate-course-lessons.ts",
