@@ -22,6 +22,10 @@ export const env = {
   isProduction: nodeEnv === 'production',
   isTest: nodeEnv === 'test',
   appName: optional('APP_NAME', 'bb-backend'),
+  // Swagger UI / OpenAPI JSON exposure. Defaults ON so staging (which runs
+  // NODE_ENV=production) keeps its docs for QA. Set API_DOCS_ENABLED=false in a
+  // real public production environment to hide the API contract.
+  apiDocsEnabled: optional('API_DOCS_ENABLED', 'true') !== 'false',
   port: Number.parseInt(optional('PORT', '3000'), 10),
   databaseUrl: required('DATABASE_URL'),
   jwt: {

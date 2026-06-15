@@ -520,6 +520,12 @@ export class AuthService {
       throw new UnauthorizedException('invalid_refresh_token');
     }
     if (stored.revokedAt) {
+      // NOTE: true RTR reuse-detection (revoke the whole session family when a
+      // rotated token is replayed) needs a lineage column (e.g. supersededById)
+      // to distinguish a rotation-reuse ATTACK from a token revoked for benign
+      // reasons (second login in the single-session bucket, logout, password
+      // change). Without it, blanket family-revocation here logs legitimate
+      // users out. Tracked as a follow-up (see docs/security-audit-followups.md).
       throw new UnauthorizedException('session_revoked');
     }
     if (stored.expiresAt < new Date()) {

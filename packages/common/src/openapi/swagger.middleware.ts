@@ -2,8 +2,19 @@ import type { Express, Request, Response } from 'express';
 import swaggerUi from 'swagger-ui-express';
 import { buildOpenApiDocument } from './builder';
 import { env } from '@bb/common/config/env';
+import { logger } from '@bb/common/config/logger';
 
 export function mountSwagger(app: Express, prefix = '/api/docs'): void {
+  // SECURITY: the doc enumerates every path/DTO/auth requirement across all
+  // modules (incl. the internal backoffice surface) — a recon aid. Gate it
+  // behind an explicit flag (default ON) rather than NODE_ENV, because staging
+  // runs NODE_ENV=production but still wants docs for QA. Set API_DOCS_ENABLED=
+  // false in a real public production environment.
+  if (!env.apiDocsEnabled) {
+    logger.info('[openapi] Swagger UI disabled (API_DOCS_ENABLED=false)');
+    return;
+  }
+
   // Build once after all module routes have been registered.
   const document = buildOpenApiDocument({
     info: {

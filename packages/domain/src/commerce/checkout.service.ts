@@ -44,7 +44,9 @@ export class CheckoutService {
       const check = await this.voucherService.validate(input.voucherCode, input.productId);
       if (!check.valid) throw new BadRequestException(check.reason ?? 'Voucher invalid');
       voucherId = check.voucherId;
-      voucherMeta = { type: check.type!, value: check.voucherAmount! };
+      // maxAmount MUST be threaded through — omitting it silently bypasses the
+      // PERCENT cap in computeTotals (over-discount / revenue loss).
+      voucherMeta = { type: check.type!, value: check.voucherAmount!, maxAmount: check.maxAmount };
     }
 
     const totals = computeTotals({

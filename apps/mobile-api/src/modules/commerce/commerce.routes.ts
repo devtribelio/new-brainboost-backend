@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { authGuard } from '@bb/common/middlewares/auth.middleware';
+import { voucherValidateRateLimiter } from '@bb/common/middlewares/rate-limit.middleware';
 import { bindRoute } from '@bb/common/openapi/route-binder';
 import { validateDto } from '@bb/common/middlewares/validation.middleware';
 import { CommerceController } from './commerce.controller';
@@ -53,7 +54,7 @@ export function commerceRoutes(): Router {
     method: 'post',
     path: '/payment/voucher/validate',
     handlerKey: 'validateVoucher',
-    middlewares: [authGuard, validateDto(ValidateVoucherDto)],
+    middlewares: [authGuard, voucherValidateRateLimiter, validateDto(ValidateVoucherDto)],
   });
   bindRoute({
     router,

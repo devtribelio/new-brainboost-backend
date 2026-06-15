@@ -15,6 +15,7 @@ describe('VoucherService', () => {
     notYet: `T-VOUCH-FUTURE-${ts}`,
     exhausted: `T-VOUCH-EXHAUSTED-${ts}`,
     quotaOne: `T-VOUCH-RACE-${ts}`,
+    cappedPercent: `T-VOUCH-CAP-${ts}`,
   };
 
   beforeAll(async () => {
@@ -68,6 +69,13 @@ describe('VoucherService', () => {
           quota: 1,
           used: 0,
         },
+        {
+          code: codes.cappedPercent,
+          type: 'PERCENT',
+          value: 50,
+          maxAmount: 50_000,
+          isActive: true,
+        },
       ],
     });
   });
@@ -120,6 +128,16 @@ describe('VoucherService', () => {
     expect(r.type).toBe('AMOUNT');
     expect(r.voucherAmount).toBe(50_000);
     expect(r.voucherId).toBeDefined();
+  });
+
+  it('threads maxAmount through for PERCENT vouchers (cap must not be silently dropped)', async () => {
+    const r = await service.validate(codes.cappedPercent, productAId);
+    expect(r.valid).toBe(true);
+    expect(r.type).toBe('PERCENT');
+    expect(r.voucherAmount).toBe(50);
+    // The bug: validate() dropped maxAmount, so computeTotals never capped the
+    // discount. 50% of 500k = 250k, but the cap is 50k.
+    expect(r.maxAmount).toBe(50_000);
   });
 
   it('atomic redeem: only one of two parallel redeems succeeds when quota=1', async () => {

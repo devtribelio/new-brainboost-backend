@@ -206,6 +206,16 @@ export class AccountService {
         code: true,
       },
     });
+
+    // SECURITY: a password change must evict any other (possibly compromised)
+    // session. Without this, a stolen refresh token keeps minting access tokens
+    // indefinitely after the victim changes their password. Mirrors the
+    // forgot-password resetPassword + logout revoke-all behaviour.
+    await prisma.refreshToken.updateMany({
+      where: { memberId, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+
     return updated;
   }
 
