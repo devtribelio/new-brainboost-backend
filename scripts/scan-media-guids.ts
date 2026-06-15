@@ -8,7 +8,7 @@
  * Run: pnpm exec tsx scripts/scan-media-guids.ts
  */
 import { writeFileSync } from 'node:fs';
-import { prisma } from '../src/config/prisma';
+import { prisma } from '@bb/db';
 
 const UUID = '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}';
 const EMBED_RE = new RegExp(`iframe\\.mediadelivery\\.net/embed/(\\d+)/(${UUID})`);
