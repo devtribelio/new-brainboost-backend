@@ -5,11 +5,12 @@ import { BadRequestException, UnauthorizedException } from '@bb/common/exception
 import type { AuthenticatedRequest } from '@bb/common/interfaces/authenticated-request';
 import {
   ApiBearerAuth,
+  ApiBody,
   ApiOperation,
   ApiResponse,
   ApiTags,
 } from '@bb/common/openapi/decorators';
-import { ReportCategoryDto, ReportResultDto } from './dto/report.dto';
+import { ReportCategoryDto, ReportMemberRequestDto, ReportResultDto } from './dto/report.dto';
 
 @ApiTags('Report')
 export class ReportController {
@@ -19,12 +20,11 @@ export class ReportController {
   @ApiResponse({ status: 200, type: () => ReportCategoryDto, isArray: true })
   categories = async (_req: Request, res: Response) => {
     const rows = await this.reportService.listCategories({ isActive: true });
-    // FE ReportCategoryModel: {memberReportMemberCategoryId, category, description}.
+    // FE ReportCategoryModel: {id, category, description}.
     // `description` not yet a column on report_categories — emit null.
     return ok(
       res,
       rows.map((c) => ({
-        memberReportMemberCategoryId: c.legacyId ?? c.id,
         id: c.id,
         category: c.name,
         description: null,
@@ -34,6 +34,7 @@ export class ReportController {
 
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Report a member' })
+  @ApiBody({ type: () => ReportMemberRequestDto })
   @ApiResponse({ status: 201, type: () => ReportResultDto })
   memberReport = async (req: AuthenticatedRequest, res: Response) => {
     if (!req.user) throw new UnauthorizedException();

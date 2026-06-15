@@ -1,9 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@bb/common/openapi/decorators';
 
 export class ReportCategoryDto {
-  @ApiProperty({ example: 1, description: 'Legacy id or backend uuid' })
-  memberReportMemberCategoryId!: number | string;
-
   @ApiProperty({ format: 'uuid', example: 'report-category-uuid-1' })
   id!: string;
 
@@ -16,6 +13,29 @@ export class ReportCategoryDto {
     description: 'Currently always null — no description column on report_categories yet.',
   })
   description!: string | null;
+}
+
+/** Request body for `POST /report/memberReport`. */
+export class ReportMemberRequestDto {
+  @ApiProperty({
+    format: 'uuid',
+    example: 'reported-member-uuid',
+    description: 'Target member id. Aliases: `targetId`, `targetMemberId`.',
+  })
+  memberId!: string;
+
+  @ApiProperty({
+    format: 'uuid',
+    example: 'report-category-uuid-1',
+    description: 'Report category id. Alias: `reportCategoryId`.',
+  })
+  categoryId!: string;
+
+  @ApiPropertyOptional({ nullable: true, format: 'uuid', example: 'network-uuid-1234' })
+  networkId?: string | null;
+
+  @ApiPropertyOptional({ nullable: true, example: 'Spamming the group' })
+  reason?: string | null;
 }
 
 /**
