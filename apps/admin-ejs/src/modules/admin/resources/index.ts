@@ -542,6 +542,10 @@ const adminResource: ResourceConfig = {
   label: 'Admin',
   pluralLabel: 'Admins',
   model: prisma.admin,
+  // SECURITY: only SUPERADMIN may manage the admins table. Otherwise any ADMIN
+  // could create a SUPERADMIN, self-escalate via the editable `role` field, or
+  // reset another admin's passwordHash — a full vertical privilege escalation.
+  requiredRole: 'SUPERADMIN',
   searchField: 'email',
   defaultOrderBy: { createdAt: 'desc' },
   listColumns: [

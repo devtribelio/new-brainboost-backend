@@ -6,6 +6,8 @@ export interface VoucherCheckResult {
   voucherId?: string;
   voucherAmount?: number;
   type?: 'PERCENT' | 'AMOUNT';
+  /** Cap for PERCENT vouchers — MUST be threaded into computeTotals or the cap is silently bypassed. */
+  maxAmount?: number | null;
   reason?: string;
 }
 
@@ -36,6 +38,7 @@ export class VoucherService {
       voucherId: voucher.id,
       type: voucher.type as 'PERCENT' | 'AMOUNT',
       voucherAmount: voucher.value,
+      maxAmount: voucher.maxAmount,
     };
   }
 

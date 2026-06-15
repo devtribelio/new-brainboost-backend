@@ -71,6 +71,13 @@ export interface ResourceConfig {
   canCreate?: boolean;
   canEdit?: boolean;
   canDelete?: boolean;
+  /**
+   * When set, the whole resource router (list/create/edit/delete) is gated to
+   * admins holding this role. Used to lock the `admins` resource to SUPERADMIN
+   * so a low-privilege ADMIN cannot self-escalate or reset other admins'
+   * credentials. Enforced in admin.routes.ts via requireRole.
+   */
+  requiredRole?: 'ADMIN' | 'SUPERADMIN';
 }
 
 export function formatCell(value: unknown): string {

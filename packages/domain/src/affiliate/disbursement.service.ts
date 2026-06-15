@@ -154,6 +154,14 @@ export class DisbursementService {
     }
 
     const created = await prisma.$transaction(async (tx) => {
+      // SECURITY (TOCTOU double-spend): serialize concurrent payout requests for
+      // the same member. Without this, two parallel requests both pass the
+      // existing-PENDING check and the balance read (READ COMMITTED — neither
+      // sees the other's uncommitted HELD row) and both create a PENDING payout,
+      // draining the balance Nx. A transaction-scoped advisory lock makes the
+      // second request block until the first commits, then see the PENDING row.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${memberId}))`;
+
       const existing = await tx.affiliateDisbursement.findFirst({
         where: {
           memberId,

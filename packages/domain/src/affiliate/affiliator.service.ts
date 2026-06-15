@@ -183,6 +183,11 @@ export class AffiliatorService {
 
     let committed = 0;
     for (const node of chain) {
+      // SECURITY: a buyer must never earn commission on their own purchase.
+      // Mutual/circular inviter links (A→B, B→A) can place the buyer inside its
+      // own seed's chain; skip (don't break — legitimate upline may sit above).
+      if (node.id === input.buyerMemberId) continue;
+
       const level = node.level;
       const rate = await this.resolveRate(node.id, node.affiliateBased, level);
       if (rate === null) continue;

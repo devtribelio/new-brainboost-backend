@@ -65,6 +65,22 @@ export const registerByPhoneRateLimiter: RequestHandler = makeRateLimiter(15);
 export const loginRateLimiter: RequestHandler = makeRateLimiter(30);
 export const adminLoginRateLimiter: RequestHandler = makeRateLimiter(10);
 
+// --- Voucher validation — per-member (or per-IP fallback). The dry-run lookup
+//     returns a distinct reason per failure mode, i.e. a code-validity oracle.
+//     Throttle to stop authenticated voucher-code enumeration.
+export const voucherValidateRateLimiter: RequestHandler = rateLimit({
+  windowMs: WINDOW_MS,
+  limit: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => {
+    const user = (req as unknown as { user?: { id?: string } }).user;
+    return user?.id ?? req.ip ?? 'anonymous';
+  },
+  handler: tooManyRequestsHandler,
+  skip: skipInTest,
+});
+
 // --- Media download — per-member (or per-IP fallback). Anti-scrape budget on
 //     the signed-download endpoint; streaming is not throttled because legit
 //     playback hits the endpoint once per session.

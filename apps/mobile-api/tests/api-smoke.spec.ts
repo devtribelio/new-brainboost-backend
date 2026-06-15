@@ -102,28 +102,23 @@ describe('API smoke (envelope { success, data, meta, error })', () => {
     expect(r.body.error.code).toBeDefined();
   });
 
-  it('GET /api/member/network/member with empty input returns 200 (lists all)', async () => {
+  // SECURITY: /network/member and /network/tag are now auth-gated. Previously
+  // unauthenticated, /network/member's empty-input "lists-all" path leaked every
+  // member's PII to anonymous callers. The empty-input lists-all behaviour still
+  // exists, but only behind authGuard (covered in network-auth.spec.ts; richer
+  // authenticated behaviour belongs in a dedicated network spec).
+  it('GET /api/member/network/member requires auth (401 without token)', async () => {
     const r = await request(app).get('/api/member/network/member?page=1&perPage=20');
-    expect(r.status).toBe(200);
-    expect(r.body.success).toBe(true);
-    expect(Array.isArray(r.body.data)).toBe(true);
-    expect(r.body.meta.pagination).toBeDefined();
+    expect(r.status).toBe(401);
+    expect(r.body.error.code).toBe('UNAUTHORIZED');
   });
 
-  it('GET /api/member/network/tag with empty code returns 200 (lists all)', async () => {
+  it('GET /api/member/network/tag requires auth (401 without token)', async () => {
     const r = await request(app).get(
       '/api/member/network/tag?page=1&perPage=50&keyword=&code=',
     );
-    expect(r.status).toBe(200);
-    expect(r.body.success).toBe(true);
-    expect(Array.isArray(r.body.data)).toBe(true);
-  });
-
-  it('GET /api/member/network/tag with keyword filters case-insensitively', async () => {
-    const r = await request(app).get('/api/member/network/tag?keyword=zzz-no-match-zzz');
-    expect(r.status).toBe(200);
-    expect(r.body.data).toEqual([]);
-    expect(r.body.meta.pagination.total).toBe(0);
+    expect(r.status).toBe(401);
+    expect(r.body.error.code).toBe('UNAUTHORIZED');
   });
 
   it('GET /api/member/report/category', async () => {

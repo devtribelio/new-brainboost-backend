@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { asyncHandler } from '@bb/common/utils/async-handler';
 import { adminLoginRateLimiter } from '@bb/common/middlewares/rate-limit.middleware';
-import { adminAuthGuard } from './admin.auth.middleware';
+import { adminAuthGuard, requireRole } from './admin.auth.middleware';
 import { AdminAuthController } from './admin.auth.controller';
 import { AdminDashboardController } from './admin.dashboard.controller';
 import { createResourceRouter } from './util/crud-factory';
@@ -26,7 +26,11 @@ export function adminRoutes(): Router {
   router.use('/', adminCurationRoutes());
 
   for (const cfg of resources) {
-    router.use(`/${cfg.key}`, createResourceRouter(cfg));
+    // SECURITY: role-gate sensitive resources (e.g. `admins` → SUPERADMIN-only)
+    // BEFORE the resource router so a low-privilege ADMIN cannot reach create/
+    // edit/delete and self-escalate. adminAuthGuard above only authenticates.
+    const guards = cfg.requiredRole ? [requireRole(cfg.requiredRole)] : [];
+    router.use(`/${cfg.key}`, ...guards, createResourceRouter(cfg));
   }
 
   return router;
