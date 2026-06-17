@@ -11,3 +11,12 @@ tmp
 *.log
 .env
 .env.*
+# secrets must never enter the build context / image
+secrets
+# local agent/tooling cruft + large db artifacts (not needed to build)
+.swarm
+.claude-flow
+knowledge
+*.db
+.mcp.json
+ecosystem.config.js
