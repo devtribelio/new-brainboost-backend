@@ -21,6 +21,18 @@ const SETTINGS: Array<{ key: string; value: string; description: string }> = [
     value: '7',
     description: 'Days a commission stays PENDING before becoming withdrawable BALANCE.',
   },
+  {
+    key: 'affiliate.iapHoldDays',
+    value: '35',
+    description:
+      'Days an IAP-channel commission stays PENDING before BALANCE (longer: covers store refund window).',
+  },
+  {
+    key: 'disbursement.autoApproveMax',
+    value: '1000000',
+    description:
+      'Max NET payout (IDR) eligible for auto-approval; anything above always goes MANUAL.',
+  },
 ];
 
 async function main() {
