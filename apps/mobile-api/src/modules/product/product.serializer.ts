@@ -141,6 +141,10 @@ interface RawSlide {
     title?: unknown;
     description?: unknown;
     platform?: unknown;
+    /** Lean shape (post-normalization) — Bunny guid lives directly on `data`. */
+    guid?: unknown;
+    /** Lean shape — real per-slide duration in seconds. */
+    durationSec?: unknown;
     audio?: Record<string, unknown>;
     /** Structured-video shape — guid lives in `data.video.guid`, like `data.audio`. */
     video?: Record<string, unknown>;
@@ -195,107 +199,79 @@ function buildDownloadUrl(guid: string, courseId: string, isPreview: boolean): s
  * `courseId` (Course UUID) + `isPreview` (parent lesson) are baked into the
  * media token. Returns a shallow-cloned slide; the original JSONB is untouched.
  */
+/**
+ * Resolve the Bunny `guid` from either slide shape:
+ *   - lean (post-normalization):   `data.guid`
+ *   - raw audio blob:              `data.audio.guid`
+ *   - raw structured video:        `data.video.guid`
+ *   - raw iframe video:            parsed out of `data.url`
+ */
+function resolveGuid(d: NonNullable<RawSlide['data']>): string | null {
+  if (typeof d.guid === 'string') return d.guid;
+  if (d.audio && typeof d.audio.guid === 'string') return d.audio.guid;
+  if (d.video && typeof d.video.guid === 'string') return d.video.guid;
+  if (typeof d.url === 'string') return parseBunnyEmbed(d.url)?.guid ?? null;
+  return null;
+}
+
+/**
+ * Real per-slide duration in seconds. Prefers the lean `data.durationSec`, then the
+ * raw Bunny blob `length` (audio/video), then the legacy slide-level `duration`.
+ * `Lesson.duration` is the sum of these across the lesson's media slides.
+ */
+function resolveDurationSec(slide: RawSlide, d: NonNullable<RawSlide['data']>): number {
+  const raw = d.durationSec ?? d.audio?.length ?? d.video?.length ?? slide.duration;
+  const n = Number.parseInt(String(raw ?? ''), 10);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+/**
+ * Scrub a single slide into the lean FE-contract shape `{ id, type, data }`.
+ * No Bunny `guid`/`videoLibraryId`/iframe HTML leaks. Handles both the raw legacy
+ * blob and the normalized lean storage shape. Non-media slides keep their `data`.
+ *
+ * FE reads duration at the LESSON level, never per-slide, so no duration is emitted
+ * on the slide. `courseId` + `isPreview` are baked into the opaque media token.
+ */
 function scrubSlide(slide: RawSlide, courseId: string, isPreview: boolean): RawSlide {
   const type = typeof slide.type === 'string' ? slide.type : '';
   const d = slide.data ?? {};
+  const guid = resolveGuid(d);
 
-  if (type === 'AudioTemplate' && d.audio) {
-    const a = d.audio;
-    const guid = typeof a.guid === 'string' ? a.guid : null;
-    const cleanAudio: Record<string, unknown> = {
-      duration: a.duration ?? slide.duration ?? 0,
-    };
+  if (type === 'AudioTemplate') {
+    const audio: Record<string, unknown> = {};
     if (guid) {
-      cleanAudio.streamUrl = buildStreamUrl(guid, courseId, isPreview);
-      cleanAudio.downloadUrl = buildDownloadUrl(guid, courseId, isPreview);
+      audio.streamUrl = buildStreamUrl(guid, courseId, isPreview);
+      audio.downloadUrl = buildDownloadUrl(guid, courseId, isPreview);
     }
     return {
-      ...slide,
-      data: {
-        title: d.title,
-        description: d.description,
-        platform: 'mp4',
-        audio: cleanAudio,
-      },
+      id: slide.id,
+      type: slide.type,
+      duration: resolveDurationSec(slide, d),
+      data: { title: d.title, description: d.description, audio },
     };
   }
 
   if (type === 'VideoTemplate') {
-    const embed = typeof d.url === 'string' ? parseBunnyEmbed(d.url) : null;
-    const v = d.video;
-    const videoGuid = v && typeof v.guid === 'string' ? v.guid : null;
     const newData: Record<string, unknown> = {
       title: d.title,
       description: d.description,
       platform: 'mp4',
     };
-    if (embed) {
-      // Iframe-HTML shape — guid parsed out of the `data.url` blob.
-      newData.streamUrl = buildStreamUrl(embed.guid, courseId, isPreview);
-      newData.downloadUrl = buildDownloadUrl(embed.guid, courseId, isPreview);
-    } else if (videoGuid) {
-      // Structured shape — guid is `data.video.guid` (like AudioTemplate).
-      newData.streamUrl = buildStreamUrl(videoGuid, courseId, isPreview);
-      newData.downloadUrl = buildDownloadUrl(videoGuid, courseId, isPreview);
+    if (guid) {
+      newData.streamUrl = buildStreamUrl(guid, courseId, isPreview);
+      newData.downloadUrl = buildDownloadUrl(guid, courseId, isPreview);
     } else if (typeof d.url === 'string') {
       // Non-Bunny embed (YouTube/external) — preserve the original url verbatim.
       newData.url = d.url;
-      newData.platform = d.platform ?? 'mp4';
+      newData.platform = (d.platform as string | undefined) ?? 'mp4';
     }
-    return { ...slide, data: newData };
+    return { id: slide.id, type: slide.type, duration: resolveDurationSec(slide, d), data: newData };
   }
 
-  // TextTemplate / GreetingTemplate / ThankYouTemplate / DocumentTemplate / ...
-  return slide;
-}
-
-// Flatten `lessonsData[].courseLessonData[].slidesData[]` into a flat list of
-// `{id, type, title, description, duration, streamUrl?}` items (FE ProductDataContent).
-// Mirrors legacy mobile transform — only AudioTemplate / VideoTemplate slides emitted.
-// Consumes already-scrubbed slides, so it never sees a raw Bunny `guid`.
-function buildDataContent(
-  lessonsData: { courseLessonData: { duration?: number; slidesData: unknown[] }[] }[],
-): Record<string, unknown>[] {
-  const out: Record<string, unknown>[] = [];
-  for (const section of lessonsData) {
-    for (const lesson of section.courseLessonData) {
-      const slides = lesson.slidesData as RawSlide[];
-      // `lesson.duration` is the Bunny-accurate total (see scripts/backfill-lesson-duration.ts).
-      // It maps cleanly to a single media item, so only prefer it when the lesson has exactly
-      // one media slide; multi-media lessons keep per-slide values to avoid over-reporting, and
-      // an un-backfilled 0 falls back to the (stale) slide duration.
-      const lessonDuration = typeof lesson.duration === 'number' ? lesson.duration : 0;
-      const mediaSlideCount = slides.filter(
-        (s) => s.type === 'AudioTemplate' || s.type === 'VideoTemplate',
-      ).length;
-      const preferLessonDuration = mediaSlideCount === 1 && lessonDuration > 0;
-      for (const slide of slides) {
-        const type = typeof slide.type === 'string' ? slide.type : '';
-        if (type !== 'AudioTemplate' && type !== 'VideoTemplate') continue;
-        const d = slide.data ?? {};
-        const item: Record<string, unknown> = {
-          id: slide.id ?? null,
-          type,
-          title: (d.title ?? slide.name ?? null) as unknown,
-          description: d.description ?? null,
-          platform: 'mp4',
-        };
-        if (type === 'AudioTemplate' && d.audio) {
-          const a = d.audio;
-          item.duration = preferLessonDuration ? lessonDuration : (a.duration ?? slide.duration ?? 0);
-          if (typeof a.streamUrl === 'string') item.streamUrl = a.streamUrl;
-          if (typeof a.downloadUrl === 'string') item.downloadUrl = a.downloadUrl;
-        }
-        if (type === 'VideoTemplate') {
-          item.duration = preferLessonDuration ? lessonDuration : (slide.duration ?? 0);
-          if (typeof d.streamUrl === 'string') item.streamUrl = d.streamUrl;
-          if (typeof d.downloadUrl === 'string') item.downloadUrl = d.downloadUrl;
-        }
-        out.push(item);
-      }
-    }
-  }
-  return out;
+  // TextTemplate / GreetingTemplate / ThankYouTemplate / DocumentTemplate / ... —
+  // ignored by the player; keep id/type/data, drop the slide-level wrapper noise.
+  return { id: slide.id, type: slide.type, data: slide.data };
 }
 
 function legacyDescriptionExcerpt(html: string | null, plain: string | null): string {
@@ -364,43 +340,29 @@ export function serializeCourseDetailLegacy(
   // non-course products; in that case there are no slides to scrub anyway.
   const courseUuid = p.course?.id ?? '';
 
+  // FE reads only `name` (section) and `lessonName / lessonDescription / duration /
+  // isPreview / slidesData` (lesson). Legacy filler (networkAccountId, memberId,
+  // courseLessonId, slideCount, code, slug, lessonStatus, order, …) is dropped.
   const lessonsData = (p.course?.sections ?? [])
     .slice()
     .sort((a, b) => a.order - b.order)
     .map((sec) => ({
-      courseSectionId: sec.legacySectionId,
-      courseId: courseLegacyId,
-      networkAccountId: 0,
-      memberId: 0,
       name: sec.name,
-      orderColumn: sec.order,
       courseLessonData: sec.lessons
         .slice()
         .sort((a, b) => a.order - b.order)
-        .map((l) => {
+        .map((l) => ({
+          lessonName: l.name,
+          lessonDescription: l.description,
+          // Duration is reported at the lesson level — every slide inherits it (FE contract).
+          duration: l.duration,
+          isPreview: l.isPreview ? 1 : 0,
           // Scrub each slide while the parent lesson's `isPreview` is in scope,
           // so Bunny `guid`/`videoLibraryId`/iframe-HTML never reach the client.
-          const slides = normalizeSlidesData(l.slidesData).map((s) =>
+          slidesData: normalizeSlidesData(l.slidesData).map((s) =>
             scrubSlide(s as RawSlide, courseUuid, l.isPreview),
-          );
-          return {
-            courseLessonId: l.legacyLessonId,
-            courseId: courseLegacyId,
-            lessonName: l.name,
-            lessonDescription: l.description,
-            joined: 0,
-            slideCount: slides.length,
-            duration: l.duration,
-            code: l.code ?? '',
-            orderColumn: l.order,
-            title: l.name,
-            lessonStatus: l.lessonStatus,
-            slug: l.slug ?? '',
-            courseSectionId: sec.legacySectionId,
-            isPreview: l.isPreview ? 1 : 0,
-            slidesData: slides,
-          };
-        }),
+          ),
+        })),
     }));
 
   return {
@@ -420,7 +382,6 @@ export function serializeCourseDetailLegacy(
     price: p.price,
     status: legacyStatus(p.status),
     lessonsData,
-    dataContent: buildDataContent(lessonsData),
     ratingSummary: {
       totalReview: reviewAggregate.total,
       avgReviewStart: roundOneDecimal(reviewAggregate.avg),
