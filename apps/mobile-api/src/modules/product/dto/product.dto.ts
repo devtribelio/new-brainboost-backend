@@ -100,44 +100,18 @@ export class ProductDto {
 }
 
 export class CourseLessonItemDto {
-  @ApiProperty({ type: 'integer', example: 5001 })
-  courseLessonId!: number;
-
-  @ApiProperty({ type: 'integer', example: 123 })
-  courseId!: number;
-
   @ApiProperty({ example: 'Intro to Hooks' })
   lessonName!: string;
 
   @ApiPropertyOptional({ nullable: true, example: 'useState and useEffect basics' })
   lessonDescription?: string | null;
 
-  @ApiProperty({ type: 'integer', example: 0 })
-  joined!: number;
-
-  @ApiProperty({ type: 'integer', example: 3 })
-  slideCount!: number;
-
-  @ApiProperty({ type: 'integer', example: 0 })
+  @ApiProperty({
+    type: 'integer',
+    example: 1200,
+    description: 'Lesson duration in seconds = SUM of its media slides\' `duration` (see slidesData[].duration).',
+  })
   duration!: number;
-
-  @ApiProperty({ example: 'LESSON-001' })
-  code!: string;
-
-  @ApiProperty({ type: 'integer', example: 0 })
-  orderColumn!: number;
-
-  @ApiProperty({ example: 'Intro to Hooks' })
-  title!: string;
-
-  @ApiProperty({ example: 'ACTIVE' })
-  lessonStatus!: string;
-
-  @ApiProperty({ example: 'intro-to-hooks' })
-  slug!: string;
-
-  @ApiProperty({ type: 'integer', example: 1001 })
-  courseSectionId!: number;
 
   @ApiProperty({ type: 'integer', example: 0, description: '0|1 — legacy emit as int' })
   isPreview!: number;
@@ -145,23 +119,33 @@ export class CourseLessonItemDto {
   @ApiProperty({
     type: 'array',
     description:
-      'Slide objects per lesson — shape per type (AudioTemplate/VideoTemplate/GreetingTemplate/ThankYouTemplate/DocumentTemplate). ' +
-      'Bunny identifiers (`guid`, `videoLibraryId`, iframe HTML) are scrubbed by the serializer: audio/video slides expose an opaque ' +
-      '`data.streamUrl` pointing at the media proxy instead. Empty array when null.',
+      'Lean slide objects `{ id, type, data }`. Media slides expose an opaque `data.streamUrl` ' +
+      '(audio under `data.audio.streamUrl`) pointing at the media proxy — Bunny `guid`/`videoLibraryId`/' +
+      'iframe HTML are scrubbed. Non-media slide types keep their `data`. Empty array when null.',
     example: [
       {
         id: 'ABC123XYZ',
         type: 'AudioTemplate',
-        name: 'Intro Audio',
-        duration: '120',
+        duration: 480,
         data: {
           title: 'Intro',
           description: '<p>Audio narration</p>',
-          platform: 'mp4',
           audio: {
-            duration: '120',
             streamUrl: '/api/member/media/stream?t=<opaque-token>',
+            downloadUrl: '/api/member/media/download?t=<opaque-token>',
           },
+        },
+      },
+      {
+        id: 'XYZ789ABC',
+        type: 'VideoTemplate',
+        duration: 720,
+        data: {
+          title: 'BLoC Deep Dive',
+          description: '<p>Step-by-step</p>',
+          platform: 'mp4',
+          streamUrl: '/api/member/media/stream?t=<opaque-token>',
+          downloadUrl: '/api/member/media/download?t=<opaque-token>',
         },
       },
     ],
@@ -170,23 +154,8 @@ export class CourseLessonItemDto {
 }
 
 export class CourseSectionDto {
-  @ApiProperty({ type: 'integer', example: 1001 })
-  courseSectionId!: number;
-
-  @ApiProperty({ type: 'integer', example: 123 })
-  courseId!: number;
-
-  @ApiProperty({ type: 'integer', example: 0, description: 'Hardcoded 0 (single-tenant)' })
-  networkAccountId!: number;
-
-  @ApiProperty({ type: 'integer', example: 0, description: 'Hardcoded 0 (single-tenant)' })
-  memberId!: number;
-
   @ApiProperty({ example: 'Getting Started' })
   name!: string;
-
-  @ApiProperty({ type: 'integer', example: 0 })
-  orderColumn!: number;
 
   @ApiProperty({ type: 'array', itemType: () => CourseLessonItemDto })
   courseLessonData!: CourseLessonItemDto[];
