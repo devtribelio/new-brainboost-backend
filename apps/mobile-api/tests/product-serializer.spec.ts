@@ -207,7 +207,7 @@ describe('serializeCourseDetailLegacy — Bunny identifier scrubbing', () => {
     expect(deepIncludes(out, 'originalhash')).toBe(false);
   });
 
-  it('replaces the audio slide Bunny object with a streamUrl, keeping title/description/platform', () => {
+  it('replaces the audio slide Bunny object with data.audio.streamUrl, keeping title/description', () => {
     const out = serializeCourseDetailLegacy(buildProduct(), reviewAggregate) as Record<
       string,
       unknown
@@ -218,16 +218,17 @@ describe('serializeCourseDetailLegacy — Bunny identifier scrubbing', () => {
     const audio = slides[0];
 
     expect(audio.type).toBe('AudioTemplate');
+    // Slide wrapper trimmed to { id, type, duration, data }.
+    expect(audio.name).toBeUndefined();
+    expect(audio.duration).toBe(120);
     const data = audio.data as Record<string, unknown>;
     expect(data.title).toBe('Welcome');
     expect(data.description).toBe('An intro track');
-    expect(data.platform).toBe('mp4');
     const audioObj = data.audio as Record<string, unknown>;
     expect(audioObj.streamUrl).toMatch(/^\/api\/member\/media\/stream\?t=/);
     expect(audioObj.guid).toBeUndefined();
     expect(audioObj.videoLibraryId).toBeUndefined();
     expect(audioObj.directPlayUrl).toBeUndefined();
-    expect(audioObj.duration).toBe(120);
   });
 
   it('drops the VideoTemplate iframe HTML and adds data.streamUrl', () => {
@@ -300,42 +301,53 @@ describe('serializeCourseDetailLegacy — Bunny identifier scrubbing', () => {
     expect(data.streamUrl).toBeUndefined();
   });
 
-  it('dataContent entries carry a streamUrl instead of guid/videoLibraryId', () => {
+  it('does not emit a dataContent field (FE builds the player from lessonsData only)', () => {
     const out = serializeCourseDetailLegacy(buildProduct(), reviewAggregate) as Record<
       string,
       unknown
     >;
-    const dataContent = out.dataContent as Array<Record<string, unknown>>;
-    // audio + bunny video + youtube video are all VideoTemplate/AudioTemplate
-    const audioEntry = dataContent.find((e) => e.type === 'AudioTemplate');
-    const videoEntries = dataContent.filter((e) => e.type === 'VideoTemplate');
-
-    expect(audioEntry?.streamUrl).toMatch(/^\/api\/member\/media\/stream\?t=/);
-    expect(audioEntry?.guid).toBeUndefined();
-    expect(audioEntry?.videoLibraryId).toBeUndefined();
-
-    const bunnyVideo = videoEntries.find((e) => typeof e.streamUrl === 'string');
-    expect(bunnyVideo?.streamUrl).toMatch(/^\/api\/member\/media\/stream\?t=/);
-    expect(bunnyVideo?.guid).toBeUndefined();
+    expect(out.dataContent).toBeUndefined();
   });
 
-  it('dataContent uses the lesson duration for single-media lessons, per-slide otherwise', () => {
+  it('trims legacy filler from lessonsData sections and lessons', () => {
     const out = serializeCourseDetailLegacy(buildProduct(), reviewAggregate) as Record<
       string,
       unknown
     >;
-    const dataContent = out.dataContent as Array<Record<string, unknown>>;
+    const section = (out.lessonsData as Array<Record<string, unknown>>)[0];
+    expect(section.networkAccountId).toBeUndefined();
+    expect(section.memberId).toBeUndefined();
+    expect(section.courseSectionId).toBeUndefined();
+    expect(Object.keys(section).sort()).toEqual(['courseLessonData', 'name']);
 
-    // Lesson A has one media slide (audio) — its item takes the lesson's
-    // Bunny-accurate duration (720), not the stale slide value (120).
-    const audioEntry = dataContent.find((e) => e.type === 'AudioTemplate');
-    expect(audioEntry?.duration).toBe(720);
+    const lesson = (section.courseLessonData as Array<Record<string, unknown>>)[0];
+    expect(lesson.courseLessonId).toBeUndefined();
+    expect(lesson.slideCount).toBeUndefined();
+    expect(lesson.joined).toBeUndefined();
+    expect(Object.keys(lesson).sort()).toEqual([
+      'duration',
+      'isPreview',
+      'lessonDescription',
+      'lessonName',
+      'slidesData',
+    ]);
+  });
 
-    // Lesson B has three media slides — each keeps its own per-slide duration.
-    const videoDurations = dataContent
-      .filter((e) => e.type === 'VideoTemplate')
-      .map((e) => e.duration);
-    expect(videoDurations).toEqual([600, 300, 35]);
+  it('emits per-slide duration on each media slide (lesson duration is their sum)', () => {
+    const out = serializeCourseDetailLegacy(buildProduct(), reviewAggregate) as Record<
+      string,
+      unknown
+    >;
+    const section = (out.lessonsData as Array<Record<string, unknown>>)[0];
+    const lessons = section.courseLessonData as Array<Record<string, unknown>>;
+
+    // Lesson A: single audio slide (120s).
+    const audio = (lessons[0].slidesData as Array<Record<string, unknown>>)[0];
+    expect(audio.duration).toBe(120);
+
+    // Lesson B: bunny video (600s), external youtube (300s), structured video (35s).
+    const bSlides = lessons[1].slidesData as Array<Record<string, unknown>>;
+    expect(bSlides.map((s) => s.duration)).toEqual([600, 300, 35]);
   });
 
   it('mints media tokens carrying the right guid / courseId / isPreview', () => {
@@ -379,14 +391,5 @@ describe('serializeCourseDetailLegacy — Bunny identifier scrubbing', () => {
     expect((videoObj.data as Record<string, unknown>).downloadUrl).toMatch(
       /^\/api\/member\/media\/download\?t=/,
     );
-
-    // dataContent entries carry downloadUrl too
-    const dataContent = out.dataContent as Array<Record<string, unknown>>;
-    const audioEntry = dataContent.find((e) => e.type === 'AudioTemplate');
-    const videoEntry = dataContent.find(
-      (e) => e.type === 'VideoTemplate' && typeof e.streamUrl === 'string',
-    );
-    expect(audioEntry?.downloadUrl).toMatch(/^\/api\/member\/media\/download\?t=/);
-    expect(videoEntry?.downloadUrl).toMatch(/^\/api\/member\/media\/download\?t=/);
   });
 });
