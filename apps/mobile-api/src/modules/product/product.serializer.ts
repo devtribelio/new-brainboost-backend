@@ -254,12 +254,22 @@ function scrubSlide(slide: RawSlide, courseId: string, isPreview: boolean): RawS
 // Mirrors legacy mobile transform — only AudioTemplate / VideoTemplate slides emitted.
 // Consumes already-scrubbed slides, so it never sees a raw Bunny `guid`.
 function buildDataContent(
-  lessonsData: { courseLessonData: { slidesData: unknown[] }[] }[],
+  lessonsData: { courseLessonData: { duration?: number; slidesData: unknown[] }[] }[],
 ): Record<string, unknown>[] {
   const out: Record<string, unknown>[] = [];
   for (const section of lessonsData) {
     for (const lesson of section.courseLessonData) {
-      for (const slide of lesson.slidesData as RawSlide[]) {
+      const slides = lesson.slidesData as RawSlide[];
+      // `lesson.duration` is the Bunny-accurate total (see scripts/backfill-lesson-duration.ts).
+      // It maps cleanly to a single media item, so only prefer it when the lesson has exactly
+      // one media slide; multi-media lessons keep per-slide values to avoid over-reporting, and
+      // an un-backfilled 0 falls back to the (stale) slide duration.
+      const lessonDuration = typeof lesson.duration === 'number' ? lesson.duration : 0;
+      const mediaSlideCount = slides.filter(
+        (s) => s.type === 'AudioTemplate' || s.type === 'VideoTemplate',
+      ).length;
+      const preferLessonDuration = mediaSlideCount === 1 && lessonDuration > 0;
+      for (const slide of slides) {
         const type = typeof slide.type === 'string' ? slide.type : '';
         if (type !== 'AudioTemplate' && type !== 'VideoTemplate') continue;
         const d = slide.data ?? {};
@@ -272,12 +282,12 @@ function buildDataContent(
         };
         if (type === 'AudioTemplate' && d.audio) {
           const a = d.audio;
-          item.duration = a.duration ?? slide.duration ?? 0;
+          item.duration = preferLessonDuration ? lessonDuration : (a.duration ?? slide.duration ?? 0);
           if (typeof a.streamUrl === 'string') item.streamUrl = a.streamUrl;
           if (typeof a.downloadUrl === 'string') item.downloadUrl = a.downloadUrl;
         }
         if (type === 'VideoTemplate') {
-          item.duration = slide.duration ?? 0;
+          item.duration = preferLessonDuration ? lessonDuration : (slide.duration ?? 0);
           if (typeof d.streamUrl === 'string') item.streamUrl = d.streamUrl;
           if (typeof d.downloadUrl === 'string') item.downloadUrl = d.downloadUrl;
         }

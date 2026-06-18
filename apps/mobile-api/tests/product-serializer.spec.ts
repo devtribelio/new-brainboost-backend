@@ -319,6 +319,25 @@ describe('serializeCourseDetailLegacy — Bunny identifier scrubbing', () => {
     expect(bunnyVideo?.guid).toBeUndefined();
   });
 
+  it('dataContent uses the lesson duration for single-media lessons, per-slide otherwise', () => {
+    const out = serializeCourseDetailLegacy(buildProduct(), reviewAggregate) as Record<
+      string,
+      unknown
+    >;
+    const dataContent = out.dataContent as Array<Record<string, unknown>>;
+
+    // Lesson A has one media slide (audio) — its item takes the lesson's
+    // Bunny-accurate duration (720), not the stale slide value (120).
+    const audioEntry = dataContent.find((e) => e.type === 'AudioTemplate');
+    expect(audioEntry?.duration).toBe(720);
+
+    // Lesson B has three media slides — each keeps its own per-slide duration.
+    const videoDurations = dataContent
+      .filter((e) => e.type === 'VideoTemplate')
+      .map((e) => e.duration);
+    expect(videoDurations).toEqual([600, 300, 35]);
+  });
+
   it('mints media tokens carrying the right guid / courseId / isPreview', () => {
     const out = serializeCourseDetailLegacy(buildProduct(), reviewAggregate);
     const urls = collectStreamUrls(out);
