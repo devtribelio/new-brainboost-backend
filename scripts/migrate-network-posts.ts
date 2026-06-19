@@ -28,7 +28,7 @@ import type { Connection, RowDataPacket } from 'mysql2/promise';
 import { PrismaClient } from '@prisma/client';
 import { connectLegacyDb } from './legacy-db';
 
-const NETWORK_LEGACY_IDS = [23410, 25136]; // BBTIMELN, BBEDUCAT
+const NETWORK_LEGACY_IDS = [23410, 25136]; // BB-TIMELINE (23410), BB-EDUCATION (25136)
 const IN_CHUNK = 1000;
 
 const prisma = new PrismaClient({ log: ['warn', 'error'] });

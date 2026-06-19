@@ -27,9 +27,15 @@ import type { RowDataPacket } from 'mysql2/promise';
 import { PrismaClient } from '@prisma/client';
 import { connectLegacyDb } from './legacy-db';
 
+// `code` is the canonical identity the mobile app resolves by (member.controller lists
+// community networks by `purpose`; joins resolve by `code`). The prisma migration
+// `seed_community_networks` already creates these two rows by code (with a placeholder
+// legacyId 999000001/2). We ADOPT those rows by code and stamp the REAL legacy network id
+// (23410/25136) so the downstream member/topic/post scripts map correctly — there must be
+// exactly ONE network per purpose, never a second BBTIMELN/BBEDUCAT pair.
 const NETWORKS = [
-  { legacyId: 23410, code: 'BBTIMELN', purpose: 'timeline', fallbackName: 'BrainBoost Timeline' },
-  { legacyId: 25136, code: 'BBEDUCAT', purpose: 'education', fallbackName: 'BrainBoost Education' },
+  { legacyId: 23410, code: 'BB-TIMELINE', purpose: 'timeline', fallbackName: 'BrainBoost Timeline' },
+  { legacyId: 25136, code: 'BB-EDUCATION', purpose: 'education', fallbackName: 'BrainBoost Education' },
 ] as const;
 
 const prisma = new PrismaClient({ log: ['warn', 'error'] });
@@ -70,16 +76,18 @@ async function main() {
       iconUrl: nonEmpty(legacyRow?.logo_image_url),
       isActive: legacyRow ? Number(legacyRow.status) === 1 : true,
     };
+    // Adopt by CODE (the app-seeded row) and stamp the real legacyId — never create a
+    // second row keyed by legacyId.
     const before = await prisma.network.findUnique({
-      where: { legacyId: cfg.legacyId },
+      where: { code: cfg.code },
       select: { id: true },
     });
     const net = await prisma.network.upsert({
-      where: { legacyId: cfg.legacyId },
+      where: { code: cfg.code },
       create: { legacyId: cfg.legacyId, ...fields },
-      update: fields,
+      update: { legacyId: cfg.legacyId, ...fields },
     });
-    log(`${cfg.code} (legacy ${cfg.legacyId}) ${before ? 'updated' : 'created'} -> ${net.id} "${net.name}"`);
+    log(`${cfg.code} (legacy ${cfg.legacyId}) ${before ? 'adopted' : 'created'} -> ${net.id} "${net.name}"`);
   }
 
   await prisma.$disconnect();

@@ -3,7 +3,7 @@
  * One-shot data migration: legacy `post_tag` rows -> new Postgres `network_tags`.
  *
  * Scope: legacy `post_tag` WHERE network_id = 25136.
- * Distinct `tag` values become NetworkTag rows on the local network `BBEDUCAT`.
+ * Distinct `tag` values become NetworkTag rows on the local network `BB-EDUCATION`.
  * NetworkTag has no legacyId; idempotency relies on @@unique([networkId, name]).
  * Safe to re-run.
  *
@@ -15,7 +15,7 @@ import { PrismaClient } from '@prisma/client';
 import { connectLegacyDb } from './legacy-db';
 
 const LEGACY_NETWORK_ID = 25136;
-const TARGET_NETWORK_CODE = 'BBEDUCAT';
+const TARGET_NETWORK_CODE = 'BB-EDUCATION';
 
 const prisma = new PrismaClient({ log: ['warn', 'error'] });
 
