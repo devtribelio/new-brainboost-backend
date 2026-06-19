@@ -3,7 +3,7 @@
  * One-shot data migration: legacy `topic` rows -> new Postgres `topics`.
  *
  * Scope: legacy `topic` WHERE network_id = 23410.
- * The new rows are attached to the local network whose code is `BBTIMELN`.
+ * The new rows are attached to the local network whose code is `BB-TIMELINE`.
  * Idempotent via the `legacyId` unique column — safe to re-run.
  *
  *   pnpm tsx scripts/migrate-timeline-topics.ts
@@ -14,7 +14,7 @@ import { PrismaClient } from '@prisma/client';
 import { connectLegacyDb } from './legacy-db';
 
 const LEGACY_NETWORK_ID = 23410;
-const TARGET_NETWORK_CODE = 'BBTIMELN';
+const TARGET_NETWORK_CODE = 'BB-TIMELINE';
 
 const prisma = new PrismaClient({ log: ['warn', 'error'] });
 
