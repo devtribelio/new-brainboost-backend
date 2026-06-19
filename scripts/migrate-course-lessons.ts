@@ -97,7 +97,6 @@ async function main() {
       description: string | null;
       slidesData: Prisma.InputJsonValue | null;
       code: string | null;
-      slug: string | null;
       lessonStatus: string;
       isPreview: boolean;
       duration: number;
@@ -127,7 +126,6 @@ async function main() {
         description: r.description ?? null,
         slidesData: parseSlides(r.slides_data),
         code,
-        slug: null,
         lessonStatus: (r.lesson_status ?? 'INACTIVE').trim() || 'INACTIVE',
         isPreview: Number(r.is_preview ?? 0) > 0,
         duration: Number(r.duration ?? 0),

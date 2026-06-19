@@ -12,14 +12,6 @@ const commentInclude = {
   post: { select: { networkId: true } },
 } as const;
 
-function extractFirstUrl(content: string): string | null {
-  // Greedy URL regex — first http(s) hit wins. Trim trailing punctuation
-  // that would not be part of a real URL.
-  const match = content.match(/\bhttps?:\/\/[^\s<>"']+/i);
-  if (!match) return null;
-  return match[0].replace(/[.,;:!?)\]}>]+$/, '');
-}
-
 function sanitizeContent(input: string): string {
   return input
     .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
@@ -156,7 +148,6 @@ export class CommentService {
     postId: string;
     content: string;
     parentId?: string;
-    imageUrls?: string[];
   }) {
     const member = await prisma.member.findUnique({ where: { id: memberId } });
     if (!member) throw new NotFoundException('Member not found');
@@ -164,9 +155,8 @@ export class CommentService {
     if (member.isMuted) throw new ForbiddenException('Member is muted');
 
     const sanitized = sanitizeContent(dto.content ?? '');
-    const imageUrls = dto.imageUrls ?? [];
-    if (!sanitized && imageUrls.length === 0) {
-      throw new BadRequestException('Comment must have content or image');
+    if (!sanitized) {
+      throw new BadRequestException('Comment must have content');
     }
     if (sanitized.length > MAX_CONTENT_CHARS) {
       throw new BadRequestException(`Content exceeds ${MAX_CONTENT_CHARS} characters`);
@@ -201,8 +191,6 @@ export class CommentService {
       parentId = parent.id;
     }
 
-    const embedUrl = extractFirstUrl(sanitized);
-
     const comment = await prisma.$transaction(async (tx) => {
       const created = await tx.comment.create({
         data: {
@@ -210,8 +198,6 @@ export class CommentService {
           authorId: memberId,
           parentId,
           content: sanitized,
-          imageUrls,
-          embedUrl,
         },
         include: commentInclude,
       });
@@ -249,8 +235,8 @@ export class CommentService {
     if (c.authorId !== memberId) throw new ForbiddenException('Not the author');
 
     const sanitized = sanitizeContent(content ?? '');
-    if (!sanitized && (c.imageUrls?.length ?? 0) === 0) {
-      throw new BadRequestException('Comment must have content or image');
+    if (!sanitized) {
+      throw new BadRequestException('Comment must have content');
     }
     if (sanitized.length > MAX_CONTENT_CHARS) {
       throw new BadRequestException(`Content exceeds ${MAX_CONTENT_CHARS} characters`);

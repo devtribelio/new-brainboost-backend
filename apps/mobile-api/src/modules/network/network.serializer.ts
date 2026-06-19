@@ -9,9 +9,7 @@ export function serializeNetwork(
     name: n.name,
     description: n.description,
     logoImageUrl: n.iconUrl,
-    bannerImageUrl: n.bannerUrl,
     countMember: n.countMember,
-    isPaid: n.isPaid,
     createdAt: n.createdAt,
   };
 }
@@ -22,8 +20,6 @@ interface NetworkMemberRow {
   legacyId: number | null;
   email: string | null;
   fullName: string | null;
-  firstName: string | null;
-  lastName: string | null;
   avatarUrl: string | null;
   coverUrl: string | null;
   bio: string | null;
@@ -48,7 +44,7 @@ export function serializeNetworkMemberLegacy(
   const p = m.profile;
   return {
     memberId: m.legacyId ?? m.id,
-    name: m.fullName ?? (`${m.firstName ?? ''} ${m.lastName ?? ''}`.trim() || null),
+    name: m.fullName,
     provinceId: p?.province?.legacyId ?? null,
     provinceName: p?.province?.name ?? null,
     cityId: p?.city?.legacyId ?? null,

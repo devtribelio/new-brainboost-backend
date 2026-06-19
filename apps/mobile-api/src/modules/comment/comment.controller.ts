@@ -92,7 +92,6 @@ export class CommentController {
       postId: body.postId,
       content: body.content ?? '',
       parentId: body.replyId ?? body.parentId,
-      imageUrls: Array.isArray(body.images) ? body.images : body.imageUrls,
     });
     return okCreated(res, serializeComment(c));
   };

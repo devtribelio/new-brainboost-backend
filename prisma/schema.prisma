@@ -20,8 +20,6 @@ model Member {
   phone                String?   @unique
   phoneCode            String?   @map("phone_code")
   fullName             String?   @map("full_name")
-  firstName            String?   @map("first_name")
-  lastName             String?   @map("last_name")
   passwordHash         String    @map("password_hash")
   passwordAlgo         String    @default("bcrypt") @map("password_algo")
   googleSub            String?   @unique @map("google_sub")
@@ -39,8 +37,6 @@ model Member {
   affiliateCode        String?   @unique @map("affiliate_code")
   affiliateBased       String    @default("PERFORMANCE") @map("affiliate_based") // "PERFORMANCE" | "GROWTH" | "INACTIVE"
   inviterId            String?   @map("inviter_id") @db.Uuid
-  inviterNetworkId     String?   @map("inviter_network_id") @db.Uuid
-  registerFrom         String?   @map("register_from")
   utmSource            String?   @map("utm_source")
   utmContent           String?   @map("utm_content")
   scheduledDeletionAt  DateTime? @map("scheduled_deletion_at")
@@ -327,7 +323,6 @@ model Product {
   slug            String? // SEO-friendly slug from legacy `course.slug`
   title           String
   description     String?
-  descriptionHtml String?  @map("description_html") // legacy `course.description_html` — rich HTML
   thumbnail       String? // legacy resource (model_type=TBModel_Course, collection=courseImage)
   price           Int      @default(0)
   iosPrice        Int?     @map("ios_price") // gross iOS IAP price (marked up to offset Apple's cut); null = same as `price`. Used for the affiliate commission range preview.
@@ -354,8 +349,6 @@ model Course {
   productId      String   @unique @map("product_id") @db.Uuid
   legacyCourseId Int?     @unique @map("legacy_course_id") // legacy `course.id` int — emitted as `courseId` in response
   durationMin    Int      @default(0) @map("duration_min")
-  level          String?
-  contentRef     String?  @map("content_ref")
   updatedAt      DateTime @updatedAt @map("updated_at")
 
   product     Product            @relation(fields: [productId], references: [id], onDelete: Cascade)
@@ -413,7 +406,6 @@ model Lesson {
   description    String? // legacy `lessonDescription`
   slidesData     Json?    @map("slides_data") // legacy `course_lesson.slides_data` — array of slide objects
   code           String?  @unique // legacy `code`
-  slug           String? // legacy `slug`
   lessonStatus   String   @default("ACTIVE") @map("lesson_status") // legacy `lesson_status`
   isPreview      Boolean  @default(false) @map("is_preview") // legacy `is_preview` (emit as int 0/1)
   duration       Int      @default(0) // legacy `duration` seconds
@@ -581,12 +573,6 @@ model Comment {
   authorId     String   @map("author_id") @db.Uuid
   parentId     String?  @map("parent_id") @db.Uuid
   content      String
-  imageUrls    String[] @map("image_urls")
-  // First URL extracted from content at create time. Mobile renders a link
-  // preview from this. Mirrors legacy TBModel_Comment.embed_url. Full OG
-  // metadata (title/description/image) is deferred — FE fetches client-side
-  // if needed.
-  embedUrl     String?  @map("embed_url")
   countLike    Int      @default(0) @map("count_like")
   countReplies Int      @default(0) @map("count_replies")
   isCurated    Boolean  @default(false) @map("is_curated")
@@ -626,10 +612,7 @@ model Network {
   purpose     String? // "timeline" | "education" | null — used by /member/info community list
   description String?
   iconUrl     String?  @map("icon_url")
-  bannerUrl   String?  @map("banner_url")
   countMember Int      @default(0) @map("count_member")
-  memberQuota Int?     @map("member_quota")
-  isPaid      Boolean  @default(false) @map("is_paid")
   isPublic    Boolean  @default(true) @map("is_public")
   isHelpdesk  Boolean  @default(false) @map("is_helpdesk")
   isActive    Boolean  @default(true) @map("is_active")

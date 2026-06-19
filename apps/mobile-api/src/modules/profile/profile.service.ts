@@ -20,8 +20,6 @@ export class ProfileService {
 
   async updateInfo(memberId: string, dto: {
     fullName?: string;
-    firstName?: string;
-    lastName?: string;
     phone?: string;
     phoneCode?: string;
     gender?: string;
@@ -78,8 +76,6 @@ export class ProfileService {
       where: { id: memberId },
       data: {
         fullName: dto.fullName,
-        firstName: dto.firstName,
-        lastName: dto.lastName,
         phone,
         phoneCode,
         // A new number was never OTP'd — verified status must not carry over.

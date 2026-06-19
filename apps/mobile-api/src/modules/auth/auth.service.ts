@@ -273,8 +273,6 @@ export class AuthService {
       gender: dto.gender,
       birthdate: dto.birthdate ? new Date(dto.birthdate) : null,
       inviterId,
-      inviterNetworkId,
-      registerFrom: dto.registerFrom,
       utmSource: dto.utmSource,
       utmContent: dto.utmContent,
       isActive: false,
@@ -660,7 +658,6 @@ export class AuthService {
           isEmailVerified: true,
           code: memberCode,
           affiliateCode: memberCode,
-          registerFrom: clientType,
         },
       });
       await this.autoJoinCommunityNetworks(created.id);

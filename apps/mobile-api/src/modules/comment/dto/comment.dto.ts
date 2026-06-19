@@ -168,14 +168,6 @@ export class CommentCreateBodyDto {
       'Parent comment legacyId/UUID. When set, the new comment is a reply. Aliases: `parentId`.',
   })
   replyId?: string;
-
-  @ApiPropertyOptional({
-    type: 'array',
-    itemType: 'string',
-    example: ['https://cdn.brainboost.com/comments/555/img.jpg'],
-    description: 'Alias `imageUrls` also accepted.',
-  })
-  images?: string[];
 }
 
 export class CommentUpdateBodyDto {

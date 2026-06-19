@@ -52,8 +52,6 @@ export class NetworkService {
             legacyId: true,
             email: true,
             fullName: true,
-            firstName: true,
-            lastName: true,
             avatarUrl: true,
             coverUrl: true,
             bio: true,
@@ -151,10 +149,6 @@ export class NetworkService {
     });
     if (existing) {
       return { networkId, status: 'APPROVED', alreadyJoined: true };
-    }
-
-    if (network.memberQuota && network.countMember >= network.memberQuota) {
-      throw new BadRequestException('Network has reached its member quota');
     }
 
     if (!network.isPublic) {
