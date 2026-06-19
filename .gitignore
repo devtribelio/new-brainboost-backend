@@ -30,3 +30,4 @@ scripts/media-copy-failures.json
 
 # TS incremental build info
 *.tsbuildinfo
+scripts/member-redirect.json

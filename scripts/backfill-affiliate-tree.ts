@@ -16,9 +16,25 @@
  * Idempotent: re-running just re-sets the same values. Run on the server (or via tunnel).
  */
 import 'dotenv/config';
+import { existsSync, readFileSync } from 'node:fs';
 import type { RowDataPacket } from 'mysql2/promise';
 import { PrismaClient } from '@prisma/client';
 import { connectLegacyDb } from './legacy-db';
+
+const REDIRECT_PATH = 'scripts/member-redirect.json';
+
+/**
+ * loser legacy member_id -> winner legacy member_id, written by migrate-members.ts.
+ * Dedup drops duplicate accounts; an inviter that was a dropped loser must be
+ * re-pointed to the surviving winner, else the downline's inviterId dangles to null.
+ */
+function loadRedirect(): Map<number, number> {
+  const map = new Map<number, number>();
+  if (!existsSync(REDIRECT_PATH)) return map;
+  const raw = JSON.parse(readFileSync(REDIRECT_PATH, 'utf8')) as Record<string, number>;
+  for (const [loser, winner] of Object.entries(raw)) map.set(Number(loser), Number(winner));
+  return map;
+}
 
 const prisma = new PrismaClient({ log: ['warn', 'error'] });
 const CHUNK = Number.parseInt(process.env.BACKFILL_CHUNK ?? '200', 10);
@@ -124,6 +140,9 @@ async function main() {
     const nodeMap = await buildNodeMap(legacy);
     log(`node map: ${nodeMap.size}`);
 
+    const redirect = loadRedirect();
+    log(`redirect map (loser->winner): ${redirect.size}`);
+
     const stats = { ok: 0, noCode: 0, fail: 0, skipped: 0, scanned: 0 };
     const buffer: Update[] = [];
     let cursor = 0;
@@ -145,7 +164,11 @@ async function main() {
         let inviterId: string | null = null;
         if (r.parent_id != null) {
           const inviterLegacyId = nodeMap.get(Number(r.parent_id));
-          if (inviterLegacyId != null) inviterId = memberMap.get(inviterLegacyId) ?? null;
+          if (inviterLegacyId != null) {
+            // Redirect a dropped-duplicate inviter to its surviving winner.
+            const canonical = redirect.get(inviterLegacyId) ?? inviterLegacyId;
+            inviterId = memberMap.get(canonical) ?? null;
+          }
         }
         buffer.push({
           id: newId,
