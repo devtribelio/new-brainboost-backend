@@ -4,6 +4,7 @@ import { BadRequestException, ForbiddenException, NotFoundException } from '@bb/
 import type { PaginationParams } from '@bb/common/utils/pagination.util';
 import { notificationEvents } from '@bb/common/events/notification-events';
 import { assertUuid } from '@bb/common/utils/uuid.util';
+import { PUBLISHED_STATUS_FILTER } from '@bb/common/utils/post-status.util';
 
 export class NetworkService {
   private async resolveNetworkId(input: string): Promise<string | null> {
@@ -114,7 +115,7 @@ export class NetworkService {
         prisma.post.count({
           where: {
             isDeleted: false,
-            publishStatus: 'PUBLISHED',
+            publishStatus: PUBLISHED_STATUS_FILTER,
             content: { contains: `#${t.name}`, mode: 'insensitive' },
           },
         }),
