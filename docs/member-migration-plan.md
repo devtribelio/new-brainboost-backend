@@ -1,11 +1,11 @@
 # Member Migration Plan (legacy → new)
 
-> Status: **DRAFT / analysis complete, not yet implemented.** Captures every
-> consideration surfaced while scoping the legacy `member` migration. There is **no
-> dedicated member-migration script yet** — only a naive `migrateMembers` phase inside
-> `scripts/migrate-from-legacy.ts` (bulk `createMany skipDuplicates`), which is unsafe
-> for this data (see §6). All row counts are from the staging legacy MariaDB
-> (`tribelio_db`) as of 2026-06-17 and drift slightly as the live DB grows.
+> Status: **scripts implemented (§9), pending a fresh-DB run + commit (§9b).** Captures
+> every consideration surfaced while scoping the legacy `member` migration. Supersedes the
+> naive `migrateMembers` phase in `scripts/migrate-from-legacy.ts` (bulk `createMany
+> skipDuplicates` + buggy `status=1` filter), which is unsafe for this data (see §3, §6).
+> Row counts are from the staging legacy MariaDB (`tribelio_db`) as of 2026-06-17 and drift
+> slightly as the live DB grows.
 
 ---
 
@@ -309,17 +309,20 @@ runs in the member migration.
 
 ---
 
-## 9. Scripts & run order (all decisions landed)
+## 9. Scripts & run order (IMPLEMENTED)
+
+All three scripts are written + typecheck-clean; dry-runs on staging legacy + the dev DB
+are sensible (numbers below). Not yet committed; not yet run end-to-end (the target DB is
+dropped + rebuilt fresh, so no clean-slate step is needed — `createMany skipDuplicates`
+keyed on `legacyId` has nothing to collide with on a fresh DB).
 
 **Tables written:** only `members` (insert + tree update) and `course_enrollment` (insert).
 Everything else (legacy member/enrollment/payment/commission/network) is read-only source.
 Balance/withdraw, programs, commissions are NOT touched here.
 
-**Pre-existing local data:** a prior buggy `migrate-from-legacy` left 215 members / 6
-enrollments / 2,424 member_affiliators in the dev DB. **Clean-slate** those three tables
-before the scoped run (the old rows used the buggy `status=1` filter + no winner-dedup).
-
-### `migrate-members.ts` (member + enrollment, one pass)
+### `migrate-members.ts` — `pnpm migrate:members` (member + enrollment, one pass)
+Dry-run: scope **57,689** (T1+T2), dedup → **57,423 winners / 266 losers**, enrollments
+**62,520** (716 dup-pairs collapsed, 1 FAILED-payment skipped).
 1. Build **scope** legacy `member_id`: Tier 1 = enrolled ∪ BB recipients ∪ upline-closure;
    Tier 2 = valid downlines of in-scope affiliators (option A). ≈ 57,576. No balance criterion.
 2. **Junk filter** (§3) + **no-identity** drop. **Email rule** (§3) — null `@brainboost.id`.
@@ -332,37 +335,44 @@ before the scoped run (the old rows used the buggy `status=1` filter + no winner
    free (§6b); `dateStart = created`; dedup `(memberId, courseId)`; losers' enrollments fold
    onto winner.
 
-### `backfill-affiliate-tree.ts` (extend existing)
-6. Set `inviterId / affiliateBased / affiliateCode` from `member_network`. **Extend to read
+### `backfill-affiliate-tree.ts` — `pnpm tsx scripts/backfill-affiliate-tree.ts` (extended)
+6. Sets `inviterId / affiliateBased / affiliateCode` from `member_network`. Now **reads
    `member-redirect.json`** so a parent that was a dropped duplicate resolves to the winner
    (fixes the dangling-inviter gap §6).
 
-### `migrate-member-affiliators.ts` (new, after the above)
+### `migrate-member-affiliators.ts` — `pnpm migrate:member-affiliators` (after the above)
 7. `member_product_affiliator` → `MemberAffiliator(memberId, programId)`, scoped to migrated
-   members + existing programs (§7).
+   members + linked (brainboost) programs, redirect-aware, keyed
+   `legacyId = member_product_affiliator_id`, unique `(memberId, programId)` (§7). Dry-run on
+   a not-yet-migrated DB is limited (members absent); real numbers appear after step 5.
 
-### Full sequence
+### Full sequence (on a fresh DB)
 ```
-migrate:products (done) → course-sections → course-lessons
-→ [clean-slate members/course_enrollment/member_affiliators]
-→ migrate-members (member + enrollment + redirect.json)
-→ backfill-affiliate-tree (reads redirect.json)
-→ backfill:affiliate-program-product (done)
-→ migrate-member-affiliators
+migrate:products → course-sections → course-lessons
+→ backfill:affiliate-program-product        (58/58 programs linked + active)
+→ migrate:members                           (members + enrollments + writes redirect.json)
+→ backfill-affiliate-tree                    (reads redirect.json)
+→ migrate:member-affiliators
 ```
 Balance: not done (out of scope, §8).
 
 ---
 
 ## 9b. Still open / not done
-- **`migrate-members.ts`** — not yet written (design above is final).
-- **`migrate-member-affiliators.ts`** — not yet written.
-- **`backfill-affiliate-tree.ts`** — needs the redirect-map extension.
-- **Clean-slate decision** for pre-existing local rows — recommended, awaiting go-ahead.
-- **Affiliate (separate from member):** visit→program resolution + the
-  `commitCommissionsForPayment` programId-required-vs-"program-optional" inconsistency.
-- Implementation-time edges: generated-email + shared-phone (14) must keep the phone;
-  phone-normalization could create a few new canonical collisions (dedup absorbs them).
+- **Commit** the three scripts + this doc.
+- **Real end-to-end run** on the fresh target DB — the only thing the dry-runs cannot fully
+  prove: `migrate-members` enrollment insert (dry-run used placeholder member UUIDs) and the
+  `migrate-member-affiliators` counts (members absent until step 5).
+- **Affiliate, separate from member migration** (blocks commissions, not members):
+  - visit→program resolution — the app OneLink sends `product + affCode` with no programCode,
+    so the visit/checkout must derive the (1-per-product) program from the product;
+  - the `commitCommissionsForPayment` `programId`-required vs the visit-layer "program is
+    optional metadata" inconsistency — a design decision (use-program vs program-optional).
+- **Optional / undecided:** disposable-email filter for Tier 2 (e.g. yopmail/mailinator —
+  count not yet measured); whether `MemberAffiliator` should cover non-brainboost programs
+  (currently brainboost-linked only).
+- Implementation-time edges already coded for: generated-email `@brainboost.id` → email=null
+  so phone is the key; union-find absorbs phone-normalization collisions.
 
 ---
 

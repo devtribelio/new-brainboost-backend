@@ -1,5 +1,5 @@
 -- DropForeignKey
-ALTER TABLE "affiliate_visits" DROP CONSTRAINT "affiliate_visits_program_id_fkey";
+ALTER TABLE "affiliate_visits" DROP CONSTRAINT IF EXISTS "affiliate_visits_program_id_fkey";
 
 -- AlterTable
 ALTER TABLE "banners" ALTER COLUMN "updated_at" DROP DEFAULT;

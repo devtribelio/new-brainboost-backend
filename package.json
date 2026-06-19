@@ -34,6 +34,8 @@
     "migrate:network-posts": "tsx scripts/migrate-network-posts.ts",
     "migrate:reviews": "tsx scripts/migrate-reviews.ts",
     "migrate:products": "tsx scripts/migrate-products.ts",
+    "migrate:members": "tsx scripts/migrate-members.ts",
+    "migrate:member-affiliators": "tsx scripts/migrate-member-affiliators.ts",
     "backfill:course-legacy-id": "tsx scripts/backfill-course-legacy-id.ts",
     "migrate:course-sections": "tsx scripts/migrate-course-sections.ts",
     "migrate:course-lessons": "tsx scripts/migrate-course-lessons.ts",
