@@ -4,6 +4,7 @@ import { BadRequestException, ForbiddenException, NotFoundException } from '@bb/
 import type { PaginationParams } from '@bb/common/utils/pagination.util';
 import { notificationEvents } from '@bb/common/events/notification-events';
 import { assertUuid } from '@bb/common/utils/uuid.util';
+import { isPublished } from '@bb/common/utils/post-status.util';
 
 const MAX_CONTENT_CHARS = 5000;
 
@@ -180,7 +181,7 @@ export class CommentService {
       select: { isDeleted: true, publishStatus: true, networkId: true },
     });
     if (!post || post.isDeleted) throw new NotFoundException('Post not found');
-    if (post.publishStatus !== 'PUBLISHED') {
+    if (!isPublished(post.publishStatus)) {
       throw new BadRequestException('Cannot comment on unpublished post');
     }
     if (post.networkId) {

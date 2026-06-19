@@ -4,6 +4,7 @@ import { BadRequestException, ForbiddenException, NotFoundException } from '@bb/
 import type { PaginationParams } from '@bb/common/utils/pagination.util';
 import { notificationEvents } from '@bb/common/events/notification-events';
 import { assertUuid } from '@bb/common/utils/uuid.util';
+import { PUBLISHED_STATUS, PUBLISHED_STATUS_FILTER, isPublished } from '@bb/common/utils/post-status.util';
 
 interface PostListQuery {
   keyword?: string;
@@ -59,8 +60,9 @@ export class PostService {
   async list(p: PaginationParams, q: PostListQuery) {
     const where: Record<string, unknown> = {
       isDeleted: false,
-      publishStatus: 'PUBLISHED',
+      publishStatus: PUBLISHED_STATUS_FILTER,
     };
+
     // `keyword` wins over `tag` when both provided (free-text > hashtag match).
     if (q.keyword) {
       where.content = { contains: q.keyword, mode: 'insensitive' };
@@ -86,10 +88,7 @@ export class PostService {
       }
     } else if (q.viewerId) {
       const visibleNetworkIds = await this.visibleNetworkIds(q.viewerId);
-      where.OR = [
-        { networkId: null },
-        { networkId: { in: visibleNetworkIds } },
-      ];
+      where.OR = [{ networkId: null }, { networkId: { in: visibleNetworkIds } }];
     } else {
       where.networkId = null;
     }
@@ -123,7 +122,7 @@ export class PostService {
   async detail(id: string, viewerId?: string) {
     const post = await this.resolveByAnyId(id);
     if (!post || post.isDeleted) throw new NotFoundException('Post not found');
-    if (post.publishStatus !== 'PUBLISHED' && post.authorId !== viewerId) {
+    if (!isPublished(post.publishStatus) && post.authorId !== viewerId) {
       throw new ForbiddenException('Post is not published');
     }
     if (post.networkId && viewerId) {
@@ -205,7 +204,6 @@ export class PostService {
     return { isLiked: result.isLiked, countLike: result.countLike };
   }
 
-
   async create(memberId: string, dto: PostCreateDto) {
     const member = await prisma.member.findUnique({ where: { id: memberId } });
     if (!member) throw new NotFoundException('Member not found');
@@ -266,7 +264,7 @@ export class PostService {
         imageUrls,
         videoUrl: dto.videoUrl ?? null,
         embedUrl: dto.embedUrl ?? null,
-        publishStatus: 'PUBLISHED',
+        publishStatus: PUBLISHED_STATUS,
         engagedAt: new Date(),
       },
       include: postInclude,
@@ -319,7 +317,9 @@ export class PostService {
         select: { id: true },
       }),
     ]);
-    return Array.from(new Set([...memberNets.map((m) => m.networkId), ...publicNets.map((n) => n.id)]));
+    return Array.from(
+      new Set([...memberNets.map((m) => m.networkId), ...publicNets.map((n) => n.id)]),
+    );
   }
 
   private async assertNetworkVisible(networkId: string, memberId: string) {
