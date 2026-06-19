@@ -38,6 +38,7 @@
     "migrate:course-sections": "tsx scripts/migrate-course-sections.ts",
     "migrate:course-lessons": "tsx scripts/migrate-course-lessons.ts",
     "backfill:product-selling-points": "tsx scripts/backfill-product-selling-points.ts",
+    "backfill:affiliate-program-product": "tsx scripts/backfill-affiliate-program-product.ts",
     "normalize:slides-data": "tsx scripts/normalize-slides-data.ts",
     "seed:settings": "tsx prisma/seed-settings.ts",
     "issue:credential": "tsx scripts/issue-credential.ts",
