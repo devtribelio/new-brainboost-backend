@@ -227,15 +227,9 @@ export class CourseDetailDto {
   @ApiPropertyOptional({
     nullable: true,
     example: 'Hands-on course covering hooks, st',
-    description: 'Plain-text excerpt (max 50 chars). Use descriptionHtml for full rich text.',
+    description: 'Plain-text excerpt (max 50 chars).',
   })
   description?: string | null;
-
-  @ApiPropertyOptional({
-    nullable: true,
-    example: '<p>Hands-on course covering <strong>hooks</strong>...</p>',
-  })
-  descriptionHtml?: string | null;
 
   @ApiPropertyOptional({
     nullable: true,

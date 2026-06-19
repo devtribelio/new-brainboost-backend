@@ -65,11 +65,6 @@ export class RegisterDto {
   @IsString()
   affiliateCode?: string;
 
-  @ApiPropertyOptional({ enum: ['ios', 'android', 'web'], example: 'android' })
-  @IsOptional()
-  @IsString()
-  registerFrom?: string;
-
   @ApiPropertyOptional({ example: 'google' })
   @IsOptional()
   @IsString()

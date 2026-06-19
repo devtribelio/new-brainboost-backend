@@ -50,8 +50,6 @@ export class ProfileController {
       isPhoneVerified: member.isPhoneVerified,
       phoneNumber: member.phone,
       phoneCode: member.phoneCode,
-      firstName: member.firstName,
-      lastName: member.lastName,
       postalCode: p?.postalCode ?? null,
       countryId: p?.country?.legacyId?.toString() ?? p?.countryId ?? null,
       countryName: p?.country?.name ?? null,
@@ -87,8 +85,6 @@ export class ProfileController {
     const body = req.body ?? {};
     await this.profileService.updateInfo(req.user.id, {
       fullName: body.name ?? body.fullName,
-      firstName: body.firstName,
-      lastName: body.lastName,
       phone: body.phone,
       phoneCode: body.phoneCode,
       bio: body.biography ?? body.bio,

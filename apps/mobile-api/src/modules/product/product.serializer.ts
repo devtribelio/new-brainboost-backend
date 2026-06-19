@@ -99,7 +99,6 @@ interface LessonLite {
   slidesData: unknown;
   legacyLessonId: number;
   code: string | null;
-  slug: string | null;
   lessonStatus: string;
   isPreview: boolean;
   duration: number;
@@ -373,7 +372,6 @@ export function serializeCourseDetailLegacy(
     code,
     name: stripBrainboostLabel(p.title),
     description: p.description,
-    descriptionHtml: p.descriptionHtml,
     sellingPoint: normalizeSellingPoints(p.sellingPoints),
     imageUrl: p.thumbnail,
     isPurchase: opts.isPurchase ?? false,

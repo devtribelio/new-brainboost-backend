@@ -19,12 +19,6 @@ export class MemberLiteDto {
   @ApiPropertyOptional({ nullable: true, example: 'John Doe' })
   name?: string | null;
 
-  @ApiPropertyOptional({ nullable: true, example: 'John' })
-  firstName?: string | null;
-
-  @ApiPropertyOptional({ nullable: true, example: 'Doe' })
-  lastName?: string | null;
-
   @ApiPropertyOptional({
     nullable: true,
     example: 'https://cdn.brainboost.com/avatars/john.jpg',
@@ -59,12 +53,6 @@ export class MemberFullDto {
 
   @ApiPropertyOptional({ nullable: true, example: 'John Doe' })
   name?: string | null;
-
-  @ApiPropertyOptional({ nullable: true, example: 'John' })
-  firstName?: string | null;
-
-  @ApiPropertyOptional({ nullable: true, example: 'Doe' })
-  lastName?: string | null;
 
   @ApiPropertyOptional({ nullable: true, example: 'https://cdn.brainboost.com/avatars/john.jpg' })
   imageUrl?: string | null;

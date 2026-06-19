@@ -253,13 +253,10 @@ const courseResource: ResourceConfig = {
   listColumns: [
     { field: 'productId', label: 'Product' },
     { field: 'durationMin', label: 'Duration (min)' },
-    { field: 'level', label: 'Level' },
   ],
   fields: [
     { name: 'productId', label: 'Product', type: 'select', required: true, optionsLoader: loadProducts },
     { name: 'durationMin', label: 'Duration (minutes)', type: 'number' },
-    { name: 'level', label: 'Level', type: 'text' },
-    { name: 'contentRef', label: 'Content Reference', type: 'text' },
   ],
 };
 

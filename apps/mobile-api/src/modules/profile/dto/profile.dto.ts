@@ -10,12 +10,6 @@ export class UpdateProfileRequestDto {
   @ApiPropertyOptional({ nullable: true, example: 'John Doe', description: 'Full name (alias: fullName).' })
   name?: string | null;
 
-  @ApiPropertyOptional({ nullable: true, example: 'John' })
-  firstName?: string | null;
-
-  @ApiPropertyOptional({ nullable: true, example: 'Doe' })
-  lastName?: string | null;
-
   @ApiPropertyOptional({ nullable: true, example: '81234567890' })
   phone?: string | null;
 
@@ -109,12 +103,6 @@ export class MemberProfileDto {
 
   @ApiPropertyOptional({ nullable: true, example: '+62' })
   phoneCode?: string | null;
-
-  @ApiPropertyOptional({ nullable: true, example: 'John' })
-  firstName?: string | null;
-
-  @ApiPropertyOptional({ nullable: true, example: 'Doe' })
-  lastName?: string | null;
 
   @ApiPropertyOptional({ nullable: true, example: '40142' })
   postalCode?: string | null;
