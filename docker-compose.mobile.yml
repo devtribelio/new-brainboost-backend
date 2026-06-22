@@ -1,6 +1,8 @@
 # Mobile-api stack: ONE image, THREE entrypoints (api / cron / relay).
 #   docker compose -f docker-compose.mobile.yml up --build
-# Postgres + RabbitMQ assumed EXTERNAL — provide via .env (DATABASE_URL, RABBITMQ_URL).
+# Postgres assumed EXTERNAL — provide via .env (DATABASE_URL). SQS is AWS — set
+# SQS_ENDPOINT / SQS_COMMS_*_URL via .env (see .env.example). For local dev run an
+# ElasticMQ container standalone; it is intentionally NOT part of this compose.
 # Migrations are NOT run here — run `pnpm prisma:deploy` against the DB first.
 name: bb-mobile
 
@@ -30,7 +32,7 @@ services:
       start_period: 20s
       retries: 3
 
-  # Comms outbox -> RabbitMQ relay. SINGLE instance only (plain PENDING->SENT
+  # Comms outbox -> SQS relay. SINGLE instance only (plain PENDING->SENT
   # flip, no SKIP LOCKED -> 2 replicas double-publish). Do NOT scale.
   relay:
     <<: *mobile

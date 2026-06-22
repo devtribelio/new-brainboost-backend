@@ -6,7 +6,8 @@ export interface EnqueueCommsInput {
   /** Template/handler discriminator: 'otp' | 'CoursePaymentSuccess' | … */
   type: string;
   channel: CommsChannel;
-  /** Defaults to 'normal'. Use 'urgent' for OTP / payment / disbursement. */
+  /** Defaults to 'normal'. Use 'urgent' for user-blocking, time-sensitive sends
+   *  (OTP) so they get a dedicated queue and don't queue behind bulk traffic. */
   priority?: CommsPriority;
   /** Entity id bb-comms reads PG by (transactional types). */
   refId?: string;
@@ -25,7 +26,7 @@ type OutboxWriter = Pick<PrismaClient, 'notificationOutbox'> | Prisma.Transactio
 
 /**
  * Write one outbound message to the transactional outbox. The comms-relay daemon
- * publishes PENDING rows to RabbitMQ; bb-comms delivers. The returned row id is
+ * publishes PENDING rows to SQS; bb-comms delivers. The returned row id is
  * the message id used downstream for idempotency.
  *
  * Pass a transaction client (`tx`) to atomically enqueue alongside a domain

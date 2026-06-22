@@ -1,60 +1,72 @@
-import amqp, { type Channel, type ChannelModel } from 'amqplib';
+import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
 import { env } from '@bb/common/config/env';
 import { logger } from '@bb/common/config/logger';
-import { TOPOLOGY, routingKeyFor } from '@bb/common/mq/topology';
-import type { CommsMessage } from '@bb/common/mq/comms-contract';
+import { queueNameFor } from '@bb/common/mq/topology';
+import type { CommsMessage, CommsPriority } from '@bb/common/mq/comms-contract';
 
 /**
- * Lazy-singleton AMQP publisher for the comms exchange. Used by the comms-relay
- * daemon to push outbox rows. Asserts only the exchange (bb-comms owns queues +
- * DLX). Publishes persistent messages keyed by priority routing key.
+ * Lazy-singleton SQS publisher for the comms queues. Used by the comms-relay
+ * daemon to push outbox rows. One Standard queue per priority (urgent/normal) —
+ * see mq/topology.ts. Local dev talks to ElasticMQ (SQS_ENDPOINT set + dummy
+ * creds); prod talks to AWS SQS with `endpoint` + creds empty so the SDK resolves
+ * the task IAM role. Replaces the old amqplib publisher. See docs/adr/0002.
  */
-let conn: ChannelModel | null = null;
-let chan: Channel | null = null;
+let client: SQSClient | null = null;
 
-async function getChannel(): Promise<Channel> {
-  if (chan) return chan;
-  if (!env.rabbitmq.url) {
-    throw new Error('RABBITMQ_URL not configured');
-  }
-  const url = new URL(env.rabbitmq.url);
-  url.pathname = `/${encodeURIComponent(env.rabbitmq.vhost)}`;
-
-  conn = await amqp.connect(url.toString());
-  conn.on('error', (err) => logger.error({ err }, '[mq-publisher] connection error'));
-  conn.on('close', () => {
-    logger.warn('[mq-publisher] connection closed');
-    conn = null;
-    chan = null;
+function getClient(): SQSClient {
+  if (client) return client;
+  client = new SQSClient({
+    region: env.sqs.region,
+    // Local ElasticMQ only; empty in prod -> SDK uses the AWS default endpoint.
+    ...(env.sqs.endpoint ? { endpoint: env.sqs.endpoint } : {}),
+    // Explicit creds only for local ElasticMQ; empty in prod -> SDK resolves the
+    // task/instance IAM role.
+    ...(env.sqs.accessKeyId && env.sqs.secretAccessKey
+      ? {
+          credentials: {
+            accessKeyId: env.sqs.accessKeyId,
+            secretAccessKey: env.sqs.secretAccessKey,
+          },
+        }
+      : {}),
   });
+  logger.info(
+    { region: env.sqs.region, endpoint: env.sqs.endpoint || 'aws-default' },
+    '[mq-publisher] SQS client ready',
+  );
+  return client;
+}
 
-  chan = await conn.createChannel();
-  await chan.assertExchange(TOPOLOGY.exchange, TOPOLOGY.exchangeType, { durable: true });
-  logger.info({ exchange: TOPOLOGY.exchange, vhost: env.rabbitmq.vhost }, '[mq-publisher] connected');
-  return chan;
+/** Resolve a priority to its configured queue URL. Throws if unconfigured. */
+function queueUrlFor(priority: CommsPriority): string {
+  const url = priority === 'urgent' ? env.sqs.urgentQueueUrl : env.sqs.normalQueueUrl;
+  if (!url) {
+    throw new Error(`SQS queue URL not configured for priority=${priority} (${queueNameFor(priority)})`);
+  }
+  return url;
 }
 
 /** Publish one comms message. Throws on failure so the relay leaves it PENDING. */
 export async function publishComms(msg: CommsMessage): Promise<void> {
-  const channel = await getChannel();
-  const ok = channel.publish(
-    TOPOLOGY.exchange,
-    routingKeyFor(msg.priority),
-    Buffer.from(JSON.stringify(msg), 'utf8'),
-    { persistent: true, messageId: msg.messageId, contentType: 'application/json' },
+  const sqs = getClient();
+  await sqs.send(
+    new SendMessageCommand({
+      QueueUrl: queueUrlFor(msg.priority),
+      MessageBody: JSON.stringify(msg),
+      // Standard queue = at-least-once; dedup/idempotency is consumer-side via
+      // messageId. Surface key fields as attributes for tracing/filtering.
+      MessageAttributes: {
+        messageId: { DataType: 'String', StringValue: msg.messageId },
+        type: { DataType: 'String', StringValue: msg.type },
+      },
+    }),
   );
-  if (!ok) {
-    // Write buffer full — apply backpressure so the relay retries this row.
-    await new Promise<void>((resolve) => channel.once('drain', resolve));
-  }
 }
 
 export async function closePublisher(): Promise<void> {
   try {
-    await chan?.close();
-    await conn?.close();
+    client?.destroy();
   } finally {
-    chan = null;
-    conn = null;
+    client = null;
   }
 }

@@ -180,13 +180,23 @@ export const env = {
     // the Bunny CDN signed URL.
     downloadTtlSeconds: Number.parseInt(optional('MEDIA_DOWNLOAD_TTL_SECONDS', '86400'), 10),
   },
-  // RabbitMQ — comms outbox publisher (bb-comms worker consumes). Only CONNECTION
-  // params live here; topology names (exchange/queues/routing keys) are code
-  // constants in mq/topology.ts (memory feedback_messaging_config). Empty
-  // RABBITMQ_URL = relay runs in log-only dev mode. See docs/adr/0002.
-  rabbitmq: {
-    url: optional('RABBITMQ_URL', ''),
-    vhost: optional('RABBITMQ_VHOST', 'comms'),
+  // Amazon SQS — comms outbox publisher (bb-comms worker consumes). Only
+  // CONNECTION params live here; queue NAMES are code constants in mq/topology.ts
+  // (memory feedback_messaging_config), full queue URLs are env (they embed
+  // account id + region). Local dev points `endpoint` at ElasticMQ
+  // (http://localhost:9324) with dummy creds; prod leaves `endpoint` + creds
+  // empty so the SDK resolves the real AWS endpoint + IAM-role creds. Empty queue
+  // URLs = relay runs in log-only dev mode. See docs/adr/0002.
+  sqs: {
+    region: optional('SQS_REGION', 'ap-southeast-3'),
+    // Local only: ElasticMQ endpoint. Empty in prod (SDK uses AWS default).
+    endpoint: optional('SQS_ENDPOINT', ''),
+    // Local/dev creds for ElasticMQ. Empty in prod -> SDK uses the task IAM role.
+    accessKeyId: optional('SQS_ACCESS_KEY_ID', ''),
+    secretAccessKey: optional('SQS_SECRET_ACCESS_KEY', ''),
+    // One Standard queue per priority (former direct-exchange routing keys).
+    urgentQueueUrl: optional('SQS_COMMS_URGENT_URL', ''),
+    normalQueueUrl: optional('SQS_COMMS_NORMAL_URL', ''),
     // Relay daemon poll interval + batch size.
     relayIntervalMs: Number.parseInt(optional('COMMS_RELAY_INTERVAL_MS', '2000'), 10),
     relayBatchSize: Number.parseInt(optional('COMMS_RELAY_BATCH_SIZE', '50'), 10),

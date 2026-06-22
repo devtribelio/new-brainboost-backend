@@ -1,7 +1,7 @@
 import { defineConfig } from 'tsup';
 
 export default defineConfig({
-  // main.ts = HTTP API; workers/comms-relay.ts = standalone outbox→RabbitMQ daemon
+  // main.ts = HTTP API; workers/comms-relay.ts = standalone outbox→SQS daemon
   // (run as its own pm2 process — see ecosystem.config.js).
   entry: ['src/main.ts', 'src/jobs-runner.ts', 'src/workers/comms-relay.ts'],
   format: ['cjs'],

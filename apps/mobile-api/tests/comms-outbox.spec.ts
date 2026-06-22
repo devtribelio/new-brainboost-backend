@@ -2,7 +2,7 @@ import { describe, it, expect, afterAll } from 'vitest';
 import { prisma } from '@bb/db';
 import { enqueueComms } from '@bb/common/services/comms-outbox';
 import { CONTRACT_VERSION } from '@bb/common/mq/comms-contract';
-import { routingKeyFor } from '@bb/common/mq/topology';
+import { queueNameFor } from '@bb/common/mq/topology';
 
 const TEST_RECIPIENT = '+62800000comms';
 
@@ -68,10 +68,10 @@ describe('enqueueComms', () => {
   });
 });
 
-describe('routingKeyFor', () => {
-  it('maps priority to its queue routing key', () => {
-    expect(routingKeyFor('urgent')).toBe('urgent');
-    expect(routingKeyFor('normal')).toBe('normal');
+describe('queueNameFor', () => {
+  it('maps priority to its SQS queue name', () => {
+    expect(queueNameFor('urgent')).toBe('comms-urgent');
+    expect(queueNameFor('normal')).toBe('comms-normal');
   });
   it('contract version is pinned', () => {
     expect(CONTRACT_VERSION).toBe(1);
