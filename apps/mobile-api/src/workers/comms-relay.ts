@@ -11,16 +11,16 @@ import {
 
 /**
  * Comms relay daemon (F1). Polls NotificationOutbox PENDING rows and publishes
- * them to RabbitMQ → at-least-once dispatch with no dual-write race (the producer
- * wrote the row in the same transaction as its domain mutation). bb-comms consumes
- * and delivers. See docs/adr/0002 + docs/email-scope.md §4.
+ * them to Amazon SQS → at-least-once dispatch with no dual-write race (the
+ * producer wrote the row in the same transaction as its domain mutation).
+ * bb-comms consumes and delivers. See docs/adr/0002 + docs/email-scope.md §4.
  *
  * NOTE (scaling): this single-instance loop uses a plain PENDING→SENT flip. To run
  * multiple relay instances, switch the claim to `SELECT … FOR UPDATE SKIP LOCKED`.
  */
 
-const POLL_MS = env.rabbitmq.relayIntervalMs;
-const BATCH = env.rabbitmq.relayBatchSize;
+const POLL_MS = env.sqs.relayIntervalMs;
+const BATCH = env.sqs.relayBatchSize;
 
 let running = true;
 let warnedNoBroker = false;
@@ -48,9 +48,9 @@ function toMessage(row: {
 
 async function tick(): Promise<void> {
   // Dev / not-yet-provisioned: leave rows PENDING, don't spin the log.
-  if (!env.rabbitmq.url) {
+  if (!env.sqs.urgentQueueUrl && !env.sqs.normalQueueUrl) {
     if (!warnedNoBroker) {
-      logger.warn('[comms-relay] RABBITMQ_URL not set — relay idle, outbox rows left PENDING');
+      logger.warn('[comms-relay] SQS queue URLs not set — relay idle, outbox rows left PENDING');
       warnedNoBroker = true;
     }
     return;

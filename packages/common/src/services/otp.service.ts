@@ -120,7 +120,7 @@ class OtpService {
       : null;
 
     // Write the otp row AND the comms outbox row in one transaction (transactional
-    // outbox — no dual-write race). The comms-relay publishes to RabbitMQ; bb-comms
+    // outbox — no dual-write race). The comms-relay publishes to SQS; bb-comms
     // delivers (WhatsApp via Qontak / email via SES). See docs/adr/0002.
     const row = await prisma.$transaction(async (tx) => {
       const created = await tx.otpCode.create({

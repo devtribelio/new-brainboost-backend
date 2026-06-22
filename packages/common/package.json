@@ -28,10 +28,10 @@
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1058.0",
+    "@aws-sdk/client-sqs": "^3.1058.0",
     "@aws-sdk/s3-request-presigner": "^3.1058.0",
     "@bb/db": "workspace:*",
     "@prisma/client": "^5.22.0",
-    "amqplib": "^0.10.4",
     "bcryptjs": "^2.4.3",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.1",
@@ -44,7 +44,6 @@
     "xendit-node": "^7.0.0"
   },
   "devDependencies": {
-    "@types/amqplib": "^0.10.5",
     "@types/bcryptjs": "^2.4.6",
     "@types/express": "^4.17.21",
     "@types/jsonwebtoken": "^9.0.7",
