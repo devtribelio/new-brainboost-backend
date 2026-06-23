@@ -9,7 +9,7 @@ import { PUBLISHED_STATUS, PUBLISHED_STATUS_FILTER, isPublished } from '@bb/comm
 interface PostListQuery {
   keyword?: string;
   networkId?: string;
-  topicId?: string;
+  topicIds?: string[];
   authorId?: string;
   viewerId?: string;
   tag?: string;
@@ -72,7 +72,9 @@ export class PostService {
       const tag = q.tag.startsWith('#') ? q.tag : `#${q.tag}`;
       where.content = { contains: tag, mode: 'insensitive' };
     }
-    if (q.topicId) where.topicId = q.topicId;
+    if (q.topicIds && q.topicIds.length > 0) {
+      where.topicId = q.topicIds.length === 1 ? q.topicIds[0] : { in: q.topicIds };
+    }
     if (q.authorId) where.authorId = q.authorId;
     if (q.filter === 'pinned') where.isPinned = true;
     if (q.filter === 'curated') where.isCurated = true;

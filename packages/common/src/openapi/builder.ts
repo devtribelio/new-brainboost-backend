@@ -101,10 +101,19 @@ function operationFromRoute(
     name: q.name,
     required: q.required ?? false,
     description: q.description,
-    schema: {
-      type: q.type ?? 'string',
-      ...(q.enum ? { enum: q.enum } : {}),
-    },
+    schema:
+      q.type === 'array'
+        ? {
+            type: 'array',
+            items: {
+              type: q.itemType ?? 'string',
+              ...(q.enum ? { enum: q.enum } : {}),
+            },
+          }
+        : {
+            type: q.type ?? 'string',
+            ...(q.enum ? { enum: q.enum } : {}),
+          },
     ...(q.example !== undefined ? { example: q.example } : {}),
   }));
 

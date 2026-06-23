@@ -26,6 +26,18 @@ import {
 } from './dto/post.dto';
 import { ReportResultDto } from '@/modules/report/dto/report.dto';
 
+/**
+ * Normalize a repeatable query param into a deduped string[].
+ * Accepts `?topicId=a&topicId=b` (Express array) or `?topicId=a,b` (CSV).
+ * Returns undefined when nothing usable was provided.
+ */
+function toStringArray(raw: unknown): string[] | undefined {
+  if (raw === undefined || raw === null || raw === '') return undefined;
+  const arr = Array.isArray(raw) ? raw : String(raw).split(',');
+  const cleaned = arr.map((v) => String(v).trim()).filter((v) => v.length > 0);
+  return cleaned.length > 0 ? Array.from(new Set(cleaned)) : undefined;
+}
+
 @ApiTags('Post')
 export class PostController {
   constructor(
@@ -39,7 +51,15 @@ export class PostController {
   @ApiQuery({ name: 'perPage', type: 'integer', required: false, example: 20 })
   @ApiQuery({ name: 'keyword', type: 'string', required: false, example: 'react' })
   @ApiQuery({ name: 'networkId', type: 'string', required: false, example: 'network-uuid-1234' })
-  @ApiQuery({ name: 'topicId', type: 'string', required: false, example: 'topic-uuid-1234' })
+  @ApiQuery({
+    name: 'topicId',
+    type: 'array',
+    itemType: 'string',
+    required: false,
+    example: ['topic-uuid-1234', 'topic-uuid-5678'],
+    description:
+      'Filter by one or more topics. Repeat the param (?topicId=a&topicId=b) or pass a comma-separated list (?topicId=a,b). A single value still works.',
+  })
   @ApiQuery({
     name: 'memberId',
     type: 'string',
@@ -77,7 +97,7 @@ export class PostController {
     const { rows, total } = await this.postService.list(p, {
       keyword: q.keyword,
       networkId: q.networkId,
-      topicId: q.topicId,
+      topicIds: toStringArray(req.query.topicId),
       authorId: q.memberId,
       viewerId: req.user.id,
       tag: q.tag,
