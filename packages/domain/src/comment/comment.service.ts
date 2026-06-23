@@ -13,19 +13,17 @@ const commentInclude = {
   post: { select: { networkId: true } },
 } as const;
 
-// Strip HTML to plain text. A single regex pass is bypassable (e.g.
-// `<scr<script>ipt>` reassembles into a tag) and the old `<script>...</script>`
-// regex was both an incomplete filter and a ReDoS risk on crafted input, so
-// remove every tag repeatedly until the string is stable, then neutralise any
-// leftover angle brackets. The result is plain text — never treat it as HTML.
+// Strip HTML to plain text. One linear pass removes well-formed `<...>` tags
+// (`<[^>]*>` is non-backtracking — `>` is excluded from the class — so no
+// ReDoS, and no loop, so no polynomial worst case), then EVERY remaining angle
+// bracket is removed. Because the defining characters of a tag can't survive,
+// a partial/reassembled tag (e.g. `<scr<script>ipt>`) can't reconstruct. The
+// result is plain text — never treat it as HTML.
 export function sanitizeContent(input: string): string {
-  let prev: string;
-  let out = input;
-  do {
-    prev = out;
-    out = out.replace(/<[^>]*>/g, '');
-  } while (out !== prev);
-  return out.replace(/[<>]/g, '').trim();
+  return input
+    .replace(/<[^>]*>/g, '')
+    .replace(/[<>]/g, '')
+    .trim();
 }
 
 export class CommentService {
