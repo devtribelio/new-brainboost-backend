@@ -1,0 +1,71 @@
+<%- include('../partials/header', { title, sidebar, currentPath, admin, flash }) %>
+
+<form method="POST" action="<%= formAction %>" class="resource-form">
+  <input type="hidden" name="_csrf" value="<%= csrfToken %>" />
+  <% fields.forEach(function(field) {
+       var current = row[field.name];
+       var currentStr = current === null || current === undefined ? '' : String(current);
+  %>
+    <div class="form-row">
+      <label for="f-<%= field.name %>">
+        <%= field.label %><% if (field.required) { %> <span class="req">*</span><% } %>
+      </label>
+
+      <% if (field.type === 'text') { %>
+        <input id="f-<%= field.name %>" type="text" name="<%= field.name %>" value="<%= currentStr %>" <%= field.required ? 'required' : '' %> />
+
+      <% } else if (field.type === 'textarea') { %>
+        <textarea id="f-<%= field.name %>" name="<%= field.name %>" rows="4" <%= field.required ? 'required' : '' %>><%= currentStr %></textarea>
+
+      <% } else if (field.type === 'number') { %>
+        <input id="f-<%= field.name %>" type="number" name="<%= field.name %>" value="<%= currentStr %>" <%= field.required ? 'required' : '' %> />
+
+      <% } else if (field.type === 'boolean') { %>
+        <input id="f-<%= field.name %>" type="checkbox" name="<%= field.name %>" <%= current ? 'checked' : '' %> />
+
+      <% } else if (field.type === 'select') { %>
+        <select id="f-<%= field.name %>" name="<%= field.name %>" <%= field.required ? 'required' : '' %>>
+          <% if (!field.required) { %>
+            <option value="">— none —</option>
+          <% } %>
+          <% (fieldOptions[field.name] || []).forEach(function(opt) { %>
+            <option value="<%= opt.value %>" <%= currentStr === opt.value ? 'selected' : '' %>>
+              <%= opt.label %>
+            </option>
+          <% }); %>
+        </select>
+
+      <% } else if (field.type === 'datetime') { %>
+        <%
+          var dtVal = '';
+          if (current instanceof Date) { dtVal = current.toISOString().slice(0,16); }
+          else if (currentStr) { try { dtVal = new Date(currentStr).toISOString().slice(0,16); } catch(e) {} }
+        %>
+        <input id="f-<%= field.name %>" type="datetime-local" name="<%= field.name %>" value="<%= dtVal %>" />
+
+      <% } else if (field.type === 'json') { %>
+        <textarea id="f-<%= field.name %>" name="<%= field.name %>" rows="6" class="mono"><%= current === null || current === undefined ? '' : JSON.stringify(current, null, 2) %></textarea>
+
+      <% } else if (field.type === 'string-array') { %>
+        <textarea id="f-<%= field.name %>" name="<%= field.name %>" rows="4"><%= Array.isArray(current) ? current.join('\n') : '' %></textarea>
+
+      <% } else if (field.type === 'password') { %>
+        <input id="f-<%= field.name %>" type="password" name="<%= field.name %>" autocomplete="new-password" <%= mode === 'create' && field.required ? 'required' : '' %> />
+
+      <% } else if (field.type === 'readonly') { %>
+        <input id="f-<%= field.name %>" type="text" value="<%= currentStr %>" disabled />
+      <% } %>
+
+      <% if (field.helpText) { %>
+        <small class="help"><%= field.helpText %></small>
+      <% } %>
+    </div>
+  <% }); %>
+
+  <div class="form-actions">
+    <button type="submit" class="btn btn-primary">Save</button>
+    <a class="btn" href="/admin/<%= cfg.key %>">Cancel</a>
+  </div>
+</form>
+
+<%- include('../partials/footer') %>

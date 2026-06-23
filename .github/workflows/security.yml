@@ -1,0 +1,65 @@
+name: security
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '0 0 * * 1' # every Monday 00:00 UTC
+
+permissions:
+  contents: read
+
+jobs:
+  # --- Step 2: dependency vulnerability audit ---
+  dep-audit:
+    name: dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # production deps must be clean at moderate+; fail the build if not
+      - name: audit (prod, blocking)
+        run: pnpm audit --prod --audit-level=moderate
+      # dev deps reported but non-blocking (most are local tooling only)
+      - name: audit (all, advisory)
+        if: always()
+        run: pnpm audit --audit-level=moderate || true
+
+  # --- Step 1: secret leak scan over full git history ---
+  secret-scan:
+    name: secret scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history so gitleaks scans every commit
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: false
+
+  # --- Step 3: static analysis (CodeQL) ---
+  codeql:
+    name: codeql
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+      - uses: github/codeql-action/analyze@v3

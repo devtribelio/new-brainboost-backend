@@ -1,0 +1,89 @@
+{
+  "_comment": "Golden parity fixtures extracted from legacy production MariaDB (tribelio_db) via scripts/extract-affiliate-parity-fixtures.ts. Each scenario is a real legacy affiliator_commision payout that the NEW engine (AffiliatorService.commitCommissionsForPayment) must reproduce exactly. chain[].level: 1 = buyer's direct inviter; level N = N-1 hops up. expected[].amount = floor((productPrice - voucherAmount) * rate / 100). PERFORMANCE tiers carry seedLifetime to reconstruct the cumulative-amount tier the affiliator was in at payment time (legacy reads pbs_aff_*; new engine derives the rate from lifetime). DO NOT hand-edit amounts — regenerate via the script.",
+  "scenarios": [
+    {
+      "name": "GROWTH 4-level multitier — legacy course_payment 655 (base 5,000)",
+      "legacyRef": "TBModel_CoursePayment#655",
+      "productPrice": 10000,
+      "voucherAmount": 5000,
+      "chain": [
+        { "level": 1, "affiliateBased": "GROWTH" },
+        { "level": 2, "affiliateBased": "GROWTH" },
+        { "level": 3, "affiliateBased": "GROWTH" },
+        { "level": 4, "affiliateBased": "GROWTH" }
+      ],
+      "expected": [
+        { "level": 1, "rate": 20, "amount": 1000 },
+        { "level": 2, "rate": 10, "amount": 500 },
+        { "level": 3, "rate": 5, "amount": 250 },
+        { "level": 4, "rate": 5, "amount": 250 }
+      ]
+    },
+    {
+      "name": "GROWTH 4-level multitier — legacy course_payment 6505 (base 199,000, no voucher)",
+      "legacyRef": "TBModel_CoursePayment#6505",
+      "productPrice": 199000,
+      "voucherAmount": 0,
+      "chain": [
+        { "level": 1, "affiliateBased": "GROWTH" },
+        { "level": 2, "affiliateBased": "GROWTH" },
+        { "level": 3, "affiliateBased": "GROWTH" },
+        { "level": 4, "affiliateBased": "GROWTH" }
+      ],
+      "expected": [
+        { "level": 1, "rate": 20, "amount": 39800 },
+        { "level": 2, "rate": 10, "amount": 19900 },
+        { "level": 3, "rate": 5, "amount": 9950 },
+        { "level": 4, "rate": 5, "amount": 9950 }
+      ]
+    },
+    {
+      "name": "PERFORMANCE tier 1 (20%) single recipient — legacy course_payment 266570",
+      "legacyRef": "TBModel_CoursePayment#266570",
+      "productPrice": 99000,
+      "voucherAmount": 0,
+      "chain": [
+        { "level": 1, "affiliateBased": "PERFORMANCE", "seedLifetime": 0 }
+      ],
+      "expected": [
+        { "level": 1, "rate": 20, "amount": 19800 }
+      ]
+    },
+    {
+      "name": "PERFORMANCE tier 2 (30%) single recipient — legacy course_payment 266479",
+      "legacyRef": "TBModel_CoursePayment#266479",
+      "productPrice": 298000,
+      "voucherAmount": 0,
+      "chain": [
+        { "level": 1, "affiliateBased": "PERFORMANCE", "seedLifetime": 6000000 }
+      ],
+      "expected": [
+        { "level": 1, "rate": 30, "amount": 89400 }
+      ]
+    },
+    {
+      "name": "PERFORMANCE tier 3 (40%) single recipient — legacy course_payment 266565",
+      "legacyRef": "TBModel_CoursePayment#266565",
+      "productPrice": 298000,
+      "voucherAmount": 0,
+      "chain": [
+        { "level": 1, "affiliateBased": "PERFORMANCE", "seedLifetime": 16000000 }
+      ],
+      "expected": [
+        { "level": 1, "rate": 40, "amount": 119200 }
+      ]
+    },
+    {
+      "name": "INACTIVE flat 20% single recipient — legacy course_payment 220787",
+      "legacyRef": "TBModel_CoursePayment#220787",
+      "productPrice": 298000,
+      "voucherAmount": 0,
+      "chain": [
+        { "level": 1, "affiliateBased": "INACTIVE" }
+      ],
+      "expected": [
+        { "level": 1, "rate": 20, "amount": 59600 }
+      ]
+    }
+  ]
+}

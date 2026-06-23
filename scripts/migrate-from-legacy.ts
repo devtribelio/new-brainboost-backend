@@ -10,15 +10,11 @@
  *   posts | comments | post-likes | comment-likes | products | reports
  */
 import 'dotenv/config';
-import mysql, { type Connection, type RowDataPacket } from 'mysql2/promise';
+import { randomUUID } from 'node:crypto';
+import type { Connection, RowDataPacket } from 'mysql2/promise';
 import { PrismaClient } from '@prisma/client';
-
-const LEGACY_HOST =
-  process.env.LEGACY_DB_HOST ??
-  'tribelio-db-rds1-mariadb.cly0dad2a29h.ap-southeast-1.rds.amazonaws.com';
-const LEGACY_USER = process.env.LEGACY_DB_USER ?? 'tribelio_readonly';
-const LEGACY_PASS = process.env.LEGACY_DB_PASS ?? '3373kfh6g0ZG0tgCU5J0';
-const LEGACY_DB = process.env.LEGACY_DB_NAME ?? 'tribelio_db';
+import { normalizePhonePair } from '@bb/common/utils/phone.util';
+import { connectLegacyDb } from './legacy-db';
 
 const BATCH = Number.parseInt(process.env.MIGRATE_BATCH ?? '1000', 10);
 const PROGRESS_EVERY = 5;
@@ -239,15 +235,27 @@ async function migrateBanners(legacy: Connection) {
 
 async function migrateMembers(legacy: Connection) {
   log('members: streaming');
-  // Distinct emails: keep lowest member_id per email
+  // Member.email is nullable: email-less legacy members migrate too, as long
+  // as they have SOME identity (email or phone). Lowest member_id wins a
+  // duplicate email/phone/sub.
+  // Social-only members have NO password in legacy (MemberLoginSocialMedia
+  // never sets one) — a social id counts as a credential, otherwise they'd be
+  // skipped and their history (enrollments/commissions via legacyId) orphaned
+  // when they Google-login into a freshly created row.
   const baseSql = `SELECT member_id, email, name, first_name, last_name, phone,
-    password, image_url, biography, is_active, is_email_verified, date_register
-    FROM member WHERE email <> '' AND email IS NOT NULL
-      AND password IS NOT NULL AND password <> ''
+    password, image_url, biography, is_active, is_email_verified, is_phone_verified,
+    google_id, sign_in_with_apple_id, date_register
+    FROM member WHERE ((email <> '' AND email IS NOT NULL) OR (phone <> '' AND phone IS NOT NULL))
+      AND ((password IS NOT NULL AND password <> '')
+        OR (google_id IS NOT NULL AND google_id <> '')
+        OR (sign_in_with_apple_id IS NOT NULL AND sign_in_with_apple_id <> '')
+        OR (facebook_id IS NOT NULL AND facebook_id <> ''))
       AND status=1`;
 
   const seenEmail = new Set<string>();
   const seenPhone = new Set<string>();
+  const seenGoogleSub = new Set<string>();
+  const seenAppleSub = new Set<string>();
   let scanned = 0,
     inserted = 0,
     skipped = 0,
@@ -258,38 +266,73 @@ async function migrateMembers(legacy: Connection) {
     const data: any[] = [];
     for (const r of rows as any[]) {
       scanned++;
-      const email = nonEmpty(r.email)?.toLowerCase();
-      if (!email) {
+      const email = nonEmpty(r.email)?.toLowerCase() ?? null;
+
+      // Canonical (phone, phoneCode) — the same forms the API stores (rules
+      // #7/#8, docs/register-verification-flow.md). Legacy kept E.164-ish
+      // strings ('+628…'/'628…'/'08…'); too short after canonicalizing = junk.
+      const rawPhone = nonEmpty(r.phone);
+      const pair = rawPhone ? normalizePhonePair(rawPhone, '+62') : null;
+      const canonicalPhone = pair && pair.phone.length >= 6 ? pair.phone : null;
+
+      if (!email && !canonicalPhone) {
         skipped++;
         continue;
       }
-      if (seenEmail.has(email)) {
+      if (email && seenEmail.has(email)) {
         skipped++;
         continue;
       }
-      const phone = nonEmpty(r.phone);
-      const phoneKey = phone ?? '';
-      if (phone && seenPhone.has(phoneKey)) {
-        // dup phone — drop phone but still insert member
+      // Duplicate phone: drop the phone but keep the member when an email
+      // remains; a phone-only row with a dup phone has no identity left — skip.
+      let phone = canonicalPhone;
+      if (phone && seenPhone.has(phone)) {
+        if (!email) {
+          skipped++;
+          continue;
+        }
+        phone = null;
       }
-      seenEmail.add(email);
-      if (phone) seenPhone.add(phoneKey);
+      if (email) seenEmail.add(email);
+      if (phone) seenPhone.add(phone);
+
+      // Legacy google_id / sign_in_with_apple_id hold the provider user id —
+      // the same value as the `sub` claim the new social login verifies, so
+      // they map 1:1 onto googleSub/appleSub (both unique; lowest member_id
+      // keeps a duplicated sub, the later row just loses the fast path and
+      // re-links by email on first login).
+      let googleSub = nonEmpty(r.google_id);
+      if (googleSub && seenGoogleSub.has(googleSub)) googleSub = null;
+      if (googleSub) seenGoogleSub.add(googleSub);
+      let appleSub = nonEmpty(r.sign_in_with_apple_id);
+      if (appleSub && seenAppleSub.has(appleSub)) appleSub = null;
+      if (appleSub) seenAppleSub.add(appleSub);
 
       const fullName =
         nonEmpty(r.name) ??
         ([nonEmpty(r.first_name), nonEmpty(r.last_name)].filter(Boolean).join(' ') || null);
 
+      // Social-only rows get the same never-authenticatable sentinel the new
+      // social register uses (verifyPassword rejects algo 'social').
+      const legacyPassword = nonEmpty(r.password);
+
       data.push({
         legacyId: r.member_id as number,
         email,
-        phone: seenPhone.size === 0 || !phone ? phone : phone, // simplified
+        phone,
+        phoneCode: phone ? pair!.phoneCode : null,
+        googleSub,
+        appleSub,
         fullName,
-        passwordHash: String(r.password),
-        passwordAlgo: 'legacy',
+        passwordHash: legacyPassword ?? `${randomUUID()}${randomUUID()}`,
+        passwordAlgo: legacyPassword ? 'legacy' : 'social',
         avatarUrl: nonEmpty(r.image_url),
         bio: nonEmpty(r.biography),
         isActive: bool(r.is_active),
-        isVerified: bool(r.is_email_verified),
+        // Verified flags only carry over while the contact they attest to does
+        // (a dropped dup phone must not stay "verified").
+        isEmailVerified: email ? bool(r.is_email_verified) : false,
+        isPhoneVerified: phone ? bool(r.is_phone_verified) : false,
         createdAt: date(r.date_register) ?? new Date(),
       });
     }
@@ -308,11 +351,16 @@ async function migrateMembers(legacy: Connection) {
             });
             inserted++;
           } catch (e) {
-            // duplicate phone -> retry without phone
+            // Duplicate phone -> retry without phone, but only when an email
+            // remains; a phone-only row would be left with no identity.
+            if (!row.email) {
+              skipped++;
+              continue;
+            }
             try {
               await prisma.member.upsert({
                 where: { legacyId: row.legacyId },
-                create: { ...row, phone: null },
+                create: { ...row, phone: null, phoneCode: null, isPhoneVerified: false },
                 update: {},
               });
               inserted++;
@@ -660,41 +708,16 @@ async function migrateProducts(legacy: Connection) {
   log(`products: ${inserted} done`);
 }
 
-async function migrateAffiliateProgramCategories(legacy: Connection) {
-  log('affiliate-categories: fetching');
-  const [rows] = (await legacy.query(
-    `SELECT affiliator_program_category_id AS id, name, status FROM affiliator_program_category`,
-  )) as [RowDataPacket[], unknown];
-  let inserted = 0;
-  for (const r of rows as any[]) {
-    const name = nonEmpty(r.name);
-    if (!name) continue;
-    await prisma.affiliateProgramCategory.upsert({
-      where: { legacyId: r.id },
-      create: { legacyId: r.id, name, isActive: bool(r.status) },
-      update: { name, isActive: bool(r.status) },
-    });
-    inserted++;
-  }
-  log(`affiliate-categories: ${inserted} done`);
-}
-
 async function migrateAffiliatePrograms(legacy: Connection) {
   log('affiliate-programs: building maps');
-  const networkMap = await buildMap(prisma.network);
   const productMap = await buildMap(prisma.product);
-  const catMap = await buildMap(prisma.affiliateProgramCategory);
 
+  // AffiliateProgram schema: legacyId, code (required+unique), name (required), productId?, isActive.
   const baseSql = `SELECT napa.network_account_product_affiliator_id,
-    napa.network_account_id, napa.productable, napa.productable_id,
-    napa.super_commision_type, napa.super_commision_amount,
-    napa.pbs_commission_type, napa.pbs_aff_1, napa.pbs_aff_2, napa.pbs_aff_3,
-    napa.affiliator_program_category_id AS category_id,
-    napa.name, napa.is_active, napa.created, napa.updated, napa.status
+    napa.productable, napa.productable_id, napa.name, napa.is_active, napa.created
     FROM network_account_product_affiliator napa
     WHERE napa.status=1 AND napa.deleted IS NULL`;
   let inserted = 0,
-    skipped = 0,
     page = 0;
   for await (const rows of paginate<RowDataPacket>(
     legacy,
@@ -703,41 +726,29 @@ async function migrateAffiliatePrograms(legacy: Connection) {
     2000,
   )) {
     page++;
-    const data = (rows as any[])
-      .map((r) => {
-        const networkId = r.network_account_id ? networkMap.get(r.network_account_id) ?? null : null;
-        // legacy uses Laravel polymorphic — link only if productable=Product
-        const isProduct =
-          typeof r.productable === 'string' &&
-          r.productable.toLowerCase().includes('product');
-        const productId =
-          isProduct && r.productable_id ? productMap.get(r.productable_id) ?? null : null;
-        const categoryId = r.category_id ? catMap.get(r.category_id) ?? null : null;
-        return {
-          legacyId: r.network_account_product_affiliator_id as number,
-          networkId,
-          productId,
-          categoryId,
-          name: nonEmpty(r.name),
-          commissionType: nonEmpty(r.super_commision_type) ?? 'percent',
-          commissionAmount: Number(r.super_commision_amount ?? 0),
-          pbsCommissionType: nonEmpty(r.pbs_commission_type) ?? 'PERCENT',
-          pbsAff1: Number(r.pbs_aff_1 ?? 20),
-          pbsAff2: Number(r.pbs_aff_2 ?? 30),
-          pbsAff3: Number(r.pbs_aff_3 ?? 40),
-          isActive: bool(r.is_active),
-          createdAt: date(r.created) ?? new Date(),
-        };
-      })
-      .filter((x): x is NonNullable<typeof x> => x !== null);
+    const data = (rows as any[]).map((r) => {
+      // legacy uses Laravel polymorphic — link only if productable=Product
+      const isProduct =
+        typeof r.productable === 'string' && r.productable.toLowerCase().includes('product');
+      const productId =
+        isProduct && r.productable_id ? productMap.get(r.productable_id) ?? null : null;
+      const legacyId = r.network_account_product_affiliator_id as number;
+      return {
+        legacyId,
+        productId,
+        code: `PROG-${legacyId}`, // deterministic, satisfies required+unique code
+        name: nonEmpty(r.name) ?? `Program ${legacyId}`,
+        isActive: bool(r.is_active),
+        createdAt: date(r.created) ?? new Date(),
+      };
+    });
     if (data.length) {
       const res = await prisma.affiliateProgram.createMany({ data, skipDuplicates: true });
       inserted += res.count;
     }
-    if (page % PROGRESS_EVERY === 0)
-      log(`affiliate-programs: page ${page} inserted=${inserted}`);
+    if (page % PROGRESS_EVERY === 0) log(`affiliate-programs: page ${page} inserted=${inserted}`);
   }
-  log(`affiliate-programs: DONE inserted=${inserted} skipped=${skipped}`);
+  log(`affiliate-programs: DONE inserted=${inserted}`);
 }
 
 async function migrateMemberAffiliators(legacy: Connection) {
@@ -780,8 +791,6 @@ async function migrateMemberAffiliators(legacy: Connection) {
           programId,
           exitState: nonEmpty(r.exit_state),
           exitAt: date(r.exit_date),
-          fbPixelId: nonEmpty(r.fb_pixel_id),
-          ttPixelId: nonEmpty(r.tiktok_pixel_id),
           isActive: bool(r.status),
           createdAt: date(r.created) ?? new Date(),
         };
@@ -795,53 +804,6 @@ async function migrateMemberAffiliators(legacy: Connection) {
       log(`member-affiliators: page ${page} inserted=${inserted}`);
   }
   log(`member-affiliators: DONE inserted=${inserted} skipped=${skipped}`);
-}
-
-async function migrateAffiliateRequests(legacy: Connection) {
-  log('affiliate-requests: building maps');
-  const memberMap = await buildMap(prisma.member);
-  const programMap = await buildMap(prisma.affiliateProgram);
-
-  const baseSql = `SELECT affiliate_request_id, network_account_product_affiliator_id AS program_id,
-    member_id, member_id_inviter, name, email, phone, from_source, invited_type, tags,
-    affiliate_request_status, actionat, actionby, created, updated, status
-    FROM affiliate_request WHERE 1=1`;
-  let inserted = 0,
-    page = 0;
-  for await (const rows of paginate<RowDataPacket>(legacy, baseSql, 'affiliate_request_id', 5000)) {
-    page++;
-    const data = (rows as any[]).map((r) => {
-      const programId = r.program_id ? programMap.get(r.program_id) ?? null : null;
-      const memberId = r.member_id ? memberMap.get(r.member_id) ?? null : null;
-      const inviterId = r.member_id_inviter ? memberMap.get(r.member_id_inviter) ?? null : null;
-      const status = ((nonEmpty(r.affiliate_request_status) ?? 'PENDING').toUpperCase());
-      const validStatus = ['PENDING', 'APPROVED', 'REJECTED', 'CANCELLED'].includes(status)
-        ? (status as 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED')
-        : 'PENDING';
-      return {
-        legacyId: r.affiliate_request_id as number,
-        programId,
-        memberId,
-        inviterId,
-        email: nonEmpty(r.email)?.toLowerCase() ?? null,
-        name: nonEmpty(r.name),
-        phone: nonEmpty(r.phone),
-        fromSource: nonEmpty(r.from_source),
-        invitedType: nonEmpty(r.invited_type),
-        tags: nonEmpty(r.tags),
-        reqStatus: validStatus,
-        actionAt: date(r.actionat),
-        actionBy: nonEmpty(r.actionby),
-        createdAt: date(r.created) ?? new Date(),
-      };
-    });
-    if (data.length) {
-      const res = await prisma.affiliateRequest.createMany({ data, skipDuplicates: true });
-      inserted += res.count;
-    }
-    if (page % PROGRESS_EVERY === 0) log(`affiliate-requests: page ${page} inserted=${inserted}`);
-  }
-  log(`affiliate-requests: DONE inserted=${inserted}`);
 }
 
 async function migrateAffiliateCommissions(legacy: Connection) {
@@ -875,6 +837,8 @@ async function migrateAffiliateCommissions(legacy: Connection) {
           : null;
         const productId =
           r.product_model === 'Product' && r.product_id ? productMap.get(r.product_id) ?? null : null;
+        // Map legacy status flags onto the new ledger status.
+        const status = bool(r.is_pending) ? 'PENDING' : bool(r.is_expired) ? 'VOIDED' : 'BALANCE';
         return {
           legacyId: r.affiliator_commision_id as number,
           recipientId,
@@ -882,16 +846,12 @@ async function migrateAffiliateCommissions(legacy: Connection) {
           programId,
           productId,
           level: Number(r.level ?? 1),
+          affiliateBased: nonEmpty(r.affiliate_based) ?? 'PERFORMANCE',
           productPrice: Math.round(Number(r.product_price ?? 0)),
-          commissionType: nonEmpty(r.commision_type) ?? 'percent',
-          commissionAmount: Number(r.commision_amount ?? 0),
+          voucherAmount: 0,
+          commissionRate: Number(r.commision_amount ?? 0),
           amount: Math.round(Number(r.price_recipient ?? 0)),
-          feePercent: Number(r.fee_service_percent ?? 0),
-          feeAmount: Math.round(Number(r.fee_service_price ?? 0)),
-          isPending: bool(r.is_pending),
-          isExpired: bool(r.is_expired),
-          isSuper: bool(r.is_super_commision),
-          source: nonEmpty(r.affiliate_based),
+          status,
           paymentLegacyId: r.payment_id ? Number(r.payment_id) : null,
           createdAt: date(r.created) ?? new Date(),
         };
@@ -960,12 +920,9 @@ async function backfillBatch(
     const colList = columns.join(',');
     const setList = columns
       .filter((c) => c !== 'legacy_id')
-      .map((c) => {
-        const camel = c.replace(/_([a-z])/g, (_, x) => x.toUpperCase());
-        return `"${camel}" = COALESCE(v.${c}, "${table}"."${camel}")`;
-      })
+      .map((c) => `"${c}" = COALESCE(v.${c}, "${table}"."${c}")`)
       .join(', ');
-    const sql = `UPDATE "${table}" SET ${setList} FROM (VALUES ${placeholders}) AS v(${colList}) WHERE "${table}"."legacyId" = v.legacy_id`;
+    const sql = `UPDATE "${table}" SET ${setList} FROM (VALUES ${placeholders}) AS v(${colList}) WHERE "${table}".legacy_id = v.legacy_id`;
     const flat = sub.flat();
     total += await prisma.$executeRawUnsafe(sql, ...flat);
   }
@@ -1124,16 +1081,12 @@ const PHASES: Record<string, (legacy: Connection) => Promise<void>> = {
   'comment-likes': migrateCommentLikes,
   products: migrateProducts,
   reports: migrateMemberReports,
-  'affiliate-categories': migrateAffiliateProgramCategories,
   'affiliate-programs': migrateAffiliatePrograms,
   'member-affiliators': migrateMemberAffiliators,
-  'affiliate-requests': migrateAffiliateRequests,
   'affiliate-commissions': migrateAffiliateCommissions,
   affiliate: async (legacy) => {
-    await migrateAffiliateProgramCategories(legacy);
     await migrateAffiliatePrograms(legacy);
     await migrateMemberAffiliators(legacy);
-    await migrateAffiliateRequests(legacy);
     await migrateAffiliateCommissions(legacy);
   },
   'backfill-members': backfillMembers,
@@ -1169,13 +1122,7 @@ async function main() {
   const requested = argv.length > 0 ? argv.join(',').split(',').map((s) => s.trim()) : DEFAULT_ORDER;
   log(`phases: ${requested.join(', ')}`);
 
-  const legacy = await mysql.createConnection({
-    host: LEGACY_HOST,
-    user: LEGACY_USER,
-    password: LEGACY_PASS,
-    database: LEGACY_DB,
-    dateStrings: false,
-  });
+  const legacy = await connectLegacyDb({ dateStrings: false });
   log('connected to legacy mariadb');
 
   try {

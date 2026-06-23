@@ -12,67 +12,93 @@ datasource db {
 // ============================================================================
 
 model Member {
-  id           String   @id @default(cuid())
-  legacyId     Int?     @unique
-  code         String?  @unique
-  email        String   @unique
-  username     String?  @unique
-  phone        String?  @unique
-  phoneCode    String?
-  fullName     String?
-  firstName    String?
-  lastName     String?
-  passwordHash String
-  passwordAlgo String   @default("bcrypt")
-  avatarUrl    String?
-  coverUrl     String?
-  bio          String?
-  isActive     Boolean  @default(true)
-  isVerified   Boolean  @default(false)
-  isPhoneVerified Boolean @default(false)
-  isMuted      Boolean  @default(false)
-  isBanned     Boolean  @default(false)
-  gender       String?
-  birthdate    DateTime?
-  affiliateCode String? @unique
-  inviterId    String?
-  inviterNetworkId String?
-  registerFrom String?
-  utmSource    String?
-  utmContent   String?
-  scheduledDeletionAt DateTime?
-  lastActiveAt DateTime?
-  latitude     Float?
-  longitude    Float?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id                   String    @id @default(uuid(7)) @db.Uuid
+  legacyId             Int?      @unique @map("legacy_id")
+  code                 String?   @unique
+  email                String?   @unique
+  username             String?   @unique
+  phone                String?   @unique
+  phoneCode            String?   @map("phone_code")
+  fullName             String?   @map("full_name")
+  passwordHash         String    @map("password_hash")
+  passwordAlgo         String    @default("bcrypt") @map("password_algo")
+  googleSub            String?   @unique @map("google_sub")
+  appleSub             String?   @unique @map("apple_sub")
+  avatarUrl            String?   @map("avatar_url")
+  coverUrl             String?   @map("cover_url")
+  bio                  String?
+  isActive             Boolean   @default(true) @map("is_active")
+  isEmailVerified      Boolean   @default(false) @map("is_email_verified")
+  isPhoneVerified      Boolean   @default(false) @map("is_phone_verified")
+  isMuted              Boolean   @default(false) @map("is_muted")
+  isBanned             Boolean   @default(false) @map("is_banned")
+  gender               String?
+  birthdate            DateTime?
+  affiliateCode        String?   @unique @map("affiliate_code")
+  affiliateBased       String    @default("PERFORMANCE") @map("affiliate_based") // "PERFORMANCE" | "GROWTH" | "INACTIVE"
+  inviterId            String?   @map("inviter_id") @db.Uuid
+  utmSource            String?   @map("utm_source")
+  utmContent           String?   @map("utm_content")
+  scheduledDeletionAt  DateTime? @map("scheduled_deletion_at")
+  lastActiveAt         DateTime? @map("last_active_at")
+  latitude             Float?
+  longitude            Float?
+  notificationsEnabled Boolean   @default(true) @map("notifications_enabled")
 
-  profile       MemberProfile?
-  devices       Device[]
-  refreshTokens RefreshToken[]
-  posts         Post[]
-  comments      Comment[]
-  notifications Notification[]
-  topicSubs     TopicSubscription[]
-  postLikes     PostLike[]
-  commentLikes  CommentLike[]
-  affiliateRequests   AffiliateRequest[]    @relation("AffiliateRequestMember")
-  memberAffiliators   MemberAffiliator[]    @relation("MemberAffiliatorMember")
-  affiliateCommissions AffiliateCommission[] @relation("AffiliateCommissionRecipient")
+  // --- Affiliate payout: default bank account stored on the profile (manual KYC flow) ---
+  bankCode          String? @map("bank_code")
+  bankAccountNumber String? @map("bank_account_number")
+  bankAccountName   String? @map("bank_account_name")
+
+  // --- Manual KYC (gate for affiliate disbursement) ---
+  kycStatus         String    @default("NONE") @map("kyc_status") // NONE | PENDING | APPROVED | REJECTED
+  kycIdNumber       String?   @map("kyc_id_number")
+  kycIdCardUrl      String?   @map("kyc_id_card_url")
+  kycSelfieUrl      String?   @map("kyc_selfie_url")
+  kycSubmittedAt    DateTime? @map("kyc_submitted_at")
+  kycReviewedAt     DateTime? @map("kyc_reviewed_at")
+  kycReviewedBy     String?   @map("kyc_reviewed_by") @db.Uuid
+  kycRejectedReason String?   @map("kyc_rejected_reason")
+  // Sumsub applicant bound to this member (externalUserId = member id).
+  // null = KYC never went through Sumsub (manual flow or none).
+  sumsubApplicantId String?   @unique @map("sumsub_applicant_id")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  profile                MemberProfile?
+  devices                Device[]
+  refreshTokens          RefreshToken[]
+  posts                  Post[]
+  comments               Comment[]
+  notifications          Notification[]
+  topicSubs              TopicSubscription[]
+  postLikes              PostLike[]
+  commentLikes           CommentLike[]
+  inviter                Member?                 @relation("MemberInviter", fields: [inviterId], references: [id])
+  invitees               Member[]                @relation("MemberInviter")
+  memberAffiliators      MemberAffiliator[]      @relation("MemberAffiliatorMember")
+  affiliateCommissions   AffiliateCommission[]   @relation("AffiliateCommissionRecipient")
+  affiliateVisits        AffiliateVisit[]        @relation("AffiliateVisitAffiliator")
+  affiliateDisbursements AffiliateDisbursement[] @relation("MemberDisbursements")
+  courseEnrollments      CourseEnrollment[]
+  commerceTransactions   CommerceTransaction[]
+  commercePayments       CommercePayment[]
+  notificationMutes      NotificationMute[]
 
   @@map("members")
 }
 
 model MemberProfile {
-  id         String   @id @default(cuid())
-  memberId   String   @unique
-  countryId  String?
-  provinceId String?
-  cityId     String?
-  districtId String?
+  id         String   @id @default(uuid(7)) @db.Uuid
+  memberId   String   @unique @map("member_id") @db.Uuid
+  countryId  String?  @map("country_id") @db.Uuid
+  provinceId String?  @map("province_id") @db.Uuid
+  cityId     String?  @map("city_id") @db.Uuid
+  districtId String?  @map("district_id") @db.Uuid
   address    String?
-  postalCode String?
-  updatedAt  DateTime @updatedAt
+  postalCode String?  @map("postal_code")
+  updatedAt  DateTime @updatedAt @map("updated_at")
 
   member   Member    @relation(fields: [memberId], references: [id], onDelete: Cascade)
   country  Country?  @relation(fields: [countryId], references: [id])
@@ -84,13 +110,14 @@ model MemberProfile {
 }
 
 model Device {
-  id            String   @id @default(cuid())
-  memberId      String
-  deviceId      String
-  platform      String
-  fcmToken      String?
-  lastSeenAt    DateTime @default(now())
-  createdAt     DateTime @default(now())
+  id         String   @id @default(uuid(7)) @db.Uuid
+  memberId   String   @map("member_id") @db.Uuid
+  deviceId   String   @map("device_id")
+  platform   String
+  fcmToken   String?  @map("fcm_token")
+  lastSeenAt DateTime @default(now()) @map("last_seen_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
 
   member Member @relation(fields: [memberId], references: [id], onDelete: Cascade)
 
@@ -99,41 +126,109 @@ model Device {
 }
 
 model RefreshToken {
-  id        String   @id @default(cuid())
-  memberId  String
-  token     String   @unique
-  expiresAt DateTime
-  revokedAt DateTime?
-  createdAt DateTime @default(now())
+  id         String    @id @default(uuid(7)) @db.Uuid
+  memberId   String    @map("member_id") @db.Uuid
+  token      String    @unique
+  clientType String    @default("mobile") @map("client_type")
+  expiresAt  DateTime  @map("expires_at")
+  revokedAt  DateTime? @map("revoked_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
 
   member Member @relation(fields: [memberId], references: [id], onDelete: Cascade)
 
   @@index([memberId])
+  @@index([memberId, clientType, revokedAt])
   @@map("refresh_tokens")
 }
 
 model OtpCode {
-  id        String   @id @default(cuid())
+  id        String    @id @default(uuid(7)) @db.Uuid
   target    String
   code      String
   purpose   String
-  expiresAt DateTime
-  usedAt    DateTime?
-  createdAt DateTime @default(now())
+  attempts  Int       @default(0)
+  expiresAt DateTime  @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
 
   @@index([target, purpose])
   @@map("otp_codes")
 }
 
+/// Outbound message outbox (transactional). Producer writes a row in the same
+/// transaction as the domain mutation; the comms-relay daemon polls PENDING and
+/// publishes to RabbitMQ → at-least-once, no dual-write race. The row id is the
+/// message id used downstream for idempotency (bb-comms). Serves external comms
+/// now (whatsapp/email/sms) and is forward-compatible with FCM push.
+/// See docs/adr/0002 + docs/email-scope.md §4.
+model NotificationOutbox {
+  id          String    @id @default(uuid(7)) @db.Uuid
+  /// Template/handler discriminator: 'otp' | 'CoursePaymentSuccess' | …
+  type        String
+  /// 'whatsapp' | 'email' | 'sms' | (future) 'fcm'
+  channel     String
+  /// 'urgent' | 'normal' — maps to the RabbitMQ routing key / queue tier.
+  priority    String    @default("normal")
+  /// Entity id the worker reads bb-platform PG by (transactional types).
+  refId       String?   @map("ref_id")
+  /// Direct recipient when no PG lookup (OTP: phone/email).
+  recipient   String?
+  /// Inline data. OTP only: { code, name?, ttl? } (otp_codes holds only the hash).
+  payload     Json?
+  status      String    @default("PENDING") /// PENDING | SENT | FAILED
+  attempts    Int       @default(0)
+  lastError   String?   @map("last_error")
+  scheduledAt DateTime  @default(now()) @map("scheduled_at")
+  sentAt      DateTime? @map("sent_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  @@index([status, scheduledAt])
+  @@map("notification_outbox")
+}
+
+/// Delivery log — comms-owned (written by bb-comms), declared here because
+/// bb-platform schema.prisma is the single migration authority (ADR-0001).
+/// One row per send attempt (SENT | FAILED) for observability/audit.
+model CommsDelivery {
+  // DB-level default: this table is written by bb-comms via Kysely (not Prisma),
+  // so the id must be generated by Postgres, not the Prisma client.
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  messageId        String   @map("message_id") /// = NotificationOutbox.id
+  channel          String
+  type             String
+  recipient        String?
+  status           String /// SENT | FAILED
+  providerResponse String?  @map("provider_response")
+  attempt          Int      @default(1)
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  @@index([messageId])
+  @@map("comms_delivery")
+}
+
+/// Idempotency guard — comms-owned (written by bb-comms). One row per message
+/// that was successfully delivered; blocks at-least-once redelivery double-sends.
+model CommsIdempotency {
+  messageId String   @id @map("message_id")
+  sentAt    DateTime @default(now()) @map("sent_at")
+
+  @@map("comms_idempotency")
+}
+
 model PraMember {
-  id                 String    @id @default(cuid())
+  id                 String   @id @default(uuid(7)) @db.Uuid
   email              String?
   phone              String?
-  affiliateMemberId  String?
-  networkId          String?
+  affiliateMemberId  String?  @map("affiliate_member_id") @db.Uuid
+  networkId          String?  @map("network_id") @db.Uuid
   device             Json?
-  expiresAt          DateTime
-  createdAt          DateTime  @default(now())
+  /// Full attribution context captured at pre-registration: programCode, utm_*,
+  /// adId, adNetwork, installReferrer, deviceId, platform, appVersion.
+  /// Carried to the register step so AffiliateVisit can be created with full
+  /// marketing fidelity bound to the new Member.id.
+  attributionContext Json?    @map("attribution_context")
+  expiresAt          DateTime @map("expires_at")
+  createdAt          DateTime @default(now()) @map("created_at")
 
   @@index([email])
   @@index([phone])
@@ -145,10 +240,11 @@ model PraMember {
 // ============================================================================
 
 model Country {
-  id        String     @id @default(cuid())
-  legacyId  Int?       @unique
+  id        String          @id @default(uuid(7)) @db.Uuid
+  legacyId  Int?            @unique @map("legacy_id")
   name      String
-  code      String?    @unique
+  code      String?         @unique
+  updatedAt DateTime        @updatedAt @map("updated_at")
   provinces Province[]
   profiles  MemberProfile[]
 
@@ -156,12 +252,13 @@ model Country {
 }
 
 model Province {
-  id        String  @id @default(cuid())
-  legacyId  Int?    @unique
-  countryId String
+  id        String          @id @default(uuid(7)) @db.Uuid
+  legacyId  Int?            @unique @map("legacy_id")
+  countryId String          @map("country_id") @db.Uuid
   name      String
+  updatedAt DateTime        @updatedAt @map("updated_at")
   cities    City[]
-  country   Country @relation(fields: [countryId], references: [id])
+  country   Country         @relation(fields: [countryId], references: [id])
   profiles  MemberProfile[]
 
   @@index([countryId])
@@ -169,12 +266,13 @@ model Province {
 }
 
 model City {
-  id         String     @id @default(cuid())
-  legacyId   Int?       @unique
-  provinceId String
+  id         String          @id @default(uuid(7)) @db.Uuid
+  legacyId   Int?            @unique @map("legacy_id")
+  provinceId String          @map("province_id") @db.Uuid
   name       String
+  updatedAt  DateTime        @updatedAt @map("updated_at")
   districts  District[]
-  province   Province   @relation(fields: [provinceId], references: [id])
+  province   Province        @relation(fields: [provinceId], references: [id])
   profiles   MemberProfile[]
 
   @@index([provinceId])
@@ -182,12 +280,13 @@ model City {
 }
 
 model District {
-  id       String @id @default(cuid())
-  legacyId Int?   @unique
-  cityId   String
-  name     String
-  city     City   @relation(fields: [cityId], references: [id])
-  profiles MemberProfile[]
+  id        String          @id @default(uuid(7)) @db.Uuid
+  legacyId  Int?            @unique @map("legacy_id")
+  cityId    String          @map("city_id") @db.Uuid
+  name      String
+  updatedAt DateTime        @updatedAt @map("updated_at")
+  city      City            @relation(fields: [cityId], references: [id])
+  profiles  MemberProfile[]
 
   @@index([cityId])
   @@map("districts")
@@ -198,47 +297,171 @@ model District {
 // ============================================================================
 
 model Banner {
-  id        String   @id @default(cuid())
-  legacyId  Int?     @unique
+  id        String    @id @default(uuid(7)) @db.Uuid
+  legacyId  Int?      @unique @map("legacy_id")
   title     String
-  imageUrl  String
-  linkUrl   String?
-  position  Int      @default(0)
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
+  imageUrl  String    @map("image_url")
+  linkUrl   String?   @map("link_url")
+  position  Int       @default(0)
+  isActive  Boolean   @default(true) @map("is_active")
+  isPopup   Boolean   @default(false) @map("is_popup")
+  startedAt DateTime? @map("started_at") // window open; null = no lower bound
+  endedAt   DateTime? @map("ended_at") // window close; null = no upper bound
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
 
   @@map("banners")
 }
 
 model Product {
-  id          String   @id @default(cuid())
-  legacyId    Int?     @unique
-  type        String
-  title       String
-  description String?
-  thumbnail   String?
-  price       Int      @default(0)
-  isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id               String   @id @default(uuid(7)) @db.Uuid
+  legacyId         Int?     @unique @map("legacy_id")
+  iosProductId     String?  @unique @map("ios_product_id") // App Store SKU → resolves a provider product_id (e.g. RevenueCat) to this Product
+  androidProductId String?  @unique @map("android_product_id") // Play Store SKU → resolves a provider product_id (e.g. RevenueCat) to this Product
+  type             String
+  code             String?  @unique // legacy `course.code` — short alphanumeric id
+  slug             String? // SEO-friendly slug from legacy `course.slug`
+  title            String
+  description      String?
+  thumbnail        String? // legacy resource (model_type=TBModel_Course, collection=courseImage)
+  price            Int      @default(0)
+  iosPrice         Int?     @map("ios_price") // gross iOS IAP price (marked up to offset Apple's cut); null = same as `price`. Used for the affiliate commission range preview.
+  marketingLink    String?  @map("marketing_link") // legacy `course.marketing_link`
+  sellingPoints    Json?    @map("selling_points") // legacy `course.selling_point` — JSONB string[]
+  status           String   @default("active") // legacy: active|inactive|draft|archived
+  tags             String? // legacy `course.tags` raw csv
+  isActive         Boolean  @default(true) @map("is_active")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
 
-  course Course?
+  course               Course?
+  reviews              Review[]
   affiliatePrograms    AffiliateProgram[]
   affiliateCommissions AffiliateCommission[]
+  commerceTransactions CommerceTransaction[]
+  vouchers             Voucher[]
 
   @@map("products")
 }
 
 model Course {
-  id          String   @id @default(cuid())
-  productId   String   @unique
-  durationMin Int      @default(0)
-  level       String?
-  contentRef  String?
+  id             String   @id @default(uuid(7)) @db.Uuid
+  productId      String   @unique @map("product_id") @db.Uuid
+  legacyCourseId Int?     @unique @map("legacy_course_id") // legacy `course.id` int — emitted as `courseId` in response
+  durationMin    Int      @default(0) @map("duration_min")
+  programDays    Int      @default(30) @map("program_days") // listening-challenge duration in days (90/60/30); challenge `target`
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  product     Product            @relation(fields: [productId], references: [id], onDelete: Cascade)
+  sections    CourseSection[]
+  enrollments CourseEnrollment[]
+
+  @@map("courses")
+}
+
+model CourseEnrollment {
+  id                 String    @id @default(uuid(7)) @db.Uuid
+  legacyId           Int?      @unique @map("legacy_id")
+  memberId           String    @map("member_id") @db.Uuid
+  courseId           String    @map("course_id") @db.Uuid
+  progress           Float     @default(0)
+  dateStart          DateTime? @map("date_start")
+  dateEnd            DateTime? @map("date_end")
+  expiredDate        DateTime? @map("expired_date")
+  isCanceled         Boolean   @default(false) @map("is_canceled")
+  cancelationReason  String?   @map("cancelation_reason")
+  certificateCode    String?   @map("certificate_code")
+  certificateCreated DateTime? @map("certificate_created")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+
+  member Member @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@unique([memberId, courseId])
+  @@index([memberId, createdAt])
+  @@map("course_enrollment")
+}
+
+model CourseSection {
+  id              String   @id @default(uuid(7)) @db.Uuid
+  legacySectionId Int      @unique @default(autoincrement()) @map("legacy_section_id") // emit as `courseSectionId` int legacy
+  courseId        String   @map("course_id") @db.Uuid
+  name            String
+  order           Int      @default(0)
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  course  Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  lessons Lesson[]
+
+  @@index([courseId, order])
+  @@map("course_sections")
+}
+
+model Lesson {
+  id             String   @id @default(uuid(7)) @db.Uuid
+  legacyLessonId Int      @unique @default(autoincrement()) @map("legacy_lesson_id") // emit as `courseLessonId` int legacy
+  sectionId      String   @map("section_id") @db.Uuid
+  name           String // legacy `lessonName`
+  description    String? // legacy `lessonDescription`
+  slidesData     Json?    @map("slides_data") // legacy `course_lesson.slides_data` — array of slide objects
+  code           String?  @unique // legacy `code`
+  lessonStatus   String   @default("ACTIVE") @map("lesson_status") // legacy `lesson_status`
+  isPreview      Boolean  @default(false) @map("is_preview") // legacy `is_preview` (emit as int 0/1)
+  duration       Int      @default(0) // legacy `duration` seconds
+  order          Int      @default(0)
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  section CourseSection @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+
+  @@index([sectionId, order])
+  @@map("course_lessons")
+}
+
+model Review {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  productId String   @map("product_id") @db.Uuid
+  memberId  String   @map("member_id") @db.Uuid
+  stars     Int // 1..5, validated in service
+  comment   String?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
 
-  @@map("courses")
+  @@unique([productId, memberId])
+  @@index([productId, stars])
+  @@map("reviews")
+}
+
+// ============================================================================
+// Listening tracker (streak / sessions / total listen / challenge / recap)
+// ============================================================================
+
+// Append-only log of listening sessions emitted by the mobile audio player.
+// All home-screen metrics (streak, sessions, total, challenge, weekly recap) are
+// derived from this table at read-time (see tracker/stats.service.ts) — no
+// pre-aggregation tables in MVP. No FK to Lesson/Course on purpose: this is a
+// cheap ingest log and a write must never fail because a lesson row was removed.
+model ListeningSession {
+  id              String   @id @default(uuid(7)) @db.Uuid
+  clientSessionId String   @map("client_session_id") @db.Uuid // generated on device at play-start → idempotency key
+  memberId        String   @map("member_id") @db.Uuid
+  audioId         String   @map("audio_id") @db.Uuid // Lesson.id (no FK — log table)
+  courseId        String?  @map("course_id") @db.Uuid
+  startedAt       DateTime @map("started_at") // UTC
+  listenedSec     Int      @map("listened_sec") // seconds actually heard (not audio duration)
+  completed       Boolean  @default(false)
+  localDay        DateTime @map("local_day") @db.Date // Asia/Jakarta (WIB) calendar day at write → trivial streak query
+  source          String? // ios / android
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@unique([memberId, clientSessionId]) // dedup retry / resume re-send
+  @@index([memberId, localDay])
+  @@index([memberId, courseId, localDay])
+  @@map("listening_session")
 }
 
 // ============================================================================
@@ -246,17 +469,19 @@ model Course {
 // ============================================================================
 
 model Topic {
-  id          String   @id @default(cuid())
-  legacyId    Int?     @unique
-  networkId   String?
+  id          String   @id @default(uuid(7)) @db.Uuid
+  legacyId    Int?     @unique @map("legacy_id")
+  networkId   String?  @map("network_id") @db.Uuid
   name        String
   description String?
-  iconUrl     String?
+  iconUrl     String?  @map("icon_url")
+  iconType    String?  @map("icon_type") // "emoji" | "image" — null when no icon
   type        String   @default("PUBLIC")
-  isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now())
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
 
-  network       Network? @relation(fields: [networkId], references: [id], onDelete: Cascade)
+  network       Network?            @relation(fields: [networkId], references: [id], onDelete: Cascade)
   posts         Post[]
   subscriptions TopicSubscription[]
   joinRequests  TopicJoinRequest[]
@@ -274,12 +499,12 @@ enum JoinRequestStatus {
 }
 
 model TopicJoinRequest {
-  id        String            @id @default(cuid())
-  topicId   String
-  memberId  String
+  id        String            @id @default(uuid(7)) @db.Uuid
+  topicId   String            @map("topic_id") @db.Uuid
+  memberId  String            @map("member_id") @db.Uuid
   status    JoinRequestStatus @default(PENDING)
-  createdAt DateTime          @default(now())
-  updatedAt DateTime          @updatedAt
+  createdAt DateTime          @default(now()) @map("created_at")
+  updatedAt DateTime          @updatedAt @map("updated_at")
 
   topic Topic @relation(fields: [topicId], references: [id], onDelete: Cascade)
 
@@ -289,10 +514,10 @@ model TopicJoinRequest {
 }
 
 model TopicSubscription {
-  id        String   @id @default(cuid())
-  memberId  String
-  topicId   String
-  createdAt DateTime @default(now())
+  id        String   @id @default(uuid(7)) @db.Uuid
+  memberId  String   @map("member_id") @db.Uuid
+  topicId   String   @map("topic_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
 
   member Member @relation(fields: [memberId], references: [id], onDelete: Cascade)
   topic  Topic  @relation(fields: [topicId], references: [id], onDelete: Cascade)
@@ -302,32 +527,34 @@ model TopicSubscription {
 }
 
 model Post {
-  id        String   @id @default(cuid())
-  legacyId  Int?     @unique
-  authorId  String
-  topicId   String?
-  networkId String?
-  title     String?
-  content   String
-  excerpt   String?
-  postType  String?
-  imageUrls String[]
-  videoUrl  String?
-  embedUrl  String?
-  publishStatus String @default("PUBLISHED")
-  publishAt   DateTime?
-  countLike    Int @default(0)
-  countComment Int @default(0)
-  countReplies Int @default(0)
-  viewCount    Int @default(0)
-  isPinned  Boolean  @default(false)
-  engagedAt DateTime?
-  isDeleted Boolean  @default(false)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id            String    @id @default(uuid(7)) @db.Uuid
+  legacyId      Int?      @unique @map("legacy_id")
+  authorId      String    @map("author_id") @db.Uuid
+  topicId       String?   @map("topic_id") @db.Uuid
+  networkId     String?   @map("network_id") @db.Uuid
+  title         String?
+  content       String
+  excerpt       String?
+  postType      String?   @map("post_type")
+  imageUrls     String[]  @map("image_urls")
+  videoUrl      String?   @map("video_url")
+  embedUrl      String?   @map("embed_url")
+  publishStatus String    @default("PUBLISHED") @map("publish_status")
+  publishAt     DateTime? @map("publish_at")
+  countLike     Int       @default(0) @map("count_like")
+  countComment  Int       @default(0) @map("count_comment")
+  countReplies  Int       @default(0) @map("count_replies")
+  viewCount     Int       @default(0) @map("view_count")
+  isPinned      Boolean   @default(false) @map("is_pinned")
+  isCurated     Boolean   @default(false) @map("is_curated")
+  isAdminPost   Boolean   @default(false) @map("is_admin_post")
+  engagedAt     DateTime? @map("engaged_at")
+  isDeleted     Boolean   @default(false) @map("is_deleted")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
 
-  author   Member    @relation(fields: [authorId], references: [id], onDelete: Cascade)
-  topic    Topic?    @relation(fields: [topicId], references: [id])
+  author   Member       @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  topic    Topic?       @relation(fields: [topicId], references: [id])
   comments Comment[]
   likes    PostLike[]
   reports  PostReport[]
@@ -338,10 +565,10 @@ model Post {
 }
 
 model PostLike {
-  id        String   @id @default(cuid())
-  postId    String
-  memberId  String
-  createdAt DateTime @default(now())
+  id        String   @id @default(uuid(7)) @db.Uuid
+  postId    String   @map("post_id") @db.Uuid
+  memberId  String   @map("member_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
 
   post   Post   @relation(fields: [postId], references: [id], onDelete: Cascade)
   member Member @relation(fields: [memberId], references: [id], onDelete: Cascade)
@@ -351,14 +578,15 @@ model PostLike {
 }
 
 model PostReport {
-  id           String       @id @default(cuid())
-  postId       String
-  reporterId   String
-  categoryId   String
-  networkId    String?
+  id           String       @id @default(uuid(7)) @db.Uuid
+  postId       String       @map("post_id") @db.Uuid
+  reporterId   String       @map("reporter_id") @db.Uuid
+  categoryId   String       @map("category_id") @db.Uuid
+  networkId    String?      @map("network_id") @db.Uuid
   reason       String?
-  reportStatus ReportStatus @default(REPORTED)
-  createdAt    DateTime     @default(now())
+  reportStatus ReportStatus @default(REPORTED) @map("report_status")
+  createdAt    DateTime     @default(now()) @map("created_at")
+  updatedAt    DateTime     @updatedAt @map("updated_at")
 
   post     Post           @relation(fields: [postId], references: [id], onDelete: Cascade)
   category ReportCategory @relation(fields: [categoryId], references: [id])
@@ -368,23 +596,23 @@ model PostReport {
 }
 
 model Comment {
-  id        String   @id @default(cuid())
-  legacyId  Int?     @unique
-  postId    String
-  authorId  String
-  parentId  String?
-  content   String
-  imageUrls String[]
-  countLike    Int @default(0)
-  countReplies Int @default(0)
-  isDeleted Boolean  @default(false)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id           String   @id @default(uuid(7)) @db.Uuid
+  legacyId     Int?     @unique @map("legacy_id")
+  postId       String   @map("post_id") @db.Uuid
+  authorId     String   @map("author_id") @db.Uuid
+  parentId     String?  @map("parent_id") @db.Uuid
+  content      String
+  countLike    Int      @default(0) @map("count_like")
+  countReplies Int      @default(0) @map("count_replies")
+  isCurated    Boolean  @default(false) @map("is_curated")
+  isDeleted    Boolean  @default(false) @map("is_deleted")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
 
-  post    Post      @relation(fields: [postId], references: [id], onDelete: Cascade)
-  author  Member    @relation(fields: [authorId], references: [id], onDelete: Cascade)
-  parent  Comment?  @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
-  replies Comment[] @relation("CommentReplies")
+  post    Post          @relation(fields: [postId], references: [id], onDelete: Cascade)
+  author  Member        @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  parent  Comment?      @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies Comment[]     @relation("CommentReplies")
   likes   CommentLike[]
 
   @@index([postId])
@@ -393,10 +621,10 @@ model Comment {
 }
 
 model CommentLike {
-  id        String   @id @default(cuid())
-  commentId String
-  memberId  String
-  createdAt DateTime @default(now())
+  id        String   @id @default(uuid(7)) @db.Uuid
+  commentId String   @map("comment_id") @db.Uuid
+  memberId  String   @map("member_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
 
   comment Comment @relation(fields: [commentId], references: [id], onDelete: Cascade)
   member  Member  @relation(fields: [memberId], references: [id], onDelete: Cascade)
@@ -406,38 +634,37 @@ model CommentLike {
 }
 
 model Network {
-  id          String   @id @default(cuid())
-  legacyId    Int?     @unique
+  id          String   @id @default(uuid(7)) @db.Uuid
+  legacyId    Int?     @unique @map("legacy_id")
+  code        String?  @unique
   name        String
+  purpose     String? // "timeline" | "education" | null — used by /member/info community list
   description String?
-  iconUrl     String?
-  bannerUrl   String?
-  countMember Int      @default(0)
-  memberQuota Int?
-  isPaid      Boolean  @default(false)
-  isPublic    Boolean  @default(true)
-  isHelpdesk  Boolean  @default(false)
-  isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now())
+  iconUrl     String?  @map("icon_url")
+  countMember Int      @default(0) @map("count_member")
+  isPublic    Boolean  @default(true) @map("is_public")
+  isHelpdesk  Boolean  @default(false) @map("is_helpdesk")
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
 
-  members         NetworkMember[]
-  memberRequests  NetworkMemberRequest[]
-  bannedMembers   NetworkBannedMember[]
-  tags            NetworkTag[]
-  topics          Topic[]
-  affiliatePrograms AffiliateProgram[]
+  members        NetworkMember[]
+  memberRequests NetworkMemberRequest[]
+  bannedMembers  NetworkBannedMember[]
+  tags           NetworkTag[]
+  topics         Topic[]
 
   @@index([name])
   @@map("networks")
 }
 
 model NetworkMemberRequest {
-  id        String            @id @default(cuid())
-  networkId String
-  memberId  String
+  id        String            @id @default(uuid(7)) @db.Uuid
+  networkId String            @map("network_id") @db.Uuid
+  memberId  String            @map("member_id") @db.Uuid
   status    JoinRequestStatus @default(PENDING)
-  createdAt DateTime          @default(now())
-  updatedAt DateTime          @updatedAt
+  createdAt DateTime          @default(now()) @map("created_at")
+  updatedAt DateTime          @updatedAt @map("updated_at")
 
   network Network @relation(fields: [networkId], references: [id], onDelete: Cascade)
 
@@ -447,11 +674,11 @@ model NetworkMemberRequest {
 }
 
 model NetworkBannedMember {
-  id        String   @id @default(cuid())
-  networkId String
-  memberId  String
+  id        String   @id @default(uuid(7)) @db.Uuid
+  networkId String   @map("network_id") @db.Uuid
+  memberId  String   @map("member_id") @db.Uuid
   reason    String?
-  bannedAt  DateTime @default(now())
+  bannedAt  DateTime @default(now()) @map("banned_at")
 
   network Network @relation(fields: [networkId], references: [id], onDelete: Cascade)
 
@@ -460,11 +687,12 @@ model NetworkBannedMember {
 }
 
 model NetworkTeamMember {
-  id        String   @id @default(cuid())
-  networkId String
-  memberId  String
+  id        String   @id @default(uuid(7)) @db.Uuid
+  networkId String   @map("network_id") @db.Uuid
+  memberId  String   @map("member_id") @db.Uuid
   role      String   @default("MODERATOR")
-  createdAt DateTime @default(now())
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   @@unique([networkId, memberId])
   @@index([memberId])
@@ -472,11 +700,16 @@ model NetworkTeamMember {
 }
 
 model NetworkMember {
-  id        String   @id @default(cuid())
-  legacyId  Int?     @unique
-  networkId String
-  memberId  String
-  joinedAt  DateTime @default(now())
+  id        String   @id @default(uuid(7)) @db.Uuid
+  legacyId  Int?     @unique @map("legacy_id")
+  networkId String   @map("network_id") @db.Uuid
+  memberId  String   @map("member_id") @db.Uuid
+  joinedAt  DateTime @default(now()) @map("joined_at")
+  // Per-network moderation flag. Set by team/admin to silence a member in this
+  // tribe without removing them. Blocks post create, comment, and like.
+  // Mirrors legacy TBApi::validateMemberMuteNetwork.
+  isMuted   Boolean  @default(false) @map("is_muted")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   network Network @relation(fields: [networkId], references: [id], onDelete: Cascade)
 
@@ -485,9 +718,11 @@ model NetworkMember {
 }
 
 model NetworkTag {
-  id        String  @id @default(cuid())
-  networkId String
+  id        String   @id @default(uuid(7)) @db.Uuid
+  networkId String   @map("network_id") @db.Uuid
   name      String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   network Network @relation(fields: [networkId], references: [id], onDelete: Cascade)
 
@@ -500,11 +735,12 @@ model NetworkTag {
 // ============================================================================
 
 model ReportCategory {
-  id        String   @id @default(cuid())
-  legacyId  Int?     @unique
+  id        String   @id @default(uuid(7)) @db.Uuid
+  legacyId  Int?     @unique @map("legacy_id")
   name      String   @unique
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   postReports   PostReport[]
   memberReports MemberReport[]
@@ -520,14 +756,15 @@ enum ReportStatus {
 }
 
 model MemberReport {
-  id           String       @id @default(cuid())
-  reporterId   String
-  targetId     String
-  categoryId   String
-  networkId    String?
+  id           String       @id @default(uuid(7)) @db.Uuid
+  reporterId   String       @map("reporter_id") @db.Uuid
+  targetId     String       @map("target_id") @db.Uuid
+  categoryId   String       @map("category_id") @db.Uuid
+  networkId    String?      @map("network_id") @db.Uuid
   reason       String?
-  reportStatus ReportStatus @default(REPORTED)
-  createdAt    DateTime     @default(now())
+  reportStatus ReportStatus @default(REPORTED) @map("report_status")
+  createdAt    DateTime     @default(now()) @map("created_at")
+  updatedAt    DateTime     @updatedAt @map("updated_at")
 
   category ReportCategory @relation(fields: [categoryId], references: [id])
 
@@ -541,186 +778,362 @@ model MemberReport {
 // ============================================================================
 
 model Notification {
-  id           String   @id @default(cuid())
-  memberId     String
-  networkId    String?
-  type         String
-  notifGroup   String?
-  title        String
-  body         String?
-  payload      Json?
-  url          String?
-  seenAt       DateTime?
-  readAt       DateTime?
-  createdAt    DateTime @default(now())
+  id         String    @id @default(uuid(7)) @db.Uuid
+  memberId   String    @map("member_id") @db.Uuid
+  networkId  String?   @map("network_id") @db.Uuid
+  type       String
+  notifGroup String?   @map("notif_group")
+  title      String
+  body       String?
+  payload    Json?
+  url        String?
+  dedupeKey  String?   @unique @map("dedupe_key")
+  seenAt     DateTime? @map("seen_at")
+  readAt     DateTime? @map("read_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
 
   member Member @relation(fields: [memberId], references: [id], onDelete: Cascade)
 
   @@index([memberId, readAt])
   @@index([memberId, networkId])
+  @@index([memberId, seenAt])
   @@map("notifications")
 }
 
-// ============================================================================
-// Commission
-// ============================================================================
+model NotificationMute {
+  memberId  String   @map("member_id") @db.Uuid
+  scope     String
+  refId     String   @map("ref_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
 
-model CommissionEntry {
-  id        String   @id @default(cuid())
-  memberId  String
-  amount    Int
-  currency  String   @default("IDR")
-  source    String?
-  createdAt DateTime @default(now())
+  member Member @relation(fields: [memberId], references: [id], onDelete: Cascade)
 
-  @@index([memberId])
-  @@map("commission_entries")
+  @@id([memberId, scope, refId])
+  @@index([scope, refId])
+  @@map("notification_mutes")
 }
 
 // ============================================================================
 // Affiliate
 // ============================================================================
 
-enum AffiliateRequestStatus {
-  PENDING
-  APPROVED
-  REJECTED
-  CANCELLED
-}
-
-model AffiliateProgramCategory {
-  id        String   @id @default(cuid())
-  legacyId  Int?     @unique
-  name      String
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
-
-  programs AffiliateProgram[]
-
-  @@map("affiliate_program_categories")
-}
-
-/// Affiliate program a network account offers for a product.
-/// Source: legacy `network_account_product_affiliator`.
+/// Affiliate program per produk. `code` = public-facing reference di link.
+/// Source: legacy `network_account_product_affiliator` (simplified, single-tenant).
 model AffiliateProgram {
-  id                 String   @id @default(cuid())
-  legacyId           Int?     @unique
-  networkId          String?
-  productId          String?
-  categoryId         String?
-  name               String?
-  commissionType     String   @default("percent")
-  commissionAmount   Int      @default(0)
-  // Per-affiliator level overrides (legacy `pbs_*` columns)
-  pbsCommissionType  String   @default("PERCENT")
-  pbsAff1            Int      @default(20)
-  pbsAff2            Int      @default(30)
-  pbsAff3            Int      @default(40)
-  isActive           Boolean  @default(true)
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  id        String   @id @default(uuid(7)) @db.Uuid
+  legacyId  Int?     @unique @map("legacy_id")
+  productId String?  @map("product_id") @db.Uuid
+  code      String   @unique
+  name      String
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
-  network    Network?                  @relation(fields: [networkId], references: [id])
-  product    Product?                  @relation(fields: [productId], references: [id])
-  category   AffiliateProgramCategory? @relation(fields: [categoryId], references: [id])
+  product      Product?              @relation(fields: [productId], references: [id])
+  affiliators  MemberAffiliator[]
+  commissions  AffiliateCommission[]
+  visits       AffiliateVisit[]
+  transactions CommerceTransaction[]
 
-  affiliators MemberAffiliator[]
-  requests    AffiliateRequest[]
-  commissions AffiliateCommission[]
-
-  @@index([networkId])
   @@index([productId])
   @@map("affiliate_programs")
 }
 
-/// Member application to join an affiliate program.
-/// Source: legacy `affiliate_request`.
-model AffiliateRequest {
-  id          String                 @id @default(cuid())
-  legacyId    Int?                   @unique
-  programId   String?
-  memberId    String?
-  inviterId   String?
-  email       String?
-  name        String?
-  phone       String?
-  fromSource  String?
-  invitedType String?
-  tags        String?
-  reqStatus   AffiliateRequestStatus @default(PENDING)
-  actionAt    DateTime?
-  actionBy    String?
-  createdAt   DateTime               @default(now())
-  updatedAt   DateTime               @updatedAt
-
-  program AffiliateProgram? @relation(fields: [programId], references: [id])
-  member  Member?           @relation("AffiliateRequestMember", fields: [memberId], references: [id])
-
-  @@index([programId])
-  @@index([memberId])
-  @@index([email])
-  @@map("affiliate_requests")
-}
-
-/// Active affiliator record (member is approved promoter for a program).
-/// Source: legacy `member_product_affiliator`.
+/// Member terdaftar sebagai promoter program.
+/// Source: legacy `member_product_affiliator` (simplified, no pixel/request).
 model MemberAffiliator {
-  id         String    @id @default(cuid())
-  legacyId   Int?      @unique
-  memberId   String
-  programId  String
-  requestId  String?
-  exitState  String?
-  exitAt     DateTime?
-  fbPixelId  String?
-  ttPixelId  String?
-  isActive   Boolean   @default(true)
-  createdAt  DateTime  @default(now())
-  updatedAt  DateTime  @updatedAt
+  id        String    @id @default(uuid(7)) @db.Uuid
+  legacyId  Int?      @unique @map("legacy_id")
+  memberId  String    @map("member_id") @db.Uuid
+  programId String    @map("program_id") @db.Uuid
+  exitState String?   @map("exit_state")
+  exitAt    DateTime? @map("exit_at")
+  isActive  Boolean   @default(true) @map("is_active")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
 
   member  Member           @relation("MemberAffiliatorMember", fields: [memberId], references: [id], onDelete: Cascade)
   program AffiliateProgram @relation(fields: [programId], references: [id], onDelete: Cascade)
 
-  commissions AffiliateCommission[]
+  commissions  AffiliateCommission[]
+  transactions CommerceTransaction[]
 
   @@unique([memberId, programId])
   @@index([programId])
   @@map("member_affiliators")
 }
 
-/// Commission earnings ledger.
+/// Commission ledger. 1 row per (payment, recipient, level).
 /// Source: legacy `affiliator_commision`.
 model AffiliateCommission {
-  id              String   @id @default(cuid())
-  legacyId        Int?     @unique
-  recipientId     String
-  affiliatorId    String?
-  programId       String?
-  productId       String?
-  level           Int      @default(1)
-  productPrice    Int      @default(0)
-  commissionType  String   @default("percent")
-  commissionAmount Int     @default(0)
-  amount          Int      @default(0)
-  feePercent      Int      @default(0)
-  feeAmount       Int      @default(0)
-  isPending       Boolean  @default(false)
-  isExpired       Boolean  @default(false)
-  isSuper         Boolean  @default(false)
-  source          String?
-  paymentLegacyId Int?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id                 String    @id @default(uuid(7)) @db.Uuid
+  legacyId           Int?      @unique @map("legacy_id")
+  recipientId        String    @map("recipient_id") @db.Uuid
+  affiliatorId       String?   @map("affiliator_id") @db.Uuid
+  programId          String?   @map("program_id") @db.Uuid
+  productId          String?   @map("product_id") @db.Uuid
+  paymentId          String?   @map("payment_id") @db.Uuid
+  paymentLegacyId    Int?      @map("payment_legacy_id")
+  buyerMemberId      String?   @map("buyer_member_id") @db.Uuid
+  level              Int       @default(1)
+  affiliateBased     String    @map("affiliate_based") // "PERFORMANCE" | "GROWTH" | "INACTIVE" snapshot
+  schemaType         String?   @map("schema_type") // "SCHEMA_1" | "SCHEMA_2" | "SCHEMA_3" (PERFORMANCE only)
+  productPrice       Int       @default(0) @map("product_price")
+  voucherAmount      Int       @default(0) @map("voucher_amount")
+  commissionRate     Int       @map("commission_rate") // % yang dipakai (20/30/40/10/5)
+  amount             Int       @default(0) // priceRecipient
+  status             String    @default("PENDING") // PENDING | BALANCE | VOIDED
+  approvedAt         DateTime? @map("approved_at")
+  voidedAt           DateTime? @map("voided_at")
+  voidedBy           String?   @map("voided_by") @db.Uuid
+  voidedReason       String?   @map("voided_reason")
+  source             String? // DEEPLINK | WEB | INSTALL_REFERRER
+  attributionVisitId String?   @map("attribution_visit_id") @db.Uuid
+  channel            String? // payment channel: "xendit" | "revenuecat" | "scalev" | "lynkid" | null (legacy/web)
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
 
   recipient  Member            @relation("AffiliateCommissionRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
   affiliator MemberAffiliator? @relation(fields: [affiliatorId], references: [id])
   program    AffiliateProgram? @relation(fields: [programId], references: [id])
   product    Product?          @relation(fields: [productId], references: [id])
 
-  @@index([recipientId])
+  @@unique([paymentId, recipientId, level], name: "uniq_payment_recipient_level")
+  @@index([recipientId, createdAt])
   @@index([programId])
-  @@index([productId])
+  @@index([buyerMemberId])
+  @@index([status])
+  @@index([status, channel])
   @@map("affiliate_commissions")
+}
+
+/// Affiliate link click log. Marketing-grade tracking + sumber attribution.
+model AffiliateVisit {
+  id                 String   @id @default(uuid(7)) @db.Uuid
+  programId          String?  @map("program_id") @db.Uuid
+  affiliatorMemberId String   @map("affiliator_member_id") @db.Uuid
+  memberId           String?  @map("member_id") @db.Uuid
+  // marketing
+  utmSource          String?  @map("utm_source")
+  utmMedium          String?  @map("utm_medium")
+  utmCampaign        String?  @map("utm_campaign")
+  utmContent         String?  @map("utm_content")
+  utmTerm            String?  @map("utm_term")
+  adId               String?  @map("ad_id")
+  adNetwork          String?  @map("ad_network") // "google" | "meta" | "tiktok"
+  // device
+  ipAddress          String?  @map("ip_address")
+  userAgent          String?  @map("user_agent")
+  referer            String?
+  deviceId           String?  @map("device_id")
+  platform           String? // "ios" | "android" | "web"
+  appVersion         String?  @map("app_version")
+  installReferrer    String?  @map("install_referrer")
+  // raw escape-hatch
+  rawQueryString     String?  @map("raw_query_string")
+  rawHeaders         Json?    @map("raw_headers")
+  // idempotency
+  clientEventId      String?  @unique @map("client_event_id")
+  createdAt          DateTime @default(now()) @map("created_at")
+
+  program    AffiliateProgram? @relation(fields: [programId], references: [id])
+  affiliator Member            @relation("AffiliateVisitAffiliator", fields: [affiliatorMemberId], references: [id])
+
+  @@index([programId, createdAt])
+  @@index([affiliatorMemberId, createdAt])
+  @@index([memberId])
+  @@index([adId])
+  @@index([utmCampaign])
+  @@map("affiliate_visits")
+}
+
+/// Affiliate payout request. Ledger debit against cleared (BALANCE) commissions.
+/// Source: legacy `disbursement_payment_affiliate` / TBDisbursement::affiliate.
+model AffiliateDisbursement {
+  id            String  @id @default(uuid(7)) @db.Uuid
+  memberId      String  @map("member_id") @db.Uuid
+  grossAmount   Int     @default(0) @map("gross_amount") // withdrawable balance consumed by this payout
+  fee           Int     @default(0) // flat platform fee
+  netAmount     Int     @default(0) @map("net_amount") // paid to member = gross - fee
+  // PENDING (awaiting manual approval) | PROCESSING (Xendit called, awaiting callback) | PAID | FAILED | REJECTED | VOIDED
+  status        String  @default("PENDING")
+  mode          String? // AUTO | MANUAL — how this payout was routed (see TBWithdraw::validateStatus parity)
+  provider      String? // "xendit"
+  providerRef   String? @map("provider_ref") // provider disbursement id
+  externalId    String? @unique @map("external_id") // our idempotency key sent to Xendit; callback matches on this
+  failureReason String? @map("failure_reason")
+
+  // Bank snapshot at request time (member profile bank may change later).
+  bankCode          String? @map("bank_code")
+  bankAccountNumber String? @map("bank_account_number")
+  bankAccountName   String? @map("bank_account_name")
+
+  // Approval audit (MANUAL flow, or AUTO self-approval timestamp).
+  approvedBy     String?   @map("approved_by") @db.Uuid
+  approvedAt     DateTime? @map("approved_at")
+  rejectedReason String?   @map("rejected_reason")
+
+  requestedAt DateTime  @default(now()) @map("requested_at")
+  paidAt      DateTime? @map("paid_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  member Member @relation("MemberDisbursements", fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@index([memberId, status])
+  @@index([status])
+  @@map("affiliate_disbursements")
+}
+
+// ============================================================================
+// Commerce / Purchase (Xendit-only; CC + VA + eWallet; no IAP, no cart, no shipping)
+// See docs/commerce-port.md
+// ============================================================================
+
+enum CommerceTransactionStatus {
+  PENDING
+  PAID
+  EXPIRED
+  FAILED
+  REFUNDED
+  CANCELED
+}
+
+enum CommercePaymentStatus {
+  PENDING
+  SUCCESS
+  EXPIRED
+  FAILED
+  CANCELED
+}
+
+/// Order header. Snapshot price + voucher + attribution at checkout time.
+model CommerceTransaction {
+  id                           String                    @id @default(uuid(7)) @db.Uuid
+  legacyId                     Int?                      @unique @map("legacy_id")
+  code                         String                    @unique // BB-YYYYMMDD-####
+  memberId                     String                    @map("member_id") @db.Uuid
+  productId                    String                    @map("product_id") @db.Uuid
+  qty                          Int                       @default(1) // reserved; always 1 for course MVP
+  itemTotal                    Int                       @default(0) @map("item_total")
+  shippingTotal                Int                       @default(0) @map("shipping_total") // reserved; 0 for course MVP
+  feeTotal                     Int                       @default(0) @map("fee_total")
+  voucherAmount                Int                       @default(0) @map("voucher_amount")
+  amount                       Int                       @default(0) // grand total
+  voucherCode                  String?                   @map("voucher_code")
+  voucherId                    String?                   @map("voucher_id") @db.Uuid
+  affiliatorId                 String?                   @map("affiliator_id") @db.Uuid
+  programId                    String?                   @map("program_id") @db.Uuid
+  // Per-purchase commission override: the Member behind the affiliate link used at THIS
+  // checkout. When set, commission for this purchase goes to this member (and up their
+  // chain), superseding the buyer's permanent inviter. No cookie persistence — per-checkout.
+  attributedAffiliatorMemberId String?                   @map("attributed_affiliator_member_id") @db.Uuid
+  // Multi-channel ingestion (IAP/Scalev/Lynk.id via /ingest/purchase). Null for native web checkout.
+  provider                     String? // = ThirdPartyCredential.name
+  providerEventId              String?                   @map("provider_event_id") // provider's event/txn id — idempotency
+  status                       CommerceTransactionStatus @default(PENDING)
+  paidAt                       DateTime?                 @map("paid_at")
+  canceledAt                   DateTime?                 @map("canceled_at")
+  expiredAt                    DateTime?                 @map("expired_at")
+  createdAt                    DateTime                  @default(now()) @map("created_at")
+  updatedAt                    DateTime                  @updatedAt @map("updated_at")
+
+  member     Member            @relation(fields: [memberId], references: [id])
+  product    Product           @relation(fields: [productId], references: [id])
+  affiliator MemberAffiliator? @relation(fields: [affiliatorId], references: [id])
+  program    AffiliateProgram? @relation(fields: [programId], references: [id])
+  voucher    Voucher?          @relation(fields: [voucherId], references: [id])
+  payments   CommercePayment[]
+
+  @@unique([provider, providerEventId]) // idempotent ingest; both null for web (NULLs distinct in PG)
+  @@index([memberId, createdAt])
+  @@index([status])
+  @@index([expiredAt])
+  @@map("commerce_transactions")
+}
+
+/// Payment attempt. Multi rows per transaction (VA retry possible after expiry).
+model CommercePayment {
+  id                    String                @id @default(uuid(7)) @db.Uuid
+  legacyId              Int?                  @unique @map("legacy_id")
+  transactionId         String                @map("transaction_id") @db.Uuid
+  // Conditional-uniqueness guard: holds `transactionId` while this payment occupies the
+  // transaction's active slot (status PENDING or SUCCESS); NULL once EXPIRED/FAILED/CANCELED
+  // so a retry can reclaim the slot. The @unique index lets Postgres reject a second
+  // concurrent active payment for the same transaction (NULLs are distinct → retries allowed).
+  activeSlotTxId        String?               @unique @map("active_slot_tx_id") @db.Uuid
+  memberId              String                @map("member_id") @db.Uuid
+  paymentType           String                @map("payment_type") // "cc" | "va" | "eWallet" | "voucher"
+  bank                  String? // BCA / BNI / MANDIRI / BRI / PERMATA
+  ewalletType           String?               @map("ewallet_type") // OVO / DANA / LINKAJA / GOPAY / SHOPEEPAY
+  amount                Int
+  fee                   Int                   @default(0)
+  acceptedAmount        Int                   @default(0) @map("accepted_amount")
+  status                CommercePaymentStatus @default(PENDING)
+  vendorStatus          String?               @map("vendor_status")
+  externalId            String?               @map("external_id")
+  xenditId              String?               @unique @map("xendit_id") // pr-xxx (PaymentRequest id)
+  xenditPaymentMethodId String?               @map("xendit_payment_method_id") // pm-xxx (PaymentMethod id from SDK)
+  paymentMethodId       String?               @map("payment_method_id") // pm-xxx supplied by mobile for CC charges
+  vaNumber              String?               @map("va_number")
+  checkoutUrl           String?               @map("checkout_url") // eWallet WEB/MOBILE AUTH redirect (webview fallback)
+  deeplinkUrl           String?               @map("deeplink_url") // eWallet DEEPLINK AUTH (open native eWallet app)
+  cardMaskedNumber      String?               @map("card_masked_number")
+  cardBrand             String?               @map("card_brand")
+  expiredAt             DateTime?             @map("expired_at")
+  paidAt                DateTime?             @map("paid_at")
+  logRequest            Json?                 @map("log_request")
+  logResponse           Json?                 @map("log_response")
+  createdAt             DateTime              @default(now()) @map("created_at")
+  updatedAt             DateTime              @updatedAt @map("updated_at")
+
+  transaction CommerceTransaction    @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  member      Member                 @relation(fields: [memberId], references: [id])
+  events      CommercePaymentEvent[]
+
+  @@index([transactionId])
+  @@index([status, expiredAt])
+  @@map("commerce_payments")
+}
+
+/// Audit trail of payment status transitions. Useful for Xendit re-delivery debugging.
+model CommercePaymentEvent {
+  id         String                 @id @default(uuid(7)) @db.Uuid
+  paymentId  String                 @map("payment_id") @db.Uuid
+  source     String // "checkout" | "webhook" | "poll" | "manual"
+  fromStatus CommercePaymentStatus? @map("from_status")
+  toStatus   CommercePaymentStatus  @map("to_status")
+  payload    Json?
+  createdAt  DateTime               @default(now()) @map("created_at")
+
+  payment CommercePayment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+
+  @@index([paymentId, createdAt])
+  @@map("commerce_payment_events")
+}
+
+/// Discount voucher. Legacy `voucher` table parity.
+model Voucher {
+  id        String    @id @default(uuid(7)) @db.Uuid
+  legacyId  Int?      @unique @map("legacy_id")
+  code      String    @unique
+  productId String?   @map("product_id") @db.Uuid // null = global
+  type      String // "PERCENT" | "AMOUNT"
+  value     Int
+  maxAmount Int?      @map("max_amount") // cap for PERCENT
+  quota     Int? // null = unlimited
+  used      Int       @default(0)
+  startsAt  DateTime? @map("starts_at")
+  endsAt    DateTime? @map("ends_at")
+  isActive  Boolean   @default(true) @map("is_active")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+
+  product      Product?              @relation(fields: [productId], references: [id])
+  transactions CommerceTransaction[]
+
+  @@map("vouchers")
 }
 
 // ============================================================================
@@ -733,15 +1146,43 @@ enum AdminRole {
 }
 
 model Admin {
-  id           String    @id @default(cuid())
+  id           String    @id @default(uuid(7)) @db.Uuid
   email        String    @unique
-  fullName     String
-  passwordHash String
+  fullName     String    @map("full_name")
+  passwordHash String    @map("password_hash")
   role         AdminRole @default(ADMIN)
-  isActive     Boolean   @default(true)
-  lastLoginAt  DateTime?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  isActive     Boolean   @default(true) @map("is_active")
+  lastLoginAt  DateTime? @map("last_login_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
 
   @@map("admins")
+}
+
+/// Runtime-configurable key-value settings. Change without redeploy (cached, short TTL).
+/// e.g. affiliate.cookieDays, affiliate.holdDays. Edit via DB/admin; takes effect within cache TTL.
+model AppSetting {
+  key         String   @id
+  value       String
+  description String?
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@map("app_settings")
+}
+
+/// Auth + per-channel capability toggles for 3rd-party ingestion (IAP/Scalev/Lynk.id) via
+/// POST /ingest/purchase. Key is stored hashed. Toggles are plain booleans (easy manual edit).
+model ThirdPartyCredential {
+  id                String    @id @default(uuid(7)) @db.Uuid
+  name              String    @unique // "revenuecat", "scalev", "lynkid"
+  keyHash           String    @unique @map("key_hash") // hash of the API key (never store plaintext)
+  isActive          Boolean   @default(true) @map("is_active") // master on/off
+  triggersAffiliate Boolean   @default(false) @map("triggers_affiliate") // may generate affiliate commission (SAFE DEFAULT off)
+  canIngestRefund   Boolean   @default(false) @map("can_ingest_refund") // may void commissions on refund events
+  lastUsedAt        DateTime? @map("last_used_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  @@map("third_party_credentials")
 }

@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title><%= title %> · bb-admin</title>
+  <link rel="stylesheet" href="/admin/static/admin.css" />
+</head>
+<body class="login-page">
+  <div class="login-card">
+    <h1>bb-admin</h1>
+    <p class="subtitle">Sign in to manage data</p>
+    <% if (typeof flash !== 'undefined' && flash) { %>
+      <div class="flash flash-<%= flash.level %>"><%= flash.text %></div>
+    <% } %>
+    <form method="POST" action="/admin/login" autocomplete="off">
+      <input type="hidden" name="_csrf" value="<%= csrfToken %>" />
+      <label>
+        Email
+        <input type="email" name="email" value="<%= email || '' %>" required autofocus />
+      </label>
+      <label>
+        Password
+        <input type="password" name="password" required />
+      </label>
+      <button type="submit" class="btn btn-primary">Sign in</button>
+    </form>
+  </div>
+</body>
+</html>

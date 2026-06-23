@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "declaration": true,
+    "rootDir": "src",
+    "outDir": "dist",
+    "baseUrl": ".",
+    "paths": {
+      "@bb/common/*": ["src/*"]
+    }
+  },
+  "references": [{ "path": "../db" }],
+  "include": ["src/**/*.ts"]
+}

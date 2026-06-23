@@ -5,8 +5,29 @@ coverage/
 .env.*
 !.env.example
 *.log
+
+# secrets — credential files (FCM service account, etc). Folder tracked via README only.
+secrets/*
+secrets/README.md
 .DS_Store
 .idea/
 .vscode/
 tmp/
 uploads/
+
+# ruv-swarm / claude-flow artifacts
+.swarm/
+.claude-flow/
+.claude/
+.mcp.json
+ruvector.db
+
+# media migration runtime state (Model C — see docs/media-model-c-migration.md)
+# media-guid-map.json IS committed — the old→new guid map is needed to run the
+# `rewrite` phase on other environments (dev/staging) with the same Bunny library.
+scripts/media-guids.json
+scripts/media-copy-failures.json
+
+# TS incremental build info
+*.tsbuildinfo
+scripts/member-redirect.json
