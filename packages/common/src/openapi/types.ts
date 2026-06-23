@@ -43,7 +43,9 @@ export interface ApiResponseOptions {
 
 export interface ApiQueryOptions {
   name: string;
-  type?: 'string' | 'number' | 'integer' | 'boolean';
+  type?: 'string' | 'number' | 'integer' | 'boolean' | 'array';
+  /** Element type when `type` is `'array'`. Defaults to `'string'`. */
+  itemType?: 'string' | 'number' | 'integer' | 'boolean';
   required?: boolean;
   description?: string;
   example?: unknown;
