@@ -61,8 +61,18 @@ pnpm backfill:affiliate-program-product                       # link 58 course p
 pnpm migrate:members              # ≈57k members + ≈62k enrollments; writes scripts/member-redirect.json
 npx tsx scripts/backfill-affiliate-tree.ts    # inviterId / affiliateBased / affiliateCode (reads redirect.json)  ← may ECONNRESET, re-run
 pnpm migrate:member-affiliators   # MemberAffiliator join records (scoped, redirect-aware)
+pnpm migrate:affiliate-commissions # ≈46k commissions as status=MIGRATED → drives currentTier/currentRate
 ```
-`migrate:members` must run before tree, affiliators, network-members, network-posts, reviews.
+`migrate:members` must run before tree, affiliators, commissions, network-members, network-posts, reviews.
+`migrate:affiliate-commissions` runs after member-affiliators + backfill:affiliate-program-product.
+
+**Commissions / tier (status MIGRATED):** `currentTier`/`currentRate` in `/affiliate/me/summary`
+are derived from `lifetimeAmount = SUM(commission.amount WHERE status != VOIDED)`. Legacy
+commissions migrate with status **MIGRATED** — they count toward lifetime/tier but NOT toward
+withdrawable balance (status != BALANCE) and are never promoted by the PENDING→BALANCE cron
+(status != PENDING). So legacy balance stays **0** while tier is correct; new post-migration
+purchases use the normal PENDING→BALANCE flow. Non-brainboost products are not inserted
+(productId/programId null; paymentLegacyId keeps the legacy payment ref).
 
 ## 5. Networks (the 2 BrainBoost communities)
 ```bash

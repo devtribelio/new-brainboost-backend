@@ -78,6 +78,10 @@ export const COMMISSION_STATUS = {
   PENDING: 'PENDING',
   BALANCE: 'BALANCE',
   VOIDED: 'VOIDED',
+  // Legacy commissions imported for lifetime/tier history only. Counts toward
+  // lifetimeAmount (status != VOIDED) but NOT withdrawable balance (status != BALANCE)
+  // and is never touched by the PENDING->BALANCE cron (status != PENDING).
+  MIGRATED: 'MIGRATED',
 } as const;
 export type CommissionStatus = (typeof COMMISSION_STATUS)[keyof typeof COMMISSION_STATUS];
 
