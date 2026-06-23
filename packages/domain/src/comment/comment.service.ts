@@ -13,11 +13,37 @@ const commentInclude = {
   post: { select: { networkId: true } },
 } as const;
 
-function sanitizeContent(input: string): string {
-  return input
-    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-    .replace(/<\/?[^>]+>/g, '')
-    .trim();
+// Does `c` make a `<` start a tag? Mirrors the browser rule: a `<` only opens
+// a tag when followed by a letter, `/`, `!` or `?` (so "5 < 10" stays text).
+function opensTag(c: string | undefined): boolean {
+  if (c === undefined) return false;
+  return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c === '/' || c === '!' || c === '?';
+}
+
+// Strip HTML to plain text with a single linear character scan — no regex on
+// the (uncontrolled) input, so there is no ReDoS surface, and no `.replace`
+// that could leave a reassembled tag. A `<` that opens a tag is dropped along
+// with everything up to its `>`; any other `<`/`>` is dropped as a stray
+// bracket so no markup can survive. The result is plain text — never HTML.
+export function sanitizeContent(input: string): string {
+  let out = '';
+  let i = 0;
+  const n = input.length;
+  while (i < n) {
+    const ch = input[i];
+    if (ch === '<' && opensTag(input[i + 1])) {
+      const close = input.indexOf('>', i + 1);
+      i = close === -1 ? n : close + 1; // jump past the tag (amortised O(n) overall)
+      continue;
+    }
+    if (ch === '<' || ch === '>') {
+      i += 1; // stray bracket — drop it
+      continue;
+    }
+    out += ch;
+    i += 1;
+  }
+  return out.trim();
 }
 
 export class CommentService {
