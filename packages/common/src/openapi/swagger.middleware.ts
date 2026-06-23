@@ -1,4 +1,5 @@
 import type { Express, Request, Response } from 'express';
+import helmet from 'helmet';
 import swaggerUi from 'swagger-ui-express';
 import { buildOpenApiDocument } from './builder';
 import { env } from '@bb/common/config/env';
@@ -33,8 +34,23 @@ export function mountSwagger(app: Express, prefix = '/api/docs'): void {
     res.json(document);
   });
 
+  // Swagger UI ships an inline bootstrap script + inline styles, which the
+  // app-level strict default CSP would block. Scope a relaxed CSP to the docs
+  // route only (this overrides the header set by the global helmet upstream).
+  const swaggerCsp = helmet({
+    contentSecurityPolicy: {
+      useDefaults: true,
+      directives: {
+        scriptSrc: ["'self'", "'unsafe-inline'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", 'data:'],
+      },
+    },
+  });
+
   app.use(
     prefix,
+    swaggerCsp,
     swaggerUi.serve,
     swaggerUi.setup(document, {
       explorer: true,

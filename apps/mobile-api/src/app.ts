@@ -32,11 +32,9 @@ export function buildApp(): Express {
     app.set('trust proxy', Number.isNaN(hops) ? env.trustProxy : hops);
   }
 
-  app.use(
-    helmet({
-      contentSecurityPolicy: false,
-    }),
-  );
+  // JSON API: keep helmet's strict default CSP. The only HTML surface is the
+  // Swagger UI at /api/docs, which loosens its own CSP inside mountSwagger().
+  app.use(helmet());
   app.use(cors());
   app.use(compression());
   app.use(cookieParser());

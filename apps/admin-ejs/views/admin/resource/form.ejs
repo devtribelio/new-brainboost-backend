@@ -1,6 +1,7 @@
 <%- include('../partials/header', { title, sidebar, currentPath, admin, flash }) %>
 
 <form method="POST" action="<%= formAction %>" class="resource-form">
+  <input type="hidden" name="_csrf" value="<%= csrfToken %>" />
   <% fields.forEach(function(field) {
        var current = row[field.name];
        var currentStr = current === null || current === undefined ? '' : String(current);

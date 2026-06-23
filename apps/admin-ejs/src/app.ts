@@ -27,7 +27,27 @@ export function buildApp(): Express {
     app.set('trust proxy', Number.isNaN(hops) ? env.trustProxy : hops);
   }
 
-  app.use(helmet({ contentSecurityPolicy: false }));
+  // Server-rendered EJS admin: only same-origin CSS, no client JS bundle.
+  // `style-src 'unsafe-inline'` covers inline `style=` attributes and
+  // `script-src-attr 'unsafe-inline'` covers the inline `onsubmit` confirm
+  // handlers in the resource views. No external/CDN origins are needed.
+  app.use(
+    helmet({
+      contentSecurityPolicy: {
+        useDefaults: true,
+        directives: {
+          defaultSrc: ["'self'"],
+          scriptSrc: ["'self'"],
+          scriptSrcAttr: ["'unsafe-inline'"],
+          styleSrc: ["'self'", "'unsafe-inline'"],
+          imgSrc: ["'self'", 'data:'],
+          formAction: ["'self'"],
+          objectSrc: ["'none'"],
+          frameAncestors: ["'self'"],
+        },
+      },
+    }),
+  );
   app.use(cookieParser());
   app.use(express.json({ limit: '5mb' }));
   app.use(express.urlencoded({ extended: true }));
