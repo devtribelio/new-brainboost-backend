@@ -197,7 +197,7 @@ model CommsDelivery {
   channel          String
   type             String
   recipient        String?
-  status           String   /// SENT | FAILED
+  status           String /// SENT | FAILED
   providerResponse String?  @map("provider_response")
   attempt          Int      @default(1)
   createdAt        DateTime @default(now()) @map("created_at")
@@ -216,19 +216,19 @@ model CommsIdempotency {
 }
 
 model PraMember {
-  id                String   @id @default(uuid(7)) @db.Uuid
-  email             String?
-  phone             String?
-  affiliateMemberId String?  @map("affiliate_member_id") @db.Uuid
-  networkId         String?  @map("network_id") @db.Uuid
-  device            Json?
+  id                 String   @id @default(uuid(7)) @db.Uuid
+  email              String?
+  phone              String?
+  affiliateMemberId  String?  @map("affiliate_member_id") @db.Uuid
+  networkId          String?  @map("network_id") @db.Uuid
+  device             Json?
   /// Full attribution context captured at pre-registration: programCode, utm_*,
   /// adId, adNetwork, installReferrer, deviceId, platform, appVersion.
   /// Carried to the register step so AffiliateVisit can be created with full
   /// marketing fidelity bound to the new Member.id.
   attributionContext Json?    @map("attribution_context")
-  expiresAt         DateTime @map("expires_at")
-  createdAt         DateTime @default(now()) @map("created_at")
+  expiresAt          DateTime @map("expires_at")
+  createdAt          DateTime @default(now()) @map("created_at")
 
   @@index([email])
   @@index([phone])
@@ -297,42 +297,42 @@ model District {
 // ============================================================================
 
 model Banner {
-  id        String   @id @default(uuid(7)) @db.Uuid
-  legacyId  Int?     @unique @map("legacy_id")
+  id        String    @id @default(uuid(7)) @db.Uuid
+  legacyId  Int?      @unique @map("legacy_id")
   title     String
-  imageUrl  String   @map("image_url")
-  linkUrl   String?  @map("link_url")
-  position  Int      @default(0)
-  isActive  Boolean  @default(true) @map("is_active")
-  isPopup   Boolean  @default(false) @map("is_popup")
+  imageUrl  String    @map("image_url")
+  linkUrl   String?   @map("link_url")
+  position  Int       @default(0)
+  isActive  Boolean   @default(true) @map("is_active")
+  isPopup   Boolean   @default(false) @map("is_popup")
   startedAt DateTime? @map("started_at") // window open; null = no lower bound
   endedAt   DateTime? @map("ended_at") // window close; null = no upper bound
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
 
   @@map("banners")
 }
 
 model Product {
-  id              String   @id @default(uuid(7)) @db.Uuid
-  legacyId        Int?     @unique @map("legacy_id")
+  id               String   @id @default(uuid(7)) @db.Uuid
+  legacyId         Int?     @unique @map("legacy_id")
   iosProductId     String?  @unique @map("ios_product_id") // App Store SKU → resolves a provider product_id (e.g. RevenueCat) to this Product
   androidProductId String?  @unique @map("android_product_id") // Play Store SKU → resolves a provider product_id (e.g. RevenueCat) to this Product
-  type            String
-  code            String?  @unique // legacy `course.code` — short alphanumeric id
-  slug            String? // SEO-friendly slug from legacy `course.slug`
-  title           String
-  description     String?
-  thumbnail       String? // legacy resource (model_type=TBModel_Course, collection=courseImage)
-  price           Int      @default(0)
-  iosPrice        Int?     @map("ios_price") // gross iOS IAP price (marked up to offset Apple's cut); null = same as `price`. Used for the affiliate commission range preview.
-  marketingLink   String?  @map("marketing_link") // legacy `course.marketing_link`
-  sellingPoints   Json?    @map("selling_points") // legacy `course.selling_point` — JSONB string[]
-  status          String   @default("active") // legacy: active|inactive|draft|archived
-  tags            String? // legacy `course.tags` raw csv
-  isActive        Boolean  @default(true) @map("is_active")
-  createdAt       DateTime @default(now()) @map("created_at")
-  updatedAt       DateTime @updatedAt @map("updated_at")
+  type             String
+  code             String?  @unique // legacy `course.code` — short alphanumeric id
+  slug             String? // SEO-friendly slug from legacy `course.slug`
+  title            String
+  description      String?
+  thumbnail        String? // legacy resource (model_type=TBModel_Course, collection=courseImage)
+  price            Int      @default(0)
+  iosPrice         Int?     @map("ios_price") // gross iOS IAP price (marked up to offset Apple's cut); null = same as `price`. Used for the affiliate commission range preview.
+  marketingLink    String?  @map("marketing_link") // legacy `course.marketing_link`
+  sellingPoints    Json?    @map("selling_points") // legacy `course.selling_point` — JSONB string[]
+  status           String   @default("active") // legacy: active|inactive|draft|archived
+  tags             String? // legacy `course.tags` raw csv
+  isActive         Boolean  @default(true) @map("is_active")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
 
   course               Course?
   reviews              Review[]
@@ -349,6 +349,7 @@ model Course {
   productId      String   @unique @map("product_id") @db.Uuid
   legacyCourseId Int?     @unique @map("legacy_course_id") // legacy `course.id` int — emitted as `courseId` in response
   durationMin    Int      @default(0) @map("duration_min")
+  programDays    Int      @default(30) @map("program_days") // listening-challenge duration in days (90/60/30); challenge `target`
   updatedAt      DateTime @updatedAt @map("updated_at")
 
   product     Product            @relation(fields: [productId], references: [id], onDelete: Cascade)
@@ -433,6 +434,34 @@ model Review {
   @@unique([productId, memberId])
   @@index([productId, stars])
   @@map("reviews")
+}
+
+// ============================================================================
+// Listening tracker (streak / sessions / total listen / challenge / recap)
+// ============================================================================
+
+// Append-only log of listening sessions emitted by the mobile audio player.
+// All home-screen metrics (streak, sessions, total, challenge, weekly recap) are
+// derived from this table at read-time (see tracker/stats.service.ts) — no
+// pre-aggregation tables in MVP. No FK to Lesson/Course on purpose: this is a
+// cheap ingest log and a write must never fail because a lesson row was removed.
+model ListeningSession {
+  id              String   @id @default(uuid(7)) @db.Uuid
+  clientSessionId String   @map("client_session_id") @db.Uuid // generated on device at play-start → idempotency key
+  memberId        String   @map("member_id") @db.Uuid
+  audioId         String   @map("audio_id") @db.Uuid // Lesson.id (no FK — log table)
+  courseId        String?  @map("course_id") @db.Uuid
+  startedAt       DateTime @map("started_at") // UTC
+  listenedSec     Int      @map("listened_sec") // seconds actually heard (not audio duration)
+  completed       Boolean  @default(false)
+  localDay        DateTime @map("local_day") @db.Date // Asia/Jakarta (WIB) calendar day at write → trivial streak query
+  source          String? // ios / android
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@unique([memberId, clientSessionId]) // dedup retry / resume re-send
+  @@index([memberId, localDay])
+  @@index([memberId, courseId, localDay])
+  @@map("listening_session")
 }
 
 // ============================================================================
@@ -922,18 +951,18 @@ model AffiliateVisit {
 /// Affiliate payout request. Ledger debit against cleared (BALANCE) commissions.
 /// Source: legacy `disbursement_payment_affiliate` / TBDisbursement::affiliate.
 model AffiliateDisbursement {
-  id            String    @id @default(uuid(7)) @db.Uuid
-  memberId      String    @map("member_id") @db.Uuid
-  grossAmount   Int       @default(0) @map("gross_amount") // withdrawable balance consumed by this payout
-  fee           Int       @default(0) // flat platform fee
-  netAmount     Int       @default(0) @map("net_amount") // paid to member = gross - fee
+  id            String  @id @default(uuid(7)) @db.Uuid
+  memberId      String  @map("member_id") @db.Uuid
+  grossAmount   Int     @default(0) @map("gross_amount") // withdrawable balance consumed by this payout
+  fee           Int     @default(0) // flat platform fee
+  netAmount     Int     @default(0) @map("net_amount") // paid to member = gross - fee
   // PENDING (awaiting manual approval) | PROCESSING (Xendit called, awaiting callback) | PAID | FAILED | REJECTED | VOIDED
-  status        String    @default("PENDING")
+  status        String  @default("PENDING")
   mode          String? // AUTO | MANUAL — how this payout was routed (see TBWithdraw::validateStatus parity)
   provider      String? // "xendit"
-  providerRef   String?   @map("provider_ref") // provider disbursement id
-  externalId    String?   @unique @map("external_id") // our idempotency key sent to Xendit; callback matches on this
-  failureReason String?   @map("failure_reason")
+  providerRef   String? @map("provider_ref") // provider disbursement id
+  externalId    String? @unique @map("external_id") // our idempotency key sent to Xendit; callback matches on this
+  failureReason String? @map("failure_reason")
 
   // Bank snapshot at request time (member profile bank may change later).
   bankCode          String? @map("bank_code")

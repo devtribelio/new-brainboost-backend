@@ -24,6 +24,8 @@ import { NotificationModule } from '@/modules/notification/notification.module';
 import { CommerceModule } from '@/modules/commerce/commerce.module';
 import { WebhookModule } from '@/modules/webhook/webhook.module';
 import { IngestModule } from '@/modules/ingest/ingest.module';
+import { TrackingModule } from '@/modules/tracker/tracking.module';
+import { StatsModule } from '@/modules/tracker/stats.module';
 
 const modules: AppModule[] = [
   AuthModule,
@@ -47,6 +49,8 @@ const modules: AppModule[] = [
   NotificationModule,
   WebhookModule,
   IngestModule,
+  TrackingModule,
+  StatsModule,
 ];
 
 export function registerModules(): Router {
