@@ -485,13 +485,18 @@ export class AuthService {
       return bcrypt.compare(plaintext, member.passwordHash);
     }
 
+    // SECURITY (CodeQL js/insufficient-password-hash false positive): these
+    // weak digests are NOT how we store passwords — they only re-derive a
+    // member's *existing legacy* hash so we can compare against the value
+    // imported from tribelio-platform. On any match we immediately rehash to
+    // bcrypt above/below, so the weak algo never survives a successful login.
     let computed: string | null = null;
     if (algo === 'md5' || algo === 'legacy') {
-      computed = createHash('md5').update(plaintext).digest('hex');
+      computed = createHash('md5').update(plaintext).digest('hex'); // lgtm[js/insufficient-password-hash]
     } else if (algo === 'sha1') {
-      computed = createHash('sha1').update(plaintext).digest('hex');
+      computed = createHash('sha1').update(plaintext).digest('hex'); // lgtm[js/insufficient-password-hash]
     } else if (algo === 'sha256') {
-      computed = createHash('sha256').update(plaintext).digest('hex');
+      computed = createHash('sha256').update(plaintext).digest('hex'); // lgtm[js/insufficient-password-hash]
     }
 
     if (computed !== null) {

@@ -273,8 +273,22 @@ function scrubSlide(slide: RawSlide, courseId: string, isPreview: boolean): RawS
   return { id: slide.id, type: slide.type, data: slide.data };
 }
 
+// A single regex pass over `<[^>]+>` is bypassable (e.g. `<scr<script>ipt>`
+// collapses back into a tag), so strip tags repeatedly until the string is
+// stable, then neutralise any leftover angle brackets. The result is a short
+// plain-text excerpt; treat it as text, never as HTML.
+function stripHtmlTags(input: string): string {
+  let prev: string;
+  let out = input;
+  do {
+    prev = out;
+    out = out.replace(/<[^>]*>/g, '');
+  } while (out !== prev);
+  return out.replace(/[<>]/g, '');
+}
+
 function legacyDescriptionExcerpt(html: string | null, plain: string | null): string {
-  const raw = (plain ?? (html ?? '').replace(/<[^>]+>/g, '')).trim();
+  const raw = (plain ?? stripHtmlTags(html ?? '')).trim();
   return raw.slice(0, 50);
 }
 

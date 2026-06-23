@@ -39,6 +39,7 @@
             <% } %>
             <% if (canDelete) { %>
               <form method="POST" action="/admin/<%= cfg.key %>/<%= row[idField] %>/delete" onsubmit="return confirm('Delete this <%= cfg.label %>?');" style="display:inline">
+                <input type="hidden" name="_csrf" value="<%= csrfToken %>" />
                 <button type="submit" class="btn btn-sm btn-danger">Delete</button>
               </form>
             <% } %>
