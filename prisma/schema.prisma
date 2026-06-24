@@ -449,7 +449,7 @@ model ListeningSession {
   id              String   @id @default(uuid(7)) @db.Uuid
   clientSessionId String   @map("client_session_id") @db.Uuid // generated on device at play-start → idempotency key
   memberId        String   @map("member_id") @db.Uuid
-  audioId         String   @map("audio_id") @db.Uuid // Lesson.id (no FK — log table)
+  audioId         String   @map("audio_id") // Lesson.id, opaque string (no FK — log table)
   courseId        String?  @map("course_id") @db.Uuid
   startedAt       DateTime @map("started_at") // UTC
   listenedSec     Int      @map("listened_sec") // seconds actually heard (not audio duration)
