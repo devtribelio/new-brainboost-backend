@@ -324,7 +324,7 @@ export class DisbursementSummaryDto {
   @ApiProperty({ type: 'integer', example: 45_000, description: 'Projected net payout = balance - fee.' })
   netAmount!: number;
 
-  @ApiProperty({ enum: ['NONE', 'PENDING', 'APPROVED', 'REJECTED'], example: 'APPROVED' })
+  @ApiProperty({ enum: ['NONE', 'PENDING', 'APPROVED', 'REJECTED', 'EXPIRED'], example: 'APPROVED' })
   kycStatus!: string;
 
   @ApiProperty({ example: true, description: 'True when bankCode + number + name are all set.' })
@@ -351,7 +351,7 @@ export class BankAccountDto {
 
 /** `GET`/`POST /affiliate/me/kyc` — manual KYC status + submitted fields. */
 export class KycDto {
-  @ApiProperty({ enum: ['NONE', 'PENDING', 'APPROVED', 'REJECTED'], example: 'PENDING' })
+  @ApiProperty({ enum: ['NONE', 'PENDING', 'APPROVED', 'REJECTED', 'EXPIRED'], example: 'PENDING' })
   kycStatus!: string;
 
   @ApiPropertyOptional({ nullable: true, example: '3201010101010001' })
@@ -382,7 +382,7 @@ export class KycTokenDto {
   applicantId!: string;
 
   @ApiProperty({
-    enum: ['NONE', 'PENDING', 'APPROVED', 'REJECTED'],
+    enum: ['NONE', 'PENDING', 'APPROVED', 'REJECTED', 'EXPIRED'],
     description: 'kycStatus at token issuance. The /api/webhook/sumsub callback updates it after review.',
   })
   kycStatus!: string;
