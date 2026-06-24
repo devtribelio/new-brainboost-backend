@@ -52,6 +52,10 @@ model Member {
 
   // --- Manual KYC (gate for affiliate disbursement) ---
   kycStatus         String    @default("NONE") @map("kyc_status") // NONE | PENDING | APPROVED | REJECTED
+  // Provenance of the current kycStatus: NONE (never KYC'd) | LEGACY (imported from
+  // legacy member_data_kyc — no Sumsub applicant / images live in legacy S3) |
+  // MANUAL (admin-reviewed manual flow) | SUMSUB (driven by Sumsub webhook).
+  kycSource         String    @default("NONE") @map("kyc_source")
   kycIdNumber       String?   @map("kyc_id_number")
   kycIdCardUrl      String?   @map("kyc_id_card_url")
   kycSelfieUrl      String?   @map("kyc_selfie_url")

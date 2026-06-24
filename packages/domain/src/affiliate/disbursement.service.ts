@@ -396,6 +396,7 @@ export class DisbursementService {
       where: { id: memberId },
       data: {
         kycStatus: 'PENDING',
+        kycSource: 'MANUAL',
         kycIdNumber: input.idNumber,
         kycIdCardUrl: input.idCardUrl,
         kycSelfieUrl: input.selfieUrl ?? null,
@@ -470,6 +471,7 @@ export class DisbursementService {
       where: { id: member.id },
       data: {
         kycStatus: 'PENDING',
+        kycSource: 'SUMSUB',
         sumsubApplicantId: applicantId,
         kycSubmittedAt: new Date(),
         kycReviewedAt: null,
@@ -507,6 +509,7 @@ export class DisbursementService {
       where: { id: member.id },
       data: {
         kycStatus: approved ? 'APPROVED' : 'REJECTED',
+        kycSource: 'SUMSUB',
         sumsubApplicantId: input.applicantId,
         kycReviewedAt: new Date(),
         kycReviewedBy: null, // reviewed by Sumsub, not an admin

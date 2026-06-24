@@ -35,6 +35,7 @@
     "migrate:reviews": "tsx scripts/migrate-reviews.ts",
     "migrate:products": "tsx scripts/migrate-products.ts",
     "migrate:members": "tsx scripts/migrate-members.ts",
+    "migrate:kyc": "tsx scripts/migrate-kyc.ts",
     "migrate:member-affiliators": "tsx scripts/migrate-member-affiliators.ts",
     "migrate:affiliate-commissions": "tsx scripts/migrate-affiliate-commissions.ts",
     "backfill:course-legacy-id": "tsx scripts/backfill-course-legacy-id.ts",

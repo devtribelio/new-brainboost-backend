@@ -62,8 +62,15 @@ pnpm migrate:members              # ≈57k members + ≈62k enrollments; writes 
 npx tsx scripts/backfill-affiliate-tree.ts    # inviterId / affiliateBased / affiliateCode (reads redirect.json)  ← may ECONNRESET, re-run
 pnpm migrate:member-affiliators   # MemberAffiliator join records (scoped, redirect-aware)
 pnpm migrate:affiliate-commissions # ≈46k commissions as status=MIGRATED → drives currentTier/currentRate
+pnpm migrate:kyc                   # legacy member_data_kyc → kycStatus + kycSource=LEGACY (APPROVED+REJECTED)
 ```
 `migrate:members` must run before tree, affiliators, commissions, network-members, network-posts, reviews.
+`migrate:kyc` runs after `migrate:members` (reads member-redirect.json; idempotent, guarded so re-runs
+never clobber a MANUAL/SUMSUB decision). Source = legacy `member_data_kyc` (the real KYC table written by
+tribelio-admin), NOT `member.last_kyc_status` (stale cache). APPROVED + REJECTED carried (latest row per
+member, redirect-aware); PENDING skipped → those members re-KYC fresh via Sumsub. Backfills
+`kycIdNumber=nik`, `kycReviewedAt=actionat`, `kycRejectedReason=reason`. Trial DB: ≈2.4k members
+(APPROVED ≈1.5k, REJECTED ≈0.86k). Legacy KTP/selfie images live in legacy S3 and are NOT migrated.
 `migrate:affiliate-commissions` runs after member-affiliators + backfill:affiliate-program-product.
 
 **Commissions / tier (status MIGRATED):** `currentTier`/`currentRate` in `/affiliate/me/summary`
