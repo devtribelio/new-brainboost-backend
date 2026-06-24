@@ -81,6 +81,17 @@ export async function getApplicantByExternalId(externalUserId: string): Promise<
   );
 }
 
+/**
+ * Reset an applicant: wipes the previous verification result so the applicant
+ * returns to "init". Required for re-KYC — without it a still-GREEN applicant
+ * would let a webhook replay / SDK re-run flip the member back to APPROVED with
+ * NO fresh verification. After reset the next SDK run must re-capture documents.
+ * Docs: POST /resources/applicants/{applicantId}/reset
+ */
+export async function resetApplicant(applicantId: string): Promise<void> {
+  await sumsubRequest('POST', `/resources/applicants/${encodeURIComponent(applicantId)}/reset`);
+}
+
 export interface SumsubAccessToken {
   token: string;
   userId: string;

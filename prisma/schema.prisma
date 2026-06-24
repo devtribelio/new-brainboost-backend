@@ -51,7 +51,14 @@ model Member {
   bankAccountName   String? @map("bank_account_name")
 
   // --- Manual KYC (gate for affiliate disbursement) ---
-  kycStatus         String    @default("NONE") @map("kyc_status") // NONE | PENDING | APPROVED | REJECTED
+  kycStatus         String    @default("NONE") @map("kyc_status") // NONE | PENDING | APPROVED | REJECTED | EXPIRED
+  // EXPIRED = previously APPROVED but a risk event (bank change / dormant reactivation /
+  // large disbursement / suspicious) forced a re-KYC. Treated as NOT-approved by the
+  // disbursement gate; member must pass Sumsub again. See docs/kyc-rekyc.md.
+  // Provenance of the current kycStatus: NONE (never KYC'd) | LEGACY (imported from
+  // legacy member_data_kyc — no Sumsub applicant / images live in legacy S3) |
+  // MANUAL (admin-reviewed manual flow) | SUMSUB (driven by Sumsub webhook).
+  kycSource         String    @default("NONE") @map("kyc_source")
   kycIdNumber       String?   @map("kyc_id_number")
   kycIdCardUrl      String?   @map("kyc_id_card_url")
   kycSelfieUrl      String?   @map("kyc_selfie_url")
@@ -85,8 +92,29 @@ model Member {
   commerceTransactions   CommerceTransaction[]
   commercePayments       CommercePayment[]
   notificationMutes      NotificationMute[]
+  kycEvents              KycEvent[]
 
   @@map("members")
+}
+
+// Audit trail for every KYC status transition (AML). Writes are append-only;
+// the Member.kyc* columns hold the current state, this holds the history.
+// See docs/kyc-rekyc.md.
+model KycEvent {
+  id         String   @id @default(uuid(7)) @db.Uuid
+  memberId   String   @map("member_id") @db.Uuid
+  member     Member   @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  type       String // RESET | SUBMIT | PENDING | APPROVE | REJECT
+  reason     String? // BANK_CHANGE | DORMANT_REACTIVATION | LARGE_DISBURSEMENT | SUSPICIOUS | ADMIN_MANUAL
+  fromStatus String?  @map("from_status")
+  toStatus   String   @map("to_status")
+  actorType  String   @map("actor_type") // SYSTEM | ADMIN | SUMSUB
+  actorId    String?  @map("actor_id") @db.Uuid
+  metadata   Json?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([memberId, createdAt])
+  @@map("kyc_event")
 }
 
 model MemberProfile {

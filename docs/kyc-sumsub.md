@@ -5,10 +5,31 @@ Mobile FE integration guide: `docs/kyc-sumsub-mobile.md`.
 
 ## Context
 
-Legacy had no real KYC: `members.verification_kyc` / `last_kyc_status` were read-only
-flags surfaced in the member payload (`TBMember.php:343,510`) with **no writer anywhere
-in the repo**; `TBModule::memberDataKyc()` referenced a module class that does not exist.
-Nothing to port.
+**Correction (2026-06-24):** legacy KYC **is** real and is now migrated — an earlier
+version of this doc wrongly said "no real KYC, nothing to port." The truth:
+`members.verification_kyc` / `last_kyc_status` are denormalised **caches** surfaced in the
+member payload (`TBMember.php:343,510`) — the tribelio *app* has no writer, but the
+authoritative data lives in the **`member_data_kyc`** table (full KTP / NIK / selfie /
+bank / business submissions; ~5.7k distinct members; APPROVED ≈2.8k, REJECTED ≈4.5k,
+PENDING 12 across all rows). It is **actively** maintained by `tribelio-admin/` (a separate
+legacy app, out of jcodemunch index — hence the missing writer; reviews carry
+`actionby`/`actionat`). `member.last_kyc_status` lags `member_data_kyc`, so the table (latest
+row per member) is the source of truth. Legacy KYC is carried over by
+`scripts/migrate-kyc.ts` (see below); the Sumsub provider only replaces the *new* review flow.
+
+### Legacy KYC migration (`migrate:kyc`)
+
+- Run after `migrate:members`. Source = latest `member_data_kyc` row per member.
+- Carries **APPROVED + REJECTED** only → `kycStatus`, `kycSource='LEGACY'`,
+  `kycIdNumber=nik`, `kycReviewedAt=actionat`, `kycRejectedReason=reason`. PENDING (and any
+  other value) is skipped so those members re-KYC fresh via Sumsub.
+- Redirect-aware (a dedup loser's KYC applies to its winner) and idempotent; guarded with
+  `kycSource IN ('NONE','LEGACY')` so a re-run never clobbers a new MANUAL/SUMSUB decision.
+- Legacy KTP/selfie **images are not migrated** (they live in legacy S3); a legacy-APPROVED
+  member therefore has `sumsubApplicantId = null` and no `kycIdCardUrl`/`kycSelfieUrl`.
+- New `members.kyc_source` column records provenance of the current `kycStatus`:
+  `NONE | LEGACY | MANUAL | SUMSUB`. Trial DB result: ≈2.4k members (APPROVED ≈1.5k,
+  REJECTED ≈0.86k).
 
 The new backend already had a **manual KYC** flow (KTP number + ID-card/selfie upload →
 `kycStatus PENDING` → admin review) gating affiliate disbursement. Sumsub replaces the

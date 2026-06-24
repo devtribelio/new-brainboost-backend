@@ -128,6 +128,16 @@ export const env = {
     // SDK access token lifetime, seconds.
     tokenTtlSeconds: Number.parseInt(optional('SUMSUB_TOKEN_TTL_SECONDS', '600'), 10),
   },
+  rekyc: {
+    // Re-KYC thresholds: an APPROVED affiliate is forced to re-verify on a risk
+    // event before the next disbursement. See docs/kyc-rekyc.md.
+    // Reactivation after this many days idle (lastActiveAt gap) resets KYC.
+    dormantDays: Number.parseInt(optional('REKYC_DORMANT_DAYS', '365'), 10),
+    // A disbursement >= this amount (IDR) forces re-KYC when the last review is stale.
+    largeDisbursementIdr: Number.parseInt(optional('REKYC_LARGE_DISBURSEMENT_IDR', '5000000'), 10),
+    // "Stale" = last KYC review older than this; guards against re-KYC right after approval.
+    staleDays: Number.parseInt(optional('REKYC_STALE_DAYS', '180'), 10),
+  },
   revenuecat: {
     // Shared secret RevenueCat sends as the `Authorization` header on each
     // webhook (configured in the RC dashboard). Empty disables the endpoint
