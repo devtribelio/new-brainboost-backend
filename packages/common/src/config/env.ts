@@ -213,4 +213,32 @@ export const env = {
   },
 } as const;
 
+/**
+ * Fixed-OTP bypass for designated tester accounts (e.g. the Apple App Review
+ * reviewer). When enabled, any OTP for a whitelisted email/phone is satisfied by
+ * the fixed `code` instead of a real one — no code is generated, stored, or sent.
+ *
+ * Read LIVE from process.env (not baked into `env`) so it can be flipped at
+ * runtime and toggled in tests without re-importing. This is still the single
+ * declaration site for these vars.
+ *
+ * SECURITY: must be a kill-switch (default OFF) limited to dummy accounts only.
+ * Adding a real user's identifier here lets `000000` reset their password via
+ * forgot-password. See docs/test-account.md.
+ */
+export function testAccountConfig(): {
+  enabled: boolean;
+  code: string;
+  identifiers: string[];
+} {
+  return {
+    enabled: optional('TEST_ACCOUNT_ENABLED', 'false') === 'true',
+    code: optional('TEST_ACCOUNT_OTP_CODE', '000000'),
+    identifiers: optional('TEST_ACCOUNT_IDENTIFIERS', '')
+      .split(',')
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean),
+  };
+}
+
 export type Env = typeof env;
