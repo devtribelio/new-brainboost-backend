@@ -1,0 +1,5 @@
+node_modules/
+cdk.out/
+.cdk.staging/
+*.log
+# cdk.context.json SENGAJA tidak di-ignore — AWS rekomen commit (cache VPC lookup biar synth deterministik)
