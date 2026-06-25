@@ -28,6 +28,20 @@ export class ProductDto {
   })
   networkAccountProductAffiliatorId!: number | string;
 
+  @ApiPropertyOptional({
+    nullable: true,
+    example: 'com.brainboost.ios.bbmm_consumable',
+    description: 'App Store SKU (RevenueCat product_id). Null if not sold via iOS IAP.',
+  })
+  iosProductId?: string | null;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    example: 'com.brainboost.android.bbmm_consumable',
+    description: 'Play Store SKU (RevenueCat product_id). Null if not sold via Android IAP.',
+  })
+  androidProductId?: string | null;
+
   @ApiPropertyOptional({ nullable: true, example: 'course' })
   type?: string | null;
 
@@ -52,6 +66,16 @@ export class ProductDto {
 
   @ApiPropertyOptional({ nullable: true, type: 'number', example: 299000 })
   price?: number | null;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    type: 'integer',
+    example: 349000,
+    description:
+      'Gross iOS IAP price (marked up to offset Apple\'s store cut). Null = same as `price`. ' +
+      'Basis for the iOS-net end of the affiliate commission range.',
+  })
+  iosPrice?: number | null;
 
   @ApiPropertyOptional({
     nullable: true,
@@ -214,6 +238,20 @@ export class CourseDetailDto {
   })
   courseId?: number | null;
 
+  @ApiPropertyOptional({
+    nullable: true,
+    example: 'com.brainboost.ios.bbmm_consumable',
+    description: 'App Store SKU (RevenueCat product_id). Null if not sold via iOS IAP.',
+  })
+  iosProductId?: string | null;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    example: 'com.brainboost.android.bbmm_consumable',
+    description: 'Play Store SKU (RevenueCat product_id). Null if not sold via Android IAP.',
+  })
+  androidProductId?: string | null;
+
   @ApiProperty({ example: 'react-fundamentals' })
   code!: string;
 
@@ -239,6 +277,15 @@ export class CourseDetailDto {
 
   @ApiProperty({ type: 'integer', example: 299000 })
   price!: number;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    type: 'integer',
+    example: 349000,
+    description:
+      'Gross iOS IAP price (marked up to offset Apple\'s store cut). Null = same as `price`.',
+  })
+  iosPrice?: number | null;
 
   @ApiProperty({ example: 'PUBLISH', description: 'PUBLISH|INACTIVE|DRAFT|ARCHIVED (uppercase)' })
   status!: string;
