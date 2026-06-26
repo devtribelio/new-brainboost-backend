@@ -1,8 +1,18 @@
-import type { Prisma, Product } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import type { Product } from '@prisma/client';
 import { prisma } from '@bb/db';
 import { NotFoundException } from '@bb/common/exceptions';
 import type { PaginationParams } from '@bb/common/utils/pagination.util';
-import type { Ownership } from './dto/list-query.dto';
+import type { Ownership, ProductMedia, ProductSort } from './dto/list-query.dto';
+
+interface ListQuery {
+  keyword?: string;
+  type?: string;
+  memberId?: string;
+  ownership?: Ownership;
+  sort?: ProductSort;
+  media?: ProductMedia[];
+}
 
 export interface ReviewAggregate {
   avg: number;
@@ -26,12 +36,16 @@ function distributionFromGroupBy(
 }
 
 export class ProductService {
-  async list(
-    p: PaginationParams,
-    q: { keyword?: string; type?: string; memberId?: string; ownership?: Ownership },
-  ) {
+  async list(p: PaginationParams, q: ListQuery) {
     if (q.ownership === 'purchased' && q.memberId) {
       return this.listPurchased(p, q.memberId, { keyword: q.keyword, type: q.type });
+    }
+
+    // `top_rated` orders by AVG(review.stars) and `media` scans lesson `slides_data`
+    // JSONB — neither is expressible via Prisma's typed query builder, so route
+    // those requests through the raw-SQL path.
+    if (q.sort === 'top_rated' || (q.media != null && q.media.length > 0)) {
+      return this.listRaw(p, q);
     }
 
     const where: Prisma.ProductWhereInput = { isActive: true };
@@ -46,13 +60,100 @@ export class ProductService {
     const [rows, total] = await Promise.all([
       prisma.product.findMany({
         where,
-        orderBy: { createdAt: 'desc' },
+        orderBy: ProductService.orderByFor(q.sort),
         skip: p.skip,
         take: p.take,
       }),
       prisma.product.count({ where }),
     ]);
     const ratingAvgByProduct = await this.batchRatingAvg(rows.map((r) => r.id));
+    const purchasedProductIds = await this.batchPurchased(q.memberId, rows);
+    return { rows, total, ratingAvgByProduct, purchasedProductIds };
+  }
+
+  private static orderByFor(sort?: ProductSort): Prisma.ProductOrderByWithRelationInput {
+    switch (sort) {
+      case 'price_asc':
+        return { price: 'asc' };
+      case 'price_desc':
+        return { price: 'desc' };
+      case 'newest':
+      default:
+        return { createdAt: 'desc' };
+    }
+  }
+
+  // Raw-SQL list path for filters/sorts the typed builder can't express:
+  // `sort=top_rated` (orders by AVG(review.stars), not a column) and `media`
+  // (EXISTS a lesson whose `slides_data` JSONB array holds an Audio/Video slide).
+  // Returns product ids in result order, then hydrates Product rows preserving it.
+  private async listRaw(p: PaginationParams, q: ListQuery) {
+    const conds: Prisma.Sql[] = [Prisma.sql`p.is_active = true`];
+    if (q.keyword) conds.push(Prisma.sql`p.title ILIKE ${`%${q.keyword}%`}`);
+    if (q.type) conds.push(Prisma.sql`p.type = ${q.type}`);
+    if (q.ownership === 'not_purchased' && q.memberId) {
+      conds.push(Prisma.sql`NOT EXISTS (
+        SELECT 1 FROM courses c
+        JOIN course_enrollment ce ON ce.course_id = c.id
+        WHERE c.product_id = p.id AND ce.member_id = ${q.memberId}::uuid
+      )`);
+    }
+    if (q.media && q.media.length > 0) {
+      const slideTypes = q.media.map((m) => (m === 'audio' ? 'AudioTemplate' : 'VideoTemplate'));
+      conds.push(Prisma.sql`EXISTS (
+        SELECT 1 FROM courses c
+        JOIN course_sections cs ON cs.course_id = c.id
+        JOIN course_lessons cl ON cl.section_id = cs.id
+        CROSS JOIN LATERAL jsonb_array_elements(
+          CASE WHEN jsonb_typeof(cl.slides_data) = 'array' THEN cl.slides_data ELSE '[]'::jsonb END
+        ) AS slide
+        WHERE c.product_id = p.id AND slide->>'type' IN (${Prisma.join(slideTypes)})
+      )`);
+    }
+    const where = Prisma.join(conds, ' AND ');
+
+    const needsRating = q.sort === 'top_rated';
+    const ratingJoin = needsRating
+      ? Prisma.sql`LEFT JOIN reviews r ON r.product_id = p.id`
+      : Prisma.empty;
+    const groupBy = needsRating ? Prisma.sql`GROUP BY p.id` : Prisma.empty;
+    const orderBy =
+      q.sort === 'price_asc'
+        ? Prisma.sql`p.price ASC, p.created_at DESC`
+        : q.sort === 'price_desc'
+          ? Prisma.sql`p.price DESC, p.created_at DESC`
+          : q.sort === 'top_rated'
+            ? Prisma.sql`COALESCE(AVG(r.stars), 0) DESC, p.created_at DESC`
+            : Prisma.sql`p.created_at DESC`;
+
+    const idRows = await prisma.$queryRaw<{ id: string }[]>`
+      SELECT p.id
+      FROM products p
+      ${ratingJoin}
+      WHERE ${where}
+      ${groupBy}
+      ORDER BY ${orderBy}
+      LIMIT ${p.take} OFFSET ${p.skip}
+    `;
+    const countRows = await prisma.$queryRaw<{ count: bigint }[]>`
+      SELECT COUNT(*)::bigint AS count FROM products p WHERE ${where}
+    `;
+    const total = Number(countRows[0]?.count ?? 0);
+
+    const ids = idRows.map((r) => r.id);
+    if (ids.length === 0) {
+      return {
+        rows: [] as Product[],
+        total,
+        ratingAvgByProduct: new Map<string, number>(),
+        purchasedProductIds: new Set<string>(),
+      };
+    }
+    const fetched = await prisma.product.findMany({ where: { id: { in: ids } } });
+    const byId = new Map(fetched.map((r) => [r.id, r]));
+    const rows = ids.map((id) => byId.get(id)).filter((r): r is Product => r != null);
+
+    const ratingAvgByProduct = await this.batchRatingAvg(ids);
     const purchasedProductIds = await this.batchPurchased(q.memberId, rows);
     return { rows, total, ratingAvgByProduct, purchasedProductIds };
   }
