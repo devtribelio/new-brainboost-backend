@@ -15,5 +15,5 @@ process.env.DATABASE_URL =
 process.env.XENDIT_CALLBACK_TOKEN = process.env.XENDIT_CALLBACK_TOKEN || 'test-xendit-token';
 process.env.XENDIT_SECRET_KEY = process.env.XENDIT_SECRET_KEY || 'xnd_test_dummy';
 process.env.REVENUECAT_WEBHOOK_AUTH = process.env.REVENUECAT_WEBHOOK_AUTH || 'test-rc-auth';
-process.env.SUMSUB_WEBHOOK_SECRET = process.env.SUMSUB_WEBHOOK_SECRET || 'test-sumsub-webhook-secret';
+process.env.DIDIT_WEBHOOK_SECRET = process.env.DIDIT_WEBHOOK_SECRET || 'test-didit-webhook-secret';
 process.env.GOOGLE_CLIENT_IDS = process.env.GOOGLE_CLIENT_IDS || 'test-google-android,test-google-ios';

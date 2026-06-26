@@ -1,7 +1,12 @@
 # Re-KYC / KYC reset design
 
-Status: **IMPLEMENTED 2026-06-24** (pending the same Sumsub sandbox QA as the base flow).
-Extends the Sumsub KYC gate (`docs/kyc-sumsub.md`).
+Status: **IMPLEMENTED 2026-06-24** (pending the same provider QA as the base flow).
+Extends the KYC gate (`docs/kyc-didit.md`).
+
+> Provider note (2026-06-26): KYC provider switched **Sumsub → Didit**. The re-KYC
+> business rules below are unchanged; the only mechanical change is **§7**: there is no
+> "applicant reset" (Didit is session-per-attempt). `resetKyc` now clears
+> `kycProviderRef` and the webhook honours only the active `session_id` — see §7.
 
 ## Implementation deviations from the original plan
 
@@ -29,7 +34,7 @@ when a risk event occurs. Four triggers (from product note):
 
 KYC di backend ini **hanya gate `requestDisbursement`** (`disbursement.service.ts:151`), bukan
 gate checkout/pembelian. Jadi re-KYC = menurunkan `kycStatus` dari `APPROVED` ke state yang
-ditolak gate, sampai member lolos Sumsub lagi. Tidak menghalangi aktivitas non-payout.
+ditolak gate, sampai member lolos verifikasi (Didit) lagi. Tidak menghalangi aktivitas non-payout.
 
 ## 2. Design decisions (default — bisa diubah)
 
@@ -41,7 +46,7 @@ ditolak gate, sampai member lolos Sumsub lagi. Tidak menghalangi aktivitas non-p
 | D4 | Dormansi | **Reuse `members.last_active_at`**; ambang `REKYC_DORMANT_DAYS=365`; deteksi di `MemberService.findById` (app-resume) | Tidak ada cron (rule repo) → cek on-event. Ternyata `last_active_at` sudah ada → tak perlu kolom/hook login baru |
 | D5 | "Checkout besar" | **Disbursement amount ≥ `REKYC_LARGE_DISBURSEMENT_IDR` (= 5.000.000)** memicu re-KYC, hanya jika review terakhir > `REKYC_STALE_DAYS` | Dikonfirmasi produk 2026-06-24: "checkout besar" = pencairan besar. KYC = gate payout, bukan gate pembeli |
 | D6 | Aktivitas mencurigakan | Method service `resetKyc(reason='SUSPICIOUS')` + aksi admin manual | Tidak ada engine fraud. Backoffice belum mulai → sediakan service-nya sekarang, wiring UI menyusul (admin EJS / backoffice) |
-| D7 | Applicant Sumsub | Saat reset, panggil **Sumsub applicant reset** (atau clear `sumsubApplicantId`) | ⚠️ tanpa ini replay webhook / re-run SDK pada applicant yang masih GREEN akan auto-APPROVED tanpa verifikasi (lihat §7) |
+| D7 | Sesi provider | Saat reset, **clear `kycProviderRef`** (Didit session-per-attempt; tak ada applicant untuk di-reset) | ⚠️ tanpa ini, replay webhook "Approved" dari sesi lama bisa auto-APPROVED tanpa verifikasi. Webhook hanya dihormati bila `session_id == kycProviderRef` (lihat §7) |
 | D8 | Disbursement in-flight | Reset **tidak** membatalkan row `PENDING`/`PROCESSING`; hanya blok request baru | Gate sudah dicek saat request; row lama sudah lolos. Pembekuan in-flight = scope terpisah |
 
 ## 3. Schema changes (`prisma/schema.prisma`)
@@ -63,7 +68,7 @@ model KycEvent {
   reason      String?  // BANK_CHANGE | DORMANT_REACTIVATION | LARGE_DISBURSEMENT | SUSPICIOUS | ADMIN_MANUAL
   fromStatus  String?  @map("from_status")
   toStatus    String   @map("to_status")
-  actorType   String   @map("actor_type")  // SYSTEM | ADMIN | SUMSUB
+  actorType   String   @map("actor_type")  // SYSTEM | ADMIN | DIDIT
   actorId     String?  @map("actor_id") @db.Uuid
   metadata    Json?    // mis. { oldBank, newBank } / { dormantDays } / { amount }
   createdAt   DateTime @default(now()) @map("created_at")
@@ -81,7 +86,7 @@ pola repo yang pakai string-enum berkomentar, bukan Prisma enum).
 ```
 NONE ─submit─► PENDING ─review─► APPROVED ──reset(event)──► EXPIRED
                   │                                            │
-                  └──review RED──► REJECTED                    └─submit/Sumsub─► PENDING ─► APPROVED
+                  └──review RED──► REJECTED                    └─submit/Didit─► PENDING ─► APPROVED
 ```
 
 - Gate `requestDisbursement`: **hanya `APPROVED` lolos.** `EXPIRED`/`REJECTED`/`PENDING`/`NONE` ditolak.
@@ -101,15 +106,16 @@ async resetKyc(memberId: string, reason: ReKycReason, opts?: {
 }): Promise<{ reset: boolean }> {
   const member = await prisma.member.findUnique({
     where: { id: memberId },
-    select: { kycStatus: true, sumsubApplicantId: true },
+    select: { kycStatus: true },
   });
   if (!member || member.kycStatus !== 'APPROVED') return { reset: false }; // hanya reset dari APPROVED
 
   await prisma.$transaction(async (tx) => {
     await tx.member.update({
       where: { id: memberId },
-      data: { kycStatus: 'EXPIRED', kycReviewedAt: null, kycRejectedReason: null },
-      // kycSource & kycIdNumber DIPERTAHANKAN (provenance); applicant ditangani di §7
+      // kycSource & kycIdNumber DIPERTAHANKAN (provenance). kycProviderRef di-null-kan (§7)
+      // supaya webhook "Approved" dari sesi lama tak lagi match → tak bisa re-approve.
+      data: { kycStatus: 'EXPIRED', kycReviewedAt: null, kycRejectedReason: null, kycProviderRef: null },
     });
     await tx.kycEvent.create({ data: {
       memberId, type: 'RESET', reason,
@@ -119,16 +125,14 @@ async resetKyc(memberId: string, reason: ReKycReason, opts?: {
     }});
   });
 
-  // §7 — fail-open: kalau Sumsub reset gagal, DB tetap EXPIRED (member tetap terblok, aman)
-  if (member.sumsubApplicantId) await this.resetSumsubApplicant(member.sumsubApplicantId);
-
+  // DB-only: tidak ada panggilan ke Didit (session-per-attempt; re-KYC bikin sesi baru).
   logger.info({ memberId, reason }, '[kyc] re-KYC reset');
   return { reset: true };
 }
 ```
 
-Catatan: write KYC lain (`applySumsubReview`, `submitKyc`, `markSumsubPending`) sebaiknya **ikut
-menulis `kyc_event`** supaya histori lengkap (opsional tapi disarankan di PR yang sama).
+Catatan: write KYC lain (`applyDiditReview`, `submitKyc`, `markDiditPending`) ikut
+menulis `kyc_event` supaya histori lengkap.
 
 ## 6. Trigger wiring
 
@@ -190,26 +194,28 @@ Service `resetKyc(memberId, 'SUSPICIOUS', { actorType:'ADMIN', actorId })` sudah
 - Sekarang: aksi di admin EJS (`apps/admin-ejs`) atau endpoint internal.
 - Nanti: masuk modul backoffice (RBAC + audit log) saat sprint disbursement.
 
-## 7. ⚠️ Reset applicant Sumsub (D7) — paling kritis
+## 7. ⚠️ Anti stale-re-approve (D7) — paling kritis
 
-`applySumsubReview` (line 508) menulis `APPROVED` **absolut**. Kalau kita set `EXPIRED` tapi
-applicant lama masih GREEN di Sumsub, replay webhook / re-run SDK → APPROVED lagi **tanpa
-verifikasi nyata**. Reset DB saja tidak cukup.
+`applyDiditReview` menulis `APPROVED`/`REJECTED` **absolut**. Kalau kita set `EXPIRED` tapi
+sebuah webhook "Approved" dari sesi lama datang (retry / late delivery), tanpa pengaman ia
+bisa nge-flip member ke `APPROVED` lagi **tanpa verifikasi nyata**. Reset DB saja tak cukup.
 
-Tambah di `packages/common/src/services/sumsub.client.ts`:
-```ts
-// POST /resources/applicants/{applicantId}/reset — Sumsub menghapus hasil check,
-// applicant kembali ke "init" sehingga SDK run berikutnya wajib capture ulang.
-export async function resetApplicant(applicantId: string): Promise<void> {
-  await sumsubRequest('POST', `/resources/applicants/${encodeURIComponent(applicantId)}/reset`);
-}
-```
-`resetSumsubApplicant` di service: panggil `resetApplicant`; kalau Sumsub tak terkonfigurasi
-atau melempar, **log + lanjут** (member sudah `EXPIRED` = terblok, fail-safe). Member legacy
-(`sumsubApplicantId = null`) tidak perlu reset Sumsub — re-KYC bikin applicant baru.
+Sumsub dulu mengatasinya dengan `resetApplicant` (applicant persisten). **Didit
+session-per-attempt → tidak ada applicant untuk di-reset.** Gantinya, pengaman pindah ke
+guard di handler + binding sesi aktif:
 
-Pertahankan idempotency webhook: `applySumsubReview` tetap menulis absolut; setelah Sumsub reset,
-event GREEN baru hanya datang setelah verifikasi ulang yang sah.
+1. **`resetKyc` meng-null-kan `kycProviderRef`** (§5). Sesi lama jadi tak ter-referensi.
+2. **`markDiditPending` / `applyDiditReview` hanya menerima webhook bila
+   `payload.session_id == member.kycProviderRef`.** Webhook dari sesi yang sudah disuperseksi
+   (atau dari member yang sudah di-reset → `kycProviderRef = null`) → diabaikan
+   (`handled:false, reason:'stale session'`).
+3. **`createDiditSession` menyetel `kycProviderRef` ke `session_id` sesi BARU** setiap re-KYC,
+   sehingga hanya webhook sesi terbaru yang dihormati.
+4. Lapis tambahan: **replay guard `X-Timestamp ±300s`** di `diditSignatureGuard` membuang
+   replay di luar jendela 5 menit.
+
+Idempotency tetap terjaga: untuk sesi aktif, write absolut → replay konvergen ke status sama;
+audit row di-skip saat status tak berubah.
 
 ## 8. Gate & payload
 
@@ -238,12 +244,12 @@ Tambahkan ke `.env.example`. Semua via `required()`/default pola env repo.
 
 ## 11. Tests (Vitest, Postgres asli — no mock DB)
 
-- `resetKyc`: APPROVED→EXPIRED + buat `kyc_event`; no-op dari non-APPROVED; Sumsub reset gagal → tetap EXPIRED.
+- `resetKyc`: APPROVED→EXPIRED + buat `kyc_event` + `kycProviderRef` jadi null; no-op dari non-APPROVED.
 - Bank change: ganti rekening existing me-reset; set pertama tidak; rekening sama tidak.
 - Dormansi: login dgn `lastLoginAt` > 365 hari me-reset; < 365 tidak; `lastLoginAt` selalu ter-update.
 - Large disbursement: `netAmount ≥ ambang` + review stale → reset + tolak; review segar → lolos.
 - Gate: `EXPIRED` ditolak `requestDisbursement`; token endpoint loloskan `EXPIRED`.
-- Idempotency: replay webhook GREEN pada applicant yang sudah di-reset tidak meng-APPROVE (butuh applicant reset).
+- Idempotency / guard: webhook "Approved" dari sesi lama (session_id ≠ kycProviderRef) tidak meng-APPROVE member EXPIRED.
 - Smoke: swagger enum `kycStatus` memuat `EXPIRED`.
 
 ## 12. File checklist
@@ -253,7 +259,7 @@ Tambahkan ke `.env.example`. Semua via `required()`/default pola env repo.
 | `prisma/schema.prisma` | `kycStatus` EXPIRED (komentar), model `KycEvent` + relasi | ✅ |
 | `prisma/migrations/20260624110000_add_kyc_event/` | CREATE TABLE kyc_event (no DDL members) | ✅ |
 | `packages/domain/src/affiliate/disbursement.service.ts` | `ReKycReason`, `resetKyc`, hook `setBankAccount` & `requestDisbursement` (sentinel `ReKycRequiredError`), pesan gate EXPIRED, audit event di submit/pending/review | ✅ |
-| `packages/common/src/services/sumsub.client.ts` | `resetApplicant` | ✅ |
+| `packages/domain/src/affiliate/disbursement.service.ts` | session_id guard di `markDiditPending`/`applyDiditReview`; `resetKyc` null-kan `kycProviderRef` (Sumsub `resetApplicant` dihapus) | ✅ |
 | `apps/mobile-api/src/modules/member/member.service.ts` | inject `DisbursementService` + cek dormansi (reuse `last_active_at`) | ✅ |
 | `packages/common/src/config/env.ts` | blok `rekyc` (3 konstanta REKYC_*) | ✅ |
 | `apps/mobile-api/src/modules/affiliate/dto/affiliate-response.dto.ts` | enum `EXPIRED` (3 tempat) | ✅ |

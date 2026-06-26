@@ -113,12 +113,12 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` parity met for current s
 - `code-generator.ts`, `compute-amount.ts`, `walk-inviter-chain.ts` ✅
 - `affiliator.service.ts`, `enrollment.service.ts`, `program.service.ts`, `visit.service.ts` — wired ✅
 - Recursive CTE for inviter chain (`walkInviterChain`) ✅
-- KYC via Sumsub (disbursement gate): SDK token endpoint + `/api/webhook/sumsub` HMAC webhook + status mapping ✅ — code complete, sandbox creds/QA + mobile SDK pending. See `docs/kyc-sumsub.md`.
+- KYC via Didit (disbursement gate): session token endpoint + `/api/webhook/didit` HMAC+timestamp webhook + status mapping ✅ — code complete (switched from Sumsub 2026-06-26), Console setup (workflow + creds) / free-tier confirm + mobile SDK pending. See `docs/kyc-didit.md`.
 - **Outstanding:**
   - Parity tests against legacy fixture rows (commission compute, multitier walk).
   - PENDING → BALANCE state machine (cron job + the 7-day delay).
   - Reconciliation report (audit trail vs. legacy).
-  - Sumsub sandbox QA (creds + level setup + mobile SDK integration).
+  - Didit QA (Console workflow + creds, free-tier confirm, mobile SDK integration).
 - See `plan.md` for full design.
 
 ---
