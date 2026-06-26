@@ -9,13 +9,7 @@ import {
   type CreateDisbursementResult,
 } from '@bb/common/services/xendit.client';
 import { generateExternalId } from '@bb/common/services/xendit-signature';
-import {
-  createApplicant,
-  generateSdkAccessToken,
-  getApplicantByExternalId,
-  isSumsubConfigured,
-  resetApplicant,
-} from '@bb/common/services/sumsub.client';
+import { createSession, isDiditConfigured } from '@bb/common/services/didit.client';
 import {
   COMMISSION_STATUS,
   DISBURSEMENT_STATUS,
@@ -466,65 +460,59 @@ export class DisbursementService {
     return member;
   }
 
-  // ---- KYC via Sumsub --------------------------------------------------------
+  // ---- KYC via Didit ---------------------------------------------------------
 
   /**
-   * Start (or resume) a Sumsub KYC session: ensure an applicant exists for this
-   * member (externalUserId = our member UUID) and mint a short-lived SDK access
-   * token for the mobile SDK. kycStatus is NOT touched here — webhooks drive the
-   * transitions (applicantPending → PENDING, applicantReviewed → APPROVED/REJECTED).
+   * Start a Didit KYC session: mint a fresh verification session (Didit is
+   * session-per-attempt — no persistent applicant) and store its session_id as
+   * the member's ACTIVE kycProviderRef. Returns the session token + hosted URL;
+   * mobile launches the native SDK with the token (or opens the URL in a webview).
+   * kycStatus is NOT touched here — webhooks drive the transitions ("In Review" →
+   * PENDING, "Approved"/"Declined" → APPROVED/REJECTED). Making the new session
+   * the active ref also invalidates any in-flight webhook from a previous session.
    */
-  async createSumsubKycSession(memberId: string) {
-    if (!isSumsubConfigured()) {
+  async createDiditSession(memberId: string) {
+    if (!isDiditConfigured()) {
       throw new BadRequestException('KYC provider not configured');
     }
     const member = await prisma.member.findUnique({
       where: { id: memberId },
-      select: { kycStatus: true, sumsubApplicantId: true },
+      select: { kycStatus: true },
     });
     if (!member) throw new NotFoundException('Member not found');
     if (member.kycStatus === 'APPROVED') throw new BadRequestException('KYC sudah disetujui');
 
-    let applicantId = member.sumsubApplicantId;
-    if (!applicantId) {
-      try {
-        const applicant = await createApplicant(memberId);
-        applicantId = applicant.id;
-      } catch (err) {
-        // 409 = applicant already exists for this externalUserId (e.g. retry
-        // after a crash before we stored the id) — resolve instead of failing.
-        if ((err as { status?: number }).status === 409) {
-          const existing = await getApplicantByExternalId(memberId);
-          applicantId = existing.id;
-        } else {
-          throw err;
-        }
-      }
-      await prisma.member.update({
-        where: { id: memberId },
-        data: { sumsubApplicantId: applicantId },
-      });
-    }
+    const session = await createSession(memberId);
+    await prisma.member.update({
+      where: { id: memberId },
+      data: { kycProviderRef: session.session_id },
+    });
 
-    const accessToken = await generateSdkAccessToken(memberId);
-    return { token: accessToken.token, applicantId, kycStatus: member.kycStatus };
+    return {
+      sessionId: session.session_id,
+      sessionToken: session.session_token,
+      url: session.url,
+      kycStatus: member.kycStatus,
+    };
   }
 
   /**
-   * Webhook `applicantPending`: documents submitted, review started.
-   * Mirrors the manual submitKyc transition. No-op when already APPROVED.
+   * Webhook status "In Review" / "In Progress" / "Resubmitted": documents
+   * submitted, review started. Mirrors the manual submitKyc transition. No-op
+   * when already APPROVED or when the webhook is for a non-active session.
    */
-  async markSumsubPending(applicantId: string, externalUserId?: string) {
-    const member = await this.findMemberForSumsub(applicantId, externalUserId);
+  async markDiditPending(sessionId: string, vendorData?: string) {
+    const member = await this.findMemberForDidit(sessionId, vendorData);
     if (!member) return { handled: false, reason: 'member not found' };
+    if (member.kycProviderRef !== sessionId) return { handled: false, reason: 'stale session' };
     if (member.kycStatus === 'APPROVED') return { handled: false, reason: 'already approved' };
     await prisma.$transaction([
       prisma.member.update({
         where: { id: member.id },
         data: {
           kycStatus: 'PENDING',
-          kycSource: 'SUMSUB',
-          sumsubApplicantId: applicantId,
+          kycSource: 'DIDIT',
+          kycProviderRef: sessionId,
           kycSubmittedAt: new Date(),
           kycReviewedAt: null,
           kycReviewedBy: null,
@@ -541,7 +529,7 @@ export class DisbursementService {
                 type: 'PENDING',
                 fromStatus: member.kycStatus,
                 toStatus: 'PENDING',
-                actorType: 'SUMSUB',
+                actorType: 'DIDIT',
               },
             }),
           ]),
@@ -550,38 +538,36 @@ export class DisbursementService {
   }
 
   /**
-   * Webhook `applicantReviewed`: GREEN → APPROVED, RED → REJECTED.
-   * RED + RETRY can re-submit through the same applicant; RED + FINAL is
-   * enforced by Sumsub itself (SDK refuses further attempts). Writes are
-   * absolute so webhook replays converge to the same state (idempotent).
+   * Webhook final decision: "Approved" → APPROVED, "Declined" → REJECTED. Writes
+   * are absolute so webhook replays converge to the same state (idempotent). The
+   * session_id guard is the re-KYC safety net: a stale "Approved" from a previous
+   * session (whose id no longer matches kycProviderRef) is IGNORED, so it cannot
+   * silently re-approve an EXPIRED member (replaces Sumsub's resetApplicant).
    */
-  async applySumsubReview(input: {
-    applicantId: string;
-    externalUserId?: string;
-    reviewAnswer: string; // GREEN | RED
-    rejectLabels?: string[];
-    reviewRejectType?: string; // FINAL | RETRY
+  async applyDiditReview(input: {
+    sessionId: string;
+    vendorData?: string;
+    approved: boolean;
+    rejectedReason?: string | null;
   }) {
-    const member = await this.findMemberForSumsub(input.applicantId, input.externalUserId);
+    const member = await this.findMemberForDidit(input.sessionId, input.vendorData);
     if (!member) return { handled: false, reason: 'member not found' };
+    if (member.kycProviderRef !== input.sessionId) {
+      return { handled: false, reason: 'stale session' };
+    }
 
-    const approved = input.reviewAnswer === 'GREEN';
-    const rejectedReason = approved
-      ? null
-      : [input.reviewRejectType, (input.rejectLabels ?? []).join(', ')]
-          .filter(Boolean)
-          .join(': ') || 'REJECTED';
-
+    const { approved } = input;
+    const rejectedReason = approved ? null : input.rejectedReason || 'REJECTED';
     const newStatus = approved ? 'APPROVED' : 'REJECTED';
     await prisma.$transaction([
       prisma.member.update({
         where: { id: member.id },
         data: {
           kycStatus: newStatus,
-          kycSource: 'SUMSUB',
-          sumsubApplicantId: input.applicantId,
+          kycSource: 'DIDIT',
+          kycProviderRef: input.sessionId,
           kycReviewedAt: new Date(),
-          kycReviewedBy: null, // reviewed by Sumsub, not an admin
+          kycReviewedBy: null, // reviewed by Didit, not an admin
           kycRejectedReason: rejectedReason,
         },
       }),
@@ -595,31 +581,31 @@ export class DisbursementService {
                 type: approved ? 'APPROVE' : 'REJECT',
                 fromStatus: member.kycStatus,
                 toStatus: newStatus,
-                actorType: 'SUMSUB',
+                actorType: 'DIDIT',
                 metadata: rejectedReason ? { rejectedReason } : undefined,
               },
             }),
           ]),
     ]);
     logger.info(
-      { memberId: member.id, applicantId: input.applicantId, reviewAnswer: input.reviewAnswer },
-      '[kyc] sumsub review applied',
+      { memberId: member.id, sessionId: input.sessionId, approved },
+      '[kyc] didit review applied',
     );
-    return { handled: true, memberId: member.id, kycStatus: approved ? 'APPROVED' : 'REJECTED' };
+    return { handled: true, memberId: member.id, kycStatus: newStatus };
   }
 
-  /** Resolve the member a Sumsub webhook refers to: applicantId first, then externalUserId (our member UUID). */
-  private async findMemberForSumsub(applicantId: string, externalUserId?: string) {
-    const byApplicant = await prisma.member.findUnique({
-      where: { sumsubApplicantId: applicantId },
-      select: { id: true, kycStatus: true },
+  /** Resolve the member a Didit webhook refers to: session_id first, then vendor_data (our member UUID). */
+  private async findMemberForDidit(sessionId: string, vendorData?: string) {
+    const bySession = await prisma.member.findUnique({
+      where: { kycProviderRef: sessionId },
+      select: { id: true, kycStatus: true, kycProviderRef: true },
     });
-    if (byApplicant) return byApplicant;
-    // externalUserId is our UUID — guard the cast so a foreign id can't blow up the query.
-    if (externalUserId && UUID_RE.test(externalUserId)) {
+    if (bySession) return bySession;
+    // vendor_data is our UUID — guard the cast so a foreign id can't blow up the query.
+    if (vendorData && UUID_RE.test(vendorData)) {
       return prisma.member.findUnique({
-        where: { id: externalUserId },
-        select: { id: true, kycStatus: true },
+        where: { id: vendorData },
+        select: { id: true, kycStatus: true, kycProviderRef: true },
       });
     }
     return null;
@@ -631,7 +617,9 @@ export class DisbursementService {
    * Revoke an APPROVED KYC on a risk event (APPROVED → EXPIRED) so the member
    * must re-verify before the next disbursement. No-op unless currently APPROVED.
    * Preserves provenance (kycSource / kycIdNumber); records a kyc_event row.
-   * Also resets the Sumsub applicant so a stale GREEN result can't auto-re-approve.
+   * Clears kycProviderRef so no in-flight webhook from the (now superseded)
+   * session can re-approve the member — the next re-KYC mints a brand-new Didit
+   * session (Didit is session-per-attempt, so there is no applicant to reset).
    */
   async resetKyc(
     memberId: string,
@@ -640,7 +628,7 @@ export class DisbursementService {
   ): Promise<{ reset: boolean }> {
     const member = await prisma.member.findUnique({
       where: { id: memberId },
-      select: { kycStatus: true, sumsubApplicantId: true },
+      select: { kycStatus: true },
     });
     // Only an APPROVED member can be downgraded. Anything else is a no-op so the
     // call is safe to fire unconditionally from triggers.
@@ -649,7 +637,14 @@ export class DisbursementService {
     await prisma.$transaction(async (tx) => {
       await tx.member.update({
         where: { id: memberId },
-        data: { kycStatus: 'EXPIRED', kycReviewedAt: null, kycRejectedReason: null },
+        data: {
+          kycStatus: 'EXPIRED',
+          kycReviewedAt: null,
+          kycRejectedReason: null,
+          // Detach the old session: a stale "Approved" webhook now matches nothing
+          // (findMemberForDidit + the session_id guard both fail), so it is ignored.
+          kycProviderRef: null,
+        },
       });
       await tx.kycEvent.create({
         data: {
@@ -664,19 +659,6 @@ export class DisbursementService {
         },
       });
     });
-
-    // Best-effort: the DB is already EXPIRED (member is blocked) — if Sumsub reset
-    // fails we stay fail-safe rather than rolling the revocation back.
-    if (member.sumsubApplicantId) {
-      try {
-        if (isSumsubConfigured()) await resetApplicant(member.sumsubApplicantId);
-      } catch (err) {
-        logger.error(
-          { err, memberId, applicantId: member.sumsubApplicantId },
-          '[kyc] sumsub applicant reset failed (member still EXPIRED)',
-        );
-      }
-    }
 
     logger.info({ memberId, reason }, '[kyc] re-KYC reset applied');
     return { reset: true };

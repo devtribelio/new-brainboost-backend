@@ -41,7 +41,7 @@ export function affiliateRoutes(): Router {
   // KYC (manual review gate for payouts)
   bindRoute({ router, controller: ctrl, method: 'get', path: '/affiliate/me/kyc', handlerKey: 'getKyc', middlewares: [authGuard] });
   bindRoute({ router, controller: ctrl, method: 'post', path: '/affiliate/me/kyc', handlerKey: 'submitKyc', middlewares: [authGuard, validateDto(SubmitKycDto)] });
-  // KYC via Sumsub — backend mints the SDK access token; status flips via /api/webhook/sumsub
+  // KYC via Didit — backend mints a verification session (token + URL); status flips via /api/webhook/didit
   bindRoute({ router, controller: ctrl, method: 'post', path: '/affiliate/me/kyc/token', handlerKey: 'createKycToken', middlewares: [authGuard] });
 
   // Disbursement / payout

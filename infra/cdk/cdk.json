@@ -1,0 +1,11 @@
+{
+  "app": "npx ts-node --prefer-ts-exts bin/app.ts",
+  "context": {
+    "@aws-cdk/core:newStyleStackSynthesis": true,
+    "region": "ap-southeast-3",
+    "imageTag": "latest",
+    "appSecretName": "bb/prod/app",
+    "rdsSecurityGroupId": "REPLACE_WITH_bb-sg-rds-id",
+    "certificateArn": ""
+  }
+}

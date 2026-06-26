@@ -5,9 +5,9 @@ import { WebhookController } from './webhook.controller';
 import { XenditWebhookHandler } from './xendit.handler';
 import { RevenueCatWebhookHandler } from './revenuecat.handler';
 import { XenditDisbursementWebhookHandler } from './xendit-disbursement.handler';
-import { SumsubWebhookHandler } from './sumsub.handler';
+import { DiditWebhookHandler } from './didit.handler';
 import { xenditCallbackGuard } from './xendit-callback.guard';
-import { sumsubDigestGuard } from './sumsub-digest.guard';
+import { diditSignatureGuard } from './didit-signature.guard';
 import { revenueCatCallbackGuard } from './revenuecat-callback.guard';
 import { XenditInvoiceCallbackDto } from './dto/xendit-callback.dto';
 import { RevenueCatCallbackDto } from './dto/revenuecat-callback.dto';
@@ -19,7 +19,7 @@ export function webhookRoutes(): Router {
     new XenditWebhookHandler(),
     new RevenueCatWebhookHandler(),
     new XenditDisbursementWebhookHandler(),
-    new SumsubWebhookHandler(),
+    new DiditWebhookHandler(),
   );
 
   // Xendit Invoice callback — Invoice API hosted checkout flow.
@@ -53,15 +53,16 @@ export function webhookRoutes(): Router {
     middlewares: [xenditCallbackGuard, validateDto(XenditDisbursementCallbackDto)],
   });
 
-  // Sumsub KYC webhook — HMAC digest over the raw body (x-payload-digest).
-  // No validateDto: Sumsub sends 20+ event shapes; the handler switches on `type`.
+  // Didit KYC webhook — HMAC-SHA256 over the raw body (X-Signature) + X-Timestamp
+  // replay guard. No validateDto: Didit sends several status shapes; the handler
+  // switches on `status`.
   bindRoute({
     router,
     controller: ctrl,
     method: 'post',
-    path: '/sumsub',
-    handlerKey: 'sumsubWebhook',
-    middlewares: [sumsubDigestGuard],
+    path: '/didit',
+    handlerKey: 'diditWebhook',
+    middlewares: [diditSignatureGuard],
   });
 
   return router;
