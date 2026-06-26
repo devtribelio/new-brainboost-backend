@@ -74,6 +74,7 @@ export function serializeProduct(
           .filter(Boolean)
       : [],
     price: p.price,
+    iosPrice: p.iosPrice,
     imageUrl: p.thumbnail,
     lastUpdated: p.updatedAt.toISOString(),
     productPaymentUrl: `${baseUrl}/checkout/${code}`,
@@ -392,6 +393,7 @@ export function serializeCourseDetailLegacy(
     productShareDetailUrl: shareUrl,
     productPaymentUrl: `${baseUrl}/checkout/${code}`,
     price: p.price,
+    iosPrice: p.iosPrice,
     status: legacyStatus(p.status),
     lessonsData,
     ratingSummary: {

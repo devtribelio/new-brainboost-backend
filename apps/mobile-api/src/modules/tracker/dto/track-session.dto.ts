@@ -1,22 +1,17 @@
-import {
-  IsBoolean,
-  IsInt,
-  IsISO8601,
-  IsOptional,
-  IsUUID,
-  Max,
-  Min,
-} from 'class-validator';
+import { IsBoolean, IsInt, IsISO8601, IsOptional, IsString, IsUUID, Max, Min } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@bb/common/openapi/decorators';
 
 /** Request body for `POST /api/tracking/session` (spec §5.1). */
 export class TrackSessionDto {
-  @ApiProperty({ format: 'uuid', description: 'Generated on device at play-start; idempotency key' })
+  @ApiProperty({
+    format: 'uuid',
+    description: 'Generated on device at play-start; idempotency key',
+  })
   @IsUUID()
   clientSessionId!: string;
 
-  @ApiProperty({ format: 'uuid', description: 'Lesson (audio) id' })
-  @IsUUID()
+  @ApiProperty({ description: 'Lesson (audio) id — opaque string, not validated as UUID' })
+  @IsString()
   audioId!: string;
 
   @ApiPropertyOptional({ format: 'uuid', nullable: true })

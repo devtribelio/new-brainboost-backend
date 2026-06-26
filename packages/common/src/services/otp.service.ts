@@ -3,6 +3,7 @@ import { randomInt } from 'node:crypto';
 import { prisma } from '@bb/db';
 import { BadRequestException } from '@bb/common/exceptions';
 import { logger } from '@bb/common/config/logger';
+import { testAccountConfig } from '@bb/common/config/env';
 import { enqueueComms } from './comms-outbox';
 
 const MAX_OTP_ATTEMPTS = 5;
@@ -57,8 +58,48 @@ function isEmail(target: string): boolean {
 }
 
 class OtpService {
+  /**
+   * A tester target is matched (case-insensitively) against the env whitelist.
+   * Returns false unless the bypass is explicitly enabled. See docs/test-account.md.
+   */
+  private isTestTarget(target: string): boolean {
+    const cfg = testAccountConfig();
+    if (!cfg.enabled || cfg.identifiers.length === 0) return false;
+    const t = target.trim().toLowerCase();
+    if (cfg.identifiers.includes(t)) return true;
+    // Phone OTP targets are canonical E.164 ('+628111…'). Match any phone-form
+    // whitelist entry with the same digits so '628111…' / '+62 8111…' all work.
+    // Emails (containing '@') only ever match exactly above — never by digits.
+    if (t.includes('@')) return false;
+    const tDigits = t.replace(/\D/g, '');
+    if (!tDigits) return false;
+    return cfg.identifiers.some((id) => !id.includes('@') && id.replace(/\D/g, '') === tDigits);
+  }
+
+  /** True only when the target is a whitelisted tester AND the fixed code matches. */
+  private isTestBypass(target: string, code: string): boolean {
+    return this.isTestTarget(target) && code === testAccountConfig().code;
+  }
+
   async issue(input: IssueOtpInput): Promise<{ id: string; code: string; expiresAt: Date }> {
     const now = new Date();
+
+    // Tester account (e.g. Apple App Review): no real OTP is generated, stored,
+    // or delivered — the reviewer enters the fixed code (env TEST_ACCOUNT_OTP_CODE).
+    // Skipping issuance also sidesteps the resend guard + daily cap so the reviewer
+    // can re-request freely. See docs/test-account.md.
+    if (this.isTestTarget(input.target)) {
+      const ttl = input.ttlSeconds ?? DEFAULT_TTL[input.purpose];
+      logger.info(
+        { purpose: input.purpose, target: input.target },
+        'OTP issue bypassed for tester account (no code stored, no delivery)',
+      );
+      return {
+        id: 'test-account-bypass',
+        code: testAccountConfig().code,
+        expiresAt: new Date(now.getTime() + ttl * 1000),
+      };
+    }
 
     // Resend guard: a still-valid code must expire (or be consumed) first.
     if (input.enforceResendGuard) {
@@ -188,10 +229,21 @@ class OtpService {
   }
 
   async verify(target: string, code: string, purpose: OtpPurpose): Promise<void> {
+    if (this.isTestBypass(target, code)) return;
     await this.resolveAndMatch(target, code, purpose);
   }
 
   async consume(target: string, code: string, purpose: OtpPurpose): Promise<void> {
+    if (this.isTestBypass(target, code)) {
+      // A tester normally has no stored OTP (issue() is bypassed), but clear any
+      // stray outstanding code so state stays clean and re-usable.
+      await prisma.otpCode.updateMany({
+        where: { target, purpose, usedAt: null },
+        data: { usedAt: new Date() },
+      });
+      return;
+    }
+
     const otp = await this.resolveAndMatch(target, code, purpose);
 
     await prisma.otpCode.update({

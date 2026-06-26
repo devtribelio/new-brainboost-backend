@@ -128,6 +128,16 @@ export const env = {
     // SDK access token lifetime, seconds.
     tokenTtlSeconds: Number.parseInt(optional('SUMSUB_TOKEN_TTL_SECONDS', '600'), 10),
   },
+  rekyc: {
+    // Re-KYC thresholds: an APPROVED affiliate is forced to re-verify on a risk
+    // event before the next disbursement. See docs/kyc-rekyc.md.
+    // Reactivation after this many days idle (lastActiveAt gap) resets KYC.
+    dormantDays: Number.parseInt(optional('REKYC_DORMANT_DAYS', '365'), 10),
+    // A disbursement >= this amount (IDR) forces re-KYC when the last review is stale.
+    largeDisbursementIdr: Number.parseInt(optional('REKYC_LARGE_DISBURSEMENT_IDR', '5000000'), 10),
+    // "Stale" = last KYC review older than this; guards against re-KYC right after approval.
+    staleDays: Number.parseInt(optional('REKYC_STALE_DAYS', '180'), 10),
+  },
   revenuecat: {
     // Shared secret RevenueCat sends as the `Authorization` header on each
     // webhook (configured in the RC dashboard). Empty disables the endpoint
@@ -202,5 +212,33 @@ export const env = {
     relayBatchSize: Number.parseInt(optional('COMMS_RELAY_BATCH_SIZE', '50'), 10),
   },
 } as const;
+
+/**
+ * Fixed-OTP bypass for designated tester accounts (e.g. the Apple App Review
+ * reviewer). When enabled, any OTP for a whitelisted email/phone is satisfied by
+ * the fixed `code` instead of a real one — no code is generated, stored, or sent.
+ *
+ * Read LIVE from process.env (not baked into `env`) so it can be flipped at
+ * runtime and toggled in tests without re-importing. This is still the single
+ * declaration site for these vars.
+ *
+ * SECURITY: must be a kill-switch (default OFF) limited to dummy accounts only.
+ * Adding a real user's identifier here lets `000000` reset their password via
+ * forgot-password. See docs/test-account.md.
+ */
+export function testAccountConfig(): {
+  enabled: boolean;
+  code: string;
+  identifiers: string[];
+} {
+  return {
+    enabled: optional('TEST_ACCOUNT_ENABLED', 'false') === 'true',
+    code: optional('TEST_ACCOUNT_OTP_CODE', '000000'),
+    identifiers: optional('TEST_ACCOUNT_IDENTIFIERS', '')
+      .split(',')
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean),
+  };
+}
 
 export type Env = typeof env;
