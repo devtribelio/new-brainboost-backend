@@ -14,7 +14,13 @@ import {
   ApiTags,
 } from '@bb/common/openapi/decorators';
 import { CourseDetailDto, ProductDto, ProductShareDto } from './dto/product.dto';
-import { ListProductsQueryDto, OWNERSHIP_VALUES } from './dto/list-query.dto';
+import {
+  ListProductsQueryDto,
+  MEDIA_VALUES,
+  OWNERSHIP_VALUES,
+  PRODUCT_TYPE_VALUES,
+  SORT_VALUES,
+} from './dto/list-query.dto';
 
 @ApiTags('Product')
 export class ProductController {
@@ -27,7 +33,28 @@ export class ProductController {
   @ApiQuery({ name: 'page', type: 'integer', required: false, example: 1 })
   @ApiQuery({ name: 'perPage', type: 'integer', required: false, example: 100 })
   @ApiQuery({ name: 'keyword', type: 'string', required: false, example: 'react' })
-  @ApiQuery({ name: 'type', type: 'string', required: false, example: 'course' })
+  @ApiQuery({
+    name: 'type',
+    type: 'string',
+    required: false,
+    enum: PRODUCT_TYPE_VALUES as unknown as string[],
+    example: 'course',
+  })
+  @ApiQuery({
+    name: 'sort',
+    type: 'string',
+    required: false,
+    enum: SORT_VALUES as unknown as string[],
+    example: 'newest',
+  })
+  @ApiQuery({
+    name: 'media',
+    type: 'array',
+    itemType: 'string',
+    required: false,
+    enum: MEDIA_VALUES as unknown as string[],
+    example: 'audio',
+  })
   @ApiQuery({
     name: 'ownership',
     type: 'string',
@@ -47,7 +74,14 @@ export class ProductController {
     const memberId = (req as { user?: { id?: string } }).user?.id;
     const { rows, total, ratingAvgByProduct, purchasedProductIds } = await this.productService.list(
       p,
-      { keyword: q.keyword, type: q.type, memberId, ownership: q.ownership },
+      {
+        keyword: q.keyword,
+        type: q.type,
+        memberId,
+        ownership: q.ownership,
+        sort: q.sort,
+        media: q.media,
+      },
     );
     // PERFORMANCE-tier rate for commisionFixAmount preview. One lookup per request;
     // anon (public list) → tier 1 (20%) default inside the serializer.
