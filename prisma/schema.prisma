@@ -73,6 +73,12 @@ model Member {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
+  // Legacy resync (new-wins-on-touch): the timestamp the resync last wrote this row.
+  // If updatedAt > legacySyncedAt, the app touched the row since → legacy-owned fields
+  // are NOT overwritten. null = never resynced (treat as legacy-owned). See
+  // docs/legacy-resync-plan.md §6.
+  legacySyncedAt DateTime? @map("legacy_synced_at")
+
   profile                MemberProfile?
   devices                Device[]
   refreshTokens          RefreshToken[]
@@ -1213,4 +1219,33 @@ model ThirdPartyCredential {
   updatedAt         DateTime  @updatedAt @map("updated_at")
 
   @@map("third_party_credentials")
+}
+
+// ---------------------------------------------------------------------------
+// Legacy resync (transition period): incremental sync of already-migrated data
+// from legacy MariaDB into Postgres. See docs/legacy-resync-plan.md.
+// ---------------------------------------------------------------------------
+
+// Per-syncer watermark + last-run stats. One row per syncer ("members",
+// "enrollments", "commissions", "kyc", "tree", "reviews", "posts").
+model SyncState {
+  syncer    String   @id // syncer name
+  watermark String? // max processed COALESCE(updated, created), ISO datetime string
+  lastRunAt DateTime? @map("last_run_at")
+  lastStats Json?    @map("last_stats") // { scanned, upserted, skipped, voided, errors }
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("sync_state")
+}
+
+// Durable dedup map (loser legacy member id -> winner legacy member id). Replaces
+// the gitignored scripts/member-redirect.json so resync re-points dangling legacy
+// member refs consistently across runs. Append-only.
+model MemberRedirect {
+  loserLegacyId  Int      @id @map("loser_legacy_id")
+  winnerLegacyId Int      @map("winner_legacy_id")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@index([winnerLegacyId])
+  @@map("member_redirect")
 }
