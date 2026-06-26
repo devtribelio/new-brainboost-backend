@@ -292,12 +292,12 @@ export class AffiliateController {
 
   @ApiBearerAuth()
   @ApiOperation({
-    summary: 'Start Sumsub KYC session — creates the applicant (once) and mints an SDK access token',
+    summary: 'Start a Didit KYC session — mints a verification session (token + hosted URL)',
   })
   @ApiResponse({ status: 200, type: () => KycTokenDto })
   createKycToken = async (req: AuthenticatedRequest, res: Response) => {
     if (!req.user) throw new UnauthorizedException();
-    const session = await this.disbursementService.createSumsubKycSession(req.user.id);
+    const session = await this.disbursementService.createDiditSession(req.user.id);
     return ok(res, session);
   };
 }
