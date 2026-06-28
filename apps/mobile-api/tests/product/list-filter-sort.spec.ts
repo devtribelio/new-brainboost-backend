@@ -108,10 +108,10 @@ describe('ProductService.list filter/sort', () => {
     expect(r.total).toBe(2);
   });
 
-  it('media=[audio,video] → OR semantics (all three)', async () => {
+  it('media=[audio,video] → AND semantics (only the course with both)', async () => {
     const r = await svc.list(page, { keyword: KW, media: ['audio', 'video'] });
-    expect(r.rows.map((p) => p.id).sort()).toEqual([audioId, videoId, miniId].sort());
-    expect(r.total).toBe(3);
+    expect(r.rows.map((p) => p.id)).toEqual([miniId]);
+    expect(r.total).toBe(1);
   });
 
   it('media + sort=top_rated combine (audio products, best rated first)', async () => {

@@ -623,6 +623,9 @@ All four list endpoints share a legacy pagination envelope: `meta: { total, page
 
 ### 55. GET `/member/product/list` — `listProduct()`
 **Query:** `page` (default `1`), `perPage` (default `100`).
+> **New (filters & sort):** `type` (`course`/`mini_course`), `sort`
+> (`price_asc`/`price_desc`/`newest`/`top_rated`), `media` (`audio`/`video`, multi=AND),
+> `keyword`, `ownership`. Full FE contract: [`product-list-filters-fe.md`](product-list-filters-fe.md).
 **Response (`List<ProductModel>`)** — **heavy fallback-chain area**, every field below has a `??` chain:
 
 | Field | Type | Fallback chain |

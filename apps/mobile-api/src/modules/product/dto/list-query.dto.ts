@@ -72,7 +72,7 @@ export class ListProductsQueryDto {
     example: ['audio', 'video'],
     enum: MEDIA_VALUES as unknown as string[],
     description:
-      'Filter by media kind contained in the course. Repeatable (`media=audio&media=video`) or CSV. Multiple values match products containing ANY of the selected media (OR).',
+      'Filter by media kind contained in the course. Repeatable (`media=audio&media=video`) or CSV. Multiple values match only products containing ALL of the selected media (AND).',
   })
   @IsOptional()
   @Transform(({ value }) => toStringArray(value))

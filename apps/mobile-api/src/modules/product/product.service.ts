@@ -99,16 +99,23 @@ export class ProductService {
       )`);
     }
     if (q.media && q.media.length > 0) {
-      const slideTypes = q.media.map((m) => (m === 'audio' ? 'AudioTemplate' : 'VideoTemplate'));
-      conds.push(Prisma.sql`EXISTS (
-        SELECT 1 FROM courses c
-        JOIN course_sections cs ON cs.course_id = c.id
-        JOIN course_lessons cl ON cl.section_id = cs.id
-        CROSS JOIN LATERAL jsonb_array_elements(
-          CASE WHEN jsonb_typeof(cl.slides_data) = 'array' THEN cl.slides_data ELSE '[]'::jsonb END
-        ) AS slide
-        WHERE c.product_id = p.id AND slide->>'type' IN (${Prisma.join(slideTypes)})
-      )`);
+      // AND semantics: the course must contain a slide of EVERY requested media
+      // kind, so each kind gets its own EXISTS (deduped). `media=audio,video`
+      // therefore matches only courses that have BOTH audio and video slides.
+      const slideTypes = Array.from(
+        new Set(q.media.map((m) => (m === 'audio' ? 'AudioTemplate' : 'VideoTemplate'))),
+      );
+      for (const slideType of slideTypes) {
+        conds.push(Prisma.sql`EXISTS (
+          SELECT 1 FROM courses c
+          JOIN course_sections cs ON cs.course_id = c.id
+          JOIN course_lessons cl ON cl.section_id = cs.id
+          CROSS JOIN LATERAL jsonb_array_elements(
+            CASE WHEN jsonb_typeof(cl.slides_data) = 'array' THEN cl.slides_data ELSE '[]'::jsonb END
+          ) AS slide
+          WHERE c.product_id = p.id AND slide->>'type' = ${slideType}
+        )`);
+      }
     }
     const where = Prisma.join(conds, ' AND ');
 
