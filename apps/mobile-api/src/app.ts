@@ -35,7 +35,24 @@ export function buildApp(): Express {
   // JSON API: keep helmet's strict default CSP. The only HTML surface is the
   // Swagger UI at /api/docs, which loosens its own CSP inside mountSwagger().
   app.use(helmet());
-  app.use(cors());
+  // CORS: no allowlist (CORS_ALLOWED_ORIGINS empty) → default permissive, which
+  // is fine for native mobile clients that don't enforce CORS. With an allowlist
+  // set, only listed origins get CORS headers and credentials can be enabled for
+  // a cookie-using web FE. Unknown origins simply receive no CORS headers (the
+  // browser blocks them) instead of a 500 — so we never throw from the callback.
+  const corsAllowlist = env.cors.allowedOrigins;
+  app.use(
+    cors(
+      corsAllowlist.length === 0
+        ? undefined
+        : {
+            origin(origin, cb) {
+              cb(null, !origin || corsAllowlist.includes(origin));
+            },
+            credentials: env.cors.credentials,
+          },
+    ),
+  );
   app.use(compression());
   app.use(cookieParser());
   app.use(
