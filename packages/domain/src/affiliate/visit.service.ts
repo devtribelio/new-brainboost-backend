@@ -4,6 +4,10 @@ import { logger } from '@bb/common/config/logger';
 export interface VisitInput {
   programCode?: string; // optional — app product-link (OneLink) carries only affCode, no program
   affiliatorCode: string;
+  // Per-product attribution (B-5): the product the OneLink/deeplink pointed at.
+  // Accepts the same forms as the product detail route — legacyId (numeric) | code
+  // | slug — and is resolved to Product.id. Unknown/absent → product-less visit.
+  productCode?: string;
   memberId?: string | null;
   // marketing
   utmSource?: string;
@@ -80,6 +84,10 @@ export class VisitService {
         return { status: 'invalid', reason: 'unknown affiliator' };
       }
 
+      // Per-product context (B-5). Best-effort: an unknown productCode degrades to a
+      // product-less visit (productId=null) rather than rejecting the click.
+      const productId = await this.resolveProductId(input.productCode);
+
       // Idempotency check via clientEventId
       if (input.clientEventId) {
         const existing = await prisma.affiliateVisit.findUnique({
@@ -95,6 +103,7 @@ export class VisitService {
           programId: program?.id ?? null,
           affiliatorMemberId: affiliator.id,
           memberId: input.memberId ?? null,
+          productId,
           utmSource: input.utmSource,
           utmMedium: input.utmMedium,
           utmCampaign: input.utmCampaign,
@@ -129,6 +138,32 @@ export class VisitService {
    */
   async logAttribution(input: VisitInput & { memberId: string }): Promise<VisitLogResult> {
     return this.logVisit({ ...input, memberId: input.memberId });
+  }
+
+  /**
+   * Resolve an affiliate-link product reference (B-5) to a Product.id. Accepts the
+   * same forms the product detail route does — legacyId (strict numeric) → code →
+   * slug — so OneLinks built from any of them attribute correctly. Returns null on
+   * absent/unknown input (→ product-less visit; never rejects the click).
+   */
+  private async resolveProductId(productCode?: string): Promise<string | null> {
+    const input = productCode?.trim();
+    if (!input) return null;
+
+    const legacyId = Number.parseInt(input, 10);
+    if (Number.isFinite(legacyId) && input === String(legacyId)) {
+      const byLegacy = await prisma.product.findUnique({ where: { legacyId }, select: { id: true } });
+      if (byLegacy) return byLegacy.id;
+    }
+    const byCode = await prisma.product.findUnique({ where: { code: input }, select: { id: true } });
+    if (byCode) return byCode.id;
+    // slug is not unique → first active match, deterministic (UUID v7 time-ordered).
+    const bySlug = await prisma.product.findFirst({
+      where: { slug: input },
+      orderBy: { id: 'asc' },
+      select: { id: true },
+    });
+    return bySlug?.id ?? null;
   }
 
   /**

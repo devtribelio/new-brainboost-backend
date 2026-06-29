@@ -127,11 +127,15 @@ export class AffiliateController {
     const body = (req.body ?? {}) as Record<string, unknown>;
     const programCode = (body.programCode || body.program_code || req.query.program) as string;
     const affiliatorCode = (body.affiliatorCode || body.affCode || body.aff || req.query.affCode) as string;
+    const productCode = (body.productCode || body.product_code || body.product || req.query.product) as
+      | string
+      | undefined;
 
     const queryParsed = VisitService.parseQuery({ ...req.query, ...body });
     const result = await this.visitService.logVisit({
       programCode,
       affiliatorCode,
+      productCode,
       memberId: req.user?.id ?? null,
       utmSource: queryParsed.utmSource ?? (body.utmSource as string | undefined),
       utmMedium: queryParsed.utmMedium ?? (body.utmMedium as string | undefined),
@@ -181,6 +185,7 @@ export class AffiliateController {
     const body = (req.body ?? {}) as Record<string, unknown>;
     const programCode = (body.programCode || body.program_code) as string;
     const affiliatorCode = (body.affiliatorCode || body.affCode || body.aff) as string;
+    const productCode = (body.productCode || body.product_code || body.product) as string | undefined;
     if (!programCode || !affiliatorCode) {
       throw new BadRequestException('programCode and affiliatorCode required');
     }
@@ -188,6 +193,7 @@ export class AffiliateController {
     const result = await this.visitService.logAttribution({
       programCode,
       affiliatorCode,
+      productCode,
       memberId: req.user.id,
       utmSource: body.utmSource as string | undefined,
       utmMedium: body.utmMedium as string | undefined,

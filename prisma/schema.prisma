@@ -952,6 +952,12 @@ model AffiliateVisit {
   programId          String?  @map("program_id") @db.Uuid
   affiliatorMemberId String   @map("affiliator_member_id") @db.Uuid
   memberId           String?  @map("member_id") @db.Uuid
+  // Per-product attribution (B-5): the product the affiliate link pointed at
+  // (OneLink carries product + affCode). null = product-less visit (web/program
+  // link or legacy pre-B5). The per-purchase resolver prefers an exact-product
+  // visit so a link for product X never attributes a different product Y.
+  // Scalar (no relation) — only ever filtered on, never `include`d.
+  productId          String?  @map("product_id") @db.Uuid
   // marketing
   utmSource          String?  @map("utm_source")
   utmMedium          String?  @map("utm_medium")
@@ -981,6 +987,7 @@ model AffiliateVisit {
   @@index([programId, createdAt])
   @@index([affiliatorMemberId, createdAt])
   @@index([memberId])
+  @@index([memberId, productId, createdAt]) // per-product last-touch lookup (B-5)
   @@index([adId])
   @@index([utmCampaign])
   @@map("affiliate_visits")

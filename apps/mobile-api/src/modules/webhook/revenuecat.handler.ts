@@ -136,7 +136,8 @@ export class RevenueCatWebhookHandler {
       // `affiliate_code` subscriber attribute is sticky (never expires) and would
       // ride along onto unrelated later purchases, so it is intentionally NOT
       // read here. Attribution resolves from the self-expiring, last-touch
-      // `AffiliateVisit` (logged by the app on the affiliate link) → buyer inviter.
+      // `AffiliateVisit` (logged by the app on the affiliate link), scoped to the
+      // purchased product (B-5: ingest passes productId) → buyer inviter.
       affiliatorCode: undefined,
       // Use local currency (IDR), NOT event.price which is in USD.
       grossAmount: gross,

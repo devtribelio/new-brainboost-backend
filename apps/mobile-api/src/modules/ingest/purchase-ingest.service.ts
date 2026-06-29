@@ -186,8 +186,9 @@ export class PurchaseIngestService {
     }
 
     // Affiliate override only resolved when this settle is the commission-bearing one.
+    // Pass productId so per-product attribution (B-5) prefers a visit for THIS product.
     const overrideAffiliatorMemberId = affiliateEligible
-      ? await attributionService.resolveOverrideAffiliatorMemberId(memberId, input.affiliatorCode)
+      ? await attributionService.resolveOverrideAffiliatorMemberId(memberId, input.affiliatorCode, productId)
       : null;
 
     commerceEvents.emit('commerce.payment.success', {

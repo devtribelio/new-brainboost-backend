@@ -1,6 +1,6 @@
 # Affiliate Over-Attribution (IAP) — Root Cause & Fix Plan
 
-**Status:** backend B-1/B-2/B-3 implemented in code (migration apply + data cleanup + app M-1/M-2 pending)
+**Status:** backend B-1/B-2/B-3/B-5 implemented in code (migration apply + data cleanup + app M-1/M-2/M-4 pending)
 **Severity:** High (affiliate dibayar untuk pembelian yang bukan hasil referral mereka)
 **Repos:** `brainboost-apps` (Flutter) + `new-brainboost-backend`
 
@@ -12,13 +12,15 @@
 |---|---|---|
 | **B-1** attribute hanya di pembelian awal | ✅ via B-3 | `revenuecat.handler.ts::toPurchase` tidak lagi membaca `affiliate_code` sama sekali (lihat B-3), jadi RENEWAL/PRODUCT_CHANGE/restore tak pernah meng-attribute. |
 | **B-2** idempotensi `original_transaction_id` | ✅ kode | Tabel baru `AffiliateAttributionClaim` `@@unique([provider, attributionKey])`. Ingest klaim 1× per purchase; re-settle (delete+rebuy/renewal/restore/burst) dapat enrollment tapi **tidak** bayar komisi. Race-proof via unique insert. `attributionKey = original_transaction_id ?? transaction_id`. |
-| **B-3** andalkan VISIT, buang sticky attribute | ✅ kode | Handler set `affiliatorCode: undefined`; attribusi murni dari `AffiliateVisit` (self-expiring, last-touch) → inviter. Menutup kasus "beli produk lain tanpa affiliate". |
+| **B-3** andalkan VISIT, buang sticky attribute | ✅ kode | Handler set `affiliatorCode: undefined`; attribusi murni dari `AffiliateVisit` (self-expiring, last-touch) → inviter. |
 | **B-4** guard tambahan (timestamp/cutoff) | ⏭️ skip | Tidak diperlukan setelah B-2+B-3. |
-| Migration apply (`prisma migrate deploy`) | ⏳ file siap, apply pending | Migration `prisma/migrations/20260629120000_add_affiliate_attribution_claim/` (additive: kolom `commerce_transactions.attribution_key` + tabel `affiliate_attribution_claims`). Belum di-apply ke DB. Re-copy `schema.prisma` ke `bb-legacy-resync` setelah apply. |
+| **B-5** per-product attribution | ✅ kode | `AffiliateVisit.productId` (nullable) + resolver 2-tier: visit produk-P → visit product-less (legacy/web) → inviter. Visit produk LAIN tak pernah match. Menutup leakage "klik link X → beli Y" + kasus multi-affiliate. Resolver dipakai IAP **dan** web checkout (keduanya kirim `productId`). |
+| Migration apply (`prisma migrate deploy`) | ⏳ file siap, apply pending | 2 migration additive: `20260629120000_add_affiliate_attribution_claim` (kolom `commerce_transactions.attribution_key` + tabel `affiliate_attribution_claims`) **dan** `20260629130000_affiliate_visit_product_id` (kolom `affiliate_visits.product_id` + index). Belum di-apply ke DB. Re-copy `schema.prisma` ke `bb-legacy-resync` setelah apply. |
 | Data cleanup (VOID komisi nyasar) | ⏳ script siap, run pending | `pnpm void:stray-affiliate-commissions` (DRY-RUN default; `--apply` untuk void). Conservative: hanya void grup `PENDING` channel `revenuecat` yang TANPA inviter-ancestor sah DAN tanpa `AffiliateVisit` buyer→affiliator. Jalankan sebelum job `pending-to-balance`. Lihat section DATA CLEANUP. |
 | App M-1/M-2 (clear attribute RC) | ⏳ pending | Repo `brainboost-apps`. Tetap dianjurkan walau backend kini tak baca attribute. |
+| App M-4 (kirim `productCode` di visit) | ⏳ pending | Repo `brainboost-apps`. OneLink sudah tangkap productCode (`appsflyer_service.dart` → `setAffiliateRedirectProductCode`); teruskan di payload `logVisit`/`logAttribution`. Sampai ini ship, visit baru tetap product-less → resolver pakai tier-2 (belum presisi per-product). |
 
-Tes: `tests/ingest/attribution-claim.spec.ts` (first-settle-wins; butuh test Postgres). Typecheck repo hijau.
+Tes: `tests/ingest/attribution-claim.spec.ts` (first-settle-wins), `tests/affiliate/per-product-attribution.spec.ts` (per-product + leak closed + multi-affiliate). Butuh test Postgres. Typecheck repo hijau.
 
 ---
 
@@ -81,6 +83,9 @@ Lokasi: `lib/app/payment/ios_iap_service.dart` (sekitar blok purchase `:106-110`
 ### M-3. Catatan
 Membersihkan attribute saja **tidak cukup** (event yang sudah ter-queue / di-replay RC bisa tetap membawa nilai lama). Perbaikan backend (B-1/B-2) tetap wajib sebagai sumber kebenaran.
 
+### M-4. Kirim `productCode` di visit *(pendamping B-5)*
+OneLink sudah menangkap productCode (`appsflyer_service.dart:60` → `setAffiliateRedirectProductCode`), tapi `logVisit`/`logAttribution` belum meneruskannya (cuma affCode + programCode). Tambah `productCode` di payload kedua call (backend sudah menerimanya: body `productCode`/`product_code`/`product` atau query `?product=`). Sampai ini ship, visit baru tercatat product-less → resolver jatuh ke tier-2 (belum presisi per-product).
+
 ---
 
 ## BACKEND (`new-brainboost-backend`)
@@ -106,6 +111,19 @@ Tujuan: attribusi tahan terhadap replay/renewal/re-sync; tidak bergantung pada s
 
 ### B-4. (Opsional) Guard tambahan
 Pertimbangkan menolak attribusi komisi untuk event RC yang lebih tua dari cutoff tertentu, atau yang teridentifikasi sebagai restore/re-sync. *(Skip — tidak diperlukan setelah B-2+B-3.)*
+
+### B-5. Per-product attribution *(lanjutan B-3)*
+`AffiliateVisit` semula **per-member** (tanpa product) — link affiliate per-produk, tapi attribusi match by member saja → klik link Produk X lalu beli Produk Y (tanpa affiliate) tetap kredit ke pemilik link X; multi-affiliate makin parah (klik-terakhir dapat semua). Karena B-3 membuat IAP 100% bergantung visit, leakage ini jadi sisa-lubang dominan.
+
+Fix:
+- **Schema:** `affiliate_visits.product_id` (nullable) + index `(member_id, product_id, created_at)`.
+- **Resolver** (`attribution.service.ts`, dipakai IAP **dan** web checkout): tambah param `productId`, resolusi 2-tier:
+  1. visit terbaru yang **scoped ke produk P**,
+  2. kalau tak ada → visit **product-less** (legacy pre-B5 / web / program link),
+  3. else → null (engine fallback ke inviter).
+  Visit yang scoped ke produk **lain** tak pernah match → leak "klik X beli Y" tertutup, tier-1 selalu menang atas tier-2 walau tier-2 lebih baru.
+- **logVisit/logAttribution:** terima `productCode` (legacyId | code | slug, sama seperti route product detail) → resolve ke `Product.id` → simpan. Unknown/absent → product-less (tak menolak klik).
+- **Fallback decision:** dipilih **per-product → product-less → inviter** (bukan strict langsung-inviter), supaya visit lama/web yang belum punya product tidak kehilangan atribusi selama transisi.
 
 ---
 
