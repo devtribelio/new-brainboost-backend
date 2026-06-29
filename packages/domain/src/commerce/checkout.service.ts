@@ -59,6 +59,7 @@ export class CheckoutService {
     const attributedAffiliatorMemberId = await attributionService.resolveOverrideAffiliatorMemberId(
       input.memberId,
       input.affiliatorCode,
+      input.productId, // per-product attribution (B-5): prefer a visit for THIS product
     );
 
     const code = await generateOrderCode();

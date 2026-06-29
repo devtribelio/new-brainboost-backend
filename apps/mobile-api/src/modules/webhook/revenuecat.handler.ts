@@ -118,19 +118,27 @@ export class RevenueCatWebhookHandler {
 
   private toPurchase(event: RevenueCatEventDto): NormalizedPurchase {
     const gross = event.price_in_purchased_currency ?? 0;
-    // Affiliate attribution: the app sets this RC subscriber attribute from the
-    // captured deeplink affCode (IosIapService.setAffiliateCode). Without it the
-    // ingest has no explicit affiliator and silently falls back to the buyer's inviter.
-    const affiliatorCode = event.subscriber_attributes?.['affiliate_code']?.value?.trim() || undefined;
     return {
       // Key on the store transaction id so a later CANCELLATION (which carries the
       // same transaction_id, not the purchase's event id) can link back to it.
       // Fall back to the event id if the store omitted a transaction id.
       providerEventId: event.transaction_id ?? event.id,
+      // Commission idempotency key (B-2): Apple's `original_transaction_id` is
+      // STABLE across delete+rebuy / renewal / restore / re-sync (a non-consumable
+      // is permanently owned), whereas `transaction_id` changes. Ingest claims
+      // commission once per (provider, attributionKey) so re-settles never
+      // double-pay. Falls back to the event/txn id when absent.
+      attributionKey: event.original_transaction_id ?? event.transaction_id ?? event.id,
       type: 'PURCHASE',
       memberRef: { byId: event.app_user_id, byEmail: this.emailAttr(event) },
       productRef: { bySku: event.product_id },
-      affiliatorCode,
+      // Affiliate attribution is VISIT-driven (B-3): the customer-global RC
+      // `affiliate_code` subscriber attribute is sticky (never expires) and would
+      // ride along onto unrelated later purchases, so it is intentionally NOT
+      // read here. Attribution resolves from the self-expiring, last-touch
+      // `AffiliateVisit` (logged by the app on the affiliate link), scoped to the
+      // purchased product (B-5: ingest passes productId) → buyer inviter.
+      affiliatorCode: undefined,
       // Use local currency (IDR), NOT event.price which is in USD.
       grossAmount: gross,
       netAmount: computeNetAmount(

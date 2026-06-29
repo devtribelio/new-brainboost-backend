@@ -73,6 +73,10 @@ export class BbEcsStack extends cdk.Stack {
       FCM_PROJECT_ID: sm('FCM_PROJECT_ID'),
       FCM_SERVICE_ACCOUNT_JSON: sm('FCM_SERVICE_ACCOUNT_JSON'), // isi JSON content (bukan path) — app deteksi diawali "{"
       // DIDIT_BASE_URL & DIDIT_CALLBACK_URL sengaja DIBUANG — env.ts default benar (base_url) / opsional (callback).
+
+      // CORS allowlist (mis. https://shop.brainboost.id) — value di Secrets Manager. Empty = permissive.
+      CORS_ALLOWED_ORIGINS: sm('CORS_ALLOWED_ORIGINS'),
+      CORS_CREDENTIALS: sm('CORS_CREDENTIALS'),
     };
     const env: Record<string, string> = {
       NODE_ENV: 'production',
