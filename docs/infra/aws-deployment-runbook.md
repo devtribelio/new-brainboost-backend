@@ -10,7 +10,8 @@ Arsitektur: **ECS Fargate + ALB(+WAF) + Amazon SQS + RDS PostgreSQL**. Region: *
 4. Phase 0–10: langkah deploy berurutan
 5. SQL reporting views + role read-only (inline)
 6. Go-live checklist, rollback, teardown
-7. Terraform (otomasi)
+7. **Re-deploy / update stack (CDK) — operasi RUTIN** ⭐
+8. Terraform (otomasi)
 
 > **Urutan PENTING** (DB dulu atau service dulu?):
 > ```
@@ -284,7 +285,87 @@ ALTER ROLE analytics_ro SET statement_timeout = '30s';
 
 ---
 
-## 7. Otomasi Terraform (disarankan setelah paham alur)
+## 7. Re-deploy / update stack (CDK) — operasi RUTIN ⭐
+
+Ini buat **update stack yang UDAH live** (ganti image / ubah env / fix bug) — **bukan dari nol**.
+Infra (RDS, SQS, S3, ECR, ALB, cluster, secret) udah ada → cukup **build image baru + `cdk deploy`**.
+
+### Model mental (WAJIB paham)
+```
+  KODE  →  docker build  →  IMAGE di ECR (per repo, dikasih TAG)
+  CDK   →  cdk deploy    →  ECS pakai IMAGE:TAG + inject ENV dari Secrets Manager
+```
+- **Image** = hasil build kode app. Tiap repo punya image sendiri (`mobile-api` dari backend, `bb-comms` dari `../bb-notification-service`).
+- **CDK** (`infra/cdk/lib/bb-ecs-stack.ts`) = cetak biru. `cdk deploy` baca file ini → suruh ECS pakai tag + set env.
+- **Perubahan ENV/config** (mis. `TRUST_PROXY`) ada di **CDK**, BUKAN di image → cukup `cdk deploy`, **nggak perlu rebuild image**.
+
+### ⚠️ Gotcha #1 — satu `imageTag` untuk SEMUA image
+Stack referensi tiap image pakai `props.imageTag` yang **sama** (`fromEcrRepository(repo, props.imageTag)`).
+→ `mobile-api` & `bb-comms` **harus eksis di tag yang sama**. Kalau bump tag buat satu image, **rebuild + push SEMUA image di tag itu**.
+→ **Jangan** overwrite tag lama (CloudFormation nggak deteksi perubahan digest → service nggak ke-redeploy).
+
+### ⚠️ Gotcha #2 — PULL DULU dari KEDUA repo (sering ke-gigit)
+Backend & bb-comms repo **terpisah**, PR/branch sering gerak. **`git fetch` + build dari `main` terbaru** sebelum build. Berkali-kali kejadian: image ke-build dari `main` lokal yang basi (mis. masih versi RabbitMQ, atau kelewat fix yang udah di-merge).
+```bash
+cd new-brainboost-backend     && git fetch origin && git checkout main && git pull --ff-only
+cd ../bb-notification-service && git fetch origin && git checkout main && git pull --ff-only
+```
+
+### Langkah
+```bash
+# 0) variabel + login ECR (token expired ~12 jam, login tiap sesi)
+export AWS_REGION=ap-southeast-3
+REG=276713243639.dkr.ecr.ap-southeast-3.amazonaws.com
+export ECR=$REG/bb
+export TAG=$(cd new-brainboost-backend && git rev-parse --short HEAD)   # label rilis = sha backend
+aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $REG
+
+# 1) mobile-api (dari backend/main) — ARM64 (Fargate Graviton)
+cd new-brainboost-backend
+docker build --platform linux/arm64 -f apps/mobile-api/Dockerfile -t $ECR/mobile-api:$TAG . && docker push $ECR/mobile-api:$TAG
+
+# 2) bb-comms (dari bb-notification-service/main) — di-tag SAMA ($TAG)
+cd ../bb-notification-service
+docker build --platform linux/arm64 -t $ECR/bb-comms:$TAG . && docker push $ECR/bb-comms:$TAG
+
+# 3) diff dulu (selalu, biar nggak kaget)
+cd ../new-brainboost-backend/infra/cdk && npm install
+npx cdk diff   -c rdsSecurityGroupId=sg-0e08f50ffbee9fa8d -c imageTag=$TAG -c certificateArn=$CERT_ARN
+
+# 4) deploy (ECS rolling update, ALB drain, zero-downtime)
+npx cdk deploy -c rdsSecurityGroupId=sg-0e08f50ffbee9fa8d -c imageTag=$TAG -c certificateArn=$CERT_ARN
+```
+
+### Parameter tetap (saat ini)
+| | |
+|---|---|
+| Account / Region | `276713243639` / `ap-southeast-3` |
+| ECR | `276713243639.dkr.ecr.ap-southeast-3.amazonaws.com/bb` |
+| RDS SG (`-c rdsSecurityGroupId`) | `sg-0e08f50ffbee9fa8d` |
+| Fargate SG | `sg-039f5d4c5b0e9d979` |
+| Cert ARN (`-c certificateArn=$CERT_ARN`) | `arn:aws:acm:ap-southeast-3:276713243639:certificate/b2e2ef7f-bfb2-453c-a686-fd0cc21f97c3` |
+| Domain | `bb-be.brainboost.id` (Cloudflare DNS-only → ALB) |
+| Secret | `bb/prod/app` (key names di CDK `secrets`, values cuma di Secrets Manager) |
+
+### Hanya ubah ENV (tanpa rebuild image)
+Mis. fix `TRUST_PROXY`: edit `lib/bb-ecs-stack.ts` → `cdk deploy` pakai **tag lama** (image nggak berubah):
+```bash
+npx cdk deploy -c rdsSecurityGroupId=sg-0e08f50ffbee9fa8d -c imageTag=<tag-lama> -c certificateArn=$CERT_ARN
+```
+
+### Verifikasi
+```bash
+curl -s https://bb-be.brainboost.id/api/member/product/list/public | head -c 200   # API hidup
+aws logs tail /bb/prod/mobile-api --since 5m --region ap-southeast-3 | grep -i "ERR_ERL\|error" || echo "bersih"
+```
+
+### Setelah deploy
+- **Commit perubahan CDK → PR ke main** (jangan commit langsung ke `main` lokal terus push sembarangan).
+- Rollback = `cdk deploy` balik ke `imageTag` revisi sebelumnya (DNS/ALB tetap, cuma ganti task def).
+
+---
+
+## 8. Otomasi Terraform (disarankan setelah paham alur)
 Manual CLI bagus buat paham urutan; produksi sebaiknya Terraform biar reproducible & staging≈prod.
 Modul: `vpc`, `rds`, `mq`, `ecr`, `ecs`, `alb`, `wafv2`, `acm`, `route53`, `secretsmanager`, `cloudwatch`.
 Struktur: `infra/terraform/{network,data,compute,edge}` + workspace `staging`/`prod`.
