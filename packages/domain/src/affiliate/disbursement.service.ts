@@ -17,6 +17,7 @@ import {
   DISBURSEMENT_AUTO_APPROVE_MAX,
   DISBURSEMENT_AUTO_MAX_PER_DAY,
   DISBURSEMENT_AUTO_MAX_PER_WEEK,
+  DISBURSEMENT_MIN_BALANCE,
   KYC_MIN_BALANCE_DEFAULT,
 } from './constants';
 import { quoteDisbursement } from './utils/disbursement-calc';
@@ -121,7 +122,11 @@ export class DisbursementService {
     });
 
     const balance = await this.getWithdrawableBalance(memberId);
-    const quote = quoteDisbursement(balance);
+    const minBalance = await settingsService.getNumber(
+      SETTING_KEYS.disbursementMinBalance,
+      DISBURSEMENT_MIN_BALANCE,
+    );
+    const quote = quoteDisbursement(balance, undefined, minBalance);
 
     // An OPEN payout (PENDING awaiting approval, or PROCESSING awaiting callback)
     // blocks a new request.
@@ -143,6 +148,7 @@ export class DisbursementService {
 
     return {
       withdrawableBalance: balance,
+      minBalance,
       eligible: quote.eligible && kycApproved && hasBank && !openDisbursement,
       reason,
       fee: quote.fee,
@@ -188,6 +194,13 @@ export class DisbursementService {
       throw new BadRequestException('Rekening belum diisi');
     }
 
+    // Runtime min-balance (app_settings `disbursement.minBalance`) — read once,
+    // before the tx (settings query is its own cached read, not part of the tx).
+    const minBalance = await settingsService.getNumber(
+      SETTING_KEYS.disbursementMinBalance,
+      DISBURSEMENT_MIN_BALANCE,
+    );
+
     // A large payout re-triggers KYC, but only when the last review is stale —
     // a freshly-approved member shouldn't be bounced. netAmount is only known
     // inside the tx, so we abort there and revoke KYC afterwards (see catch).
@@ -216,7 +229,7 @@ export class DisbursementService {
 
       const { cleared, consumed } = await this.balanceInputs(memberId, tx);
       const balance = Math.max(0, cleared - consumed);
-      const quote = quoteDisbursement(balance, amount);
+      const quote = quoteDisbursement(balance, amount, minBalance);
       if (!quote.eligible) throw new BadRequestException(quote.reason ?? 'Not eligible for withdrawal');
 
       if (reviewStale && quote.netAmount >= env.rekyc.largeDisbursementIdr) {

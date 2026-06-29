@@ -19,7 +19,8 @@ vi.mock('@bb/common/services/xendit.client', () => ({
 
 import { prisma } from '@bb/db';
 import { DisbursementService } from '@bb/domain/affiliate/disbursement.service';
-import { SettingsService } from '@bb/common/services/settings.service';
+import { AffiliatorService } from '@bb/domain/affiliate/affiliator.service';
+import { settingsService, SettingsService, SETTING_KEYS } from '@bb/common/services/settings.service';
 
 const TAG = `disbflow-${Date.now()}`;
 const svc = new DisbursementService();
@@ -241,5 +242,40 @@ describe('DisbursementService — payout flow', () => {
     // Replay → 0 rows.
     const r2 = await svc.markFailedByExternalId(row.externalId!, 'BANK_REJECTED');
     expect(r2.count).toBe(0);
+  });
+
+  // ---- min balance (app_settings) + summary consistency -------------------
+
+  it('getSummary returns minBalance and honors app_settings disbursement.minBalance', async () => {
+    const id = await member({ balance: 30_000 });
+    // default (no row) → fallback constant 15000
+    let summary = await svc.getSummary(id);
+    expect(summary.minBalance).toBe(15_000);
+    expect(summary.withdrawableBalance).toBe(30_000);
+    expect(summary.eligible).toBe(true);
+
+    try {
+      // raise the min above the balance → not eligible
+      await settingsService.set(SETTING_KEYS.disbursementMinBalance, '50000');
+      SettingsService.clearCache();
+      summary = await svc.getSummary(id);
+      expect(summary.minBalance).toBe(50_000);
+      expect(summary.eligible).toBe(false);
+      // and the request itself is now blocked by the runtime min
+      await expect(svc.requestDisbursement(id)).rejects.toThrow(/Minimum balance/i);
+    } finally {
+      await prisma.appSetting.deleteMany({ where: { key: SETTING_KEYS.disbursementMinBalance } });
+      SettingsService.clearCache();
+    }
+  });
+
+  it('affiliator summary.balance == withdrawableBalance after a held payout (single source)', async () => {
+    const id = await member({ balance: 100_000, priorPaid: true });
+    await svc.requestDisbursement(id, 30_000); // AUTO → PROCESSING, holds 30k gross
+
+    const withdrawable = await svc.getWithdrawableBalance(id);
+    const summary = await new AffiliatorService().getSummary(id);
+    expect(withdrawable).toBe(70_000); // 100k − 30k held
+    expect(summary.balance).toBe(withdrawable); // dashboard agrees with /disbursement
   });
 });

@@ -312,6 +312,13 @@ export class DisbursementSummaryDto {
   @ApiProperty({ type: 'integer', example: 50_000 })
   withdrawableBalance!: number;
 
+  @ApiProperty({
+    type: 'integer',
+    example: 15_000,
+    description: 'Minimum withdrawable balance (IDR) to request a payout (app_settings disbursement.minBalance).',
+  })
+  minBalance!: number;
+
   @ApiProperty({ example: true, description: 'True only if balance meets thresholds AND no pending payout exists.' })
   eligible!: boolean;
 

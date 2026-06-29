@@ -14,7 +14,7 @@ export class RequestDisbursementDto {
     type: 'integer',
     example: 50_000,
     description:
-      'Gross amount to withdraw (IDR), taken from the withdrawable balance. The flat fee is deducted from this. Omit to withdraw the full balance.',
+      'GROSS payout amount (IDR) — this is what is deducted from `withdrawableBalance`, NOT the amount the member receives. The flat fee is taken out of it, so the member receives `amount - fee` (= the `netAmount` returned by GET /affiliate/me/disbursement). Example: amount=50000, fee=5000 → member receives 45000, balance drops by 50000. Constraints: `minBalance <= amount <= withdrawableBalance` and `amount - fee` must exceed the min-net rule. Omit to withdraw the FULL withdrawable balance as gross.',
   })
   @IsOptional()
   @IsInt()

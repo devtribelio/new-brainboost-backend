@@ -34,6 +34,12 @@ const SETTINGS: Array<{ key: string; value: string; description: string }> = [
       'Max NET payout (IDR) eligible for auto-approval; anything above always goes MANUAL.',
   },
   {
+    key: 'disbursement.minBalance',
+    value: '55000',
+    description:
+      'Minimum withdrawable balance (IDR) required to request a payout (gross >= this).',
+  },
+  {
     key: 'kyc.minBalance',
     value: '55000',
     description:
