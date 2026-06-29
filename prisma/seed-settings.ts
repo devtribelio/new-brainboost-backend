@@ -33,6 +33,12 @@ const SETTINGS: Array<{ key: string; value: string; description: string }> = [
     description:
       'Max NET payout (IDR) eligible for auto-approval; anything above always goes MANUAL.',
   },
+  {
+    key: 'kyc.minBalance',
+    value: '55000',
+    description:
+      'Minimum withdrawable balance (IDR) required before a member may request KYC. 0 = gate off.',
+  },
 ];
 
 async function main() {

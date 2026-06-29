@@ -60,10 +60,11 @@ export class BbEcsStack extends cdk.Stack {
       BUNNY_STREAM_TOKEN_KEY: sm('BUNNY_STREAM_TOKEN_KEY'),
       BUNNY_STREAM_CDN_HOST: sm('BUNNY_STREAM_CDN_HOST'),
 
-      SUMSUB_APP_TOKEN: sm('SUMSUB_APP_TOKEN'),
-      SUMSUB_SECRET_KEY: sm('SUMSUB_SECRET_KEY'),
-      SUMSUB_WEBHOOK_SECRET: sm('SUMSUB_WEBHOOK_SECRET'),
-      SUMSUB_LEVEL_NAME: sm('SUMSUB_LEVEL_NAME'),
+      // Didit KYC (gantiin Sumsub, PR #98). apiKey & webhookSecret = rahasia;
+      // workflowId = UUID workflow (account-specific, taruh di secret biar nggak hardcode di git).
+      DIDIT_API_KEY: sm('DIDIT_API_KEY'),
+      DIDIT_WEBHOOK_SECRET: sm('DIDIT_WEBHOOK_SECRET'),
+      DIDIT_WORKFLOW_ID: sm('DIDIT_WORKFLOW_ID'),
 
       // Social login: cuma audiences (validasi token). OAUTH_CLIENT_ID/SECRET = optional, staging nggak set.
       GOOGLE_CLIENT_IDS: sm('GOOGLE_CLIENT_IDS'),
@@ -71,7 +72,7 @@ export class BbEcsStack extends cdk.Stack {
 
       FCM_PROJECT_ID: sm('FCM_PROJECT_ID'),
       FCM_SERVICE_ACCOUNT_JSON: sm('FCM_SERVICE_ACCOUNT_JSON'), // isi JSON content (bukan path) — app deteksi diawali "{"
-      // SUMSUB_BASE_URL & SUMSUB_TOKEN_TTL_SECONDS sengaja DIBUANG — env.ts udah punya default benar.
+      // DIDIT_BASE_URL & DIDIT_CALLBACK_URL sengaja DIBUANG — env.ts default benar (base_url) / opsional (callback).
     };
     const env: Record<string, string> = {
       NODE_ENV: 'production',
