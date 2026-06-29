@@ -42,6 +42,8 @@ export class BbEcsStack extends cdk.Stack {
       S3_ACCESS_KEY_ID: sm('S3_ACCESS_KEY_ID'),
       S3_SECRET_ACCESS_KEY: sm('S3_SECRET_ACCESS_KEY'),
       S3_BUCKET: sm('S3_BUCKET'),
+      S3_PUBLIC_BASE_URL: sm('S3_PUBLIC_BASE_URL'),   // URL publik file (s3-storage.service)
+      BASE_URL: sm('BASE_URL'),                        // domain prod (default env.ts = localhost → WAJIB override)
       MEDIA_TOKEN_SECRET: sm('MEDIA_TOKEN_SECRET'),
       SQS_COMMS_URGENT_URL: sm('SQS_COMMS_URGENT_URL'),
       SQS_COMMS_NORMAL_URL: sm('SQS_COMMS_NORMAL_URL'),
@@ -50,6 +52,8 @@ export class BbEcsStack extends cdk.Stack {
       //    Belum punya nilai prod? Isi sandbox/staging dulu (app tetap jalan), swap nanti.
       XENDIT_SECRET_KEY: sm('XENDIT_SECRET_KEY'),
       XENDIT_CALLBACK_TOKEN: sm('XENDIT_CALLBACK_TOKEN'),
+      XENDIT_INVOICE_SUCCESS_URL: sm('XENDIT_INVOICE_SUCCESS_URL'), // redirect after pay (default localhost → override)
+      XENDIT_INVOICE_FAILURE_URL: sm('XENDIT_INVOICE_FAILURE_URL'),
       REVENUECAT_WEBHOOK_AUTH: sm('REVENUECAT_WEBHOOK_AUTH'),
 
       // Bunny: cuma 2 yang DIPAKAI media module (streamApiKey & libraryId itu dead field).
@@ -65,13 +69,15 @@ export class BbEcsStack extends cdk.Stack {
       GOOGLE_CLIENT_IDS: sm('GOOGLE_CLIENT_IDS'),
       APPLE_CLIENT_IDS: sm('APPLE_CLIENT_IDS'),
 
-      // FCM — tambah nanti (lihat catatan FCM): FCM_PROJECT_ID, FCM_SERVICE_ACCOUNT_JSON
+      FCM_PROJECT_ID: sm('FCM_PROJECT_ID'),
+      FCM_SERVICE_ACCOUNT_JSON: sm('FCM_SERVICE_ACCOUNT_JSON'), // isi JSON content (bukan path) — app deteksi diawali "{"
       // SUMSUB_BASE_URL & SUMSUB_TOKEN_TTL_SECONDS sengaja DIBUANG — env.ts udah punya default benar.
     };
     const env: Record<string, string> = {
       NODE_ENV: 'production',
       SQS_REGION: this.region,
       API_DOCS_ENABLED: 'false',
+      TRUST_PROXY: '1', // di belakang ALB (1 hop) → req.ip = X-Forwarded-For, rate-limit akurat
     };
 
     // === ECR images ===
@@ -91,6 +97,11 @@ export class BbEcsStack extends cdk.Stack {
       actions: ['sqs:SendMessage', 'sqs:ReceiveMessage', 'sqs:DeleteMessage',
                 'sqs:GetQueueUrl', 'sqs:GetQueueAttributes'],
       resources: ['*'], // TODO: persempit ke ARN 2 queue (urgent, normal)
+    }));
+    // bb-comms kirim email lewat SES (Singapura). Cross-region OK.
+    taskRole.addToPolicy(new iam.PolicyStatement({
+      actions: ['ses:SendEmail', 'ses:SendRawEmail'],
+      resources: ['*'], // TODO: persempit ke ARN identity brainboost.id
     }));
 
     const logGroup = (name: string) => new logs.LogGroup(this, `Log-${name}`, {
@@ -202,7 +213,10 @@ export class BbEcsStack extends cdk.Stack {
     });
     commsTd.addContainer('bb-comms', {
       image: commsImg,
-      environment: env, secrets,
+      // AWS_REGION=ap-southeast-1 → SES client pakai Singapura (SES nggak ada di Jakarta).
+      // SQS bb-comms tetap pakai SQS_REGION=ap-southeast-3 (region sendiri, eksplisit) → aman.
+      environment: { ...env, AWS_REGION: 'ap-southeast-1' },
+      secrets,
       logging: ecs.LogDrivers.awsLogs({ streamPrefix: 'bb-comms', logGroup: logGroup('bb-comms') }),
     });
     new ecs.FargateService(this, 'BbCommsSvc', {
