@@ -5,10 +5,15 @@
  * Member-scoped only — seeds its own members. NO real Didit call is made.
  * Requires a reachable Postgres test DB (DATABASE_URL).
  */
-import { describe, it, expect, afterAll, vi } from 'vitest';
+import { describe, it, expect, afterAll, beforeAll, vi } from 'vitest';
 import { createHmac, randomUUID } from 'node:crypto';
 import request from 'supertest';
 import * as bcrypt from 'bcryptjs';
+import {
+  settingsService,
+  SettingsService,
+  SETTING_KEYS,
+} from '@bb/common/services/settings.service';
 
 // Mock the Didit client BEFORE the service imports it.
 const { createSessionMock } = vi.hoisted(() => ({ createSessionMock: vi.fn() }));
@@ -187,5 +192,133 @@ describe('POST /api/webhook/didit', () => {
     const ignored = await postWebhook({ status: 'Not Started', session_id: 'whatever' });
     expect(ignored.status).toBe(200);
     expect(ignored.body.handled).toBe(false);
+  });
+});
+
+describe('DisbursementService KYC min-balance gate (app_settings kyc.minBalance)', () => {
+  let programId = '';
+  let productId = '';
+  const gateMembers: string[] = [];
+  const MIN = '55000';
+
+  beforeAll(async () => {
+    const product = await prisma.product.create({
+      data: { type: 'course', title: `${TAG}-bal`, price: 0 },
+    });
+    productId = product.id;
+    const program = await prisma.affiliateProgram.create({
+      data: { code: `${TAG}-balprog`, name: 'Bal Gate', productId, isActive: true },
+    });
+    programId = program.id;
+  });
+
+  afterAll(async () => {
+    await prisma.affiliateCommission.deleteMany({ where: { recipientId: { in: gateMembers } } });
+    await prisma.member.deleteMany({ where: { id: { in: gateMembers } } });
+    await prisma.affiliateProgram.delete({ where: { id: programId } });
+    await prisma.product.delete({ where: { id: productId } });
+    // Restore "row absent → fallback 0 (gate off)" so other specs are unaffected.
+    await prisma.appSetting.deleteMany({ where: { key: SETTING_KEYS.kycMinBalance } });
+    SettingsService.clearCache();
+  });
+
+  async function makeGateMember(): Promise<string> {
+    const m = await prisma.member.create({
+      data: {
+        email: `${TAG}-gate-${randomUUID()}@kyc.local`,
+        passwordHash: await bcrypt.hash('x', 4),
+        kycStatus: 'NONE',
+      },
+    });
+    gateMembers.push(m.id);
+    return m.id;
+  }
+
+  async function seedBalance(memberId: string, amount: number) {
+    await prisma.affiliateCommission.create({
+      data: {
+        recipientId: memberId,
+        programId,
+        productId,
+        paymentId: randomUUID(),
+        level: 1,
+        affiliateBased: 'PERFORMANCE',
+        productPrice: amount,
+        voucherAmount: 0,
+        commissionRate: 20,
+        amount,
+        status: 'BALANCE',
+      },
+    });
+  }
+
+  async function setGate(value: string) {
+    await settingsService.set(SETTING_KEYS.kycMinBalance, value);
+    SettingsService.clearCache();
+  }
+
+  it('blocks createDiditSession when withdrawable balance is below the minimum', async () => {
+    await setGate(MIN);
+    const id = await makeGateMember();
+    await seedBalance(id, 50_000); // < 55000
+    createSessionMock.mockClear();
+    await expect(svc.createDiditSession(id)).rejects.toThrow(
+      'Saldo belum mencukupi untuk verifikasi KYC',
+    );
+    expect(createSessionMock).not.toHaveBeenCalled();
+  });
+
+  it('allows createDiditSession when balance meets the minimum (boundary inclusive)', async () => {
+    await setGate(MIN);
+    const id = await makeGateMember();
+    await seedBalance(id, 55_000); // == 55000
+    createSessionMock.mockResolvedValueOnce({
+      session_id: `sess-bal-${id}`,
+      session_token: 'tok',
+      url: 'https://verify.example/s/tok',
+      status: 'Not Started',
+    });
+    const res = await svc.createDiditSession(id);
+    expect(res.sessionId).toBe(`sess-bal-${id}`);
+  });
+
+  it('blocks manual submitKyc too (no bypass via the manual path)', async () => {
+    await setGate(MIN);
+    const id = await makeGateMember();
+    await seedBalance(id, 10_000);
+    await expect(
+      svc.submitKyc(id, { idNumber: '3201010101010001', idCardUrl: 'https://x/ktp.webp' }),
+    ).rejects.toThrow('Saldo belum mencukupi untuk verifikasi KYC');
+  });
+
+  it('gate is OFF when kyc.minBalance = 0 — nil-balance member can start KYC', async () => {
+    await setGate('0');
+    const id = await makeGateMember(); // zero balance
+    createSessionMock.mockResolvedValueOnce({
+      session_id: `sess-off-${id}`,
+      session_token: 'tok',
+      url: 'https://verify.example/s/tok',
+      status: 'Not Started',
+    });
+    const res = await svc.createDiditSession(id);
+    expect(res.sessionId).toBe(`sess-off-${id}`);
+  });
+
+  it('getKyc returns kycMinBalance + isEligible=false when balance is below the minimum', async () => {
+    await setGate(MIN);
+    const id = await makeGateMember();
+    await seedBalance(id, 50_000); // < 55000
+    const kyc = await svc.getKyc(id);
+    expect(kyc.kycMinBalance).toBe(55_000);
+    expect(kyc.isEligible).toBe(false);
+  });
+
+  it('getKyc returns isEligible=true when balance meets the minimum and not approved', async () => {
+    await setGate(MIN);
+    const id = await makeGateMember();
+    await seedBalance(id, 60_000); // >= 55000
+    const kyc = await svc.getKyc(id);
+    expect(kyc.kycMinBalance).toBe(55_000);
+    expect(kyc.isEligible).toBe(true);
   });
 });

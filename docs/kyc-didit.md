@@ -68,7 +68,20 @@ mobile                    backend                              Didit
   Didit is **session-per-attempt**: every call mints a fresh `/v3/session/` (no persistent
   applicant) and stores its `session_id` as the member's **active** `kyc_provider_ref`.
   Returns `{ sessionId, sessionToken, url, kycStatus }` — mobile launches the native SDK
-  with `sessionToken` (or opens `url` in a webview). Refused when already APPROVED.
+  with `sessionToken` (or opens `url` in a webview). Refused when already APPROVED, or when
+  the **min-balance gate** fails (see below).
+- **Min-balance gate (`assertBalanceForKyc`):** a member may only REQUEST KYC once their
+  **withdrawable balance** (`getWithdrawableBalance` = cleared BALANCE commissions − HELD
+  payouts) reaches `app_settings.kyc.minBalance`. Applied to **both** `createDiditSession`
+  and the manual `submitKyc` (no bypass). Threshold is runtime-configurable via the
+  `SettingsService` cache (≤30s propagation); `0` disables the gate (fallback default
+  `KYC_MIN_BALANCE_DEFAULT = 0`). Seeded value: **55 000 IDR** (`pnpm seed:settings`).
+  Applied uniformly to every not-yet-APPROVED state (NONE/PENDING/REJECTED/EXPIRED). On
+  failure: `400 'Saldo belum mencukupi untuk verifikasi KYC'`. Rationale: don't spend
+  verification/review effort on nil-balance accounts.
+  - `GET /affiliate/me/kyc` (`getKyc`) surfaces the gate so the FE can pre-empt the 400:
+    `kycMinBalance` (the threshold) + `isEligible` (`kycStatus !== 'APPROVED' &&
+    withdrawableBalance >= kycMinBalance`).
 - `POST /api/webhook/didit` — guard `diditSignatureGuard`: HMAC-SHA256 over the **raw body**
   (captured by the `express.json` `verify` hook in `app.ts`) vs the `X-Signature` header,
   plus an `X-Timestamp` replay guard (`abs(now - ts) <= 300s`). Fails closed when
