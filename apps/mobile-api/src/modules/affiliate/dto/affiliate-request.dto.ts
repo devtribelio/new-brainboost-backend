@@ -1,8 +1,26 @@
-import { IsIn, IsNotEmpty, IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsIn, IsInt, IsNotEmpty, IsOptional, IsPositive, IsString, MaxLength } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@bb/common/openapi/decorators';
 import { AFFILIATE_BASED } from '@bb/domain/affiliate/constants';
 
 const AFFILIATE_BASED_VALUES = Object.values(AFFILIATE_BASED);
+
+/**
+ * Body for `POST /affiliate/me/disbursement`. Optional partial payout amount.
+ * `amount` is the gross consumed from the withdrawable balance — the member
+ * receives `amount - fee`. Omit it to withdraw the full balance (legacy behavior).
+ */
+export class RequestDisbursementDto {
+  @ApiPropertyOptional({
+    type: 'integer',
+    example: 50_000,
+    description:
+      'Gross amount to withdraw (IDR), taken from the withdrawable balance. The flat fee is deducted from this. Omit to withdraw the full balance.',
+  })
+  @IsOptional()
+  @IsInt()
+  @IsPositive()
+  amount?: number;
+}
 
 /** Body for `PUT /affiliate/me/bank-account`. The bank used for affiliate payouts. */
 export class SetBankAccountDto {

@@ -21,6 +21,7 @@ import {
 import {
   LogAttributionDto,
   LogVisitDto,
+  RequestDisbursementDto,
   SetBankAccountDto,
   SetModeDto,
   SubmitKycDto,
@@ -217,11 +218,13 @@ export class AffiliateController {
   };
 
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Request a payout for the full withdrawable balance' })
+  @ApiOperation({ summary: 'Request a payout (full balance, or a partial `amount`)' })
+  @ApiBody({ type: () => RequestDisbursementDto, description: 'Optional body. Omit to withdraw the full balance.' })
   @ApiResponse({ status: 201, type: () => AffiliateDisbursementDto })
   requestDisbursement = async (req: AuthenticatedRequest, res: Response) => {
     if (!req.user) throw new UnauthorizedException();
-    const disbursement = await this.disbursementService.requestDisbursement(req.user.id);
+    const { amount } = req.body as RequestDisbursementDto;
+    const disbursement = await this.disbursementService.requestDisbursement(req.user.id, amount);
     return okCreated(res, disbursement);
   };
 

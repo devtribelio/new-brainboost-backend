@@ -137,14 +137,17 @@ export class DisbursementService {
   // ---- request ------------------------------------------------------------
 
   /**
-   * Create a payout request consuming the full withdrawable balance.
+   * Create a payout request. By default it consumes the full withdrawable
+   * balance; pass `amount` to withdraw a partial gross (member receives
+   * `amount - fee`). `amount` must be <= the withdrawable balance and still
+   * clear the min-balance / min-net rules.
    *
    * Gates: KYC APPROVED + bank account on profile. Decides AUTO vs MANUAL via
    * legacy TBWithdraw::validateStatus parity. The row is created (status PENDING)
    * inside a concurrency-guarded transaction. If AUTO, Xendit is called AFTER
    * the transaction commits (network I/O must not hold a DB tx open).
    */
-  async requestDisbursement(memberId: string) {
+  async requestDisbursement(memberId: string, amount?: number) {
     const member = await prisma.member.findUnique({
       where: { id: memberId },
       select: {
@@ -193,7 +196,7 @@ export class DisbursementService {
 
       const { cleared, consumed } = await this.balanceInputs(memberId, tx);
       const balance = Math.max(0, cleared - consumed);
-      const quote = quoteDisbursement(balance);
+      const quote = quoteDisbursement(balance, amount);
       if (!quote.eligible) throw new BadRequestException(quote.reason ?? 'Not eligible for withdrawal');
 
       if (reviewStale && quote.netAmount >= env.rekyc.largeDisbursementIdr) {
