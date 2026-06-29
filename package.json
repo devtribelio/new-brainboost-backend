@@ -47,7 +47,8 @@
     "seed:settings": "tsx prisma/seed-settings.ts",
     "issue:credential": "tsx scripts/issue-credential.ts",
     "seed:revenuecat-iap": "tsx scripts/seed-revenuecat-iap.ts",
-    "seed:test-account": "tsx scripts/seed-test-account.ts"
+    "seed:test-account": "tsx scripts/seed-test-account.ts",
+    "void:stray-affiliate-commissions": "tsx scripts/void-stray-affiliate-commissions.ts"
   },
   "dependencies": {
     "@bb/common": "workspace:*",

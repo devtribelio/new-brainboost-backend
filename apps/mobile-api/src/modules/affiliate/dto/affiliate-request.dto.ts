@@ -102,6 +102,15 @@ export class LogVisitDto {
   @IsString()
   affiliatorCode?: string;
 
+  @ApiPropertyOptional({
+    example: 'CRS123',
+    description:
+      'Product the link points at (B-5 per-product attribution). legacyId | code | slug. Aliases: `product_code`, `product`, query `?product=`.',
+  })
+  @IsOptional()
+  @IsString()
+  productCode?: string;
+
   @ApiPropertyOptional({ example: 'instagram' })
   @IsOptional()
   @IsString()
@@ -181,6 +190,14 @@ export class LogAttributionDto {
   })
   @IsString()
   affiliatorCode!: string;
+
+  @ApiPropertyOptional({
+    example: 'CRS123',
+    description: 'Product the link points at (B-5 per-product attribution). legacyId | code | slug. Alias: `product_code`, `product`.',
+  })
+  @IsOptional()
+  @IsString()
+  productCode?: string;
 
   @ApiPropertyOptional({ example: 'instagram' })
   @IsOptional()
