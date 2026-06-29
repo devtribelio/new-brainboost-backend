@@ -1070,6 +1070,9 @@ model CommerceTransaction {
   // Multi-channel ingestion (IAP/Scalev/Lynk.id via /ingest/purchase). Null for native web checkout.
   provider                     String? // = ThirdPartyCredential.name
   providerEventId              String?                   @map("provider_event_id") // provider's event/txn id — idempotency
+  // Commission idempotency key (B-2): stable across re-settles (Apple original_transaction_id).
+  // Audit/forensics + lets the cleanup job map a stray commission back to its purchase.
+  attributionKey               String?                   @map("attribution_key")
   status                       CommerceTransactionStatus @default(PENDING)
   paidAt                       DateTime?                 @map("paid_at")
   canceledAt                   DateTime?                 @map("canceled_at")
@@ -1089,6 +1092,23 @@ model CommerceTransaction {
   @@index([status])
   @@index([expiredAt])
   @@map("commerce_transactions")
+}
+
+/// Commission "first settle wins" claim (B-2). One row per underlying purchase,
+/// keyed by (provider, attributionKey = Apple original_transaction_id). The unique
+/// constraint makes commission attribution idempotent across re-settles that mint a
+/// fresh providerEventId/paymentId (delete+rebuy, renewal, restore, RC re-sync burst):
+/// the first ingest inserts and pays commission; later ones hit P2002 → enrollment
+/// only, no double-pay. Race-proof under a concurrent burst (exactly one insert wins).
+model AffiliateAttributionClaim {
+  id             String   @id @default(uuid(7)) @db.Uuid
+  provider       String // = ThirdPartyCredential.name
+  attributionKey String   @map("attribution_key")
+  paymentId      String   @map("payment_id") @db.Uuid // the payment that won the claim (audit)
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@unique([provider, attributionKey])
+  @@map("affiliate_attribution_claims")
 }
 
 /// Payment attempt. Multi rows per transaction (VA retry possible after expiry).

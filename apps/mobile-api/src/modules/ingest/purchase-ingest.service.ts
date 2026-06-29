@@ -9,7 +9,16 @@ import type { VerifiedCredential } from './credential.service';
 
 /** Provider-agnostic purchase shape. Adapters (edge functions) map their payload to this. */
 export interface NormalizedPurchase {
-  providerEventId: string; // idempotency (provider txn/event id)
+  providerEventId: string; // idempotency (provider txn/event id) — per-EVENT (one transaction row)
+  /**
+   * Commission idempotency key (B-2). Identifies the underlying *purchase* across
+   * re-settles that mint a fresh `providerEventId` (delete+rebuy, renewal,
+   * restore, RC re-sync burst) — e.g. Apple's stable `original_transaction_id`.
+   * Commission is claimed once per `(provider, attributionKey)`, so a re-settle
+   * grants enrollment again but never double-pays. Defaults to `providerEventId`
+   * when the channel has no stabler key (each event then claims independently).
+   */
+  attributionKey?: string;
   type: 'PURCHASE' | 'REFUND';
   memberRef: { byId?: string; byEmail?: string };
   productRef: { byId?: string; bySku?: string };
@@ -103,6 +112,7 @@ export class PurchaseIngestService {
               voucherAmount,
               provider: cred.name,
               providerEventId: input.providerEventId,
+              attributionKey: input.attributionKey ?? input.providerEventId,
               status: 'PAID',
               paidAt: new Date(),
             },
@@ -151,8 +161,32 @@ export class PurchaseIngestService {
       }
     }
 
-    // Affiliate override only resolved when the channel is allowed to pay commission.
-    const overrideAffiliatorMemberId = cred.triggersAffiliate
+    // Commission eligibility (B-2): "first settle wins" per (provider, attributionKey).
+    // A re-settle of the same underlying purchase — delete+rebuy, renewal, restore,
+    // or an RC re-sync burst — shares the attributionKey but arrives with a fresh
+    // providerEventId/paymentId, so the per-payment commission dedup can't catch it.
+    // The unique claim row makes only the FIRST settle commission-eligible; the rest
+    // keep their enrollment but pay nothing. Race-proof: a burst of N concurrent
+    // events all attempt the insert, exactly one wins, the others get P2002.
+    let affiliateEligible = cred.triggersAffiliate;
+    if (affiliateEligible) {
+      const attributionKey = input.attributionKey ?? input.providerEventId;
+      try {
+        await prisma.affiliateAttributionClaim.create({
+          data: { provider: cred.name, attributionKey, paymentId },
+        });
+      } catch (e) {
+        if ((e as { code?: string }).code !== 'P2002') throw e;
+        affiliateEligible = false;
+        logger.info(
+          { provider: cred.name, attributionKey, paymentId },
+          '[ingest] attribution already claimed for this purchase — commission skipped',
+        );
+      }
+    }
+
+    // Affiliate override only resolved when this settle is the commission-bearing one.
+    const overrideAffiliatorMemberId = affiliateEligible
       ? await attributionService.resolveOverrideAffiliatorMemberId(memberId, input.affiliatorCode)
       : null;
 
@@ -171,7 +205,7 @@ export class PurchaseIngestService {
       affiliatorId: null,
       programId: null,
       attributedAffiliatorMemberId: overrideAffiliatorMemberId, // listener maps → engine override
-      affiliateEligible: cred.triggersAffiliate, // gate: false → enrollment yes, commission no
+      affiliateEligible, // gate: false → enrollment yes, commission no (channel off OR re-settle)
       channel: cred.name, // e.g. "revenuecat", "scalev", "lynkid" — used for per-channel hold
       isRenewal: input.isRenewal,
     });
