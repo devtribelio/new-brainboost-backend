@@ -46,4 +46,44 @@ describe('quoteDisbursement (legacy payout rules)', () => {
     expect(DISBURSEMENT_MIN_NET).toBe(10_000);
     expect(DISBURSEMENT_FEE).toBe(5_000);
   });
+
+  describe('partial amount (requestedAmount)', () => {
+    it('uses the requested amount as gross, not the full balance', () => {
+      const q = quoteDisbursement(100_000, 30_000);
+      expect(q).toEqual({ eligible: true, grossAmount: 30_000, fee: 5_000, netAmount: 25_000 });
+    });
+
+    it('rejects an amount above the withdrawable balance', () => {
+      const q = quoteDisbursement(20_000, 30_000);
+      expect(q.eligible).toBe(false);
+      expect(q.reason).toMatch(/exceeds withdrawable balance/);
+    });
+
+    it('allows withdrawing exactly the full balance', () => {
+      const q = quoteDisbursement(50_000, 50_000);
+      expect(q.eligible).toBe(true);
+      expect(q.grossAmount).toBe(50_000);
+    });
+
+    it('still enforces the min-balance rule on the requested amount', () => {
+      const q = quoteDisbursement(100_000, DISBURSEMENT_MIN_BALANCE - 1);
+      expect(q.eligible).toBe(false);
+      expect(q.reason).toMatch(/Minimum balance/);
+    });
+
+    it('still enforces the min-net rule on the requested amount', () => {
+      const q = quoteDisbursement(100_000, 15_000);
+      expect(q.eligible).toBe(false);
+      expect(q.netAmount).toBe(10_000);
+      expect(q.reason).toMatch(/Net payout/);
+    });
+
+    it('floors a fractional requested amount', () => {
+      expect(quoteDisbursement(100_000, 30_000.9).grossAmount).toBe(30_000);
+    });
+
+    it('omitting the amount keeps full-balance behavior', () => {
+      expect(quoteDisbursement(50_000)).toEqual(quoteDisbursement(50_000, 50_000));
+    });
+  });
 });

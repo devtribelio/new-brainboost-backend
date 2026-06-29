@@ -8,7 +8,7 @@ import { DisbursementService } from '@bb/domain/affiliate/disbursement.service';
 import { authGuard, optionalAuthGuard } from '@bb/common/middlewares/auth.middleware';
 import { validateDto } from '@bb/common/middlewares/validation.middleware';
 import { bindRoute } from '@bb/common/openapi/route-binder';
-import { SetBankAccountDto, SubmitKycDto } from './dto/affiliate-request.dto';
+import { RequestDisbursementDto, SetBankAccountDto, SubmitKycDto } from './dto/affiliate-request.dto';
 
 export function affiliateRoutes(): Router {
   const router = Router();
@@ -46,7 +46,7 @@ export function affiliateRoutes(): Router {
 
   // Disbursement / payout
   bindRoute({ router, controller: ctrl, method: 'get', path: '/affiliate/me/disbursement', handlerKey: 'getDisbursementSummary', middlewares: [authGuard] });
-  bindRoute({ router, controller: ctrl, method: 'post', path: '/affiliate/me/disbursement', handlerKey: 'requestDisbursement', middlewares: [authGuard] });
+  bindRoute({ router, controller: ctrl, method: 'post', path: '/affiliate/me/disbursement', handlerKey: 'requestDisbursement', middlewares: [authGuard, validateDto(RequestDisbursementDto)] });
   bindRoute({ router, controller: ctrl, method: 'get', path: '/affiliate/me/disbursements', handlerKey: 'listDisbursements', middlewares: [authGuard] });
 
   return router;
