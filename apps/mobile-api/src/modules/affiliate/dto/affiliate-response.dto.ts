@@ -312,6 +312,13 @@ export class DisbursementSummaryDto {
   @ApiProperty({ type: 'integer', example: 50_000 })
   withdrawableBalance!: number;
 
+  @ApiProperty({
+    type: 'integer',
+    example: 15_000,
+    description: 'Minimum withdrawable balance (IDR) to request a payout (app_settings disbursement.minBalance).',
+  })
+  minBalance!: number;
+
   @ApiProperty({ example: true, description: 'True only if balance meets thresholds AND no pending payout exists.' })
   eligible!: boolean;
 
@@ -371,6 +378,21 @@ export class KycDto {
 
   @ApiPropertyOptional({ nullable: true, description: 'Reason when kycStatus is REJECTED.' })
   kycRejectedReason?: string | null;
+
+  @ApiProperty({
+    type: 'integer',
+    example: 55000,
+    description:
+      'Minimum withdrawable balance (IDR) required to request KYC (app_settings kyc.minBalance). 0 = gate off.',
+  })
+  kycMinBalance!: number;
+
+  @ApiProperty({
+    example: false,
+    description:
+      'Whether the member may start a KYC request now: kycStatus !== APPROVED AND withdrawableBalance >= kycMinBalance.',
+  })
+  isEligible!: boolean;
 }
 
 /** `POST /affiliate/me/kyc/token` — Didit verification session for the mobile SDK / webview. */

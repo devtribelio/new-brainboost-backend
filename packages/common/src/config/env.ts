@@ -89,6 +89,18 @@ export const env = {
     // webp quality 1-100 for re-encoded images.
     imageWebpQuality: Number.parseInt(optional('S3_IMAGE_WEBP_QUALITY', '82'), 10),
   },
+  cors: {
+    // Browser origin allowlist (comma-separated). Empty = allow all (`*`, no
+    // credentials) — fine for native mobile clients which don't enforce CORS.
+    // Set an explicit list for web FE that needs cookie/credential requests.
+    allowedOrigins: optional('CORS_ALLOWED_ORIGINS', '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
+    // Send Access-Control-Allow-Credentials. Only effective with an allowlist
+    // (the CORS spec forbids combining `*` with credentials).
+    credentials: optional('CORS_CREDENTIALS', 'false') === 'true',
+  },
   baseUrl: optional('BASE_URL', 'http://localhost:3000'),
   // Express `trust proxy` setting. Empty = off (req.ip = socket address).
   // Set to a hop count ("1") behind a reverse proxy / LB so req.ip reflects

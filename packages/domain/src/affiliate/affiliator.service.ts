@@ -13,8 +13,13 @@ import {
 import { computeAmount, getPerformanceTier } from './utils/compute-amount';
 import { walkInviterChain } from './utils/walk-inviter-chain';
 import { affiliateEvents } from '@bb/common/events/affiliate-events';
+import { DisbursementService } from './disbursement.service';
 
 export class AffiliatorService {
+  // Reuse the disbursement balance calc so the dashboard `balance` and the payout
+  // `withdrawableBalance` are ALWAYS the same number (Σ BALANCE − Σ HELD payouts).
+  constructor(private readonly disbursement = new DisbursementService()) {}
+
   /**
    * Get my affiliator profile. Auto-generate `affiliateCode` if missing
    * (legacy convention: every member can be an affiliator).
@@ -62,7 +67,7 @@ export class AffiliatorService {
    * `getPerformanceSchemaPercent` query semantics).
    */
   async getSummary(memberId: string) {
-    const [agg, balanceAgg, pendingAgg, voidedAgg, commisionAgg, recent] = await Promise.all([
+    const [agg, withdrawable, pendingAgg, voidedAgg, commisionAgg, recent] = await Promise.all([
       prisma.affiliateCommission.aggregate({
         where: {
           recipientId: memberId,
@@ -71,10 +76,8 @@ export class AffiliatorService {
         },
         _sum: { amount: true },
       }),
-      prisma.affiliateCommission.aggregate({
-        where: { recipientId: memberId, status: COMMISSION_STATUS.BALANCE },
-        _sum: { amount: true },
-      }),
+      // Withdrawable = cleared BALANCE commissions − HELD payouts (same as /disbursement).
+      this.disbursement.getWithdrawableBalance(memberId),
       prisma.affiliateCommission.aggregate({
         where: { recipientId: memberId, status: COMMISSION_STATUS.PENDING },
         _sum: { amount: true },
@@ -107,7 +110,7 @@ export class AffiliatorService {
 
     return {
       lifetimeAmount,
-      balance: balanceAgg._sum.amount ?? 0,
+      balance: withdrawable,
       pending: pendingAgg._sum.amount ?? 0,
       voided: voidedAgg._sum.amount ?? 0,
       currency: 'IDR',

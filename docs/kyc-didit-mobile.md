@@ -56,6 +56,7 @@ Auth: `Authorization: Bearer <jwt>`. Body: **kosong**.
 | HTTP | `error.message` | Arti / aksi FE |
 |---|---|---|
 | 400 | `KYC sudah disetujui` | Member sudah `APPROVED` — sembunyikan tombol verifikasi |
+| 400 | `Saldo belum mencukupi untuk verifikasi KYC` | Saldo (withdrawable) belum capai minimum buat mulai KYC. Sembunyikan/disable tombol verifikasi sampai saldo cukup; arahkan user kumpulin komisi dulu |
 | 400 | `KYC provider not configured` | Env backend belum diisi (biasanya dev) — tampilkan error generik |
 | 401 | — | JWT invalid/expired → refresh token / re-login |
 
@@ -79,13 +80,19 @@ Auth: bearer.
     "kycSelfieUrl": null,          // idem
     "kycSubmittedAt": "2026-06-26T09:00:00.000Z",
     "kycReviewedAt": null,
-    "kycRejectedReason": null      // terisi saat REJECTED (alasan dari Didit decision)
+    "kycRejectedReason": null,     // terisi saat REJECTED (alasan dari Didit decision)
+    "kycMinBalance": 55000,        // saldo (withdrawable) minimal IDR buat boleh mulai KYC (0 = gate mati)
+    "isEligible": false            // boleh mulai KYC sekarang? = kycStatus != APPROVED && withdrawableBalance >= kycMinBalance
   }
 }
 ```
 
 FE menjadikan endpoint ini **satu-satunya** acuan status. Field `kycIdNumber`/`kycIdCardUrl`/
 `kycSelfieUrl` akan `null` untuk member yang lewat Didit — jangan dirender sebagai data wajib.
+
+**Gunakan `isEligible` buat enable/disable CTA "Verifikasi"** — kalau `false` karena saldo
+kurang, FE bisa kasih hint (mis. "kumpulin komisi dulu"; saldo terkini ada di
+`GET /affiliate/me/disbursement → withdrawableBalance`). Mencegah user kena `400` saat tap.
 
 ---
 
