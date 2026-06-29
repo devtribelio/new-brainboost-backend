@@ -373,17 +373,25 @@ export class KycDto {
   kycRejectedReason?: string | null;
 }
 
-/** `POST /affiliate/me/kyc/token` — Sumsub SDK session for the mobile SDK. */
+/** `POST /affiliate/me/kyc/token` — Didit verification session for the mobile SDK / webview. */
 export class KycTokenDto {
-  @ApiProperty({ description: 'Short-lived Sumsub SDK access token. Hand to the mobile SDK as-is.' })
-  token!: string;
+  @ApiProperty({ description: 'Didit session id. Stored server-side; echoed in the webhook.' })
+  sessionId!: string;
 
-  @ApiProperty({ description: 'Sumsub applicant id bound to this member.' })
-  applicantId!: string;
+  @ApiProperty({
+    description:
+      'Didit session token. Pass to the native SDK, e.g. DiditSdk.startVerification(sessionToken).',
+  })
+  sessionToken!: string;
+
+  @ApiProperty({
+    description: 'Hosted verification URL — open in a webview as a fallback to the native SDK.',
+  })
+  url!: string;
 
   @ApiProperty({
     enum: ['NONE', 'PENDING', 'APPROVED', 'REJECTED', 'EXPIRED'],
-    description: 'kycStatus at token issuance. The /api/webhook/sumsub callback updates it after review.',
+    description: 'kycStatus at session creation. The /api/webhook/didit callback updates it after review.',
   })
   kycStatus!: string;
 }

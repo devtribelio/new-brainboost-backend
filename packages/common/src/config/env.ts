@@ -113,20 +113,22 @@ export const env = {
       'http://localhost:3000/checkout/failed',
     ),
   },
-  sumsub: {
-    // App token + secret pair from the Sumsub dashboard (Dev space → App tokens).
-    // Sandbox and production are DIFFERENT pairs — same base URL for both.
-    // Empty = Sumsub KYC disabled (token endpoint 503s, webhook guard fails closed).
-    appToken: optional('SUMSUB_APP_TOKEN', ''),
-    secretKey: optional('SUMSUB_SECRET_KEY', ''),
-    // Separate secret configured on the webhook endpoint (dashboard → Webhooks).
-    // Used for x-payload-digest HMAC verification — NOT the same as secretKey.
-    webhookSecret: optional('SUMSUB_WEBHOOK_SECRET', ''),
-    // Verification level name created in the dashboard (ID doc + selfie).
-    levelName: optional('SUMSUB_LEVEL_NAME', 'basic-kyc-idn'),
-    baseUrl: optional('SUMSUB_BASE_URL', 'https://api.sumsub.com'),
-    // SDK access token lifetime, seconds.
-    tokenTtlSeconds: Number.parseInt(optional('SUMSUB_TOKEN_TTL_SECONDS', '600'), 10),
+  didit: {
+    // API key from the Didit Console (Settings → API Keys). Sent as the `x-api-key`
+    // header on every server-to-server call. Empty = Didit KYC disabled (session
+    // endpoint 503s, webhook guard fails closed).
+    apiKey: optional('DIDIT_API_KEY', ''),
+    // Per-destination "secret_shared_key" from the Console (Webhooks → destination).
+    // Used to verify the X-Signature HMAC-SHA256 over the raw webhook body — this is
+    // NOT the apiKey.
+    webhookSecret: optional('DIDIT_WEBHOOK_SECRET', ''),
+    // Published verification workflow UUID (Console → Workflows). Defines which
+    // checks run (ID doc + liveness + face match).
+    workflowId: optional('DIDIT_WORKFLOW_ID', ''),
+    baseUrl: optional('DIDIT_BASE_URL', 'https://verification.didit.me'),
+    // Optional redirect URL for the hosted-webview fallback (deep link back into the
+    // app, e.g. brainboost://kyc/done). Unused on the native-SDK path. Empty = omit.
+    callbackUrl: optional('DIDIT_CALLBACK_URL', ''),
   },
   rekyc: {
     // Re-KYC thresholds: an APPROVED affiliate is forced to re-verify on a risk

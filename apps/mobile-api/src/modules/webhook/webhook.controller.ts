@@ -3,7 +3,7 @@ import { ApiBody, ApiOperation, ApiTags } from '@bb/common/openapi/decorators';
 import type { XenditWebhookHandler } from './xendit.handler';
 import type { RevenueCatWebhookHandler } from './revenuecat.handler';
 import type { XenditDisbursementWebhookHandler } from './xendit-disbursement.handler';
-import type { SumsubWebhookHandler, SumsubWebhookPayload } from './sumsub.handler';
+import type { DiditWebhookHandler, DiditWebhookPayload } from './didit.handler';
 import { XenditInvoiceCallbackDto } from './dto/xendit-callback.dto';
 import { RevenueCatCallbackDto } from './dto/revenuecat-callback.dto';
 import { XenditDisbursementCallbackDto } from './dto/xendit-disbursement-callback.dto';
@@ -14,7 +14,7 @@ export class WebhookController {
     private readonly xendit: XenditWebhookHandler,
     private readonly revenuecat: RevenueCatWebhookHandler,
     private readonly xenditDisbursement: XenditDisbursementWebhookHandler,
-    private readonly sumsub: SumsubWebhookHandler,
+    private readonly didit: DiditWebhookHandler,
   ) {}
 
   @ApiOperation({ summary: 'Xendit Invoice callback (paid / expired)' })
@@ -44,12 +44,12 @@ export class WebhookController {
   };
 
   @ApiOperation({
-    summary: 'Sumsub KYC webhook (applicantPending → PENDING, applicantReviewed → APPROVED/REJECTED)',
+    summary: 'Didit KYC webhook ("In Review" → PENDING, "Approved"/"Declined" → APPROVED/REJECTED)',
   })
-  sumsubWebhook = async (req: Request, res: Response) => {
-    const result = await this.sumsub.handle(req.body as SumsubWebhookPayload);
-    // 200 even on ignored/unmatched events so Sumsub stops retrying them;
-    // transient failures (DB down) throw → errorHandler 5xx → Sumsub retries.
+  diditWebhook = async (req: Request, res: Response) => {
+    const result = await this.didit.handle(req.body as DiditWebhookPayload);
+    // 200 even on ignored/unmatched events so Didit stops retrying them;
+    // transient failures (DB down) throw → errorHandler 5xx → Didit retries.
     return res.status(200).json({ received: true, ...result });
   };
 }

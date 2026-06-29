@@ -8,7 +8,7 @@ import { DisbursementService } from '@bb/domain/affiliate/disbursement.service';
 import { authGuard, optionalAuthGuard } from '@bb/common/middlewares/auth.middleware';
 import { validateDto } from '@bb/common/middlewares/validation.middleware';
 import { bindRoute } from '@bb/common/openapi/route-binder';
-import { SetBankAccountDto, SubmitKycDto } from './dto/affiliate-request.dto';
+import { RequestDisbursementDto, SetBankAccountDto, SubmitKycDto } from './dto/affiliate-request.dto';
 
 export function affiliateRoutes(): Router {
   const router = Router();
@@ -41,12 +41,12 @@ export function affiliateRoutes(): Router {
   // KYC (manual review gate for payouts)
   bindRoute({ router, controller: ctrl, method: 'get', path: '/affiliate/me/kyc', handlerKey: 'getKyc', middlewares: [authGuard] });
   bindRoute({ router, controller: ctrl, method: 'post', path: '/affiliate/me/kyc', handlerKey: 'submitKyc', middlewares: [authGuard, validateDto(SubmitKycDto)] });
-  // KYC via Sumsub — backend mints the SDK access token; status flips via /api/webhook/sumsub
+  // KYC via Didit — backend mints a verification session (token + URL); status flips via /api/webhook/didit
   bindRoute({ router, controller: ctrl, method: 'post', path: '/affiliate/me/kyc/token', handlerKey: 'createKycToken', middlewares: [authGuard] });
 
   // Disbursement / payout
   bindRoute({ router, controller: ctrl, method: 'get', path: '/affiliate/me/disbursement', handlerKey: 'getDisbursementSummary', middlewares: [authGuard] });
-  bindRoute({ router, controller: ctrl, method: 'post', path: '/affiliate/me/disbursement', handlerKey: 'requestDisbursement', middlewares: [authGuard] });
+  bindRoute({ router, controller: ctrl, method: 'post', path: '/affiliate/me/disbursement', handlerKey: 'requestDisbursement', middlewares: [authGuard, validateDto(RequestDisbursementDto)] });
   bindRoute({ router, controller: ctrl, method: 'get', path: '/affiliate/me/disbursements', handlerKey: 'listDisbursements', middlewares: [authGuard] });
 
   return router;

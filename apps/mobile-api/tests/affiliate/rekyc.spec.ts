@@ -1,23 +1,12 @@
 /**
  * Re-KYC (KYC reset) triggers + gate. Member-scoped; seeds its own data.
- * Sumsub client is mocked so resetKyc's applicant-reset branch is observable
- * without a real API call. Requires a reachable Postgres test DB (DATABASE_URL).
- * See docs/kyc-rekyc.md.
+ * resetKyc is DB-only (Didit is session-per-attempt — no applicant to reset); it
+ * clears kycProviderRef so a stale webhook can't re-approve an EXPIRED member.
+ * Requires a reachable Postgres test DB (DATABASE_URL). See docs/kyc-rekyc.md.
  */
-import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import * as bcrypt from 'bcryptjs';
-
-// Mock the Sumsub client BEFORE the service imports it. isSumsubConfigured=true so
-// resetKyc attempts the applicant reset for members that have an applicant id.
-const { resetApplicantMock } = vi.hoisted(() => ({ resetApplicantMock: vi.fn() }));
-vi.mock('@bb/common/services/sumsub.client', () => ({
-  isSumsubConfigured: () => true,
-  resetApplicant: resetApplicantMock,
-  createApplicant: vi.fn(),
-  generateSdkAccessToken: vi.fn(),
-  getApplicantByExternalId: vi.fn(),
-}));
 
 import { prisma } from '@bb/db';
 import { DisbursementService } from '@bb/domain/affiliate/disbursement.service';
@@ -68,14 +57,15 @@ afterAll(async () => {
 });
 
 describe('DisbursementService.resetKyc', () => {
-  it('downgrades APPROVED → EXPIRED and records a RESET event', async () => {
-    const id = await makeMember({ kycSource: 'SUMSUB' });
+  it('downgrades APPROVED → EXPIRED, clears the session ref, and records a RESET event', async () => {
+    const id = await makeMember({ kycSource: 'DIDIT', kycProviderRef: `sess-${randomUUID()}` });
     const { reset } = await svc.resetKyc(id, 'ADMIN_MANUAL', { actorType: 'ADMIN' });
     expect(reset).toBe(true);
 
     const m = await prisma.member.findUnique({ where: { id } });
     expect(m?.kycStatus).toBe('EXPIRED');
-    expect(m?.kycSource).toBe('SUMSUB'); // provenance preserved
+    expect(m?.kycSource).toBe('DIDIT'); // provenance preserved
+    expect(m?.kycProviderRef).toBeNull(); // active session detached so no stale re-approve
 
     const ev = await latestEvent(id);
     expect(ev).toMatchObject({ type: 'RESET', reason: 'ADMIN_MANUAL', fromStatus: 'APPROVED', toStatus: 'EXPIRED', actorType: 'ADMIN' });
@@ -87,21 +77,6 @@ describe('DisbursementService.resetKyc', () => {
     expect(reset).toBe(false);
     expect(await latestEvent(id)).toBeNull();
     expect((await prisma.member.findUnique({ where: { id } }))?.kycStatus).toBe('PENDING');
-  });
-
-  it('resets the Sumsub applicant when one is bound', async () => {
-    resetApplicantMock.mockClear();
-    const applicantId = `appl-${randomUUID()}`;
-    const id = await makeMember({ sumsubApplicantId: applicantId });
-    await svc.resetKyc(id, 'SUSPICIOUS');
-    expect(resetApplicantMock).toHaveBeenCalledWith(applicantId);
-  });
-
-  it('does not call Sumsub for a legacy member with no applicant', async () => {
-    resetApplicantMock.mockClear();
-    const id = await makeMember({ kycSource: 'LEGACY' });
-    await svc.resetKyc(id, 'SUSPICIOUS');
-    expect(resetApplicantMock).not.toHaveBeenCalled();
   });
 });
 

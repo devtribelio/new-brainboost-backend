@@ -41,7 +41,7 @@ export function buildApp(): Express {
   app.use(
     express.json({
       limit: '5mb',
-      // Keep the raw body bytes: the Sumsub webhook digest is an HMAC over the
+      // Keep the raw body bytes: the Didit webhook signature is an HMAC over the
       // payload AS SENT — re-serializing req.body would not round-trip.
       verify: (req, _res, buf) => {
         (req as express.Request & { rawBody?: Buffer }).rawBody = buf;

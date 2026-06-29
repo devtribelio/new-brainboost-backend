@@ -21,6 +21,7 @@ import {
 import {
   LogAttributionDto,
   LogVisitDto,
+  RequestDisbursementDto,
   SetBankAccountDto,
   SetModeDto,
   SubmitKycDto,
@@ -217,11 +218,13 @@ export class AffiliateController {
   };
 
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Request a payout for the full withdrawable balance' })
+  @ApiOperation({ summary: 'Request a payout (full balance, or a partial `amount`)' })
+  @ApiBody({ type: () => RequestDisbursementDto, description: 'Optional body. Omit to withdraw the full balance.' })
   @ApiResponse({ status: 201, type: () => AffiliateDisbursementDto })
   requestDisbursement = async (req: AuthenticatedRequest, res: Response) => {
     if (!req.user) throw new UnauthorizedException();
-    const disbursement = await this.disbursementService.requestDisbursement(req.user.id);
+    const { amount } = req.body as RequestDisbursementDto;
+    const disbursement = await this.disbursementService.requestDisbursement(req.user.id, amount);
     return okCreated(res, disbursement);
   };
 
@@ -292,12 +295,12 @@ export class AffiliateController {
 
   @ApiBearerAuth()
   @ApiOperation({
-    summary: 'Start Sumsub KYC session — creates the applicant (once) and mints an SDK access token',
+    summary: 'Start a Didit KYC session — mints a verification session (token + hosted URL)',
   })
   @ApiResponse({ status: 200, type: () => KycTokenDto })
   createKycToken = async (req: AuthenticatedRequest, res: Response) => {
     if (!req.user) throw new UnauthorizedException();
-    const session = await this.disbursementService.createSumsubKycSession(req.user.id);
+    const session = await this.disbursementService.createDiditSession(req.user.id);
     return ok(res, session);
   };
 }

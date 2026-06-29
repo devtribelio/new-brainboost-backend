@@ -10,6 +10,7 @@ function productTypeLabel(type: string | null): string {
   if (!type) return '';
   const map: Record<string, string> = {
     course: 'Course',
+    mini_course: 'Mini Course',
     bundle: 'Bundle',
     book: 'Book',
     digital: 'Digital',

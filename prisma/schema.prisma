@@ -54,10 +54,10 @@ model Member {
   kycStatus         String    @default("NONE") @map("kyc_status") // NONE | PENDING | APPROVED | REJECTED | EXPIRED
   // EXPIRED = previously APPROVED but a risk event (bank change / dormant reactivation /
   // large disbursement / suspicious) forced a re-KYC. Treated as NOT-approved by the
-  // disbursement gate; member must pass Sumsub again. See docs/kyc-rekyc.md.
+  // disbursement gate; member must re-verify before the next payout. See docs/kyc-rekyc.md.
   // Provenance of the current kycStatus: NONE (never KYC'd) | LEGACY (imported from
-  // legacy member_data_kyc — no Sumsub applicant / images live in legacy S3) |
-  // MANUAL (admin-reviewed manual flow) | SUMSUB (driven by Sumsub webhook).
+  // legacy member_data_kyc — no provider session / images live in legacy S3) |
+  // MANUAL (admin-reviewed manual flow) | DIDIT (driven by Didit webhook).
   kycSource         String    @default("NONE") @map("kyc_source")
   kycIdNumber       String?   @map("kyc_id_number")
   kycIdCardUrl      String?   @map("kyc_id_card_url")
@@ -66,9 +66,13 @@ model Member {
   kycReviewedAt     DateTime? @map("kyc_reviewed_at")
   kycReviewedBy     String?   @map("kyc_reviewed_by") @db.Uuid
   kycRejectedReason String?   @map("kyc_rejected_reason")
-  // Sumsub applicant bound to this member (externalUserId = member id).
-  // null = KYC never went through Sumsub (manual flow or none).
-  sumsubApplicantId String?   @unique @map("sumsub_applicant_id")
+  // Provider verification reference bound to this member. For Didit this is the
+  // ACTIVE verification session_id (session-per-attempt). A provider webhook is
+  // only honoured when its session_id matches this value — that guards against a
+  // stale "Approved" webhook from an old session re-approving an EXPIRED member
+  // (replaces Sumsub's resetApplicant call). See docs/kyc-rekyc.md.
+  // null = KYC never went through an external provider (manual flow or none).
+  kycProviderRef    String?   @unique @map("kyc_provider_ref")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -114,7 +118,7 @@ model KycEvent {
   reason     String? // BANK_CHANGE | DORMANT_REACTIVATION | LARGE_DISBURSEMENT | SUSPICIOUS | ADMIN_MANUAL
   fromStatus String?  @map("from_status")
   toStatus   String   @map("to_status")
-  actorType  String   @map("actor_type") // SYSTEM | ADMIN | SUMSUB
+  actorType  String   @map("actor_type") // SYSTEM | ADMIN | DIDIT
   actorId    String?  @map("actor_id") @db.Uuid
   metadata   Json?
   createdAt  DateTime @default(now()) @map("created_at")

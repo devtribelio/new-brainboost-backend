@@ -11,14 +11,14 @@
  *           NOT `member.last_kyc_status`, which is a stale denormalised cache).
  *           Latest row per member (MAX member_data_kyc_id) is authoritative.
  * SCOPE   = APPROVED + REJECTED only. PENDING (and any other value) is skipped →
- *           those members stay kycStatus=NONE so they re-KYC fresh via Sumsub.
+ *           those members stay kycStatus=NONE so they re-KYC fresh via Didit.
  * REDIRECT= a loser's KYC is applied to its dedup winner (member-redirect.json),
  *           mirroring how enrollments merge to the winner. If both a loser and the
  *           winner have KYC rows, the globally-latest row across the cluster wins.
  * WRITES  = members.{kycStatus, kycSource='LEGACY', kycIdNumber=nik,
  *           kycReviewedAt=actionat, kycRejectedReason=reason(only REJECTED)}.
  * GUARD   = only overwrites members whose kycSource is still NONE or LEGACY, so a
- *           re-run never clobbers a MANUAL/SUMSUB decision made in the new system.
+ *           re-run never clobbers a MANUAL/DIDIT decision made in the new system.
  * Idempotent: keyed by legacyId; safe to re-run.
  */
 import 'dotenv/config';
@@ -128,7 +128,7 @@ async function main() {
       return;
     }
 
-    // apply (guarded so a re-run never clobbers MANUAL/SUMSUB)
+    // apply (guarded so a re-run never clobbers MANUAL/DIDIT)
     let updated = 0;
     let skippedGuard = 0;
     for (let i = 0; i < targets.length; i += CONCURRENCY) {
@@ -153,7 +153,7 @@ async function main() {
         else skippedGuard += 1;
       }
     }
-    log(`DONE updated=${updated} skippedGuard(MANUAL/SUMSUB)=${skippedGuard}`);
+    log(`DONE updated=${updated} skippedGuard(MANUAL/DIDIT)=${skippedGuard}`);
   } finally {
     await legacy.end();
     await prisma.$disconnect();
