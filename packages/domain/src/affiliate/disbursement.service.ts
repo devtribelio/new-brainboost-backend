@@ -17,6 +17,7 @@ import {
   DISBURSEMENT_AUTO_APPROVE_MAX,
   DISBURSEMENT_AUTO_MAX_PER_DAY,
   DISBURSEMENT_AUTO_MAX_PER_WEEK,
+  KYC_MIN_BALANCE_DEFAULT,
 } from './constants';
 import { quoteDisbursement } from './utils/disbursement-calc';
 
@@ -87,6 +88,25 @@ export class DisbursementService {
   async getWithdrawableBalance(memberId: string): Promise<number> {
     const { cleared, consumed } = await this.balanceInputs(memberId);
     return Math.max(0, cleared - consumed);
+  }
+
+  /**
+   * Gate: a member may only REQUEST KYC once their withdrawable balance reaches
+   * the configured minimum (app_settings `kyc.minBalance`, runtime-overridable —
+   * fallback KYC_MIN_BALANCE_DEFAULT). Stops nil-balance accounts from spamming
+   * verifications. A threshold of 0 disables the gate. Applied uniformly to every
+   * not-yet-APPROVED state (NONE / PENDING / REJECTED / EXPIRED).
+   */
+  private async assertBalanceForKyc(memberId: string): Promise<void> {
+    const min = await settingsService.getNumber(
+      SETTING_KEYS.kycMinBalance,
+      KYC_MIN_BALANCE_DEFAULT,
+    );
+    if (min <= 0) return;
+    const balance = await this.getWithdrawableBalance(memberId);
+    if (balance < min) {
+      throw new BadRequestException('Saldo belum mencukupi untuk verifikasi KYC');
+    }
   }
 
   async getSummary(memberId: string) {
@@ -428,6 +448,7 @@ export class DisbursementService {
     if (!member) throw new NotFoundException('Member not found');
     if (member.kycStatus === 'PENDING') throw new BadRequestException('KYC sedang ditinjau');
     if (member.kycStatus === 'APPROVED') throw new BadRequestException('KYC sudah disetujui');
+    await this.assertBalanceForKyc(memberId);
     const [updated] = await prisma.$transaction([
       prisma.member.update({
         where: { id: memberId },
@@ -460,7 +481,17 @@ export class DisbursementService {
   async getKyc(memberId: string) {
     const member = await prisma.member.findUnique({ where: { id: memberId }, select: kycSelect });
     if (!member) throw new NotFoundException('Member not found');
-    return member;
+    // Surface the min-balance gate to the client so the FE can enable/disable the
+    // "request KYC" CTA proactively instead of discovering the gate via a 400.
+    const kycMinBalance = await settingsService.getNumber(
+      SETTING_KEYS.kycMinBalance,
+      KYC_MIN_BALANCE_DEFAULT,
+    );
+    const balance = await this.getWithdrawableBalance(memberId);
+    // Mirrors the gate (assertBalanceForKyc) + the createDiditSession APPROVED check:
+    // eligible to START a KYC request iff not already approved AND balance clears the min.
+    const isEligible = member.kycStatus !== 'APPROVED' && balance >= kycMinBalance;
+    return { ...member, kycMinBalance, isEligible };
   }
 
   // ---- KYC via Didit ---------------------------------------------------------
@@ -484,6 +515,7 @@ export class DisbursementService {
     });
     if (!member) throw new NotFoundException('Member not found');
     if (member.kycStatus === 'APPROVED') throw new BadRequestException('KYC sudah disetujui');
+    await this.assertBalanceForKyc(memberId);
 
     const session = await createSession(memberId);
     await prisma.member.update({

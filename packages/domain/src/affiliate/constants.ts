@@ -29,6 +29,12 @@ export const DISBURSEMENT_MIN_BALANCE = 15_000; // IDR — minimum withdrawable 
 export const DISBURSEMENT_FEE = 5_000; // IDR — flat platform fee per payout
 export const DISBURSEMENT_MIN_NET = 10_000; // IDR — net (balance - fee) must be strictly greater than this
 
+// Minimum withdrawable balance required before a member may REQUEST KYC (start a
+// verification session / submit manual KYC). Stops nil-balance accounts from
+// spamming verifications. Fallback default 0 = gate OFF; the live value lives in
+// app_settings `kyc.minBalance` (runtime-overridable, see seed-settings.ts).
+export const KYC_MIN_BALANCE_DEFAULT = 0; // IDR
+
 // AUTO-approval cap (legacy TBWithdraw::AMOUNT_MIN_NEED_APPROVAL was 10,000,000).
 // We pick a conservative default; runtime-overridable via app_settings
 // `disbursement.autoApproveMax`. A payout whose NET exceeds this always goes MANUAL.

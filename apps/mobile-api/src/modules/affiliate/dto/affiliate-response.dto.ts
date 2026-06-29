@@ -371,6 +371,21 @@ export class KycDto {
 
   @ApiPropertyOptional({ nullable: true, description: 'Reason when kycStatus is REJECTED.' })
   kycRejectedReason?: string | null;
+
+  @ApiProperty({
+    type: 'integer',
+    example: 55000,
+    description:
+      'Minimum withdrawable balance (IDR) required to request KYC (app_settings kyc.minBalance). 0 = gate off.',
+  })
+  kycMinBalance!: number;
+
+  @ApiProperty({
+    example: false,
+    description:
+      'Whether the member may start a KYC request now: kycStatus !== APPROVED AND withdrawableBalance >= kycMinBalance.',
+  })
+  isEligible!: boolean;
 }
 
 /** `POST /affiliate/me/kyc/token` — Didit verification session for the mobile SDK / webview. */
