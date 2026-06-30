@@ -569,8 +569,8 @@ export class AuthService {
         email: payload.email,
         name: payload.name,
         clientType,
-        // Affiliate attribution is accepted ONLY on the Google path. Apple
-        // (below) deliberately omits it.
+        // Affiliate attribution: bound only on first-time signup (create path),
+        // never on an already-existing account. Same handling on the Apple path.
         affiliateCode: dto.affiliateCode,
       });
     }
@@ -587,6 +587,7 @@ export class AuthService {
         email: payload.email,
         name: payload.name,
         clientType,
+        affiliateCode: dto.affiliateCode,
       });
     }
 
@@ -613,8 +614,8 @@ export class AuthService {
     name: string | null;
     clientType: ReturnType<typeof normalizeClientType>;
     // Inviter attribution. Applied ONLY on the create path (new account); every
-    // already-exists path leaves inviterId untouched. Caller only passes it for
-    // provider=google.
+    // already-exists path leaves inviterId untouched. Passed for both social
+    // providers (google + apple).
     affiliateCode?: string;
   }): Promise<TokenBundle> {
     const { provider, sub, name, clientType } = opts;
