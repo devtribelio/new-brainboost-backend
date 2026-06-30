@@ -23,10 +23,11 @@ export function registerCommerceListeners(): void {
       logger.error({ err, paymentId: e.paymentId }, '[commerce] enrollment grant failed'),
     );
 
-    // 2. Redeem voucher (atomic used++ on quota)
+    // 2. Redeem voucher (atomic used++ on quota, idempotent per order so a
+    //    redelivered webhook can't double-count — keyed on transactionId)
     if (e.voucherId) {
       await voucherService
-        .redeem(e.voucherId)
+        .redeem(e.voucherId, e.transactionId, e.paymentId)
         .catch((err) =>
           logger.error({ err, voucherId: e.voucherId }, '[commerce] voucher redeem failed'),
         );

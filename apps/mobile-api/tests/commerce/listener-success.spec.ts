@@ -77,6 +77,7 @@ describe('commerce.payment.success listener', () => {
     await prisma.courseEnrollment.deleteMany({ where: { memberId } });
     await prisma.memberAffiliator.deleteMany({ where: { programId } });
     await prisma.affiliateProgram.delete({ where: { id: programId } });
+    await prisma.voucherRedemption.deleteMany({ where: { voucherId } });
     await prisma.voucher.delete({ where: { id: voucherId } });
     await prisma.course.delete({ where: { id: courseId } });
     await prisma.product.delete({ where: { id: productId } });
