@@ -14,7 +14,7 @@
 | **B-2** idempotensi `original_transaction_id` | ✅ kode | Tabel baru `AffiliateAttributionClaim` `@@unique([provider, attributionKey])`. Ingest klaim 1× per purchase; re-settle (delete+rebuy/renewal/restore/burst) dapat enrollment tapi **tidak** bayar komisi. Race-proof via unique insert. `attributionKey = original_transaction_id ?? transaction_id`. |
 | **B-3** andalkan VISIT, buang sticky attribute | ✅ kode | Handler set `affiliatorCode: undefined`; attribusi murni dari `AffiliateVisit` (self-expiring, last-touch) → inviter. |
 | **B-4** guard tambahan (timestamp/cutoff) | ⏭️ skip | Tidak diperlukan setelah B-2+B-3. |
-| **B-5** per-product attribution | ✅ kode | `AffiliateVisit.productId` (nullable) + resolver 2-tier: visit produk-P → visit product-less (legacy/web) → inviter. Visit produk LAIN tak pernah match. Menutup leakage "klik link X → beli Y" + kasus multi-affiliate. Resolver dipakai IAP **dan** web checkout (keduanya kirim `productId`). |
+| **B-5** per-product attribution (STRICT) | ✅ kode | `AffiliateVisit.productId` (nullable) + resolver **strict**: hanya visit produk-P yang attribute; visit product-less **(NULL) maupun produk lain DIABAIKAN** → kalau tak ada → inviter. Menutup leakage "klik link X → beli Y", multi-affiliate, **dan** kebocoran product-less. Dipakai IAP **dan** web checkout. ⚠️ Butuh app M-4 (kirim `productCode`) — sampai itu, visit app product-less → tak attribute via visit (jatuh ke inviter). |
 | Migration apply (`prisma migrate deploy`) | ⏳ file siap, apply pending | 2 migration additive: `20260629120000_add_affiliate_attribution_claim` (kolom `commerce_transactions.attribution_key` + tabel `affiliate_attribution_claims`) **dan** `20260629130000_affiliate_visit_product_id` (kolom `affiliate_visits.product_id` + index). Belum di-apply ke DB. Re-copy `schema.prisma` ke `bb-legacy-resync` setelah apply. |
 | Data cleanup (VOID komisi nyasar) | ⏳ script siap, run pending | `pnpm void:stray-affiliate-commissions` (DRY-RUN default; `--apply` untuk void). Conservative: hanya void grup `PENDING` channel `revenuecat` yang TANPA inviter-ancestor sah DAN tanpa `AffiliateVisit` buyer→affiliator. Jalankan sebelum job `pending-to-balance`. Lihat section DATA CLEANUP. |
 | App M-1/M-2 (clear attribute RC) | ⏳ pending | Repo `brainboost-apps`. Tetap dianjurkan walau backend kini tak baca attribute. |
@@ -117,13 +117,12 @@ Pertimbangkan menolak attribusi komisi untuk event RC yang lebih tua dari cutoff
 
 Fix:
 - **Schema:** `affiliate_visits.product_id` (nullable) + index `(member_id, product_id, created_at)`.
-- **Resolver** (`attribution.service.ts`, dipakai IAP **dan** web checkout): tambah param `productId`, resolusi 2-tier:
-  1. visit terbaru yang **scoped ke produk P**,
-  2. kalau tak ada → visit **product-less** (legacy pre-B5 / web / program link),
-  3. else → null (engine fallback ke inviter).
-  Visit yang scoped ke produk **lain** tak pernah match → leak "klik X beli Y" tertutup, tier-1 selalu menang atas tier-2 walau tier-2 lebih baru.
-- **logVisit/logAttribution:** terima `productCode` (legacyId | code | slug, sama seperti route product detail) → resolve ke `Product.id` → simpan. Unknown/absent → product-less (tak menolak klik).
-- **Fallback decision:** dipilih **per-product → product-less → inviter** (bukan strict langsung-inviter), supaya visit lama/web yang belum punya product tidak kehilangan atribusi selama transisi.
+- **Resolver** (`attribution.service.ts`, dipakai IAP **dan** web checkout): tambah param `productId`, resolusi **STRICT**:
+  1. visit terbaru yang **scoped ke produk P** → affiliator itu;
+  2. tak ada → **null** → engine fallback ke inviter.
+  Visit **product-less (NULL)** dan visit produk **lain** **DIABAIKAN** (tidak dipakai sebagai fallback) → leak "klik X beli Y" **dan** kebocoran product-less tertutup total.
+- **logVisit/logAttribution:** terima `productCode` (legacyId | code | slug, sama seperti route product detail) → resolve ke `Product.id` → simpan. Unknown/absent → product-less (klik tetap dicatat, tapi **tak akan attribute** komisi di mode strict).
+- **Keputusan model (final):** **strict per-produk** — hanya link per-produk yang dapat komisi via visit. Tier-2 (fallback product-less) **dihapus**. ⚠️ **Urutan rollout:** strict ini mengandalkan app mengirim `productCode` (M-4). Sebelum M-4 ship+adopsi, visit app product-less → komisi affiliate via IAP/app jatuh ke inviter. Trade-off diterima (presisi > cakupan transisi).
 
 ---
 

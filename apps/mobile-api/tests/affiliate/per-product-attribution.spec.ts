@@ -2,11 +2,10 @@
  * B-5: per-product attribution in AttributionService.resolveOverrideAffiliatorMemberId.
  *
  * AffiliateVisit is per-member; a visit for product X must NOT attribute a purchase
- * of product Y (the "click link for X, buy Y" leak). Precedence per product P:
- *   tier 1 — most recent visit scoped to P
- *   tier 2 — most recent product-less visit (legacy/web/program link)
- *   else   — null (engine falls back to buyer inviter)
- * A visit scoped to a DIFFERENT product never matches.
+ * of product Y (the "click link for X, buy Y" leak). STRICT per product P:
+ *   - only a visit scoped to P attributes
+ *   - product-less visits (productId IS NULL) and other-product visits are IGNORED
+ *   - no match → null (engine falls back to buyer inviter)
  *
  * Requires a reachable Postgres test DB (DATABASE_URL).
  */
@@ -85,20 +84,20 @@ describe('AttributionService — per-product visit attribution (B-5)', () => {
     expect(ry).toBe(affY);
   });
 
-  it('falls back to a product-less visit when no product-specific one exists', async () => {
+  it('IGNORES a product-less visit (strict) — no product-specific visit → null', async () => {
     const productZ = await mkProduct();
-    await visit(affG, null);
+    await visit(affG, null); // product-less visit must NOT attribute under strict mode
     const r = await svc.resolveOverrideAffiliatorMemberId(buyer, undefined, productZ);
-    expect(r).toBe(affG); // tier 2
+    expect(r).toBeNull(); // → engine falls back to buyer inviter
   });
 
-  it('prefers the exact-product visit over a more recent product-less visit', async () => {
+  it('uses the exact-product visit even when a more recent product-less visit exists', async () => {
     const productW = await mkProduct();
     const affW = await mkMember();
-    // exact-product visit is OLDER; product-less visit is NEWER.
+    // exact-product visit is OLDER; product-less visit is NEWER (and is ignored).
     await visit(affW, productW, new Date(Date.now() - 60 * 60 * 1000));
     await visit(affG, null, new Date());
     const r = await svc.resolveOverrideAffiliatorMemberId(buyer, undefined, productW);
-    expect(r).toBe(affW); // tier 1 beats tier 2 regardless of recency
+    expect(r).toBe(affW); // product-less visit ignored; exact-product wins
   });
 });
