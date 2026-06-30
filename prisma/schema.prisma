@@ -1201,6 +1201,22 @@ model Voucher {
   @@map("vouchers")
 }
 
+/// Idempotency guard for voucher redemption. One row per order (CommerceTransaction)
+/// that consumed the voucher, so a redelivered `commerce.payment.success` (Xendit
+/// webhook retry / event re-emit) cannot double-increment `vouchers.used`. No FK —
+/// mirrors AffiliateAttributionClaim; the unique(transactionId) IS the guard. The
+/// first redeem for an order inserts here and bumps `used`; redelivery hits P2002 → no-op.
+model VoucherRedemption {
+  id            String   @id @default(uuid(7)) @db.Uuid
+  voucherId     String   @map("voucher_id") @db.Uuid
+  transactionId String   @unique @map("transaction_id") @db.Uuid // one redemption per order
+  paymentId     String?  @map("payment_id") @db.Uuid // audit: payment that triggered it
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@index([voucherId])
+  @@map("voucher_redemptions")
+}
+
 // ============================================================================
 // Admin (separate from Member — isolated admin panel auth)
 // ============================================================================

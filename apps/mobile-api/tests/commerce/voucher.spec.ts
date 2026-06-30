@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { VoucherService } from '@bb/domain/commerce/voucher.service';
 import { prisma } from '@bb/db';
@@ -16,6 +17,7 @@ describe('VoucherService', () => {
     exhausted: `T-VOUCH-EXHAUSTED-${ts}`,
     quotaOne: `T-VOUCH-RACE-${ts}`,
     cappedPercent: `T-VOUCH-CAP-${ts}`,
+    idempotent: `T-VOUCH-IDEM-${ts}`,
   };
 
   beforeAll(async () => {
@@ -76,11 +78,25 @@ describe('VoucherService', () => {
           maxAmount: 50_000,
           isActive: true,
         },
+        {
+          code: codes.idempotent,
+          type: 'AMOUNT',
+          value: 10_000,
+          isActive: true,
+          used: 0,
+        },
       ],
     });
   });
 
   afterAll(async () => {
+    const vs = await prisma.voucher.findMany({
+      where: { code: { in: Object.values(codes) } },
+      select: { id: true },
+    });
+    await prisma.voucherRedemption.deleteMany({
+      where: { voucherId: { in: vs.map((v) => v.id) } },
+    });
     await prisma.voucher.deleteMany({ where: { code: { in: Object.values(codes) } } });
     await prisma.product.deleteMany({ where: { id: { in: [productAId, productBId] } } });
     await prisma.$disconnect();
@@ -143,7 +159,11 @@ describe('VoucherService', () => {
   it('atomic redeem: only one of two parallel redeems succeeds when quota=1', async () => {
     const v = await prisma.voucher.findUnique({ where: { code: codes.quotaOne } });
     expect(v).toBeTruthy();
-    const [r1, r2] = await Promise.allSettled([service.redeem(v!.id), service.redeem(v!.id)]);
+    // Two DISTINCT orders racing for the last quota slot — exactly one wins.
+    const [r1, r2] = await Promise.allSettled([
+      service.redeem(v!.id, randomUUID()),
+      service.redeem(v!.id, randomUUID()),
+    ]);
     const ok = [r1, r2].filter((r) => r.status === 'fulfilled').length;
     const fail = [r1, r2].filter((r) => r.status === 'rejected').length;
     expect(ok).toBe(1);
@@ -151,5 +171,30 @@ describe('VoucherService', () => {
 
     const after = await prisma.voucher.findUnique({ where: { id: v!.id } });
     expect(after?.used).toBe(1);
+  });
+
+  it('idempotent redeem: redelivering the same order does not double-count used', async () => {
+    const v = await prisma.voucher.findUnique({ where: { code: codes.idempotent } });
+    expect(v).toBeTruthy();
+    const transactionId = randomUUID();
+    // First delivery redeems; the redelivered webhook for the SAME order is a no-op.
+    await service.redeem(v!.id, transactionId);
+    await service.redeem(v!.id, transactionId);
+    const after = await prisma.voucher.findUnique({ where: { id: v!.id } });
+    expect(after?.used).toBe(1);
+  });
+
+  it('idempotent redeem: concurrent redelivery of the same order increments used once', async () => {
+    const v = await prisma.voucher.findUnique({ where: { code: codes.idempotent } });
+    expect(v).toBeTruthy();
+    const before = (await prisma.voucher.findUnique({ where: { id: v!.id } }))!.used;
+    const transactionId = randomUUID();
+    // Two webhooks for the same order land at once — the unique slot serialises them.
+    await Promise.allSettled([
+      service.redeem(v!.id, transactionId),
+      service.redeem(v!.id, transactionId),
+    ]);
+    const after = await prisma.voucher.findUnique({ where: { id: v!.id } });
+    expect(after?.used).toBe(before + 1);
   });
 });
