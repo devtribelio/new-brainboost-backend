@@ -569,6 +569,9 @@ export class AuthService {
         email: payload.email,
         name: payload.name,
         clientType,
+        // Affiliate attribution is accepted ONLY on the Google path. Apple
+        // (below) deliberately omits it.
+        affiliateCode: dto.affiliateCode,
       });
     }
 
@@ -609,6 +612,10 @@ export class AuthService {
     email: string | null;
     name: string | null;
     clientType: ReturnType<typeof normalizeClientType>;
+    // Inviter attribution. Applied ONLY on the create path (new account); every
+    // already-exists path leaves inviterId untouched. Caller only passes it for
+    // provider=google.
+    affiliateCode?: string;
   }): Promise<TokenBundle> {
     const { provider, sub, name, clientType } = opts;
     const email = opts.email ? opts.email.trim().toLowerCase() : null;
@@ -651,6 +658,20 @@ export class AuthService {
     const memberCode = await this.generateUniqueMemberCode();
     const username = await this.deriveUniqueUsernameFromEmail(email ?? `${provider}${sub}`);
 
+    // Bind the inviter ONLY here, on first-time signup. Every already-exists
+    // path above returned before reaching this point, so an existing account's
+    // inviterId is never written — null stays null, set stays set. Mirrors
+    // register(): first 8 chars = inviter member code; a code matching no member
+    // is ignored (never aborts signup). Network suffix is not applied here.
+    let inviterId: string | undefined;
+    if (opts.affiliateCode) {
+      const inviter = await prisma.member.findUnique({
+        where: { affiliateCode: opts.affiliateCode.slice(0, 8) },
+        select: { id: true },
+      });
+      if (inviter) inviterId = inviter.id;
+    }
+
     try {
       const created = await prisma.member.create({
         data: {
@@ -663,6 +684,7 @@ export class AuthService {
           isEmailVerified: true,
           code: memberCode,
           affiliateCode: memberCode,
+          inviterId,
         },
       });
       await this.autoJoinCommunityNetworks(created.id);
