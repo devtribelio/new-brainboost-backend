@@ -49,6 +49,15 @@ export class LoginDto {
   @IsNotEmpty()
   social_token?: string;
 
+  @ApiPropertyOptional({
+    example: 'JD000001-42',
+    description:
+      'Affiliate code. Honored ONLY for grant_type=social with provider=google, and ONLY on first-time signup (new account) — binds the inviter. First 8 chars = inviter member code (network suffix ignored). Silently ignored when the account already exists.',
+  })
+  @IsOptional()
+  @IsString()
+  affiliateCode?: string;
+
   @ApiPropertyOptional({ example: 'brainboost-mobile' })
   @IsOptional()
   @IsString()

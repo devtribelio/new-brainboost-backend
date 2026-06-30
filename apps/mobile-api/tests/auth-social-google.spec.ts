@@ -259,4 +259,81 @@ describe('auth social google grant', () => {
     });
     expect(res.status).toBe(400);
   });
+
+  async function registerInviter(prefix: string): Promise<{ id: string; affiliateCode: string }> {
+    const email = trackedEmail(prefix);
+    const reg = await request(app)
+      .post('/api/member/auth/register')
+      .send({ email, password: 'secret123', fullName: 'Inviter' });
+    expect([200, 201]).toContain(reg.status);
+    const inviter = await prisma.member.findUnique({
+      where: { email },
+      select: { id: true, affiliateCode: true },
+    });
+    expect(inviter!.affiliateCode).toBeTruthy();
+    return { id: inviter!.id, affiliateCode: inviter!.affiliateCode! };
+  }
+
+  it('new google signup with affiliateCode binds inviterId (create path only)', async () => {
+    const inviter = await registerInviter('aff-inviter');
+
+    const email = trackedEmail('aff-invitee');
+    const sub = `gs-${Date.now()}-aff`;
+    setGoogleResponse({ sub, email, email_verified: true, name: 'Invitee' });
+    const res = await tokenRequest({
+      grant_type: 'social',
+      provider: 'google',
+      social_token: 'fake.id.token',
+      affiliateCode: inviter.affiliateCode,
+    });
+    expect(res.status).toBe(200);
+
+    const created = await prisma.member.findUnique({ where: { email } });
+    expect(created!.inviterId).toBe(inviter.id);
+  });
+
+  it('affiliateCode on an already-existing account is ignored (inviterId never updated)', async () => {
+    const inviter = await registerInviter('aff-inviter2');
+
+    const email = trackedEmail('aff-existing');
+    const sub = `gs-${Date.now()}-exist`;
+
+    // First signup WITHOUT affiliateCode → inviterId stays null.
+    setGoogleResponse({ sub, email, email_verified: true, name: 'Existing' });
+    const first = await tokenRequest({
+      grant_type: 'social',
+      provider: 'google',
+      social_token: 'fake.id.token',
+    });
+    expect(first.status).toBe(200);
+    const before = await prisma.member.findUnique({ where: { email } });
+    expect(before!.inviterId).toBeNull();
+
+    // Second login (fast-path via googleSub) WITH affiliateCode → must NOT update.
+    setGoogleResponse({ sub, email, email_verified: true, name: 'Existing' });
+    const second = await tokenRequest({
+      grant_type: 'social',
+      provider: 'google',
+      social_token: 'fake.id.token',
+      affiliateCode: inviter.affiliateCode,
+    });
+    expect(second.status).toBe(200);
+    const after = await prisma.member.findUnique({ where: { email } });
+    expect(after!.inviterId).toBeNull();
+  });
+
+  it('unknown affiliateCode is ignored — signup succeeds with inviterId null', async () => {
+    const email = trackedEmail('aff-bad');
+    const sub = `gs-${Date.now()}-badaff`;
+    setGoogleResponse({ sub, email, email_verified: true, name: 'Bad Aff' });
+    const res = await tokenRequest({
+      grant_type: 'social',
+      provider: 'google',
+      social_token: 'fake.id.token',
+      affiliateCode: 'ZZZZZZZZ',
+    });
+    expect(res.status).toBe(200);
+    const created = await prisma.member.findUnique({ where: { email } });
+    expect(created!.inviterId).toBeNull();
+  });
 });
