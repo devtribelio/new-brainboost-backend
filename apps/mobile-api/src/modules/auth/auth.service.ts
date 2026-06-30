@@ -585,7 +585,10 @@ export class AuthService {
         provider: 'apple',
         sub: payload.sub,
         email: payload.email,
-        name: payload.name,
+        // payload.name is always null for Apple (the identity token never carries
+        // it). Apple delivers the name only once, in the client-side authorization
+        // response, so the mobile app forwards it as social_name on first sign-in.
+        name: dto.social_name?.trim() || payload.name,
         clientType,
         affiliateCode: dto.affiliateCode,
       });
