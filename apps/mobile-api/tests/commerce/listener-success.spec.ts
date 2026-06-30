@@ -179,6 +179,43 @@ describe('commerce.payment.success listener', () => {
     expect(enrollments).toHaveLength(1);
   });
 
+  it('grants enrollment for a mini_course product (regression: type gate dropped mini_course)', async () => {
+    // Regression for the silent-skip bug: grantCourseEnrollment used to gate on
+    // `type === 'course'`, so mini_course purchases committed a commission but
+    // never created the enrollment. Fix keys on the linked course row instead.
+    const miniProduct = await prisma.product.create({
+      data: { type: 'mini_course', title: `Mini ${uid()}`, price: 100_000 },
+    });
+    const miniCourse = await prisma.course.create({
+      data: { productId: miniProduct.id, durationMin: 30 },
+    });
+    try {
+      const paymentId = randomUUID();
+      commerceEvents.emit('commerce.payment.success', {
+        paymentId,
+        transactionId: randomUUID(),
+        memberId,
+        productId: miniProduct.id,
+        amount: 100_000,
+        voucherAmount: 0,
+        voucherId: null,
+        affiliatorId: null,
+        programId: null,
+      });
+      await wait(150);
+
+      const enrollment = await prisma.courseEnrollment.findUnique({
+        where: { memberId_courseId: { memberId, courseId: miniCourse.id } },
+      });
+      expect(enrollment).not.toBeNull();
+    } finally {
+      await prisma.courseEnrollment.deleteMany({ where: { courseId: miniCourse.id } });
+      await prisma.affiliateCommission.deleteMany({ where: { productId: miniProduct.id } });
+      await prisma.course.delete({ where: { id: miniCourse.id } });
+      await prisma.product.delete({ where: { id: miniProduct.id } });
+    }
+  });
+
   it('no programId: still commissions the buyer inviter (Option B — program optional)', async () => {
     const paymentId = randomUUID();
     const transactionId = randomUUID();

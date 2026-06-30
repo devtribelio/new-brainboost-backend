@@ -207,7 +207,12 @@ export class ProductService {
   ): Promise<Set<string>> {
     const set = new Set<string>();
     if (!memberId) return set;
-    const courseProductIds = rows.filter((r) => r.type === 'course').map((r) => r.id);
+    // Course-backed types (course + mini_course) carry enrollment; gating on
+    // 'course' alone hid owned mini_course products from the list. Enrollment
+    // existence is the real ownership signal — the join below filters anyway.
+    const courseProductIds = rows
+      .filter((r) => r.type === 'course' || r.type === 'mini_course')
+      .map((r) => r.id);
     if (courseProductIds.length === 0) return set;
     const enrollments = await prisma.courseEnrollment.findMany({
       where: { memberId, course: { productId: { in: courseProductIds } } },
