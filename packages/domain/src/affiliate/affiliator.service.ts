@@ -311,9 +311,22 @@ export class AffiliatorService {
     return agg._sum.amount ?? 0;
   }
 
-  async listCommissions(memberId: string, filter: { status?: string; from?: Date; to?: Date }, page: number, perPage: number) {
+  /**
+   * Commission history for a member — "komisi yang didapatkan dari mana saja".
+   * Each row is enriched with its source: the product (title + thumbnail),
+   * the buyer (name + avatar), the program, plus the raw channel/source/level.
+   * `buyerMemberId` is a scalar (no Prisma relation) so buyers are resolved with
+   * one batch `Member` lookup per page and stitched in.
+   */
+  async listCommissions(
+    memberId: string,
+    filter: { status?: string; from?: Date; to?: Date; productId?: string },
+    page: number,
+    perPage: number,
+  ) {
     const where: Record<string, unknown> = { recipientId: memberId };
     if (filter.status) where.status = filter.status;
+    if (filter.productId) where.productId = filter.productId;
     if (filter.from || filter.to) {
       where.createdAt = {
         ...(filter.from ? { gte: filter.from } : {}),
@@ -327,11 +340,29 @@ export class AffiliatorService {
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * perPage,
         take: perPage,
-        include: { program: { select: { code: true, name: true } } },
+        include: {
+          program: { select: { code: true, name: true } },
+          product: { select: { id: true, title: true, thumbnail: true } },
+        },
       }),
       prisma.affiliateCommission.count({ where }),
     ]);
 
-    return { rows, total };
+    // Resolve buyers in one batch — buyerMemberId has no relation in the schema.
+    const buyerIds = [...new Set(rows.map((r) => r.buyerMemberId).filter((id): id is string => !!id))];
+    const buyers = buyerIds.length
+      ? await prisma.member.findMany({
+          where: { id: { in: buyerIds } },
+          select: { id: true, fullName: true, avatarUrl: true, code: true },
+        })
+      : [];
+    const buyerById = new Map(buyers.map((b) => [b.id, b]));
+
+    const enriched = rows.map((r) => ({
+      ...r,
+      buyer: r.buyerMemberId ? buyerById.get(r.buyerMemberId) ?? null : null,
+    }));
+
+    return { rows: enriched, total };
   }
 }

@@ -109,6 +109,33 @@ export class AffiliateCommissionProgramDto {
   name!: string;
 }
 
+/** Product the commission was earned on (the "dari produk apa"). */
+export class AffiliateCommissionProductDto {
+  @ApiProperty({ format: 'uuid' })
+  id!: string;
+
+  @ApiProperty({ example: 'Mastery Trading 2026' })
+  title!: string;
+
+  @ApiPropertyOptional({ nullable: true, description: 'Product thumbnail URL.' })
+  thumbnail?: string | null;
+}
+
+/** Buyer whose purchase generated the commission (the "dari pembeli siapa"). */
+export class AffiliateCommissionBuyerDto {
+  @ApiProperty({ format: 'uuid' })
+  id!: string;
+
+  @ApiPropertyOptional({ nullable: true, example: 'Budi Santoso' })
+  fullName?: string | null;
+
+  @ApiPropertyOptional({ nullable: true, description: 'Buyer avatar URL.' })
+  avatarUrl?: string | null;
+
+  @ApiPropertyOptional({ nullable: true, example: 'X7K9Q2', description: 'Buyer member code.' })
+  code?: string | null;
+}
+
 /** `GET /affiliate/me/commissions` — one commission ledger row. */
 export class AffiliateCommissionDto {
   @ApiProperty({ format: 'uuid' })
@@ -174,8 +201,15 @@ export class AffiliateCommissionDto {
   @ApiPropertyOptional({ nullable: true })
   voidedReason?: string | null;
 
-  @ApiPropertyOptional({ nullable: true, enum: ['DEEPLINK', 'WEB', 'INSTALL_REFERRER'] })
+  @ApiPropertyOptional({ nullable: true, enum: ['DEEPLINK', 'WEB', 'INSTALL_REFERRER'], description: 'Acquisition source of the visit that won attribution.' })
   source?: string | null;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    example: 'xendit',
+    description: 'Payment channel of the sourcing transaction: xendit | revenuecat | scalev | lynkid | null (legacy/web).',
+  })
+  channel?: string | null;
 
   @ApiPropertyOptional({ nullable: true, format: 'uuid' })
   attributionVisitId?: string | null;
@@ -188,6 +222,12 @@ export class AffiliateCommissionDto {
 
   @ApiPropertyOptional({ nullable: true, type: () => AffiliateCommissionProgramDto })
   program?: AffiliateCommissionProgramDto | null;
+
+  @ApiPropertyOptional({ nullable: true, type: () => AffiliateCommissionProductDto, description: 'Product the commission was earned on.' })
+  product?: AffiliateCommissionProductDto | null;
+
+  @ApiPropertyOptional({ nullable: true, type: () => AffiliateCommissionBuyerDto, description: 'Buyer whose purchase generated this commission.' })
+  buyer?: AffiliateCommissionBuyerDto | null;
 }
 
 /** `GET /affiliate/programs` — one active program. */
