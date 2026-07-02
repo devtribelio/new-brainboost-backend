@@ -12,6 +12,10 @@
   "scripts": {
     "dev:mobile": "pnpm -F @bb/mobile-api dev",
     "relay:comms": "tsx --conditions=development apps/mobile-api/src/workers/comms-relay.ts",
+    "resync": "tsx --conditions=development apps/resync-worker/src/run.ts",
+    "resync:worker": "tsx --conditions=development apps/resync-worker/src/worker.ts",
+    "resync:seed-redirect": "tsx --conditions=development apps/resync-worker/src/seed-redirect.ts",
+    "resync:unlock": "tsx --conditions=development apps/resync-worker/src/unlock.ts",
     "build:packages": "pnpm -r --filter \"./packages/*\" build",
     "build": "pnpm -r build",
     "typecheck": "tsc -b",
