@@ -244,7 +244,9 @@ export class PurchaseIngestService {
     // later re-purchase re-creates the enrollment via the success listener.
     // Idempotent: deleteMany is a no-op if already revoked.
     let revokedEnrollments = 0;
-    if (tx.product?.type === 'course' && tx.product.course) {
+    // Revoke for any course-backed product (course + mini_course). Mirror of the
+    // grant gate in payment-success.listener — key on the linked course row, not type.
+    if (tx.product?.course) {
       const del = await prisma.courseEnrollment.deleteMany({
         where: { memberId: tx.memberId, courseId: tx.product.course.id },
       });

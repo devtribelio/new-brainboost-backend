@@ -82,10 +82,13 @@ export class AffiliateController {
   };
 
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'List my commissions (paginated, optional status/from/to filter)' })
+  @ApiOperation({
+    summary: 'Commission history (paginated) — enriched with product, buyer & channel ("dari mana saja")',
+  })
   @ApiQuery({ name: 'page', type: 'integer', required: false, example: 1 })
   @ApiQuery({ name: 'perPage', type: 'integer', required: false, example: 20, description: 'Max 100.' })
   @ApiQuery({ name: 'status', type: 'string', required: false, description: 'PENDING | BALANCE | VOIDED' })
+  @ApiQuery({ name: 'productId', type: 'string', required: false, description: 'Filter by source product (UUID).' })
   @ApiQuery({ name: 'from', type: 'string', required: false, description: 'ISO date — createdAt lower bound.' })
   @ApiQuery({ name: 'to', type: 'string', required: false, description: 'ISO date — createdAt upper bound.' })
   @ApiResponse({ status: 200, type: () => AffiliateCommissionDto, isArray: true, envelope: 'paginated' })
@@ -94,9 +97,15 @@ export class AffiliateController {
     const page = Math.max(1, Number(req.query.page) || 1);
     const perPage = Math.min(100, Math.max(1, Number(req.query.perPage) || 20));
     const status = typeof req.query.status === 'string' ? req.query.status : undefined;
+    const productId = typeof req.query.productId === 'string' ? req.query.productId : undefined;
     const from = typeof req.query.from === 'string' ? new Date(req.query.from) : undefined;
     const to = typeof req.query.to === 'string' ? new Date(req.query.to) : undefined;
-    const { rows, total } = await this.affiliatorService.listCommissions(req.user.id, { status, from, to }, page, perPage);
+    const { rows, total } = await this.affiliatorService.listCommissions(
+      req.user.id,
+      { status, from, to, productId },
+      page,
+      perPage,
+    );
     return okPaginated(res, rows, { page, perPage, total });
   };
 

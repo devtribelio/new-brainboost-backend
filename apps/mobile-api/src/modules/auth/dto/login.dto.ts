@@ -49,6 +49,24 @@ export class LoginDto {
   @IsNotEmpty()
   social_token?: string;
 
+  @ApiPropertyOptional({
+    example: 'John Doe',
+    description:
+      "Display name from the social provider. Required for Apple on first sign-in: Apple's identity token never carries the name and only delivers it once (in the native authorization response), so the client must forward it here. Used ONLY on first-time signup (new account); ignored when the account already exists.",
+  })
+  @IsOptional()
+  @IsString()
+  social_name?: string;
+
+  @ApiPropertyOptional({
+    example: 'JD000001-42',
+    description:
+      'Affiliate code. Honored ONLY for grant_type=social (provider=google or apple), and ONLY on first-time signup (new account) — binds the inviter. First 8 chars = inviter member code (network suffix ignored). Silently ignored when the account already exists.',
+  })
+  @IsOptional()
+  @IsString()
+  affiliateCode?: string;
+
   @ApiPropertyOptional({ example: 'brainboost-mobile' })
   @IsOptional()
   @IsString()

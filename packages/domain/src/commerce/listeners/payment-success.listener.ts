@@ -23,10 +23,11 @@ export function registerCommerceListeners(): void {
       logger.error({ err, paymentId: e.paymentId }, '[commerce] enrollment grant failed'),
     );
 
-    // 2. Redeem voucher (atomic used++ on quota)
+    // 2. Redeem voucher (atomic used++ on quota, idempotent per order so a
+    //    redelivered webhook can't double-count — keyed on transactionId)
     if (e.voucherId) {
       await voucherService
-        .redeem(e.voucherId)
+        .redeem(e.voucherId, e.transactionId, e.paymentId)
         .catch((err) =>
           logger.error({ err, voucherId: e.voucherId }, '[commerce] voucher redeem failed'),
         );
@@ -68,7 +69,12 @@ async function grantCourseEnrollment(memberId: string, productId: string): Promi
     where: { id: productId },
     select: { id: true, type: true, course: { select: { id: true } } },
   });
-  if (!product?.course || product.type !== 'course') return;
+  // A linked `course` row is the single proof a product is enrollable — covers
+  // both `course` and `mini_course` (and any future course-backed type). The old
+  // `type === 'course'` gate silently dropped mini_course purchases: commission
+  // committed but enrollment never granted (xendit + revenuecat alike, since both
+  // converge on this event). Keying on `product.course` closes that leak.
+  if (!product?.course) return;
   // createMany + skipDuplicates: idempotent without throwing on the
   // (memberId, courseId) unique. `create`+catch worked but Prisma still logs
   // the swallowed P2002 at error level (prisma:error noise on every re-purchase

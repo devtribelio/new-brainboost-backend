@@ -9,10 +9,14 @@ import { AFFILIATE_COOKIE_DAYS_DEFAULT } from './constants';
  * Precedence:
  *   1. explicit affiliate code for THIS purchase (web cookie / app deeplink param / provider metadata)
  *   2. most-recent AffiliateVisit within the configurable window (app_settings: affiliate.cookieDays).
- *      Per-product (B-5): when `productId` is given, an exact-product visit wins; only when none
- *      exists do we fall back to a product-less visit (legacy/web/program link). A visit scoped to
- *      a DIFFERENT product never attributes — that closes the "click link for X, buy Y" leakage.
+ *      STRICT per-product (B-5): when `productId` is given, ONLY a visit scoped to that exact product
+ *      attributes. Product-less visits (productId IS NULL) and visits for a DIFFERENT product are
+ *      ignored — closing both the "click link for X, buy Y" leak and the product-less last-touch leak.
  *   3. null → engine then falls back to the buyer's permanent inviterId
+ *
+ * ROLLOUT NOTE: strict mode requires the app to send `productCode` on visits (M-4). Until that
+ * ships+adopts, app visits are product-less → they will NOT attribute via visit and fall through
+ * to the buyer's inviter. This was an explicit product decision (precision over transition coverage).
  */
 export class AttributionService {
   async resolveOverrideAffiliatorMemberId(
@@ -45,17 +49,16 @@ export class AttributionService {
     };
 
     if (productId !== undefined && productId !== null) {
-      // Tier 1: a visit scoped to THIS product (B-5 precise attribution).
-      const exact = await pickVisit({ productId });
-      if (exact) return exact;
-      // Tier 2: a product-less visit (legacy pre-B5, or web/program link with no
-      // product). NOT a different-product visit — those are excluded by tier 1's filter.
-      const generic = await pickVisit({ productId: null });
-      if (generic) return generic;
-      return null;
+      // STRICT per-product (B-5): ONLY a visit scoped to THIS product attributes.
+      // Product-less visits (productId IS NULL — legacy pre-B5, web/program links,
+      // or app builds that don't yet send productCode) and other-product visits are
+      // intentionally IGNORED. No match → null → engine falls back to buyer inviter.
+      return pickVisit({ productId });
     }
 
-    // No product context (caller can't supply one) → legacy behavior: latest visit of any product.
+    // No product context at all (caller didn't supply productId) → latest visit of
+    // any product. Both production callers (IAP ingest + web checkout) DO pass
+    // productId, so this is a defensive fallback only.
     return pickVisit({});
   }
 }

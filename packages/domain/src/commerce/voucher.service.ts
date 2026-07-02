@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { prisma } from '@bb/db';
 import { BadRequestException } from '@bb/common/exceptions';
 
@@ -43,10 +44,28 @@ export class VoucherService {
   }
 
   /**
-   * Atomic redeem — increments `used` if quota still available. Throws if exhausted.
-   * Called by `OnCommercePaymentSuccess` listener (P5).
+   * Atomic + idempotent redeem. Claims a per-order slot (`voucher_redemptions`,
+   * unique `transactionId`) first, then increments `used` under the quota/window
+   * guard. A redelivered `commerce.payment.success` (Xendit webhook retry / event
+   * re-emit) re-hits the unique slot → P2002 → silent no-op, so `used` is never
+   * double-counted. Distinct orders racing for the last quota slot still resolve to
+   * exactly one winner via the increment guard. Called by `OnCommercePaymentSuccess`
+   * listener (P5).
    */
-  async redeem(voucherId: string): Promise<void> {
+  async redeem(voucherId: string, transactionId: string, paymentId?: string | null): Promise<void> {
+    // 1. Idempotency claim — first redeem for this order wins; redelivery is a no-op.
+    try {
+      await prisma.voucherRedemption.create({
+        data: { voucherId, transactionId, paymentId: paymentId ?? null },
+      });
+    } catch (e) {
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+        return; // already redeemed for this order — idempotent
+      }
+      throw e;
+    }
+
+    // 2. Atomic counter increment with quota/window guard.
     const now = new Date();
     const updated = await prisma.$executeRaw`
       UPDATE vouchers
@@ -58,6 +77,9 @@ export class VoucherService {
         AND (ends_at IS NULL OR ends_at > ${now})
     `;
     if (updated === 0) {
+      // Voucher no longer redeemable — roll back the claim so this order isn't left
+      // with a slot it never paid for (invariant: a claim row ⇒ `used` was bumped).
+      await prisma.voucherRedemption.delete({ where: { transactionId } }).catch(() => {});
       throw new BadRequestException('Voucher exhausted or no longer redeemable');
     }
   }
