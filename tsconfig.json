@@ -4,8 +4,6 @@
     { "path": "packages/db" },
     { "path": "packages/common" },
     { "path": "packages/domain" },
-    { "path": "apps/mobile-api" },
-    { "path": "apps/admin-ejs" },
-    { "path": "apps/backoffice-api" }
+    { "path": "apps/mobile-api" }
   ]
 }
