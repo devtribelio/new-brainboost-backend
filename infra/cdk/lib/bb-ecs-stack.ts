@@ -83,6 +83,15 @@ export class BbEcsStack extends cdk.Stack {
       // CORS allowlist (mis. https://shop.brainboost.id) — value di Secrets Manager. Empty = permissive.
       CORS_ALLOWED_ORIGINS: sm('CORS_ALLOWED_ORIGINS'),
       CORS_CREDENTIALS: sm('CORS_CREDENTIALS'),
+
+      // Tester fixed-OTP bypass (App Review hits PROD → harus nyala di prod).
+      // Diamankan kill-switch (TEST_ACCOUNT_ENABLED) + whitelist exact-match
+      // (TEST_ACCOUNT_IDENTIFIERS). testAccountConfig() baca LIVE per-request. Semua
+      // optional di env.ts (default OFF), tapi di-reference sbg secret → 3 key ini
+      // WAJIB ada di bb/prod/app (sudah diverifikasi). Spec: docs/test-account.md.
+      TEST_ACCOUNT_ENABLED: sm('TEST_ACCOUNT_ENABLED'),
+      TEST_ACCOUNT_OTP_CODE: sm('TEST_ACCOUNT_OTP_CODE'),
+      TEST_ACCOUNT_IDENTIFIERS: sm('TEST_ACCOUNT_IDENTIFIERS'),
     };
     const env: Record<string, string> = {
       NODE_ENV: 'production',
