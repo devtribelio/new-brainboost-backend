@@ -14,13 +14,14 @@ into the new Postgres, for the **transition period** where legacy is still writt
 
 ## 0. Implementation status (2026-06-24) — BUILT & VALIDATED on bb_trial
 
-> **Code lives in the SEPARATE repo `bb-legacy-resync`** (sibling dir), not here — it's a
-> throwaway transition tool, retired after cutover. This repo stays the **schema owner**:
-> the `sync_state`/`member_redirect` tables + `members.legacy_synced_at` column (migration
-> `20260624120000_add_resync_tables`) live here; `bb-legacy-resync` copies `schema.prisma`
-> + `phone.util` to generate its client and never migrates. This doc (design + business
-> rules) stays here as the spec. Paths below like `scripts/resync/*` now map to
-> `bb-legacy-resync/src/*`.
+> **Code lives in `apps/resync-worker/`** (a throwaway transition tool, retired after
+> cutover — delete the app dir + the four `resync*` root scripts). It was briefly a
+> standalone sibling repo `bb-legacy-resync` (now archived) but was folded back in so it
+> consumes the root `@prisma/client` + `@bb/common/utils/phone.util` directly — **no
+> schema/util copy, no drift**. The `sync_state`/`member_redirect` tables +
+> `members.legacy_synced_at` column (migration `20260624120000_add_resync_tables`) are part
+> of the root schema. Run from repo root: `pnpm resync[:worker|:seed-redirect|:unlock]`.
+> Paths below like `scripts/resync/*` now map to `apps/resync-worker/src/*`.
 
 All 7 syncers implemented and validated end-to-end:
 - Schema/migration deployed: `members.legacy_synced_at`, `sync_state`, `member_redirect`.
