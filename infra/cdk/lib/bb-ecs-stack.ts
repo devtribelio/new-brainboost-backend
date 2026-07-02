@@ -45,6 +45,7 @@ export class BbEcsStack extends cdk.Stack {
       S3_PUBLIC_BASE_URL: sm('S3_PUBLIC_BASE_URL'),   // URL publik file (s3-storage.service)
       BASE_URL: sm('BASE_URL'),                        // domain prod (default env.ts = localhost → WAJIB override)
       MEDIA_TOKEN_SECRET: sm('MEDIA_TOKEN_SECRET'),
+      MEDIA_MODE: sm('MEDIA_MODE'),                    // 'proxy' | 'signed' — media serving mode (env.ts default 'proxy')
       SQS_COMMS_URGENT_URL: sm('SQS_COMMS_URGENT_URL'),
       SQS_COMMS_NORMAL_URL: sm('SQS_COMMS_NORMAL_URL'),
       // --- VENDOR (nama key sudah dicocokkan ke env.ts) ---
