@@ -41,9 +41,11 @@ Operational instructions for working on this repo. Keep responses short; read de
 > **pnpm monorepo** (ADR-0001, Accepted). The old single `src/` tree was split into
 > shared `packages/*` + deployable `apps/*`. Repo dir + remote stay
 > `new-brainboost-backend` (rename to `bb-platform` deferred). `node-linker=hoisted`
-> (`.npmrc`). Dev: `pnpm dev:mobile` / `dev:backoffice` / `dev:admin` (tsx
-> `--conditions=development` → resolves `@bb/*` to package source). Prod build: `tsup`
-> per app (bundles `@/*` + `@bb/*`). Tests: `pnpm test` (vitest workspace, real Postgres).
+> (`.npmrc`). Dev: `pnpm dev:mobile` (tsx `--conditions=development` → resolves `@bb/*`
+> to package source). Prod build: `tsup` per app (bundles `@/*` + `@bb/*`).
+> Tests: `pnpm test` (vitest workspace, real Postgres).
+> **`apps/backoffice-api` + `apps/admin-ejs` REMOVED 2026-07** (never deployed;
+> recoverable from git history — branch `feat/voucher`, pre-removal).
 
 ```
 packages/
@@ -58,8 +60,7 @@ apps/
   mobile-api/     :3000    # member-facing API. app.ts/main.ts/core/register-modules +
                            #   modules/<feature>/{module,routes,controller,dto,serializer}.
                            #   service layer of shared features lives in @bb/domain.
-  backoffice-api/ :3001    # JSON product-ops API (scaffold; see backoffice-port-plan.md)
-  admin-ejs/      :3002    # EJS internal sysadmin (views/, public/) + modules/admin
+  notification-worker/     # background notification/push worker
 prisma/                    # SINGLE source of truth — schema.prisma (UUID v7, legacyId Int?),
                            #   migrations/, seeds/  (root-level, shared by all apps)
 tests/setup.ts             # shared vitest setup; specs live in apps/*/tests/
@@ -72,8 +73,8 @@ and register it in that app's `core/register-modules.ts`.
 ### Legacy → New module map
 
 > Path note (post ADR-0001): `src/modules/<feature>/` in the rows below now lives at
-> **`apps/mobile-api/src/modules/<feature>/`**; `src/modules/admin/` → **`apps/admin-ejs/`**;
-> `src/modules/backoffice/` → **`apps/backoffice-api/`**. Service/rule layer of
+> **`apps/mobile-api/src/modules/<feature>/`**; `src/modules/admin/` → `apps/admin-ejs/` and
+> `src/modules/backoffice/` → `apps/backoffice-api/` (both apps REMOVED 2026-07). Service/rule layer of
 > commerce/affiliate/notification + post/comment services moved to **`packages/domain/`**;
 > `src/common/*` + `src/config/{env,logger}` → **`packages/common/`**; prisma client →
 > **`packages/db/`**.
@@ -245,9 +246,9 @@ Module status (one-line summary; details in `docs/rewrite-progress.md`):
 - [x] network — CRUD, member list (empty-input lists-all parity)
 - [x] notification — list, read, producer (commerce/post/comment/like/network), FCM v1 push (fire-and-forget), mute. Pending: FCM live credentials + manual push QA. RabbitMQ outbox deferred (see `docs/notification-port.md §12`).
 - [x] report — submit
-- [x] admin — auth, dashboard, CRUD scaffolding via `crud-factory` (EJS internal sysadmin)
+- [x] admin — was done (EJS internal sysadmin), but `apps/admin-ejs` REMOVED 2026-07 (recover from git history if needed)
 - [x] commerce / purchase — Xendit-only (CC + VA + eWallet), 2-step checkout→payment, voucher bypass, webhook + cron expire, event-driven side effects (enrollment + affiliate commission + voucher redeem). See `docs/commerce-port.md`. Pending: manual Xendit sandbox QA
-- [ ] backoffice — JSON-only product-ops API under `/api/backoffice/*` (port of legacy Tribelio admin + Oracle methods). 6-sprint plan in `docs/backoffice-port-plan.md`. Distinct from `admin` (which is EJS-only). NOT STARTED
+- [ ] backoffice — `apps/backoffice-api` scaffold REMOVED 2026-07 (was never started). Plan docs kept: `docs/backoffice-port-plan.md` + `docs/backoffice-port/`
 - [ ] disbursement — payout to bank/e-wallet (NOT STARTED — folded into backoffice sprint 2)
 - [ ] chat / broadcast — drop or defer
 - [ ] certificate — drop or defer

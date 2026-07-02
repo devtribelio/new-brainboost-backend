@@ -91,8 +91,7 @@ export class BbEcsStack extends cdk.Stack {
         ecr.Repository.fromRepositoryName(this, `${repo}Repo`, `bb/${repo}`), props.imageTag);
     const mobileApiImg = img('mobile-api');   // dipakai 3×: api, comms-relay, cron
     const commsImg = img('bb-comms');
-    // backoffice-api (skeleton kosong) & admin-ejs (panel admin, belum dibutuhin) SENGAJA di-skip.
-    // Image-nya tetap ada di ECR; tinggal tambah service-nya nanti kalau perlu.
+    // backoffice-api & admin-ejs sudah DIHAPUS dari monorepo (2026-07) — tidak ada service-nya di sini.
 
     // === Task role (perm runtime: SQS) ===
     const taskRole = new iam.Role(this, 'TaskRole', {

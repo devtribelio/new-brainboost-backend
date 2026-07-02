@@ -35,8 +35,6 @@ COPY packages/db/package.json        packages/db/
 COPY packages/common/package.json    packages/common/
 COPY packages/domain/package.json    packages/domain/
 COPY apps/mobile-api/package.json    apps/mobile-api/
-COPY apps/backoffice-api/package.json apps/backoffice-api/
-COPY apps/admin-ejs/package.json     apps/admin-ejs/
 RUN pnpm install --frozen-lockfile
 
 # 2) Source + build. prisma generate writes node_modules/.prisma/client.
