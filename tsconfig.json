@@ -4,6 +4,7 @@
     { "path": "packages/db" },
     { "path": "packages/common" },
     { "path": "packages/domain" },
-    { "path": "apps/mobile-api" }
+    { "path": "apps/mobile-api" },
+    { "path": "apps/resync-worker" }
   ]
 }
