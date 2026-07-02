@@ -13,4 +13,7 @@ new BbEcsStack(app, 'BbEcsStack', {
   appSecretName: app.node.tryGetContext('appSecretName') ?? 'bb/prod/app',
   rdsSecurityGroupId: app.node.tryGetContext('rdsSecurityGroupId'),
   certificateArn: app.node.tryGetContext('certificateArn') || undefined,
+  // Resync worker: off unless `-c resyncEnabled=true`. resyncImageTag defaults to imageTag.
+  resyncEnabled: app.node.tryGetContext('resyncEnabled') === 'true',
+  resyncImageTag: app.node.tryGetContext('resyncImageTag') || undefined,
 });

@@ -15,6 +15,11 @@ export interface BbEcsStackProps extends cdk.StackProps {
   appSecretName: string;       // Secrets Manager secret (JSON) berisi env: DATABASE_URL, SQS_*, vendor creds
   rdsSecurityGroupId: string;  // bb-sg-rds — biar Fargate boleh nyolok RDS:5432
   certificateArn?: string;     // ACM cert utk HTTPS:443 (opsional; tanpa ini jalan di HTTP:80)
+  // Resync worker (throwaway transition tool). Own image + tag → tidak lockstep
+  // dengan imageTag mobile-api. `resyncEnabled=false` (default) = tidak deploy
+  // service-nya sama sekali, jadi bisa merge dulu tanpa butuh image/secret siap.
+  resyncEnabled?: boolean;
+  resyncImageTag?: string;     // tag image bb/resync-worker (default: sama dgn imageTag)
 }
 
 export class BbEcsStack extends cdk.Stack {
@@ -220,7 +225,10 @@ export class BbEcsStack extends cdk.Stack {
       image: commsImg,
       // AWS_REGION=ap-southeast-1 → SES client pakai Singapura (SES nggak ada di Jakarta).
       // SQS bb-comms tetap pakai SQS_REGION=ap-southeast-3 (region sendiri, eksplisit) → aman.
-      environment: { ...env, AWS_REGION: 'ap-southeast-1' },
+      // SES_FROM = display-name + alamat pengirim (RFC 5322). Bukan rahasia → plain env.
+      // Prod nggak baca .env, jadi tanpa ini Go service jatuh ke default 'no-reply@brainboost.id'
+      // (tanpa nama). Nilai disamakan dengan staging bb-notification-service/.env.
+      environment: { ...env, AWS_REGION: 'ap-southeast-1', SES_FROM: 'BrainBoost <no-reply@brainboost.id>' },
       secrets,
       logging: ecs.LogDrivers.awsLogs({ streamPrefix: 'bb-comms', logGroup: logGroup('bb-comms') }),
     });
@@ -229,6 +237,55 @@ export class BbEcsStack extends cdk.Stack {
       minHealthyPercent: 0, maxHealthyPercent: 200,
       circuitBreaker: { rollback: true },
     });
+
+    // ============ resync-worker (THROWAWAY transition tool — opt-in) ============
+    // Incremental legacy MariaDB → prod Postgres sync. OFF unless `-c resyncEnabled=true`,
+    // so this block can merge before the image/creds exist. When enabled:
+    //  - own image bb/resync-worker (bawa mysql2) @ resyncImageTag (default = imageTag)
+    //  - long-running FargateService (worker.ts loop, RESYNC_INTERVAL_SEC). Pakai `placement`
+    //    yang sama dgn relay/bb-comms → assignPublicIp:true = outbound internet ke legacy DB
+    //    (domain public, akun AWS beda) + akses prod RDS lewat appSg. Bukan ScheduledFargateTask
+    //    krn itu nggak set assignPublicIp → task nggak akan nyampe legacy DB (lihat catatan cron).
+    //  - desiredCount:1 (+ run-lock TTL di app) → nggak pernah dobel.
+    //  - LEGACY_DB_* dipisah ke resyncSecrets → nggak bocor ke container lain.
+    // Teardown pasca-cutover: set resyncEnabled=false + deploy, lalu hapus ECR bb/resync-worker.
+    if (props.resyncEnabled) {
+      const resyncImg = ecs.ContainerImage.fromEcrRepository(
+        ecr.Repository.fromRepositoryName(this, 'resyncRepo', 'bb/resync-worker'),
+        props.resyncImageTag ?? props.imageTag,
+      );
+      const resyncSecrets: Record<string, ecs.Secret> = {
+        DATABASE_URL: sm('DATABASE_URL'),        // prod Postgres (target tulis)
+        LEGACY_DB_HOST: sm('LEGACY_DB_HOST'),    // legacy MariaDB (sumber baca) — WAJIB ada di bb/prod/app
+        LEGACY_DB_USER: sm('LEGACY_DB_USER'),
+        LEGACY_DB_PASS: sm('LEGACY_DB_PASS'),
+        LEGACY_DB_NAME: sm('LEGACY_DB_NAME'),
+      };
+      const resyncTd = new ecs.FargateTaskDefinition(this, 'ResyncTask', {
+        cpu: 256, memoryLimitMiB: 512, taskRole,
+        runtimePlatform: { cpuArchitecture: ecs.CpuArchitecture.ARM64 },
+      });
+      resyncTd.addContainer('resync-worker', {
+        image: resyncImg,
+        // Tuning params (BUKAN rahasia) — eksplisit biar gampang diubah via CDK (edit + deploy,
+        // tanpa rebuild image). Nilai di bawah = default config.ts. RESYNC_LOCK_TTL_SEC sengaja
+        // diomit → default 2× RESYNC_INTERVAL_SEC.
+        environment: {
+          NODE_ENV: 'production',
+          RESYNC_INTERVAL_SEC: '3600',            // loop worker (detik). 1800 = tiap 30 mnt
+          RESYNC_SYNCERS: 'all',                  // "all" atau CSV: members,enrollments,kyc,tree,commissions,reviews,posts
+          RESYNC_BATCH_SIZE: '1000',              // row per batch
+          RESYNC_LEGACY_RECONNECT_RETRIES: '3',   // reconnect saat legacy ECONNRESET
+        },
+        secrets: resyncSecrets,
+        logging: ecs.LogDrivers.awsLogs({ streamPrefix: 'resync', logGroup: logGroup('resync') }),
+      });
+      new ecs.FargateService(this, 'ResyncSvc', {
+        cluster, taskDefinition: resyncTd, desiredCount: 1, ...placement,
+        minHealthyPercent: 0, maxHealthyPercent: 100, // singleton: jangan jalanin 2 sekaligus
+        circuitBreaker: { rollback: true },
+      });
+    }
 
     new cdk.CfnOutput(this, 'AlbDns', { value: alb.loadBalancerDnsName });
     new cdk.CfnOutput(this, 'AppSecurityGroupId', { value: appSg.securityGroupId });
