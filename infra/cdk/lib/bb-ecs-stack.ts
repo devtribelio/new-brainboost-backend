@@ -238,7 +238,21 @@ export class BbEcsStack extends cdk.Stack {
       // Prod nggak baca .env, jadi tanpa ini Go service jatuh ke default 'no-reply@brainboost.id'
       // (tanpa nama). Nilai disamakan dengan staging bb-notification-service/.env.
       environment: { ...env, AWS_REGION: 'ap-southeast-1', SES_FROM: 'BrainBoost <no-reply@brainboost.id>' },
-      secrets,
+      // Qontak (WhatsApp OTP) — dipakai bb-comms SAJA, jadi di-scope ke container ini
+      // (bukan shared `secrets` map yang kena mobile-api/relay/cron juga). CLIENT_ID/
+      // SECRET/USERNAME/PASSWORD = kredensial (Go baca via os.Getenv, tanpa default →
+      // wajib ada). BASE_URL/CHANNEL_INTEGRATION_ID/OTP_TEMPLATE_ID punya default di
+      // config.go tapi di-override dari secret. Semua 7 key sudah ada di bb/prod/app.
+      secrets: {
+        ...secrets,
+        QONTAK_BASE_URL: sm('QONTAK_BASE_URL'),
+        QONTAK_CLIENT_ID: sm('QONTAK_CLIENT_ID'),
+        QONTAK_CLIENT_SECRET: sm('QONTAK_CLIENT_SECRET'),
+        QONTAK_USERNAME: sm('QONTAK_USERNAME'),
+        QONTAK_PASSWORD: sm('QONTAK_PASSWORD'),
+        QONTAK_CHANNEL_INTEGRATION_ID: sm('QONTAK_CHANNEL_INTEGRATION_ID'),
+        QONTAK_OTP_TEMPLATE_ID: sm('QONTAK_OTP_TEMPLATE_ID'),
+      },
       logging: ecs.LogDrivers.awsLogs({ streamPrefix: 'bb-comms', logGroup: logGroup('bb-comms') }),
     });
     new ecs.FargateService(this, 'BbCommsSvc', {
