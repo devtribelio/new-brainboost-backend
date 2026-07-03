@@ -18,6 +18,7 @@ import {
   DISBURSEMENT_AUTO_MAX_PER_DAY,
   DISBURSEMENT_AUTO_MAX_PER_WEEK,
   DISBURSEMENT_MIN_BALANCE,
+  DISBURSEMENT_FEE,
   KYC_MIN_BALANCE_DEFAULT,
 } from './constants';
 import { quoteDisbursement } from './utils/disbursement-calc';
@@ -126,7 +127,8 @@ export class DisbursementService {
       SETTING_KEYS.disbursementMinBalance,
       DISBURSEMENT_MIN_BALANCE,
     );
-    const quote = quoteDisbursement(balance, undefined, minBalance);
+    const fee = await settingsService.getNumber(SETTING_KEYS.disbursementFee, DISBURSEMENT_FEE);
+    const quote = quoteDisbursement(balance, undefined, minBalance, fee);
 
     // An OPEN payout (PENDING awaiting approval, or PROCESSING awaiting callback)
     // blocks a new request.
@@ -194,12 +196,13 @@ export class DisbursementService {
       throw new BadRequestException('Rekening belum diisi');
     }
 
-    // Runtime min-balance (app_settings `disbursement.minBalance`) — read once,
-    // before the tx (settings query is its own cached read, not part of the tx).
+    // Runtime min-balance + fee (app_settings `disbursement.minBalance` / `disbursement.fee`)
+    // — read once, before the tx (settings query is its own cached read, not part of the tx).
     const minBalance = await settingsService.getNumber(
       SETTING_KEYS.disbursementMinBalance,
       DISBURSEMENT_MIN_BALANCE,
     );
+    const fee = await settingsService.getNumber(SETTING_KEYS.disbursementFee, DISBURSEMENT_FEE);
 
     // A large payout re-triggers KYC, but only when the last review is stale —
     // a freshly-approved member shouldn't be bounced. netAmount is only known
@@ -229,7 +232,7 @@ export class DisbursementService {
 
       const { cleared, consumed } = await this.balanceInputs(memberId, tx);
       const balance = Math.max(0, cleared - consumed);
-      const quote = quoteDisbursement(balance, amount, minBalance);
+      const quote = quoteDisbursement(balance, amount, minBalance, fee);
       if (!quote.eligible) throw new BadRequestException(quote.reason ?? 'Not eligible for withdrawal');
 
       if (reviewStale && quote.netAmount >= env.rekyc.largeDisbursementIdr) {

@@ -86,4 +86,23 @@ describe('quoteDisbursement (legacy payout rules)', () => {
       expect(quoteDisbursement(50_000)).toEqual(quoteDisbursement(50_000, 50_000));
     });
   });
+
+  describe('fee override (app_settings disbursement.fee)', () => {
+    it('uses the given fee for net and the returned fee field', () => {
+      const q = quoteDisbursement(50_000, undefined, DISBURSEMENT_MIN_BALANCE, 7_500);
+      expect(q).toEqual({ eligible: true, grossAmount: 50_000, fee: 7_500, netAmount: 42_500 });
+    });
+
+    it('min-net rule follows the overridden fee', () => {
+      // gross 17,000 - fee 7,000 = 10,000 → NOT > 10,000 → ineligible
+      const q = quoteDisbursement(17_000, undefined, DISBURSEMENT_MIN_BALANCE, 7_000);
+      expect(q.eligible).toBe(false);
+      expect(q.netAmount).toBe(10_000);
+      expect(q.reason).toMatch(/Net payout/);
+    });
+
+    it('omitting the fee keeps the constant fallback', () => {
+      expect(quoteDisbursement(50_000).fee).toBe(DISBURSEMENT_FEE);
+    });
+  });
 });

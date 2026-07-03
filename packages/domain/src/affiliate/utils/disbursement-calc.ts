@@ -19,13 +19,16 @@ export interface DisbursementQuote {
  *
  * `minBalance` (optional) overrides the minimum gross to withdraw — callers pass the
  * runtime value from app_settings `disbursement.minBalance`; defaults to the constant.
+ *
+ * `fee` (optional) overrides the flat platform fee — callers pass the runtime value
+ * from app_settings `disbursement.fee`; defaults to the constant.
  */
 export function quoteDisbursement(
   balance: number,
   requestedAmount?: number,
   minBalance: number = DISBURSEMENT_MIN_BALANCE,
+  fee: number = DISBURSEMENT_FEE,
 ): DisbursementQuote {
-  const fee = DISBURSEMENT_FEE;
   const available = Math.max(0, Math.floor(balance));
   const grossAmount = requestedAmount === undefined ? available : Math.max(0, Math.floor(requestedAmount));
   const netAmount = grossAmount - fee;

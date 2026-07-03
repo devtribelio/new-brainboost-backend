@@ -21,6 +21,7 @@ export const SETTING_KEYS = {
   affiliateHoldDays: 'affiliate.holdDays',
   affiliateIapHoldDays: 'affiliate.iapHoldDays',
   disbursementAutoApproveMax: 'disbursement.autoApproveMax',
+  disbursementFee: 'disbursement.fee',
   disbursementMinBalance: 'disbursement.minBalance',
   kycMinBalance: 'kyc.minBalance',
 } as const;

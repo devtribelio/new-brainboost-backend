@@ -34,6 +34,11 @@ const SETTINGS: Array<{ key: string; value: string; description: string }> = [
       'Max NET payout (IDR) eligible for auto-approval; anything above always goes MANUAL.',
   },
   {
+    key: 'disbursement.fee',
+    value: '5000',
+    description: 'Flat platform fee (IDR) deducted from the gross payout (member receives gross - fee).',
+  },
+  {
     key: 'disbursement.minBalance',
     value: '55000',
     description:
