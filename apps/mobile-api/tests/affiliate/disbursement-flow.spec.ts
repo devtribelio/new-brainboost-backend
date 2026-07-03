@@ -269,6 +269,29 @@ describe('DisbursementService — payout flow', () => {
     }
   });
 
+  it('fee honors app_settings disbursement.fee in summary and on the created row', async () => {
+    const id = await member({ balance: 50_000, priorPaid: true });
+    // default (no row) → fallback constant 5000
+    let summary = await svc.getSummary(id);
+    expect(summary.fee).toBe(5_000);
+
+    try {
+      await settingsService.set(SETTING_KEYS.disbursementFee, '7500');
+      SettingsService.clearCache();
+      summary = await svc.getSummary(id);
+      expect(summary.fee).toBe(7_500);
+      expect(summary.netAmount).toBe(42_500); // 50k gross − 7.5k fee
+
+      const row = await svc.requestDisbursement(id);
+      expect(row.fee).toBe(7_500);
+      expect(row.grossAmount).toBe(50_000);
+      expect(row.netAmount).toBe(42_500);
+    } finally {
+      await prisma.appSetting.deleteMany({ where: { key: SETTING_KEYS.disbursementFee } });
+      SettingsService.clearCache();
+    }
+  });
+
   it('affiliator summary.balance == withdrawableBalance after a held payout (single source)', async () => {
     const id = await member({ balance: 100_000, priorPaid: true });
     await svc.requestDisbursement(id, 30_000); // AUTO → PROCESSING, holds 30k gross

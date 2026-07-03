@@ -26,7 +26,7 @@ export const AFFILIATE_COOKIE_DAYS_DEFAULT = 365; // 1 year
 
 // Disbursement / payout (legacy: TBDisbursement::affiliate — min 15k, flat fee 5k, net must exceed 10k)
 export const DISBURSEMENT_MIN_BALANCE = 15_000; // IDR — minimum withdrawable balance to request
-export const DISBURSEMENT_FEE = 5_000; // IDR — flat platform fee per payout
+export const DISBURSEMENT_FEE = 5_000; // IDR — flat platform fee per payout (fallback; runtime value in app_settings `disbursement.fee`)
 export const DISBURSEMENT_MIN_NET = 10_000; // IDR — net (balance - fee) must be strictly greater than this
 
 // Minimum withdrawable balance required before a member may REQUEST KYC (start a
