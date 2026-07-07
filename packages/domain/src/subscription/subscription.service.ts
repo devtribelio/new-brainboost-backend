@@ -192,7 +192,15 @@ export class SubscriptionService {
       },
     });
 
-    // Owner claims seat 1 — unless they already hold a seat on someone else's sub
+    // A seat on a DEAD sub (expired/canceled) is a zombie: it grants nothing but
+    // still trips uniq_active_seat_per_member. Release the owner's zombie before
+    // seating them — the common repurchase-after-expiry path.
+    await tx.subscriptionSeat.updateMany({
+      where: { memberId: ownerId, subscription: { NOT: { status: 'ACTIVE' } } },
+      data: { memberId: null, claimedAt: null },
+    });
+
+    // Owner claims seat 1 — unless they still hold a seat on someone's ACTIVE sub
     // (RC path can't be blocked pre-payment; uniq_active_seat_per_member would fire).
     // The sub is still created with seat 1 left empty; a human (or leaveSeat) resolves it.
     const ownerSeatElsewhere = await tx.subscriptionSeat.findFirst({

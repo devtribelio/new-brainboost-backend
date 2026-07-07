@@ -19,7 +19,7 @@ Status: `todo` → `wip` → `done` (done = kode + test hijau; ✅ di kolom Jira
 | BE-03 SubscriptionService aktivasi/renewal | BB-79 | **selesai — menunggu review** | `packages/domain/src/subscription/subscription.service.ts`; ledger-last idempotency; 10 test activation.spec.ts |
 | BE-04 Grant | BB-80 | **selesai — menunggu review** | `SubscriptionService.grant(memberId, planCode, months?)`; ledger `kind='grant'` transactionId NULL (idempotensi = tugas script BE-20); 6 test grant.spec.ts |
 | BE-05 Seat management | BB-81 | **selesai — menunggu review** | `seat.service.ts`: invite rotasi (alfabet tanpa 0/O/1/I), claim = conditional UPDATE single-statement (race-safe), remove/leave matikan lazy enrollment seketika; 8 test seats.spec.ts |
-| BE-06 EntitlementService + lazy enrollment | BB-82 | todo | |
+| BE-06 EntitlementService + lazy enrollment | BB-82 | **selesai — menunggu review** | `entitlement.service.ts`; retail = valid by existence (expired_date legacy diabaikan); + upgrade-lifetime di `grantCourseEnrollment`; + fix seat zombie; 7 test entitlement.spec.ts |
 | BE-07 Event bus | BB-83 | todo | |
 | BE-08 Listener commerce | BB-84 | todo | |
 | BE-09 Komisi flat | BB-85 | todo | |
@@ -56,5 +56,6 @@ Status: `todo` → `wip` → `done` (done = kode + test hijau; ✅ di kolom Jira
 - 2026-07-07: Tracker dibuat. Semua issue BB-77…BB-98 assigned, semuanya Backlog. Angka final `renewalAffiliateRate` masih menunggu COO (placeholder 20%).
 - 2026-07-07 (BE-01): Migration **ditulis tangan** via `prisma migrate diff` + `migrate deploy`, BUKAN `migrate dev` — `migrate dev` butuh TTY dan mendeteksi drift `bo_*` di `bb_trial` (drift itu disengaja: tabel backoffice legacy dipertahankan di DB dev, di luar schema). Jangan jalankan `migrate dev`/`reset` di `bb_trial`.
 - 2026-07-07 (BE-01): **Test DB (localhost:5433/bb) ditemukan rusak** — migration `20260525130001` nyangkut FAILED sejak 24 Juni + drift akibat `db push`, sehingga ±75 test sudah gagal sebelum BE-01 (bukan regresi). Diperbaiki via delta `migrate diff` + `migrate resolve --applied` (7 migration). `bo_*` di test DB ikut ter-drop (benar, karena sudah keluar dari schema). Hasil: 470/470 hijau.
+- 2026-07-07 (BE-06): **Seat zombie** — seat di sub EXPIRED/CANCELED masih memegang `member_id` dan memblokir `uniq_active_seat_per_member` saat member itu beli/claim sub baru (ketangkap test). Fix: release-on-demand di `createInitial` + `claimSeat` (`updateMany where subscription NOT ACTIVE`). Seat di sub ACTIVE-in-grace TIDAK dilepas (masih entitled).
 - 2026-07-07 (BE-03): **P2002 dari partial index dilaporkan Prisma per NAMA KOLOM** (`meta.target=['transaction_id']`), bukan nama constraint — matcher idempotensi di `subscription.service.ts` mencocokkan kolom. Ledger insert = write TERAKHIR dalam transaksi (P2002 → seluruh tx rollback → no-op bersih).
 - 2026-07-07 (BE-01): 3 partial unique index (`uniq_active_sub_per_owner`, `uniq_active_seat_per_member`, `uniq_activation_tx`) = SQL manual di migration; **terverifikasi Prisma 5.22 mengabaikannya saat diff** (tidak dianggap drift). Kalau upgrade Prisma major, re-verify perilaku ini.

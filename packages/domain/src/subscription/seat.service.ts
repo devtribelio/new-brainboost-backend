@@ -74,6 +74,13 @@ export class SeatService {
       throw new BadRequestException('Kamu adalah pemilik subscription ini (sudah menempati seat 1)');
     }
 
+    // Release the claimer's zombie seat (on an expired/canceled sub) first — it
+    // grants nothing but would trip uniq_active_seat_per_member below.
+    await prisma.subscriptionSeat.updateMany({
+      where: { memberId, subscription: { NOT: { status: 'ACTIVE' } } },
+      data: { memberId: null, claimedAt: null },
+    });
+
     let claimed: number;
     try {
       // The atomic decision point — see class doc.

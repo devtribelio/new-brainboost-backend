@@ -83,4 +83,11 @@ async function grantCourseEnrollment(memberId: string, productId: string): Promi
     data: [{ memberId, courseId: product.course.id, dateStart: new Date() }],
     skipDuplicates: true,
   });
+  // A retail purchase over a subscription lazy row upgrades it to lifetime:
+  // clear the marker (+expiry) so the buyer keeps access after the sub lapses.
+  // No-op for genuine retail rows (marker already NULL).
+  await prisma.courseEnrollment.updateMany({
+    where: { memberId, courseId: product.course.id, viaSubscriptionId: { not: null } },
+    data: { viaSubscriptionId: null, expiredDate: null },
+  });
 }
