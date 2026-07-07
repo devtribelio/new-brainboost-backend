@@ -1,4 +1,4 @@
-import { Prisma, type MemberSubscription } from '@prisma/client';
+import { Prisma, type MemberSubscription, type SubscriptionPlan } from '@prisma/client';
 import { prisma } from '@bb/db';
 import { logger } from '@bb/common/config/logger';
 import { BadRequestException } from '@bb/common/exceptions';
@@ -13,6 +13,8 @@ export interface ActivationResult {
   outcome: ActivationOutcome;
   /** null when outcome='noop'. */
   subscription: MemberSubscription | null;
+  /** The plan involved — null only on a 'no-plan' noop. Saves emitters a query. */
+  plan: SubscriptionPlan | null;
   /** Why a noop happened: product has no plan, or the transaction was already processed. */
   noopReason?: 'no-plan' | 'duplicate-transaction';
 }
@@ -66,7 +68,7 @@ interface ActivationMeta {
 export class SubscriptionService {
   async activateFromPayment(input: ActivateFromPaymentInput): Promise<ActivationResult> {
     const plan = await prisma.subscriptionPlan.findUnique({ where: { productId: input.productId } });
-    if (!plan) return { outcome: 'noop', subscription: null, noopReason: 'no-plan' };
+    if (!plan) return { outcome: 'noop', subscription: null, plan: null, noopReason: 'no-plan' };
 
     const graceDays = await this.getGraceDays();
 
@@ -105,7 +107,7 @@ export class SubscriptionService {
             },
           });
 
-          return { outcome, subscription: sub };
+          return { outcome, subscription: sub, plan };
         });
       } catch (e) {
         if (isUniqueViolation(e, 'transaction_id')) {
@@ -113,7 +115,7 @@ export class SubscriptionService {
             { transactionId: input.transactionId },
             '[subscription] duplicate activation — no-op',
           );
-          return { outcome: 'noop', subscription: null, noopReason: 'duplicate-transaction' };
+          return { outcome: 'noop', subscription: null, plan, noopReason: 'duplicate-transaction' };
         }
         if (isUniqueViolation(e, 'owner_id') && attempt === 0) {
           logger.warn(
@@ -165,6 +167,33 @@ export class SubscriptionService {
       });
 
       return { outcome: existing ? 'extended' : 'created', subscription: sub } as GrantResult;
+    });
+  }
+
+  /**
+   * Refund revoke (PRD BE-08): resolve the sub via the activation ledger and
+   * kill it NOW — refund is the one flow that cuts access immediately (unlike
+   * cancel-intent). Idempotent: only an ACTIVE sub flips; a second refund (or a
+   * refund after expiry) returns null. Seats are left as-is — the zombie-seat
+   * release in createInitial/claimSeat recycles them when their members move on.
+   */
+  async revokeByTransactionId(transactionId: string): Promise<MemberSubscription | null> {
+    const activation = await prisma.subscriptionActivation.findFirst({
+      where: { transactionId },
+      select: { subscriptionId: true },
+    });
+    if (!activation) return null;
+
+    return prisma.$transaction(async (tx) => {
+      const flipped = await tx.memberSubscription.updateMany({
+        where: { id: activation.subscriptionId, status: 'ACTIVE' },
+        data: { status: 'CANCELED', canceledAt: new Date() },
+      });
+      if (flipped.count === 0) return null;
+      await this.bumpLazyEnrollments(tx, activation.subscriptionId, new Date()); // access off now
+      return tx.memberSubscription.findUniqueOrThrow({
+        where: { id: activation.subscriptionId },
+      });
     });
   }
 
