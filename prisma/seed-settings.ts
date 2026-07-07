@@ -50,6 +50,18 @@ const SETTINGS: Array<{ key: string; value: string; description: string }> = [
     description:
       'Minimum withdrawable balance (IDR) required before a member may request KYC. 0 = gate off.',
   },
+  {
+    key: 'subscription.graceDays',
+    value: '7',
+    description:
+      'Days of grace after a subscription expires before access is cut (graceUntil = expiresAt + this).',
+  },
+  {
+    key: 'subscription.reminderDaysBefore',
+    value: '7,3,1',
+    description:
+      'Comma-separated H-minus buckets for the renewal reminder job (email + push).',
+  },
 ];
 
 async function main() {

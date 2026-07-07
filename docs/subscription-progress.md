@@ -3,7 +3,7 @@
 > Sumber kebenaran progres implementasi PRD `docs/prd-subscription-backend.md`.
 > **Cara resume sesi baru:** prompt — *"baca docs/prd-subscription-backend.md + docs/subscription-progress.md, lanjut task berikutnya yang belum selesai"*.
 > **Aturan update (WAJIB tiap akhir sesi / selesai task):** update baris task di tabel (status, branch, catatan) dan catat keputusan/penemuan non-obvious di bagian "Log keputusan".
-> **Aturan status Jira:** mulai task → flip ke **Development**; ke **Done** HANYA setelah user review / bilang commit (kode selesai ≠ Done).
+> **Aturan status Jira:** mulai task → flip ke **Development**; JANGAN pernah flip ke **Done** (user kelola sendiri — Done menghilangkan issue dari backlog/board). Doneness dicatat di tabel tracker ini.
 
 - Branch kerja: `feat/subscription` (dari `main`) — satu branch untuk seluruh phase 1, PR per kelompok task jika perlu.
 - Jira: project BB, label `subscription-phase1`, assignee Warda June.
@@ -15,7 +15,7 @@ Status: `todo` → `wip` → `done` (done = kode + test hijau; ✅ di kolom Jira
 | Task | Jira | Status | Catatan |
 |---|---|---|---|
 | BE-01 Schema & migration | BB-77 | **selesai — menunggu review** | migration `20260707140000_add_subscription`; 5 tabel + enum + `via_subscription_id` + 3 partial unique; 470/470 test hijau |
-| BE-02 Seed plans + settings | BB-78 | todo | |
+| BE-02 Seed plans + settings | BB-78 | **selesai — menunggu review** | `pnpm seed:subscription-plans` (+--dry-run); create-only, tidak overwrite operator; SKU placeholder `com.brainboost.{ios,android}.sub_*_annual`; ⚠️ JANGAN seed prod sebelum BE-11 live |
 | BE-03 SubscriptionService aktivasi/renewal | BB-79 | todo | |
 | BE-04 Grant | BB-80 | todo | |
 | BE-05 Seat management | BB-81 | todo | |
