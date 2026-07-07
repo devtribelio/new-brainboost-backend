@@ -1,4 +1,4 @@
-import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
+import { SQSClient, SendMessageCommand, GetQueueAttributesCommand } from '@aws-sdk/client-sqs';
 import { env } from '@bb/common/config/env';
 import { logger } from '@bb/common/config/logger';
 import { queueNameFor } from '@bb/common/mq/topology';
@@ -61,6 +61,20 @@ export async function publishComms(msg: CommsMessage): Promise<void> {
       },
     }),
   );
+}
+
+/**
+ * Connectivity probe for bootup checks: GetQueueAttributes on the first
+ * configured queue. Returns 'skipped' when no queue URL is set (dev log-only
+ * mode — mirrors the relay's idle behavior, see workers/comms-relay.ts).
+ */
+export async function checkSqsConnection(): Promise<'ok' | 'skipped'> {
+  const url = env.sqs.urgentQueueUrl || env.sqs.normalQueueUrl;
+  if (!url) return 'skipped';
+  await getClient().send(
+    new GetQueueAttributesCommand({ QueueUrl: url, AttributeNames: ['QueueArn'] }),
+  );
+  return 'ok';
 }
 
 export async function closePublisher(): Promise<void> {
