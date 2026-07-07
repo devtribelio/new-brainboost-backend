@@ -2,8 +2,12 @@ import 'reflect-metadata';
 import { buildApp } from './app';
 import { env } from '@bb/common/config/env';
 import { logger } from '@bb/common/config/logger';
+import { runStartupChecks, startConnectionMonitor } from './core/startup-checks';
 
 async function bootstrap() {
+  await runStartupChecks();
+  startConnectionMonitor();
+
   const app = buildApp();
 
   const server = app.listen(env.port, () => {

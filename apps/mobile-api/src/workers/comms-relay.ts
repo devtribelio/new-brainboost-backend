@@ -8,6 +8,7 @@ import {
   type CommsMessage,
   type CommsPriority,
 } from '@bb/common/mq/comms-contract';
+import { runStartupChecks, startConnectionMonitor } from '../core/startup-checks';
 
 /**
  * Comms relay daemon (F1). Polls NotificationOutbox PENDING rows and publishes
@@ -111,7 +112,12 @@ async function shutdown(signal: string): Promise<void> {
 process.on('SIGTERM', () => void shutdown('SIGTERM'));
 process.on('SIGINT', () => void shutdown('SIGINT'));
 
-loop().catch((err) => {
-  logger.error({ err }, '[comms-relay] fatal');
-  process.exit(1);
-});
+runStartupChecks()
+  .then(() => {
+    startConnectionMonitor();
+    return loop();
+  })
+  .catch((err) => {
+    logger.error({ err }, '[comms-relay] fatal');
+    process.exit(1);
+  });
