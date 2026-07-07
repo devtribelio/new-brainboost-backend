@@ -14,7 +14,7 @@ Status: `todo` → `wip` → `done` (done = kode + test hijau; ✅ di kolom Jira
 
 | Task | Jira | Status | Catatan |
 |---|---|---|---|
-| BE-01 Schema & migration | BB-77 | todo | |
+| BE-01 Schema & migration | BB-77 | **selesai — menunggu review** | migration `20260707140000_add_subscription`; 5 tabel + enum + `via_subscription_id` + 3 partial unique; 470/470 test hijau |
 | BE-02 Seed plans + settings | BB-78 | todo | |
 | BE-03 SubscriptionService aktivasi/renewal | BB-79 | todo | |
 | BE-04 Grant | BB-80 | todo | |
@@ -54,3 +54,6 @@ Status: `todo` → `wip` → `done` (done = kode + test hijau; ✅ di kolom Jira
 > Tambahkan entri bertanggal untuk hal non-obvious yang ditemukan saat implementasi (edge case legacy, keputusan desain di luar PRD, blocker). Ini yang dibaca sesi berikutnya.
 
 - 2026-07-07: Tracker dibuat. Semua issue BB-77…BB-98 assigned, semuanya Backlog. Angka final `renewalAffiliateRate` masih menunggu COO (placeholder 20%).
+- 2026-07-07 (BE-01): Migration **ditulis tangan** via `prisma migrate diff` + `migrate deploy`, BUKAN `migrate dev` — `migrate dev` butuh TTY dan mendeteksi drift `bo_*` di `bb_trial` (drift itu disengaja: tabel backoffice legacy dipertahankan di DB dev, di luar schema). Jangan jalankan `migrate dev`/`reset` di `bb_trial`.
+- 2026-07-07 (BE-01): **Test DB (localhost:5433/bb) ditemukan rusak** — migration `20260525130001` nyangkut FAILED sejak 24 Juni + drift akibat `db push`, sehingga ±75 test sudah gagal sebelum BE-01 (bukan regresi). Diperbaiki via delta `migrate diff` + `migrate resolve --applied` (7 migration). `bo_*` di test DB ikut ter-drop (benar, karena sudah keluar dari schema). Hasil: 470/470 hijau.
+- 2026-07-07 (BE-01): 3 partial unique index (`uniq_active_sub_per_owner`, `uniq_active_seat_per_member`, `uniq_activation_tx`) = SQL manual di migration; **terverifikasi Prisma 5.22 mengabaikannya saat diff** (tidak dianggap drift). Kalau upgrade Prisma major, re-verify perilaku ini.

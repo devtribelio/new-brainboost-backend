@@ -103,6 +103,8 @@ model Member {
   commercePayments       CommercePayment[]
   notificationMutes      NotificationMute[]
   kycEvents              KycEvent[]
+  ownedSubscriptions     MemberSubscription[]    @relation("MemberSubscriptionOwner")
+  subscriptionSeats      SubscriptionSeat[]      @relation("SubscriptionSeatMember")
 
   @@map("members")
 }
@@ -378,6 +380,7 @@ model Product {
   affiliateCommissions AffiliateCommission[]
   commerceTransactions CommerceTransaction[]
   vouchers             Voucher[]
+  subscriptionPlan     SubscriptionPlan?
 
   @@map("products")
 }
@@ -406,6 +409,13 @@ model CourseEnrollment {
   dateStart          DateTime? @map("date_start")
   dateEnd            DateTime? @map("date_end")
   expiredDate        DateTime? @map("expired_date")
+  // Lazy-enrollment marker: set when this row was auto-created/refreshed by an active
+  // subscription (expiredDate mirrors sub.expiresAt; renewal bumps it). NULL = retail/
+  // legacy row — subscription code never touches it, and access gates must treat it as
+  // ALWAYS valid regardless of expiredDate (legacy migration filled expiredDate on
+  // lifetime purchases). No FK by design: enrollment must not be deleted/locked by the
+  // subscription lifecycle (mirrors AffiliateAttributionClaim).
+  viaSubscriptionId  String?   @map("via_subscription_id") @db.Uuid
   isCanceled         Boolean   @default(false) @map("is_canceled")
   cancelationReason  String?   @map("cancelation_reason")
   certificateCode    String?   @map("certificate_code")
@@ -418,6 +428,7 @@ model CourseEnrollment {
 
   @@unique([memberId, courseId])
   @@index([memberId, createdAt])
+  @@index([viaSubscriptionId])
   @@map("course_enrollment")
 }
 
@@ -1295,4 +1306,130 @@ model MemberRedirect {
 
   @@index([winnerLegacyId])
   @@map("member_redirect")
+}
+
+// ============================================================================
+// Subscription (Phase 1: annual) — see docs/prd-subscription-backend.md
+// ============================================================================
+
+enum SubscriptionStatus {
+  ACTIVE
+  EXPIRED
+  CANCELED
+}
+
+/// Subscription tier definition, 1:1 with a Product (type='subscription').
+/// Price intentionally lives on Product so checkout/voucher/Xendit paid-amount
+/// verification reuse the commerce path unchanged. Phase 2/3 (6-month, monthly)
+/// = new rows here, zero-code.
+model SubscriptionPlan {
+  id                   String   @id @default(uuid(7)) @db.Uuid
+  productId            String   @unique @map("product_id") @db.Uuid
+  code                 String   @unique // SOLO_12M | DUO_12M | FAMILY_12M | PREMIUM_12M
+  tier                 String // SOLO | DUO | FAMILY | PREMIUM
+  periodMonths         Int      @map("period_months")
+  seatCount            Int      @map("seat_count") // seat 1 = owner
+  affiliateRate        Int      @map("affiliate_rate") // % flat L1 commission on first sale (40)
+  renewalAffiliateRate Int      @map("renewal_affiliate_rate") // % on renewals — placeholder 20, final number pending COO
+  isActive             Boolean  @default(true) @map("is_active")
+  sortOrder            Int      @default(0) @map("sort_order")
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
+
+  product       Product              @relation(fields: [productId], references: [id])
+  subscriptions MemberSubscription[]
+
+  @@map("subscription_plans")
+}
+
+/// One row per owner-side subscription. Entitlement predicate: a member holds a
+/// seat on a sub with status=ACTIVE and coalesce(graceUntil, expiresAt) > now.
+/// Partial unique (manual SQL in migration — Prisma can't express it):
+///   uniq_active_sub_per_owner ON (owner_id) WHERE status = 'ACTIVE'
+model MemberSubscription {
+  id                  String             @id @default(uuid(7)) @db.Uuid
+  ownerId             String             @map("owner_id") @db.Uuid
+  planId              String             @map("plan_id") @db.Uuid
+  status              SubscriptionStatus @default(ACTIVE)
+  expiresAt           DateTime           @map("expires_at")
+  graceUntil          DateTime?          @map("grace_until") // expiresAt + app_settings subscription.graceDays
+  canceledAt          DateTime?          @map("canceled_at") // cancel-INTENT (auto-renew off); access continues until expiry
+  source              String // xendit | revenuecat | granted
+  providerRef         String?            @map("provider_ref") // RC original_transaction_id — EXPIRATION/CANCELLATION webhook lookup
+  latestTransactionId String?            @map("latest_transaction_id") @db.Uuid
+  createdAt           DateTime           @default(now()) @map("created_at")
+  updatedAt           DateTime           @updatedAt @map("updated_at")
+
+  owner        Member                    @relation("MemberSubscriptionOwner", fields: [ownerId], references: [id])
+  plan         SubscriptionPlan          @relation(fields: [planId], references: [id])
+  seats        SubscriptionSeat[]
+  activations  SubscriptionActivation[]
+  reminderLogs SubscriptionReminderLog[]
+
+  @@index([ownerId])
+  @@index([providerRef])
+  @@index([status, expiresAt])
+  @@map("member_subscriptions")
+}
+
+/// Pre-provisioned seat slots (Spotify-Family model): activation creates seatCount
+/// rows up front; seat 1 is claimed by the owner, the rest sit empty (memberId null)
+/// until claimed by invite code. Claim = conditional UPDATE on (inviteCode, memberId
+/// IS NULL); the code is single-use (nulled after claim). Partial unique (manual SQL):
+///   uniq_active_seat_per_member ON (member_id) WHERE member_id IS NOT NULL
+model SubscriptionSeat {
+  id             String    @id @default(uuid(7)) @db.Uuid
+  subscriptionId String    @map("subscription_id") @db.Uuid
+  seatNo         Int       @map("seat_no") // 1 = owner
+  memberId       String?   @map("member_id") @db.Uuid // null = empty slot
+  inviteCode     String?   @unique @map("invite_code") // crypto-random, single-use, rotated by generateInvite
+  claimedAt      DateTime? @map("claimed_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  subscription MemberSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  member       Member?            @relation("SubscriptionSeatMember", fields: [memberId], references: [id])
+
+  @@unique([subscriptionId, seatNo])
+  @@index([memberId])
+  @@map("subscription_seats")
+}
+
+/// Idempotency ledger + audit trail: one append-only row per expiry-affecting change.
+/// Webhook redelivery (Xendit retry / RC re-emit) re-hits the unique transactionId →
+/// P2002 → no-op, so expiry is never double-extended. transactionId is null for grants,
+/// hence the partial unique (manual SQL):
+///   uniq_activation_tx ON (transaction_id) WHERE transaction_id IS NOT NULL
+/// No FK on transactionId by design (mirrors AffiliateAttributionClaim).
+model SubscriptionActivation {
+  id                String    @id @default(uuid(7)) @db.Uuid
+  subscriptionId    String    @map("subscription_id") @db.Uuid
+  kind              String // initial | renewal | grant | plan_change
+  source            String // xendit | revenuecat | granted
+  transactionId     String?   @map("transaction_id") @db.Uuid // CommerceTransaction.id; null for grants
+  providerRef       String?   @map("provider_ref")
+  previousExpiresAt DateTime? @map("previous_expires_at")
+  newExpiresAt      DateTime  @map("new_expires_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+
+  subscription MemberSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  @@index([subscriptionId, createdAt])
+  @@map("subscription_activations")
+}
+
+/// Dedupe for the renewal-reminder job (insert-first): the unique key includes
+/// expiresAt, so a renewal (which moves expiresAt) automatically re-arms the next
+/// cycle's reminders without any cleanup.
+model SubscriptionReminderLog {
+  id             String   @id @default(uuid(7)) @db.Uuid
+  subscriptionId String   @map("subscription_id") @db.Uuid
+  expiresAt      DateTime @map("expires_at") // the expiry cycle this reminder targeted
+  daysBefore     Int      @map("days_before") // 7 | 3 | 1 (from app_settings subscription.reminderDaysBefore)
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  subscription MemberSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  @@unique([subscriptionId, expiresAt, daysBefore])
+  @@map("subscription_reminder_logs")
 }
