@@ -18,7 +18,7 @@ Status: `todo` → `wip` → `done` (done = kode + test hijau; ✅ di kolom Jira
 | BE-02 Seed plans + settings | BB-78 | **selesai — menunggu review** | `pnpm seed:subscription-plans` (+--dry-run); create-only, tidak overwrite operator; SKU placeholder `com.brainboost.{ios,android}.sub_*_annual`; ⚠️ JANGAN seed prod sebelum BE-11 live |
 | BE-03 SubscriptionService aktivasi/renewal | BB-79 | **selesai — menunggu review** | `packages/domain/src/subscription/subscription.service.ts`; ledger-last idempotency; 10 test activation.spec.ts |
 | BE-04 Grant | BB-80 | **selesai — menunggu review** | `SubscriptionService.grant(memberId, planCode, months?)`; ledger `kind='grant'` transactionId NULL (idempotensi = tugas script BE-20); 6 test grant.spec.ts |
-| BE-05 Seat management | BB-81 | todo | |
+| BE-05 Seat management | BB-81 | **selesai — menunggu review** | `seat.service.ts`: invite rotasi (alfabet tanpa 0/O/1/I), claim = conditional UPDATE single-statement (race-safe), remove/leave matikan lazy enrollment seketika; 8 test seats.spec.ts |
 | BE-06 EntitlementService + lazy enrollment | BB-82 | todo | |
 | BE-07 Event bus | BB-83 | todo | |
 | BE-08 Listener commerce | BB-84 | todo | |
