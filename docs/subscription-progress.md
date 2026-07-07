@@ -1,0 +1,56 @@
+# Subscription Phase 1 — Progress Tracker
+
+> Sumber kebenaran progres implementasi PRD `docs/prd-subscription-backend.md`.
+> **Cara resume sesi baru:** prompt — *"baca docs/prd-subscription-backend.md + docs/subscription-progress.md, lanjut task berikutnya yang belum selesai"*.
+> **Aturan update (WAJIB tiap akhir sesi / selesai task):** update baris task di tabel (status, branch, catatan) dan catat keputusan/penemuan non-obvious di bagian "Log keputusan".
+> **Aturan status Jira:** mulai task → flip ke **Development**; ke **Done** HANYA setelah user review / bilang commit (kode selesai ≠ Done).
+
+- Branch kerja: `feat/subscription` (dari `main`) — satu branch untuk seluruh phase 1, PR per kelompok task jika perlu.
+- Jira: project BB, label `subscription-phase1`, assignee Warda June.
+
+## Status task
+
+Status: `todo` → `wip` → `done` (done = kode + test hijau; ✅ di kolom Jira = sudah ditransisikan).
+
+| Task | Jira | Status | Catatan |
+|---|---|---|---|
+| BE-01 Schema & migration | BB-77 | todo | |
+| BE-02 Seed plans + settings | BB-78 | todo | |
+| BE-03 SubscriptionService aktivasi/renewal | BB-79 | todo | |
+| BE-04 Grant | BB-80 | todo | |
+| BE-05 Seat management | BB-81 | todo | |
+| BE-06 EntitlementService + lazy enrollment | BB-82 | todo | |
+| BE-07 Event bus | BB-83 | todo | |
+| BE-08 Listener commerce | BB-84 | todo | |
+| BE-09 Komisi flat | BB-85 | todo | |
+| BE-10 Gate media | BB-86 | todo | |
+| BE-11 Product list/detail | BB-87 | todo | |
+| BE-12 RC webhook | BB-88 | todo | |
+| BE-13 purchase-ingest | BB-89 | todo | |
+| BE-14 Guard checkout | BB-90 | todo | |
+| BE-15 Job renewal reminder | BB-91 | todo | ⚠️ jangan aktif di prod sebelum template bb-comms siap |
+| BE-16 Job expire | BB-92 | todo | |
+| BE-17 Notification listeners | BB-93 | todo | |
+| BE-18 Email receipt + bb-comms | BB-94 | todo | dependensi eksternal bb-comms |
+| BE-19 Modul HTTP /subscription | BB-95 | todo | |
+| BE-20 Script grant + eligibility | BB-96 | todo | |
+| BE-21 Integration tests | BB-97 | todo | |
+| BE-22 Docs + reporting | BB-98 | todo | |
+
+## Urutan pengerjaan yang disarankan (dependency)
+
+1. BE-01 → BE-02 (fondasi schema + seed)
+2. BE-03 → BE-04, BE-07 (service inti + event bus)
+3. BE-05, BE-06 (seat + entitlement — bisa paralel)
+4. BE-08, BE-09 (integrasi commerce/affiliate)
+5. BE-10, BE-11, BE-14 (gate + product surface)
+6. BE-12, BE-13 (jalur RevenueCat)
+7. BE-15, BE-16, BE-17, BE-18 (jobs + notif + email)
+8. BE-19, BE-20 (HTTP + script)
+9. BE-21 → BE-22 (test menyeluruh + docs)
+
+## Log keputusan & penemuan
+
+> Tambahkan entri bertanggal untuk hal non-obvious yang ditemukan saat implementasi (edge case legacy, keputusan desain di luar PRD, blocker). Ini yang dibaca sesi berikutnya.
+
+- 2026-07-07: Tracker dibuat. Semua issue BB-77…BB-98 assigned, semuanya Backlog. Angka final `renewalAffiliateRate` masih menunggu COO (placeholder 20%).
