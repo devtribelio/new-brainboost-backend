@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express';
 import { ProductService } from './product.service';
 import type { AffiliatorService } from '@bb/domain/affiliate/affiliator.service';
+import { EntitlementService } from '@bb/domain/subscription/entitlement.service';
 import { ok, okPaginated } from '@bb/common/utils/response.util';
 import { BadRequestException } from '@bb/common/exceptions';
 import { parsePagination } from '@bb/common/utils/pagination.util';
@@ -27,6 +28,7 @@ export class ProductController {
   constructor(
     private readonly productService: ProductService,
     private readonly affiliatorService: AffiliatorService,
+    private readonly entitlement = new EntitlementService(),
   ) {}
 
   @ApiOperation({ summary: 'List products' })
@@ -115,11 +117,15 @@ export class ProductController {
       });
       affiliateCode = m?.affiliateCode ?? null;
       if (product.course) {
+        // Valid enrollment (retail by existence, lazy row by date — BE-06
+        // predicate) OR an active subscription = "owned" (BE-11).
         const enrollment = await prisma.courseEnrollment.findUnique({
           where: { memberId_courseId: { memberId, courseId: product.course.id } },
-          select: { id: true },
+          select: { viaSubscriptionId: true, expiredDate: true },
         });
-        isPurchase = !!enrollment;
+        isPurchase =
+          (enrollment != null && this.entitlement.isEnrollmentValid(enrollment)) ||
+          (await this.entitlement.hasActiveSubscription(memberId));
       }
     }
     return ok(

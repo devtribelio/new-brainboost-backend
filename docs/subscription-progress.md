@@ -23,8 +23,8 @@ Status: `todo` → `wip` → `done` (done = kode + test hijau; ✅ di kolom Jira
 | BE-07 Event bus | BB-83 | **selesai — menunggu review** | `packages/common/src/events/subscription-events.ts`; 4 event; isolasi sync throw (lebih kuat dari bus commerce) |
 | BE-08 Listener commerce | BB-84 | **selesai — menunggu review** | `subscription-activation.listener.ts` + `revokeByTransactionId`; wired ke `registerDomainListeners`; 6 test activation-listener.spec.ts |
 | BE-09 Komisi flat | BB-85 | **selesai — menunggu review** | short-circuit di `commitCommissionsForPayment`; 1 row L1 `schemaType='FLAT'`, rate dari plan; renewal = flag RC OR ledger (`transactionId` lain non-NULL, grant tak dihitung); 9 test flat-commission.spec.ts |
-| BE-10 Gate media | BB-86 | todo | |
-| BE-11 Product list/detail | BB-87 | todo | |
+| BE-10 Gate media | BB-86 | **selesai — menunggu review** | `MediaService.assertEnrollment` → delegasi `assertCourseAccess`; signature tetap |
+| BE-11 Product list/detail | BB-87 | **selesai — menunggu review** | isPurchase/badge/purchased/not_purchased (typed+raw) subscription-aware; `type='subscription'` excluded dari list default; 9 test product-subscription.spec.ts |
 | BE-12 RC webhook | BB-88 | todo | |
 | BE-13 purchase-ingest | BB-89 | todo | |
 | BE-14 Guard checkout | BB-90 | todo | |

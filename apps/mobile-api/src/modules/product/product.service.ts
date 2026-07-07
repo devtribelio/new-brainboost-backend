@@ -3,6 +3,7 @@ import type { Product } from '@prisma/client';
 import { prisma } from '@bb/db';
 import { NotFoundException } from '@bb/common/exceptions';
 import type { PaginationParams } from '@bb/common/utils/pagination.util';
+import { EntitlementService } from '@bb/domain/subscription/entitlement.service';
 import type { Ownership, ProductMedia, ProductSort } from './dto/list-query.dto';
 
 interface ListQuery {
@@ -12,6 +13,16 @@ interface ListQuery {
   ownership?: Ownership;
   sort?: ProductSort;
   media?: ProductMedia[];
+}
+
+/**
+ * Enrollment VALIDITY (must mirror EntitlementService.isEnrollmentValid, BE-06):
+ * retail/legacy rows (via_subscription_id NULL) count by existence; subscription
+ * lazy rows only while expired_date is in the future. Used by every ownership
+ * filter below so list badges and the media gate never disagree.
+ */
+function validEnrollmentWhere(now: Date): Prisma.CourseEnrollmentWhereInput {
+  return { OR: [{ viaSubscriptionId: null }, { expiredDate: { gt: now } }] };
 }
 
 export interface ReviewAggregate {
@@ -36,9 +47,11 @@ function distributionFromGroupBy(
 }
 
 export class ProductService {
+  constructor(private readonly entitlement = new EntitlementService()) {}
+
   async list(p: PaginationParams, q: ListQuery) {
     if (q.ownership === 'purchased' && q.memberId) {
-      return this.listPurchased(p, q.memberId, { keyword: q.keyword, type: q.type });
+      return this.listPurchased(p, q, q.memberId);
     }
 
     // `top_rated` orders by AVG(review.stars) and `media` scans lesson `slides_data`
@@ -50,12 +63,20 @@ export class ProductService {
 
     const where: Prisma.ProductWhereInput = { isActive: true };
     if (q.keyword) where.title = { contains: q.keyword, mode: 'insensitive' };
+    // Subscription plan products never show in the catalog by default — the
+    // paywall reads GET /subscription/plans. Explicit ?type=subscription still works.
     if (q.type) where.type = q.type;
+    else where.type = { not: 'subscription' };
     if (q.ownership === 'not_purchased' && q.memberId) {
-      where.OR = [
-        { course: null },
-        { course: { enrollments: { none: { memberId: q.memberId } } } },
-      ];
+      if (await this.entitlement.hasActiveSubscription(q.memberId)) {
+        // Subscribers own every course-backed product → only course-less ones remain.
+        where.course = null;
+      } else {
+        where.OR = [
+          { course: null },
+          { course: { enrollments: { none: { memberId: q.memberId, ...validEnrollmentWhere(new Date()) } } } },
+        ];
+      }
     }
     const [rows, total] = await Promise.all([
       prisma.product.findMany({
@@ -91,12 +112,21 @@ export class ProductService {
     const conds: Prisma.Sql[] = [Prisma.sql`p.is_active = true`];
     if (q.keyword) conds.push(Prisma.sql`p.title ILIKE ${`%${q.keyword}%`}`);
     if (q.type) conds.push(Prisma.sql`p.type = ${q.type}`);
+    else conds.push(Prisma.sql`p.type <> 'subscription'`); // paywall products stay out of the catalog
     if (q.ownership === 'not_purchased' && q.memberId) {
-      conds.push(Prisma.sql`NOT EXISTS (
-        SELECT 1 FROM courses c
-        JOIN course_enrollment ce ON ce.course_id = c.id
-        WHERE c.product_id = p.id AND ce.member_id = ${q.memberId}::uuid
-      )`);
+      if (await this.entitlement.hasActiveSubscription(q.memberId)) {
+        // Subscribers own every course-backed product → only course-less ones remain.
+        conds.push(Prisma.sql`NOT EXISTS (SELECT 1 FROM courses c WHERE c.product_id = p.id)`);
+      } else {
+        // Only VALID enrollments count (mirror of validEnrollmentWhere):
+        // retail rows by existence, lazy rows only while expired_date is future.
+        conds.push(Prisma.sql`NOT EXISTS (
+          SELECT 1 FROM courses c
+          JOIN course_enrollment ce ON ce.course_id = c.id
+          WHERE c.product_id = p.id AND ce.member_id = ${q.memberId}::uuid
+            AND (ce.via_subscription_id IS NULL OR ce.expired_date > now())
+        )`);
+      }
     }
     if (q.media && q.media.length > 0) {
       // AND semantics: the course must contain a slide of EVERY requested media
@@ -168,13 +198,37 @@ export class ProductService {
   // ownership=purchased: drive query off CourseEnrollment so we can paginate
   // and sort by *purchase date*, not product.createdAt. Total = enrollment count
   // for the member, so meta.pagination.total matches the filtered result.
-  private async listPurchased(
-    p: PaginationParams,
-    memberId: string,
-    filter: { keyword?: string; type?: string },
-  ) {
+  private async listPurchased(p: PaginationParams, q: ListQuery, memberId: string) {
+    const filter = { keyword: q.keyword, type: q.type };
+
+    // A subscriber "owns" EVERY course-backed product (all-access) — drive the
+    // query off products, not enrollments, so unopened courses show up too.
+    if (await this.entitlement.hasActiveSubscription(memberId)) {
+      const where: Prisma.ProductWhereInput = {
+        isActive: true,
+        course: { isNot: null },
+        ...(filter.keyword
+          ? { title: { contains: filter.keyword, mode: 'insensitive' as const } }
+          : {}),
+        ...(filter.type ? { type: filter.type } : {}),
+      };
+      const [rows, total] = await Promise.all([
+        prisma.product.findMany({
+          where,
+          orderBy: { createdAt: 'desc' },
+          skip: p.skip,
+          take: p.take,
+        }),
+        prisma.product.count({ where }),
+      ]);
+      const ratingAvgByProduct = await this.batchRatingAvg(rows.map((r) => r.id));
+      const purchasedProductIds = new Set(rows.map((r) => r.id));
+      return { rows, total, ratingAvgByProduct, purchasedProductIds };
+    }
+
     const enrollmentWhere: Prisma.CourseEnrollmentWhereInput = {
       memberId,
+      ...validEnrollmentWhere(new Date()), // lapsed lazy rows are not "owned"
       course: {
         product: {
           isActive: true,
@@ -214,8 +268,18 @@ export class ProductService {
       .filter((r) => r.type === 'course' || r.type === 'mini_course')
       .map((r) => r.id);
     if (courseProductIds.length === 0) return set;
+
+    // All-access: an active subscription marks every course-backed row purchased.
+    if (await this.entitlement.hasActiveSubscription(memberId)) {
+      return new Set(courseProductIds);
+    }
+
     const enrollments = await prisma.courseEnrollment.findMany({
-      where: { memberId, course: { productId: { in: courseProductIds } } },
+      where: {
+        memberId,
+        ...validEnrollmentWhere(new Date()), // lapsed lazy rows don't badge as owned
+        course: { productId: { in: courseProductIds } },
+      },
       select: { course: { select: { productId: true } } },
     });
     for (const e of enrollments) set.add(e.course.productId);

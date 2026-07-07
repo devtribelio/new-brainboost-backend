@@ -1,6 +1,5 @@
-import { ForbiddenException } from '@bb/common/exceptions';
 import { env } from '@bb/common/config/env';
-import { prisma } from '@bb/db';
+import { EntitlementService } from '@bb/domain/subscription/entitlement.service';
 import type { MediaResolution } from './dto/media.dto';
 import { signBunnyHlsUrl, signBunnyMp4Url } from './bunny-sign.util';
 
@@ -12,18 +11,17 @@ import { signBunnyHlsUrl, signBunnyMp4Url } from './bunny-sign.util';
  * media lives here; the controller stays thin.
  */
 export class MediaService {
+  constructor(private readonly entitlement = new EntitlementService()) {}
+
   /**
-   * Throw `ForbiddenException` unless `memberId` is enrolled in `courseId`.
+   * Throw `ForbiddenException` unless `memberId` may access `courseId`:
+   * valid enrollment (retail = by existence; subscription lazy row = by date)
+   * OR an active subscription — which lazily creates the enrollment row
+   * (BE-10 → delegates to EntitlementService.assertCourseAccess, BE-06).
    * Used to gate non-preview media — preview media skips this entirely.
    */
   async assertEnrollment(courseId: string, memberId: string): Promise<void> {
-    const enrollment = await prisma.courseEnrollment.findUnique({
-      where: { memberId_courseId: { memberId, courseId } },
-      select: { id: true },
-    });
-    if (!enrollment) {
-      throw new ForbiddenException('Not enrolled in this course');
-    }
+    await this.entitlement.assertCourseAccess(memberId, courseId);
   }
 
   /**
