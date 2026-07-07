@@ -1,0 +1,295 @@
+import { Prisma, type MemberSubscription } from '@prisma/client';
+import { prisma } from '@bb/db';
+import { logger } from '@bb/common/config/logger';
+import { settingsService, SETTING_KEYS } from '@bb/common/services/settings.service';
+
+/** Fallback when the app_settings row is missing (seeded as 7). */
+const GRACE_DAYS_DEFAULT = 7;
+
+export type ActivationOutcome = 'initial' | 'renewal' | 'plan_change' | 'noop';
+
+export interface ActivationResult {
+  outcome: ActivationOutcome;
+  /** null when outcome='noop'. */
+  subscription: MemberSubscription | null;
+  /** Why a noop happened: product has no plan, or the transaction was already processed. */
+  noopReason?: 'no-plan' | 'duplicate-transaction';
+}
+
+export interface ActivateFromPaymentInput {
+  ownerId: string;
+  productId: string;
+  /** CommerceTransaction.id — the idempotency key (one activation per order). */
+  transactionId: string;
+  /** Payment channel: 'xendit' | 'revenuecat' (grants don't go through here). */
+  source: string;
+  /** RC original_transaction_id — binds the sub to the store subscription. */
+  providerRef?: string | null;
+  /**
+   * Authoritative expiry from the provider (RC expiration_at_ms). When present it
+   * ALWAYS wins over the locally computed `base + periodMonths` — RC already
+   * accounts for store-side grace/billing retry.
+   */
+  providerExpiresAt?: Date | null;
+}
+
+/**
+ * Owner-side subscription state machine (PRD BE-03). One activation per commerce
+ * transaction, enforced by the `subscription_activations` ledger: the unique
+ * `transaction_id` insert is the LAST write of the transaction, so a redelivered
+ * webhook (Xendit retry / RC re-emit) rolls the whole thing back via P2002 and
+ * becomes a no-op — expiry is never double-extended.
+ *
+ * Event emission is intentionally NOT here — BE-07 wires the caller (commerce
+ * listener) to emit subscription.* events AFTER this commits, based on `outcome`.
+ */
+export class SubscriptionService {
+  async activateFromPayment(input: ActivateFromPaymentInput): Promise<ActivationResult> {
+    const plan = await prisma.subscriptionPlan.findUnique({ where: { productId: input.productId } });
+    if (!plan) return { outcome: 'noop', subscription: null, noopReason: 'no-plan' };
+
+    const graceDays = await this.getGraceDays();
+
+    // Retry once: two DIFFERENT first-time transactions racing on
+    // uniq_active_sub_per_owner — the loser re-runs and lands on the renewal branch.
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await prisma.$transaction(async (tx) => {
+          const existing = await tx.memberSubscription.findFirst({
+            where: { ownerId: input.ownerId, status: 'ACTIVE' },
+          });
+
+          let outcome: ActivationOutcome;
+          let sub: MemberSubscription;
+          if (!existing) {
+            outcome = 'initial';
+            sub = await this.createInitial(tx, input, plan, graceDays);
+          } else if (existing.planId === plan.id) {
+            outcome = 'renewal';
+            sub = await this.renew(tx, existing, plan.periodMonths, graceDays, input);
+          } else {
+            outcome = 'plan_change';
+            sub = await this.changePlan(tx, existing, plan, graceDays, input);
+          }
+
+          // Idempotency gate — LAST write on purpose (see class doc).
+          await tx.subscriptionActivation.create({
+            data: {
+              subscriptionId: sub.id,
+              kind: outcome,
+              source: input.source,
+              transactionId: input.transactionId,
+              providerRef: input.providerRef ?? null,
+              previousExpiresAt: existing?.expiresAt ?? null,
+              newExpiresAt: sub.expiresAt,
+            },
+          });
+
+          return { outcome, subscription: sub };
+        });
+      } catch (e) {
+        if (isUniqueViolation(e, 'transaction_id')) {
+          logger.info(
+            { transactionId: input.transactionId },
+            '[subscription] duplicate activation — no-op',
+          );
+          return { outcome: 'noop', subscription: null, noopReason: 'duplicate-transaction' };
+        }
+        if (isUniqueViolation(e, 'owner_id') && attempt === 0) {
+          logger.warn(
+            { ownerId: input.ownerId },
+            '[subscription] lost initial-activation race — retrying as renewal',
+          );
+          continue;
+        }
+        throw e;
+      }
+    }
+  }
+
+  // --- branch: first activation -------------------------------------------------
+
+  private async createInitial(
+    tx: Prisma.TransactionClient,
+    input: ActivateFromPaymentInput,
+    plan: { id: string; periodMonths: number; seatCount: number },
+    graceDays: number,
+  ): Promise<MemberSubscription> {
+    const expiresAt = input.providerExpiresAt ?? addMonths(new Date(), plan.periodMonths);
+    const sub = await tx.memberSubscription.create({
+      data: {
+        ownerId: input.ownerId,
+        planId: plan.id,
+        status: 'ACTIVE',
+        expiresAt,
+        graceUntil: addDays(expiresAt, graceDays),
+        source: input.source,
+        providerRef: input.providerRef ?? null,
+        latestTransactionId: input.transactionId,
+      },
+    });
+
+    // Owner claims seat 1 — unless they already hold a seat on someone else's sub
+    // (RC path can't be blocked pre-payment; uniq_active_seat_per_member would fire).
+    // The sub is still created with seat 1 left empty; a human (or leaveSeat) resolves it.
+    const ownerSeatElsewhere = await tx.subscriptionSeat.findFirst({
+      where: { memberId: input.ownerId },
+    });
+    if (ownerSeatElsewhere) {
+      logger.warn(
+        { ownerId: input.ownerId, subscriptionId: sub.id, existingSeatId: ownerSeatElsewhere.id },
+        '[subscription] owner already holds a seat elsewhere — seat 1 left empty',
+      );
+    }
+    await tx.subscriptionSeat.createMany({
+      data: Array.from({ length: plan.seatCount }, (_, i) => ({
+        subscriptionId: sub.id,
+        seatNo: i + 1,
+        memberId: i === 0 && !ownerSeatElsewhere ? input.ownerId : null,
+        claimedAt: i === 0 && !ownerSeatElsewhere ? new Date() : null,
+      })),
+    });
+    return sub;
+  }
+
+  // --- branch: same-plan repurchase ---------------------------------------------
+
+  private async renew(
+    tx: Prisma.TransactionClient,
+    sub: MemberSubscription,
+    periodMonths: number,
+    graceDays: number,
+    input: ActivateFromPaymentInput,
+  ): Promise<MemberSubscription> {
+    const now = new Date();
+    // Base = whichever is later: not-yet-expired subs extend from their expiry,
+    // lapsed-but-still-ACTIVE (in grace) subs extend from now.
+    const base = sub.expiresAt > now ? sub.expiresAt : now;
+    const expiresAt = input.providerExpiresAt ?? addMonths(base, periodMonths);
+
+    const updated = await tx.memberSubscription.update({
+      where: { id: sub.id },
+      data: {
+        expiresAt,
+        graceUntil: addDays(expiresAt, graceDays),
+        canceledAt: null, // repurchase revokes a pending cancel-intent
+        source: input.source,
+        providerRef: input.providerRef ?? sub.providerRef,
+        latestTransactionId: input.transactionId,
+      },
+    });
+    await this.bumpLazyEnrollments(tx, sub.id, expiresAt);
+    return updated;
+  }
+
+  // --- branch: RC PRODUCT_CHANGE (web tier-change is blocked at checkout, BE-14) --
+
+  private async changePlan(
+    tx: Prisma.TransactionClient,
+    sub: MemberSubscription,
+    plan: { id: string; periodMonths: number; seatCount: number },
+    graceDays: number,
+    input: ActivateFromPaymentInput,
+  ): Promise<MemberSubscription> {
+    const now = new Date();
+    const base = sub.expiresAt > now ? sub.expiresAt : now;
+    const expiresAt = input.providerExpiresAt ?? addMonths(base, plan.periodMonths);
+
+    const updated = await tx.memberSubscription.update({
+      where: { id: sub.id },
+      data: {
+        planId: plan.id,
+        expiresAt,
+        graceUntil: addDays(expiresAt, graceDays),
+        canceledAt: null,
+        source: input.source,
+        providerRef: input.providerRef ?? sub.providerRef,
+        latestTransactionId: input.transactionId,
+      },
+    });
+
+    // Seat reconciliation. Grow: append empty slots. Shrink: drop EMPTY slots from
+    // the highest seatNo down — claimed seats are never dropped; if claimed seats
+    // alone exceed the new count, keep them all (over-provisioned) and let a human
+    // resolve. Seat 1 (owner) is claimed, so it always survives a shrink.
+    const seats = await tx.subscriptionSeat.findMany({
+      where: { subscriptionId: sub.id },
+      orderBy: { seatNo: 'desc' },
+    });
+    if (seats.length < plan.seatCount) {
+      const maxNo = seats.length ? seats[0].seatNo : 0;
+      await tx.subscriptionSeat.createMany({
+        data: Array.from({ length: plan.seatCount - seats.length }, (_, i) => ({
+          subscriptionId: sub.id,
+          seatNo: maxNo + i + 1,
+          memberId: null,
+        })),
+      });
+    } else if (seats.length > plan.seatCount) {
+      const removable = seats // desc order: drop from the top
+        .filter((s) => s.memberId === null)
+        .slice(0, seats.length - plan.seatCount);
+      if (removable.length < seats.length - plan.seatCount) {
+        logger.warn(
+          { subscriptionId: sub.id, claimed: seats.filter((s) => s.memberId).length, target: plan.seatCount },
+          '[subscription] plan change left more claimed seats than the new seatCount',
+        );
+      }
+      if (removable.length) {
+        await tx.subscriptionSeat.deleteMany({
+          where: { id: { in: removable.map((s) => s.id) } },
+        });
+      }
+    }
+
+    await this.bumpLazyEnrollments(tx, sub.id, expiresAt);
+    return updated;
+  }
+
+  // --- shared -------------------------------------------------------------------
+
+  /** Renewal/plan-change moves every lazy enrollment of this sub to the new expiry. */
+  private async bumpLazyEnrollments(
+    tx: Prisma.TransactionClient,
+    subscriptionId: string,
+    expiresAt: Date,
+  ): Promise<void> {
+    await tx.courseEnrollment.updateMany({
+      where: { viaSubscriptionId: subscriptionId },
+      data: { expiredDate: expiresAt },
+    });
+  }
+
+  private async getGraceDays(): Promise<number> {
+    const raw = await settingsService.get(
+      SETTING_KEYS.subscriptionGraceDays,
+      String(GRACE_DAYS_DEFAULT),
+    );
+    const parsed = Number.parseInt(raw, 10);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : GRACE_DAYS_DEFAULT;
+  }
+}
+
+function isUniqueViolation(e: unknown, field: string): boolean {
+  // Prisma reports manually created partial indexes by COLUMN name, not constraint
+  // name (P2002 meta.target = ['transaction_id'] for uniq_activation_tx). Within
+  // this service's transaction each guarded column is unique to one constraint:
+  // transaction_id → activation ledger, owner_id → one-ACTIVE-sub-per-owner.
+  return (
+    e instanceof Prisma.PrismaClientKnownRequestError &&
+    e.code === 'P2002' &&
+    (JSON.stringify(e.meta ?? {}) + e.message).includes(field)
+  );
+}
+
+function addMonths(d: Date, months: number): Date {
+  const out = new Date(d);
+  out.setMonth(out.getMonth() + months);
+  return out;
+}
+
+function addDays(d: Date, days: number): Date {
+  const out = new Date(d);
+  out.setDate(out.getDate() + days);
+  return out;
+}
