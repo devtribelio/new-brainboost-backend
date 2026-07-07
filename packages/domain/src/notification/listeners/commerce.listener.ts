@@ -11,8 +11,12 @@ export function registerCommerceNotificationListener(): void {
     try {
       const product = await prisma.product.findUnique({
         where: { id: e.productId },
-        select: { title: true, code: true },
+        select: { title: true, code: true, subscriptionPlan: { select: { id: true } } },
       });
+      // Plan-backed products: the subscription lifecycle listener owns the
+      // messaging (subscription.activated/renewed) — skip the generic payment
+      // notification so the member doesn't get doubles (BE-17).
+      if (product?.subscriptionPlan) return;
       const named = product ? product.title : null;
 
       const type = e.isRenewal ? ActionLabel.SubscriptionRenewed : ActionLabel.PaymentSuccess;

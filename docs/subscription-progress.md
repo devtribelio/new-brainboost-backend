@@ -28,9 +28,9 @@ Status: `todo` → `wip` → `done` (done = kode + test hijau; ✅ di kolom Jira
 | BE-12 RC webhook | BB-88 | **selesai — menunggu review** | EXPIRATION → `expireByProviderRef`; CANCELLATION cabang `cancel_reason` (UNSUBSCRIBE/BILLING_ERROR = intent, lainnya/kosong = refund legacy); DTO +3 field |
 | BE-13 purchase-ingest | BB-89 | **selesai — menunggu review** | SKU resolve iOS OR Android; passthrough `subscription:{providerRef,expiresAt}` di event; attributionKey per-periode utk produk plan; 6 test rc-subscription.spec.ts |
 | BE-14 Guard checkout | BB-90 | **selesai — menunggu review** | guard di `CheckoutService.start`; plan beda 400, plan sama = renewal OK, seat orang lain 400 (zombie tidak blok); 5 test checkout-guard.spec.ts |
-| BE-15 Job renewal reminder | BB-91 | todo | ⚠️ jangan aktif di prod sebelum template bb-comms siap |
-| BE-16 Job expire | BB-92 | todo | |
-| BE-17 Notification listeners | BB-93 | todo | |
+| BE-15 Job renewal reminder | BB-91 | **selesai — menunggu review** | `jobs/subscription-renewal-reminder.ts`; insert-first, bucket terkecil dulu, suppression ter-scope per siklus expiry; ⚠️ jangan aktif di prod sebelum template bb-comms siap |
+| BE-16 Job expire | BB-92 | **selesai — menunggu review** | `jobs/subscription-expire.ts`; hanya past-grace, idempotent, emit expired |
+| BE-17 Notification listeners | BB-93 | **selesai — menunggu review** | `subscription.listener.ts` + 4 label baru; commerce listener skip product ber-plan (anti-dobel); refund silent; 9 test jobs.spec.ts |
 | BE-18 Email receipt + bb-comms | BB-94 | todo | dependensi eksternal bb-comms |
 | BE-19 Modul HTTP /subscription | BB-95 | todo | |
 | BE-20 Script grant + eligibility | BB-96 | todo | |

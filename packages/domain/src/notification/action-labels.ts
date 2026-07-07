@@ -11,6 +11,10 @@ export const ActionLabel = {
   PaymentPending: 'paymentPending',
   PaymentRefunded: 'paymentRefunded',
   SubscriptionRenewed: 'subscriptionRenewed',
+  SubscriptionActivated: 'subscriptionActivated',
+  SubscriptionExpired: 'subscriptionExpired',
+  SubscriptionCanceled: 'subscriptionCanceled',
+  SubscriptionReminder: 'subscriptionReminder',
   CommissionEarned: 'commissionEarned',
 } as const;
 

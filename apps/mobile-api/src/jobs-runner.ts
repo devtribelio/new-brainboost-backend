@@ -4,6 +4,8 @@ import { logger } from '@bb/common/config/logger';
 import { prisma } from '@bb/db';
 import { affiliatePendingToBalance } from '@bb/domain/jobs/affiliate-pending-to-balance';
 import { expirePendingPayments } from '@bb/domain/jobs/expire-pending-payments';
+import { subscriptionExpire } from '@bb/domain/jobs/subscription-expire';
+import { subscriptionRenewalReminder } from '@bb/domain/jobs/subscription-renewal-reminder';
 
 /**
  * Standalone scheduled-jobs entrypoint. Runs every registered job ONCE, then exits.
@@ -21,6 +23,12 @@ import { expirePendingPayments } from '@bb/domain/jobs/expire-pending-payments';
 const JOBS: Array<{ name: string; run: () => Promise<unknown> }> = [
   { name: 'affiliatePendingToBalance', run: () => affiliatePendingToBalance() },
   { name: 'expirePendingPayments', run: () => expirePendingPayments() },
+  // Expire BEFORE reminders: a sub past grace must not get a renewal reminder
+  // in the same tick it dies.
+  { name: 'subscriptionExpire', run: () => subscriptionExpire() },
+  // ⚠️ emails require the bb-comms SubscriptionRenewalReminder template (BE-18
+  // external dependency) — do not schedule this runner on prod before it ships.
+  { name: 'subscriptionRenewalReminder', run: () => subscriptionRenewalReminder() },
 ];
 
 async function main(): Promise<void> {
