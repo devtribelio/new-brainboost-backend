@@ -1,5 +1,7 @@
 import { logger } from '@bb/common/config/logger';
 import { env } from '@bb/common/config/env';
+import { subscriptionEvents } from '@bb/common/events/subscription-events';
+import { SubscriptionService } from '@bb/domain/subscription/subscription.service';
 import {
   purchaseIngestService,
   type NormalizedPurchase,
@@ -17,6 +19,14 @@ const PURCHASE_EVENT_TYPES = new Set([
 
 /** RC event types we treat as a refund (revoke access + void commission). */
 const REFUND_EVENT_TYPES = new Set(['CANCELLATION']);
+
+/**
+ * CANCELLATION reasons that mean "auto-renew off, access continues" (cancel
+ * intent) rather than a refund. Anything else — CUSTOMER_SUPPORT (real refund),
+ * absent (legacy payloads, retail consumables), unknown — takes the refund path,
+ * preserving pre-subscription behavior exactly.
+ */
+const CANCEL_INTENT_REASONS = new Set(['UNSUBSCRIBE', 'BILLING_ERROR']);
 
 /**
  * Compute the net amount Brainboost takes home from a RC purchase event.
@@ -71,6 +81,8 @@ export interface RevenueCatHandleResult {
  * per-channel toggles (`triggersAffiliate` / `canIngestRefund`).
  */
 export class RevenueCatWebhookHandler {
+  constructor(private readonly subscriptionService = new SubscriptionService()) {}
+
   async handle(event: RevenueCatEventDto): Promise<RevenueCatHandleResult> {
     // Full event logged on entry — gives a forensic trail for fee/encoding
     // surprises like the takehome_percentage discovery, without depending on
@@ -78,6 +90,20 @@ export class RevenueCatWebhookHandler {
     // for long-term audit see `commerce_payments.log_request` (persisted in
     // the ingest service on successful purchase).
     logger.info({ event }, '[revenuecat] webhook received');
+
+    // Subscription lifecycle events that never touch the ingest kernel (BE-12):
+    // EXPIRATION ends the sub; CANCELLATION with UNSUBSCRIBE/BILLING_ERROR is a
+    // cancel-INTENT (access continues). Both key on original_transaction_id.
+    if (event.type === 'EXPIRATION') {
+      return this.handleExpiration(event);
+    }
+    if (
+      event.type === 'CANCELLATION' &&
+      event.cancel_reason != null &&
+      CANCEL_INTENT_REASONS.has(event.cancel_reason)
+    ) {
+      return this.handleCancelIntent(event);
+    }
 
     const isPurchase = PURCHASE_EVENT_TYPES.has(event.type);
     const isRefund = REFUND_EVENT_TYPES.has(event.type);
@@ -116,6 +142,58 @@ export class RevenueCatWebhookHandler {
     };
   }
 
+  private async handleExpiration(event: RevenueCatEventDto): Promise<RevenueCatHandleResult> {
+    const providerRef = event.original_transaction_id ?? event.transaction_id;
+    if (!providerRef) {
+      logger.warn({ eventId: event.id }, '[revenuecat] EXPIRATION without transaction ref — skipped');
+      return { handled: false, status: 'skipped' };
+    }
+    const sub = await this.subscriptionService.expireByProviderRef(providerRef);
+    if (!sub) {
+      logger.info({ providerRef, eventId: event.id }, '[revenuecat] EXPIRATION: no active sub — noop');
+      return { handled: true, status: 'expiration_noop' };
+    }
+    subscriptionEvents.emit('subscription.expired', {
+      subscriptionId: sub.id,
+      ownerId: sub.ownerId,
+      planId: sub.plan.id,
+      planCode: sub.plan.code,
+      tier: sub.plan.tier,
+      expiresAt: sub.expiresAt,
+      source: sub.source,
+    });
+    logger.info({ subscriptionId: sub.id, providerRef }, '[revenuecat] subscription expired');
+    return { handled: true, status: 'expired' };
+  }
+
+  private async handleCancelIntent(event: RevenueCatEventDto): Promise<RevenueCatHandleResult> {
+    const providerRef = event.original_transaction_id ?? event.transaction_id;
+    if (!providerRef) {
+      logger.warn({ eventId: event.id }, '[revenuecat] CANCELLATION without transaction ref — skipped');
+      return { handled: false, status: 'skipped' };
+    }
+    const sub = await this.subscriptionService.cancelIntentByProviderRef(providerRef);
+    if (!sub) {
+      // Not a sub / already intent / not active — nothing to do (idempotent).
+      return { handled: true, status: 'cancel_intent_noop' };
+    }
+    subscriptionEvents.emit('subscription.canceled', {
+      subscriptionId: sub.id,
+      ownerId: sub.ownerId,
+      planId: sub.plan.id,
+      planCode: sub.plan.code,
+      tier: sub.plan.tier,
+      expiresAt: sub.expiresAt,
+      source: sub.source,
+      reason: 'store',
+    });
+    logger.info(
+      { subscriptionId: sub.id, providerRef, cancelReason: event.cancel_reason },
+      '[revenuecat] cancel intent recorded — access continues to expiry',
+    );
+    return { handled: true, status: 'cancel_intent' };
+  }
+
   private toPurchase(event: RevenueCatEventDto): NormalizedPurchase {
     const gross = event.price_in_purchased_currency ?? 0;
     return {
@@ -149,6 +227,13 @@ export class RevenueCatWebhookHandler {
       ),
       currency: event.currency,
       isRenewal: event.type === 'RENEWAL',
+      // Subscription facts (BE-13): bind the sub to the store subscription and
+      // carry RC's authoritative expiry. Harmless for consumables (no plan → the
+      // activation listener no-ops).
+      subscription: {
+        providerRef: event.original_transaction_id ?? event.transaction_id ?? null,
+        expirationAtMs: event.expiration_at_ms ?? null,
+      },
       occurredAt: undefined,
       raw: event,
     };

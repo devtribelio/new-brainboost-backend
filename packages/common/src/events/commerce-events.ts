@@ -37,9 +37,16 @@ export interface CommercePaymentSuccessEvent {
   /**
    * Subscription renewal (vs first purchase). RC `RENEWAL` event sets this; other
    * channels leave it undefined. Notification listener emits `subscriptionRenewed`
-   * instead of `paymentSuccess` when true. Does not affect enrollment/commission.
+   * instead of `paymentSuccess` when true. Feeds renewal-rate detection (BE-09).
    */
   isRenewal?: boolean;
+  /**
+   * Provider subscription facts (BE-13, RC only): providerRef = the store's
+   * original_transaction_id (binds the sub for later EXPIRATION/CANCELLATION
+   * lookups), expiresAt = authoritative entitlement expiry from the provider.
+   * Channels without a subscription concept leave this undefined.
+   */
+  subscription?: { providerRef?: string | null; expiresAt?: Date | null };
 }
 
 export interface CommercePaymentRefundedEvent {

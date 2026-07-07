@@ -90,6 +90,29 @@ export class RevenueCatEventDto {
   @IsNumber()
   tax_percentage?: number;
 
+  @ApiPropertyOptional({
+    example: 1751884800000,
+    description:
+      'Entitlement expiry (ms epoch) for auto-renewing subscriptions. Authoritative — already includes store-side grace/billing retry. Drives MemberSubscription.expiresAt.',
+  })
+  @IsOptional()
+  @IsNumber()
+  expiration_at_ms?: number;
+
+  @ApiPropertyOptional({
+    example: 'UNSUBSCRIBE',
+    description:
+      'CANCELLATION reason: UNSUBSCRIBE / BILLING_ERROR → cancel-intent (access continues to expiry); CUSTOMER_SUPPORT (refund) or absent → refund path.',
+  })
+  @IsOptional()
+  @IsString()
+  cancel_reason?: string;
+
+  @ApiPropertyOptional({ example: 'NORMAL', description: 'NORMAL | TRIAL | INTRO (informational)' })
+  @IsOptional()
+  @IsString()
+  period_type?: string;
+
   @ApiPropertyOptional({ description: 'RC subscriber attributes ($email, $displayName, …)' })
   @IsOptional()
   @IsObject()

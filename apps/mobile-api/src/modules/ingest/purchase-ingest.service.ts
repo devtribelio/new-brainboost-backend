@@ -40,6 +40,12 @@ export interface NormalizedPurchase {
   refundOfProviderEventId?: string; // for type=REFUND: the original purchase's providerEventId
   /** Subscription renewal vs first purchase — drives `subscriptionRenewed` notif. */
   isRenewal?: boolean;
+  /**
+   * Provider subscription facts (BE-13): providerRef = store original_transaction_id,
+   * expirationAtMs = authoritative entitlement expiry. Forwarded on the success
+   * event so the subscription activation listener binds/extends the sub correctly.
+   */
+  subscription?: { providerRef?: string | null; expirationAtMs?: number | null };
   occurredAt?: string;
   raw?: unknown;
 }
@@ -79,6 +85,18 @@ export class PurchaseIngestService {
     });
     if (existing) return { status: 'duplicate', transactionId: existing.id };
 
+    // Subscription products claim commission PER PERIOD (BE-13): the stable
+    // original_transaction_id would let the first period's claim block every
+    // renewal's commission forever, but renewals must pay (at the renewal rate,
+    // BE-09). providerEventId (= store transaction_id) is unique per period, and
+    // same-period restores/re-syncs reuse it → they short-circuit as duplicates
+    // above before ever reaching the claim. Retail keeps the stable key.
+    const isSubscriptionProduct =
+      (await prisma.subscriptionPlan.count({ where: { productId } })) > 0;
+    const attributionKey = isSubscriptionProduct
+      ? input.providerEventId
+      : (input.attributionKey ?? input.providerEventId);
+
     const gross = Math.max(0, Math.round(input.grossAmount));
     const voucherAmount = Math.max(0, Math.round(input.voucherAmount ?? 0));
     // `acceptedAmount` = net settlement (after store cut + tax). When the
@@ -112,7 +130,7 @@ export class PurchaseIngestService {
               voucherAmount,
               provider: cred.name,
               providerEventId: input.providerEventId,
-              attributionKey: input.attributionKey ?? input.providerEventId,
+              attributionKey,
               status: 'PAID',
               paidAt: new Date(),
             },
@@ -170,7 +188,6 @@ export class PurchaseIngestService {
     // events all attempt the insert, exactly one wins, the others get P2002.
     let affiliateEligible = cred.triggersAffiliate;
     if (affiliateEligible) {
-      const attributionKey = input.attributionKey ?? input.providerEventId;
       try {
         await prisma.affiliateAttributionClaim.create({
           data: { provider: cred.name, attributionKey, paymentId },
@@ -209,6 +226,16 @@ export class PurchaseIngestService {
       affiliateEligible, // gate: false → enrollment yes, commission no (channel off OR re-settle)
       channel: cred.name, // e.g. "revenuecat", "scalev", "lynkid" — used for per-channel hold
       isRenewal: input.isRenewal,
+      // Subscription facts passthrough (BE-13) — undefined for non-subscription channels.
+      subscription: input.subscription
+        ? {
+            providerRef: input.subscription.providerRef ?? null,
+            expiresAt:
+              input.subscription.expirationAtMs != null
+                ? new Date(input.subscription.expirationAtMs)
+                : null,
+          }
+        : undefined,
     });
 
     return { status: 'committed', transactionId: txId, paymentId };
@@ -290,7 +317,12 @@ export class PurchaseIngestService {
       if (p) return p.id;
     }
     if (ref?.bySku) {
-      const p = await prisma.product.findUnique({ where: { iosProductId: ref.bySku }, select: { id: true } });
+      // A store SKU can arrive from either platform — Android SKUs never resolved
+      // before this OR (BE-13); both columns are unique so findFirst is exact.
+      const p = await prisma.product.findFirst({
+        where: { OR: [{ iosProductId: ref.bySku }, { androidProductId: ref.bySku }] },
+        select: { id: true },
+      });
       if (p) return p.id;
     }
     return null;

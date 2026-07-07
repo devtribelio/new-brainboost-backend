@@ -204,11 +204,12 @@ describe('RevenueCat webhook', () => {
     expect(r.body.status).toBe('product_not_found');
   });
 
-  it('unhandled event type (EXPIRATION) → skipped, no ingest', async () => {
+  // EXPIRATION became a handled lifecycle event (BE-12) — TEST is the unhandled probe now.
+  it('unhandled event type (TEST) → skipped, no ingest', async () => {
     const r = await request(app)
       .post(ROUTE)
       .set('authorization', AUTH)
-      .send(rcEvent({ type: 'EXPIRATION', app_user_id: memberId }));
+      .send(rcEvent({ type: 'TEST', app_user_id: memberId }));
     expect(r.status).toBe(200);
     expect(r.body.handled).toBe(false);
     expect(r.body.status).toBe('skipped');
@@ -257,14 +258,14 @@ describe('RevenueCat webhook', () => {
     const old = await request(app)
       .post(ROUTE)
       .set('authorization', AUTH)
-      .send(rcEvent({ type: 'EXPIRATION', app_user_id: memberId }));
+      .send(rcEvent({ type: 'TEST', app_user_id: memberId }));
     expect(old.status).toBe(401);
 
-    // New secret authorizes (EXPIRATION → 200 skipped proves auth passed).
+    // New secret authorizes (TEST → 200 skipped proves auth passed).
     const fresh = await request(app)
       .post(ROUTE)
       .set('authorization', `Bearer ${NEW}`)
-      .send(rcEvent({ type: 'EXPIRATION', app_user_id: memberId }));
+      .send(rcEvent({ type: 'TEST', app_user_id: memberId }));
     expect(fresh.status).toBe(200);
     expect(fresh.body.status).toBe('skipped');
   });

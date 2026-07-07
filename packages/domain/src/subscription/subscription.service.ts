@@ -197,6 +197,54 @@ export class SubscriptionService {
     });
   }
 
+  /**
+   * RC EXPIRATION (PRD BE-12): the store says the entitlement is over (its grace
+   * included) — flip ACTIVE → EXPIRED now. If our local expiry was still in the
+   * future (clock skew / store-side early termination), pull it and the lazy
+   * enrollments back to now so access dies with the status. Idempotent: returns
+   * null unless an ACTIVE sub with this providerRef existed.
+   */
+  async expireByProviderRef(
+    providerRef: string,
+  ): Promise<(MemberSubscription & { plan: SubscriptionPlan }) | null> {
+    return prisma.$transaction(async (tx) => {
+      const sub = await tx.memberSubscription.findFirst({
+        where: { providerRef, status: 'ACTIVE' },
+      });
+      if (!sub) return null;
+
+      const now = new Date();
+      const expiresAt = sub.expiresAt < now ? sub.expiresAt : now;
+      const updated = await tx.memberSubscription.update({
+        where: { id: sub.id },
+        data: { status: 'EXPIRED', expiresAt, graceUntil: expiresAt },
+        include: { plan: true },
+      });
+      if (sub.expiresAt > now) await this.bumpLazyEnrollments(tx, sub.id, now);
+      return updated;
+    });
+  }
+
+  /**
+   * RC CANCELLATION with UNSUBSCRIBE/BILLING_ERROR (PRD BE-12): cancel-INTENT
+   * only — auto-renew is off but access continues to expiry. No revoke, no
+   * commission void (that's the refund path). Idempotent: a second event on an
+   * already-intent sub returns null so no duplicate subscription.canceled fires.
+   */
+  async cancelIntentByProviderRef(
+    providerRef: string,
+  ): Promise<(MemberSubscription & { plan: SubscriptionPlan }) | null> {
+    const sub = await prisma.memberSubscription.findFirst({
+      where: { providerRef, status: 'ACTIVE', canceledAt: null },
+    });
+    if (!sub) return null;
+    return prisma.memberSubscription.update({
+      where: { id: sub.id },
+      data: { canceledAt: new Date() },
+      include: { plan: true },
+    });
+  }
+
   // --- branch: first activation -------------------------------------------------
 
   private async createInitial(

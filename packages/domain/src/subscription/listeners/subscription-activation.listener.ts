@@ -12,8 +12,6 @@ const subscriptionService = new SubscriptionService();
  * this single listener activates subs for every channel; products without a
  * plan no-op inside activateFromPayment. subscription.* events are emitted
  * AFTER the service's transaction committed (we're past the await).
- *
- * providerRef / provider expiry passthrough for RC arrives with BE-13.
  */
 export function registerSubscriptionActivationListeners(): void {
   commerceEvents.on('commerce.payment.success', async (e) => {
@@ -23,6 +21,9 @@ export function registerSubscriptionActivationListeners(): void {
         productId: e.productId,
         transactionId: e.transactionId,
         source: e.channel === 'revenuecat' ? 'revenuecat' : 'xendit',
+        // Provider facts passthrough (BE-13): RC binds providerRef + authoritative expiry.
+        providerRef: e.subscription?.providerRef ?? null,
+        providerExpiresAt: e.subscription?.expiresAt ?? null,
       });
       if (result.outcome === 'noop' || !result.subscription || !result.plan) return;
 
