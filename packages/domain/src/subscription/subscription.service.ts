@@ -1,6 +1,7 @@
 import { Prisma, type MemberSubscription } from '@prisma/client';
 import { prisma } from '@bb/db';
 import { logger } from '@bb/common/config/logger';
+import { BadRequestException } from '@bb/common/exceptions';
 import { settingsService, SETTING_KEYS } from '@bb/common/services/settings.service';
 
 /** Fallback when the app_settings row is missing (seeded as 7). */
@@ -33,12 +34,31 @@ export interface ActivateFromPaymentInput {
   providerExpiresAt?: Date | null;
 }
 
+export interface GrantResult {
+  outcome: 'created' | 'extended';
+  subscription: MemberSubscription;
+}
+
+/** Shared shape the initial/renew/change helpers consume — payment and grant paths. */
+interface ActivationMeta {
+  source: string;
+  providerRef?: string | null;
+  /** null/undefined for grants (no commerce transaction). */
+  transactionId?: string | null;
+  providerExpiresAt?: Date | null;
+  /** Period override in months (grant campaigns); defaults to plan.periodMonths. */
+  months?: number;
+}
+
 /**
- * Owner-side subscription state machine (PRD BE-03). One activation per commerce
- * transaction, enforced by the `subscription_activations` ledger: the unique
- * `transaction_id` insert is the LAST write of the transaction, so a redelivered
- * webhook (Xendit retry / RC re-emit) rolls the whole thing back via P2002 and
- * becomes a no-op — expiry is never double-extended.
+ * Owner-side subscription state machine (PRD BE-03/BE-04). One activation per
+ * commerce transaction, enforced by the `subscription_activations` ledger: the
+ * unique `transaction_id` insert is the LAST write of the transaction, so a
+ * redelivered webhook (Xendit retry / RC re-emit) rolls the whole thing back via
+ * P2002 and becomes a no-op — expiry is never double-extended. Grants write a
+ * ledger row with transactionId NULL (exempt from the partial unique): grant
+ * idempotency is the calling script's job (BE-20 skips members who already have
+ * a sub/seat).
  *
  * Event emission is intentionally NOT here — BE-07 wires the caller (commerce
  * listener) to emit subscription.* events AFTER this commits, based on `outcome`.
@@ -63,7 +83,7 @@ export class SubscriptionService {
           let sub: MemberSubscription;
           if (!existing) {
             outcome = 'initial';
-            sub = await this.createInitial(tx, input, plan, graceDays);
+            sub = await this.createInitial(tx, input.ownerId, plan, graceDays, input);
           } else if (existing.planId === plan.id) {
             outcome = 'renewal';
             sub = await this.renew(tx, existing, plan.periodMonths, graceDays, input);
@@ -107,25 +127,68 @@ export class SubscriptionService {
     }
   }
 
+  /**
+   * Grant a subscription with no payment (BE-04): upgrade-claim campaign
+   * (historic buyers > 2jt → 1 year Solo) and CS cases. Behaves identically to a
+   * paid sub. Same plan ACTIVE → extend; different plan → reject (grants never
+   * silently switch a member's tier).
+   */
+  async grant(memberId: string, planCode: string, months?: number): Promise<GrantResult> {
+    const plan = await prisma.subscriptionPlan.findUnique({ where: { code: planCode } });
+    if (!plan) throw new BadRequestException(`Unknown subscription plan code: ${planCode}`);
+    const graceDays = await this.getGraceDays();
+    const meta: ActivationMeta = { source: 'granted', months };
+
+    return prisma.$transaction(async (tx) => {
+      const existing = await tx.memberSubscription.findFirst({
+        where: { ownerId: memberId, status: 'ACTIVE' },
+      });
+      if (existing && existing.planId !== plan.id) {
+        throw new BadRequestException(
+          'Member already has an ACTIVE subscription on a different plan — grant rejected',
+        );
+      }
+
+      const sub = existing
+        ? await this.renew(tx, existing, plan.periodMonths, graceDays, meta)
+        : await this.createInitial(tx, memberId, plan, graceDays, meta);
+
+      await tx.subscriptionActivation.create({
+        data: {
+          subscriptionId: sub.id,
+          kind: 'grant',
+          source: 'granted',
+          transactionId: null,
+          previousExpiresAt: existing?.expiresAt ?? null,
+          newExpiresAt: sub.expiresAt,
+        },
+      });
+
+      return { outcome: existing ? 'extended' : 'created', subscription: sub } as GrantResult;
+    });
+  }
+
   // --- branch: first activation -------------------------------------------------
 
   private async createInitial(
     tx: Prisma.TransactionClient,
-    input: ActivateFromPaymentInput,
+    ownerId: string,
     plan: { id: string; periodMonths: number; seatCount: number },
     graceDays: number,
+    meta: ActivationMeta,
   ): Promise<MemberSubscription> {
-    const expiresAt = input.providerExpiresAt ?? addMonths(new Date(), plan.periodMonths);
+    const expiresAt =
+      meta.providerExpiresAt ?? addMonths(new Date(), meta.months ?? plan.periodMonths);
     const sub = await tx.memberSubscription.create({
       data: {
-        ownerId: input.ownerId,
+        ownerId,
         planId: plan.id,
         status: 'ACTIVE',
         expiresAt,
         graceUntil: addDays(expiresAt, graceDays),
-        source: input.source,
-        providerRef: input.providerRef ?? null,
-        latestTransactionId: input.transactionId,
+        source: meta.source,
+        providerRef: meta.providerRef ?? null,
+        latestTransactionId: meta.transactionId ?? null,
       },
     });
 
@@ -133,11 +196,11 @@ export class SubscriptionService {
     // (RC path can't be blocked pre-payment; uniq_active_seat_per_member would fire).
     // The sub is still created with seat 1 left empty; a human (or leaveSeat) resolves it.
     const ownerSeatElsewhere = await tx.subscriptionSeat.findFirst({
-      where: { memberId: input.ownerId },
+      where: { memberId: ownerId },
     });
     if (ownerSeatElsewhere) {
       logger.warn(
-        { ownerId: input.ownerId, subscriptionId: sub.id, existingSeatId: ownerSeatElsewhere.id },
+        { ownerId, subscriptionId: sub.id, existingSeatId: ownerSeatElsewhere.id },
         '[subscription] owner already holds a seat elsewhere — seat 1 left empty',
       );
     }
@@ -145,37 +208,37 @@ export class SubscriptionService {
       data: Array.from({ length: plan.seatCount }, (_, i) => ({
         subscriptionId: sub.id,
         seatNo: i + 1,
-        memberId: i === 0 && !ownerSeatElsewhere ? input.ownerId : null,
+        memberId: i === 0 && !ownerSeatElsewhere ? ownerId : null,
         claimedAt: i === 0 && !ownerSeatElsewhere ? new Date() : null,
       })),
     });
     return sub;
   }
 
-  // --- branch: same-plan repurchase ---------------------------------------------
+  // --- branch: same-plan repurchase / grant extension -----------------------------
 
   private async renew(
     tx: Prisma.TransactionClient,
     sub: MemberSubscription,
     periodMonths: number,
     graceDays: number,
-    input: ActivateFromPaymentInput,
+    meta: ActivationMeta,
   ): Promise<MemberSubscription> {
     const now = new Date();
     // Base = whichever is later: not-yet-expired subs extend from their expiry,
     // lapsed-but-still-ACTIVE (in grace) subs extend from now.
     const base = sub.expiresAt > now ? sub.expiresAt : now;
-    const expiresAt = input.providerExpiresAt ?? addMonths(base, periodMonths);
+    const expiresAt = meta.providerExpiresAt ?? addMonths(base, meta.months ?? periodMonths);
 
     const updated = await tx.memberSubscription.update({
       where: { id: sub.id },
       data: {
         expiresAt,
         graceUntil: addDays(expiresAt, graceDays),
-        canceledAt: null, // repurchase revokes a pending cancel-intent
-        source: input.source,
-        providerRef: input.providerRef ?? sub.providerRef,
-        latestTransactionId: input.transactionId,
+        canceledAt: null, // repurchase/grant revokes a pending cancel-intent
+        source: meta.source,
+        providerRef: meta.providerRef ?? sub.providerRef,
+        latestTransactionId: meta.transactionId ?? sub.latestTransactionId,
       },
     });
     await this.bumpLazyEnrollments(tx, sub.id, expiresAt);
@@ -189,11 +252,11 @@ export class SubscriptionService {
     sub: MemberSubscription,
     plan: { id: string; periodMonths: number; seatCount: number },
     graceDays: number,
-    input: ActivateFromPaymentInput,
+    meta: ActivationMeta,
   ): Promise<MemberSubscription> {
     const now = new Date();
     const base = sub.expiresAt > now ? sub.expiresAt : now;
-    const expiresAt = input.providerExpiresAt ?? addMonths(base, plan.periodMonths);
+    const expiresAt = meta.providerExpiresAt ?? addMonths(base, meta.months ?? plan.periodMonths);
 
     const updated = await tx.memberSubscription.update({
       where: { id: sub.id },
@@ -202,9 +265,9 @@ export class SubscriptionService {
         expiresAt,
         graceUntil: addDays(expiresAt, graceDays),
         canceledAt: null,
-        source: input.source,
-        providerRef: input.providerRef ?? sub.providerRef,
-        latestTransactionId: input.transactionId,
+        source: meta.source,
+        providerRef: meta.providerRef ?? sub.providerRef,
+        latestTransactionId: meta.transactionId ?? sub.latestTransactionId,
       },
     });
 
