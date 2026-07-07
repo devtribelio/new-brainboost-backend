@@ -22,7 +22,7 @@ Status: `todo` → `wip` → `done` (done = kode + test hijau; ✅ di kolom Jira
 | BE-06 EntitlementService + lazy enrollment | BB-82 | **selesai — menunggu review** | `entitlement.service.ts`; retail = valid by existence (expired_date legacy diabaikan); + upgrade-lifetime di `grantCourseEnrollment`; + fix seat zombie; 7 test entitlement.spec.ts |
 | BE-07 Event bus | BB-83 | **selesai — menunggu review** | `packages/common/src/events/subscription-events.ts`; 4 event; isolasi sync throw (lebih kuat dari bus commerce) |
 | BE-08 Listener commerce | BB-84 | **selesai — menunggu review** | `subscription-activation.listener.ts` + `revokeByTransactionId`; wired ke `registerDomainListeners`; 6 test activation-listener.spec.ts |
-| BE-09 Komisi flat | BB-85 | todo | |
+| BE-09 Komisi flat | BB-85 | **selesai — menunggu review** | short-circuit di `commitCommissionsForPayment`; 1 row L1 `schemaType='FLAT'`, rate dari plan; renewal = flag RC OR ledger (`transactionId` lain non-NULL, grant tak dihitung); 9 test flat-commission.spec.ts |
 | BE-10 Gate media | BB-86 | todo | |
 | BE-11 Product list/detail | BB-87 | todo | |
 | BE-12 RC webhook | BB-88 | todo | |

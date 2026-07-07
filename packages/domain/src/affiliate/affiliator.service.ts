@@ -157,7 +157,22 @@ export class AffiliatorService {
     overrideAffiliatorMemberId?: string | null;
     /** Payment channel / provider: "xendit" | "revenuecat" | "scalev" | "lynkid" | null (legacy/web). */
     channel?: string | null;
+    /** CommerceTransaction.id — used for subscription renewal detection (BE-09). */
+    transactionId?: string | null;
+    /** Provider renewal flag (RC RENEWAL). Web renewals are detected via the ledger. */
+    isRenewal?: boolean;
   }): Promise<{ committed: number }> {
+    // Subscription products pay a FLAT level-1 commission (PRD BE-09): no
+    // PERFORMANCE tiering, no GROWTH upline. Short-circuit before the chain walk —
+    // the retail path below stays identical.
+    const subscriptionPlan = await prisma.subscriptionPlan.findUnique({
+      where: { productId: input.productId },
+      select: { id: true, affiliateRate: true, renewalAffiliateRate: true },
+    });
+    if (subscriptionPlan) {
+      return this.commitFlatSubscriptionCommission(input, subscriptionPlan);
+    }
+
     // Option B: any product is affiliate-able — `programId` is optional metadata, not a gate.
     // Recipient seed (Model: A permanent + per-purchase link override):
     //  - if this purchase came through a specific affiliate link → that affiliator (override),
@@ -266,6 +281,121 @@ export class AffiliatorService {
     }
 
     return { committed };
+  }
+
+  /**
+   * Flat subscription commission (PRD BE-09): exactly one level-1 row for the
+   * seed (link override ?? permanent inviter), schemaType='FLAT', rate from the
+   * PLAN (not the recipient's mode): affiliateRate on the first sale,
+   * renewalAffiliateRate on renewals.
+   *
+   * Renewal detection: the provider flag (RC RENEWAL) OR any OTHER non-null
+   * transactionId in the activation ledger for the buyer's sub on this plan.
+   * "Other" makes it listener-order independent (this event's own activation may
+   * or may not have landed yet); "non-null" excludes grants — the first PAID
+   * purchase after a granted sub is the affiliate's first sale → full rate.
+   */
+  private async commitFlatSubscriptionCommission(
+    input: {
+      paymentId: string;
+      productId: string;
+      productPrice: number;
+      voucherAmount: number;
+      buyerMemberId: string;
+      programId?: string | null;
+      overrideAffiliatorMemberId?: string | null;
+      channel?: string | null;
+      transactionId?: string | null;
+      isRenewal?: boolean;
+    },
+    plan: { id: string; affiliateRate: number; renewalAffiliateRate: number },
+  ): Promise<{ committed: number }> {
+    let seedMemberId = input.overrideAffiliatorMemberId ?? null;
+    if (!seedMemberId) {
+      const buyer = await prisma.member.findUnique({
+        where: { id: input.buyerMemberId },
+        select: { inviterId: true },
+      });
+      seedMemberId = buyer?.inviterId ?? null;
+    }
+    if (!seedMemberId || seedMemberId === input.buyerMemberId) {
+      logger.debug(
+        { buyerMemberId: input.buyerMemberId },
+        '[affiliate] subscription sale without eligible affiliator — skip',
+      );
+      return { committed: 0 };
+    }
+
+    const recipient = await prisma.member.findUnique({
+      where: { id: seedMemberId },
+      select: { affiliateBased: true },
+    });
+    if (!recipient) return { committed: 0 };
+
+    const isRenewal =
+      input.isRenewal === true ||
+      (await prisma.subscriptionActivation.count({
+        where: {
+          subscription: { ownerId: input.buyerMemberId, planId: plan.id },
+          AND: [
+            { transactionId: { not: null } },
+            ...(input.transactionId ? [{ NOT: { transactionId: input.transactionId } }] : []),
+          ],
+        },
+      })) > 0;
+
+    const rate = isRenewal ? plan.renewalAffiliateRate : plan.affiliateRate;
+    const amount = computeAmount(input.productPrice, input.voucherAmount, rate);
+    if (amount <= 0) return { committed: 0 };
+
+    const affiliator = input.programId
+      ? await prisma.memberAffiliator.findUnique({
+          where: { memberId_programId: { memberId: seedMemberId, programId: input.programId } },
+          select: { id: true },
+        })
+      : null;
+
+    try {
+      const created = await prisma.affiliateCommission.create({
+        data: {
+          recipientId: seedMemberId,
+          affiliatorId: affiliator?.id ?? null,
+          programId: input.programId,
+          productId: input.productId,
+          paymentId: input.paymentId,
+          buyerMemberId: input.buyerMemberId,
+          level: 1,
+          affiliateBased: recipient.affiliateBased,
+          schemaType: 'FLAT',
+          productPrice: input.productPrice,
+          voucherAmount: input.voucherAmount,
+          commissionRate: rate,
+          amount,
+          channel: input.channel ?? null,
+          status: COMMISSION_STATUS.PENDING,
+        },
+        select: { id: true },
+      });
+      affiliateEvents.emit('affiliate.commission.created', {
+        commissionId: created.id,
+        recipientId: seedMemberId,
+        paymentId: input.paymentId,
+        level: 1,
+      });
+      logger.info(
+        { paymentId: input.paymentId, recipientId: seedMemberId, rate, isRenewal },
+        '[affiliate] flat subscription commission committed',
+      );
+      return { committed: 1 };
+    } catch (e) {
+      const code = (e as { code?: string }).code;
+      if (code !== 'P2002') throw e; // unique (paymentId, recipientId, level) — redelivery no-op
+      logger.debug(
+        { paymentId: input.paymentId, recipientId: seedMemberId },
+        '[affiliate] flat subscription commission already exists — skipping',
+      );
+      return { committed: 0 };
+    }
   }
 
   private async resolveRate(
