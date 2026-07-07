@@ -27,7 +27,7 @@ Status: `todo` → `wip` → `done` (done = kode + test hijau; ✅ di kolom Jira
 | BE-11 Product list/detail | BB-87 | **selesai — menunggu review** | isPurchase/badge/purchased/not_purchased (typed+raw) subscription-aware; `type='subscription'` excluded dari list default; 9 test product-subscription.spec.ts |
 | BE-12 RC webhook | BB-88 | **selesai — menunggu review** | EXPIRATION → `expireByProviderRef`; CANCELLATION cabang `cancel_reason` (UNSUBSCRIBE/BILLING_ERROR = intent, lainnya/kosong = refund legacy); DTO +3 field |
 | BE-13 purchase-ingest | BB-89 | **selesai — menunggu review** | SKU resolve iOS OR Android; passthrough `subscription:{providerRef,expiresAt}` di event; attributionKey per-periode utk produk plan; 6 test rc-subscription.spec.ts |
-| BE-14 Guard checkout | BB-90 | todo | |
+| BE-14 Guard checkout | BB-90 | **selesai — menunggu review** | guard di `CheckoutService.start`; plan beda 400, plan sama = renewal OK, seat orang lain 400 (zombie tidak blok); 5 test checkout-guard.spec.ts |
 | BE-15 Job renewal reminder | BB-91 | todo | ⚠️ jangan aktif di prod sebelum template bb-comms siap |
 | BE-16 Job expire | BB-92 | todo | |
 | BE-17 Notification listeners | BB-93 | todo | |

@@ -36,6 +36,44 @@ export class CheckoutService {
       throw new BadRequestException('Product not available');
     }
 
+    // Subscription checkout guard (PRD BE-14). Same plan passes on purpose —
+    // that's web renewal-by-repurchase (the reminder emails point here); the
+    // activation listener extends the sub on payment success. Tier switches on
+    // web are Phase 2 (the only sanctioned switch path is RC PRODUCT_CHANGE).
+    const plan = await prisma.subscriptionPlan.findUnique({
+      where: { productId: product.id },
+      select: { id: true },
+    });
+    if (plan) {
+      const activeSub = await prisma.memberSubscription.findFirst({
+        where: { ownerId: input.memberId, status: 'ACTIVE' },
+        select: { planId: true },
+      });
+      if (activeSub && activeSub.planId !== plan.id) {
+        throw new BadRequestException(
+          'Kamu masih punya subscription aktif di paket lain — upgrade/downgrade belum tersedia',
+        );
+      }
+      if (!activeSub) {
+        // Seated on someone ELSE's ACTIVE sub → resolve that BEFORE paying, not
+        // after (the seat-1-left-empty fallback is for the unblockable IAP path).
+        // Seats on dead subs (zombies) don't block — consistent with the
+        // release-on-demand in claimSeat/createInitial.
+        const seatElsewhere = await prisma.subscriptionSeat.findFirst({
+          where: {
+            memberId: input.memberId,
+            subscription: { status: 'ACTIVE', ownerId: { not: input.memberId } },
+          },
+          select: { id: true },
+        });
+        if (seatElsewhere) {
+          throw new BadRequestException(
+            'Kamu masih tergabung di subscription lain — keluar dulu sebelum membeli paket sendiri',
+          );
+        }
+      }
+    }
+
     let voucherId: string | undefined;
     let voucherMeta:
       | { type: 'PERCENT' | 'AMOUNT'; value: number; maxAmount?: number | null }
