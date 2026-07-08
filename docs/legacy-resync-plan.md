@@ -314,6 +314,16 @@ new-system state.
   (BB comments)` (legacy ids from the new DB, chunked) — **never a full-table scan** of
   every tribelio like.
 - Two-pass comments (top-level then replies) preserved so `parentId` resolves.
+- **Denormalised counters NOT maintained by the syncer.** Posts/comments carry cached
+  `count_comment` / `count_like` / `count_replies` that the app increments/decrements on
+  app-driven likes/comments AND reads (serializers + feed sort by `count_like`). Resync
+  writes comments/likes directly (`createMany`/`upsert`), bypassing that increment, so the
+  counters drift (0 / understated) for migrated + resynced content. Fix = a separate
+  **recompute pass**: `pnpm resync:recount` (`apps/resync-worker/src/recount.ts`) — a
+  set-based one-shot that rebuilds all five counters from actual rows, matching the app's
+  exact semantics (`count_comment` = top-level comments, `count_replies` = replies,
+  `is_deleted=false`). Idempotent + self-healing (~2.5s for 7.4k posts / 88k comments).
+  Run it after a big posts sync and/or periodically (e.g. its own cron).
 
 ---
 
