@@ -22,6 +22,7 @@ import { NetworkModule } from '@/modules/network/network.module';
 import { ReportModule } from '@/modules/report/report.module';
 import { NotificationModule } from '@/modules/notification/notification.module';
 import { CommerceModule } from '@/modules/commerce/commerce.module';
+import { SubscriptionModule } from '@/modules/subscription/subscription.module';
 import { WebhookModule } from '@/modules/webhook/webhook.module';
 import { IngestModule } from '@/modules/ingest/ingest.module';
 import { TrackingModule } from '@/modules/tracker/tracking.module';
@@ -40,6 +41,7 @@ const modules: AppModule[] = [
   CommissionModule,
   AffiliateModule,
   CommerceModule,
+  SubscriptionModule,
   TopicModule,
   PostModule,
   CommentModule,

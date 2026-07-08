@@ -245,6 +245,38 @@ export class SubscriptionService {
     });
   }
 
+  /**
+   * Web cancel (PRD BE-19): cancel-INTENT on the caller's own ACTIVE sub —
+   * access continues to expiry; a repurchase clears it. RC-sourced subs are
+   * rejected: auto-renew for IAP can only be turned off in the store, and
+   * pretending otherwise would leave the member still being charged.
+   * Idempotent: an already-canceled intent returns changed=false (caller skips
+   * the event).
+   */
+  async cancelIntentByOwner(ownerId: string): Promise<{
+    subscription: MemberSubscription & { plan: SubscriptionPlan };
+    changed: boolean;
+  }> {
+    const sub = await prisma.memberSubscription.findFirst({
+      where: { ownerId, status: 'ACTIVE' },
+      include: { plan: true },
+    });
+    if (!sub) throw new BadRequestException('Tidak ada subscription aktif');
+    if (sub.source === 'revenuecat') {
+      throw new BadRequestException(
+        'Langganan kamu dikelola App Store / Play Store — matikan perpanjangan otomatis dari pengaturan langganan di store',
+      );
+    }
+    if (sub.canceledAt) return { subscription: sub, changed: false };
+
+    const updated = await prisma.memberSubscription.update({
+      where: { id: sub.id },
+      data: { canceledAt: new Date() },
+      include: { plan: true },
+    });
+    return { subscription: updated, changed: true };
+  }
+
   // --- branch: first activation -------------------------------------------------
 
   private async createInitial(
