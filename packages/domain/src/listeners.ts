@@ -1,6 +1,7 @@
 import { registerCommerceListeners } from './commerce/listeners/payment-success.listener';
 import { registerNotificationListeners } from './notification/listeners/register';
 import { registerCommsEmailListeners } from './comms/listeners/commerce-email.listener';
+import { registerSubscriptionEmailListeners } from './comms/listeners/subscription-email.listener';
 import { registerSubscriptionActivationListeners } from './subscription/listeners/subscription-activation.listener';
 
 /**
@@ -13,5 +14,6 @@ export function registerDomainListeners(): void {
   registerCommerceListeners();
   registerNotificationListeners();
   registerCommsEmailListeners();
+  registerSubscriptionEmailListeners();
   registerSubscriptionActivationListeners();
 }

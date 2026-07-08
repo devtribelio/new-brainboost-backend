@@ -31,7 +31,7 @@ Status: `todo` → `wip` → `done` (done = kode + test hijau; ✅ di kolom Jira
 | BE-15 Job renewal reminder | BB-91 | **selesai — menunggu review** | `jobs/subscription-renewal-reminder.ts`; insert-first, bucket terkecil dulu, suppression ter-scope per siklus expiry; ⚠️ jangan aktif di prod sebelum template bb-comms siap |
 | BE-16 Job expire | BB-92 | **selesai — menunggu review** | `jobs/subscription-expire.ts`; hanya past-grace, idempotent, emit expired |
 | BE-17 Notification listeners | BB-93 | **selesai — menunggu review** | `subscription.listener.ts` + 4 label baru; commerce listener skip product ber-plan (anti-dobel); refund silent; 9 test jobs.spec.ts |
-| BE-18 Email receipt + bb-comms | BB-94 | todo | dependensi eksternal bb-comms |
+| BE-18 Email receipt + bb-comms | BB-94 | **backend selesai — menunggu review; BLOCKED bb-comms utk end-to-end** | `subscription-email.listener.ts` (Activated/Renewed by refId=subId); commerce email skip product ber-plan; 3 template bb-comms = kerjaan eksternal terpisah |
 | BE-19 Modul HTTP /subscription | BB-95 | todo | |
 | BE-20 Script grant + eligibility | BB-96 | todo | |
 | BE-21 Integration tests | BB-97 | todo | |

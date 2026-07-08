@@ -1,3 +1,4 @@
+import { prisma } from '@bb/db';
 import { logger } from '@bb/common/config/logger';
 import { commerceEvents } from '@bb/common/events/commerce-events';
 import { affiliateEvents } from '@bb/common/events/affiliate-events';
@@ -15,9 +16,17 @@ import { enqueueComms } from '@bb/common/services/comms-outbox';
  */
 export function registerCommsEmailListeners(): void {
   commerceEvents.on('commerce.payment.success', async (e) => {
-    // Renewals are subscription events, not first-purchase receipts — skip for now.
+    // Renewals are subscription events, not first-purchase receipts — skip.
     if (e.isRenewal) return;
     try {
+      // Plan-backed products get the SubscriptionActivated/Renewed receipts
+      // (subscription-email.listener, BE-18) — the course receipt would be a
+      // wrong-context double.
+      const plan = await prisma.subscriptionPlan.findUnique({
+        where: { productId: e.productId },
+        select: { id: true },
+      });
+      if (plan) return;
       await enqueueComms({
         type: 'CoursePaymentSuccess',
         channel: 'email',
