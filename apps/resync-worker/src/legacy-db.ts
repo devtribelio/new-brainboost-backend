@@ -27,6 +27,10 @@ export function connectLegacyDb(extra?: ConnectionOptions): Promise<Connection> 
     user: reqEnv('LEGACY_DB_USER'),
     password: reqEnv('LEGACY_DB_PASS'),
     database: reqEnv('LEGACY_DB_NAME'),
+    // Legacy DATETIMEs are stored as Asia/Jakarta / Bangkok wall-clock (WIB, UTC+7).
+    // Without this, mysql2 reads them as if UTC → every timestamp lands 7h in the
+    // future. Telling mysql2 the source tz makes it convert to the correct UTC Date.
+    timezone: process.env.LEGACY_DB_TIMEZONE ?? '+07:00',
     ...extra,
   });
 }

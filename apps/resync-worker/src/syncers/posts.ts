@@ -17,6 +17,18 @@ import { maxWatermark, nonEmpty, sinceBound, toDate } from '../util';
 const NETWORK_LEGACY_IDS = [23410, 25136]; // BB-TIMELINE, BB-EDUCATION
 const IN_CHUNK = 1000;
 
+// Post images live in the polymorphic `resource` table (Spatie media; model_type
+// 'TBModel_Post', collection 'images', disk s3-resource) — NOT on post.image_url
+// (always empty for BB posts). Public URL mirrors the product thumbnail pattern:
+//   {base}/resources/{file_name[0:8]}/TBModel_Post/{resource_id}/{file_name}
+const RESOURCE_BASE =
+  process.env.LEGACY_RESOURCE_BASE ??
+  'https://tribelio-s3-production.s3.ap-southeast-1.amazonaws.com';
+function buildPostImageUrl(resourceId: number, fileName: string): string {
+  const day = fileName.slice(0, 8); // YYYYMMDD prefix
+  return `${RESOURCE_BASE}/resources/${day}/TBModel_Post/${resourceId}/${fileName}`;
+}
+
 function chunk<T>(arr: T[], size: number): T[][] {
   const out: T[][] = [];
   for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
@@ -49,7 +61,7 @@ export const postsSyncer: Syncer = {
     // 1) posts
     const [postRows] = await ctx.legacy.query<RowDataPacket[]>(
       `SELECT post_id, network_id, member_id, topic_id, title, post_type, content,
-              embed_url, excerpt, image_url, enganged_at, publish_status, created,
+              embed_url, excerpt, enganged_at, publish_status, created,
               COALESCE(\`updated\`, \`created\`) AS wm
          FROM post
         WHERE network_id IN (?) AND status=1 AND is_active=1 AND member_id IS NOT NULL
@@ -57,6 +69,27 @@ export const postsSyncer: Syncer = {
         ORDER BY post_id`,
       [NETWORK_LEGACY_IDS, since],
     );
+
+    // fetch each post's images from the polymorphic `resource` table (ordered) → post_id -> [url]
+    const imagesByPost = new Map<number, string[]>();
+    for (const ids of chunk((postRows as any[]).map((r) => Number(r.post_id)), IN_CHUNK)) {
+      if (!ids.length) continue;
+      const [imgs] = await ctx.legacy.query<RowDataPacket[]>(
+        `SELECT model_id, resource_id, file_name FROM resource
+          WHERE model_type='TBModel_Post' AND collection_name='images'
+            AND status=1 AND file_name<>'' AND model_id IN (?)
+          ORDER BY model_id, order_column ASC, resource_id ASC`,
+        [ids],
+      );
+      for (const r of imgs as any[]) {
+        const pid = Number(r.model_id);
+        const url = buildPostImageUrl(Number(r.resource_id), String(r.file_name));
+        const arr = imagesByPost.get(pid);
+        if (arr) arr.push(url);
+        else imagesByPost.set(pid, [url]);
+      }
+    }
+
     for (const r of postRows as any[]) {
       stats.scanned += 1;
       watermark = maxWatermark(watermark, toDate(r.wm));
@@ -70,8 +103,7 @@ export const postsSyncer: Syncer = {
         stats.upserted += 1;
         continue;
       }
-      const imgRaw = nonEmpty(r.image_url);
-      const imageUrls = imgRaw ? imgRaw.split(/[,;\n]/).map((u) => u.trim()).filter(Boolean) : [];
+      const imageUrls = imagesByPost.get(Number(r.post_id)) ?? [];
       const fields = {
         authorId,
         networkId,

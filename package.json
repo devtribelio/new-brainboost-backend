@@ -17,6 +17,7 @@
     "resync:seed-redirect": "tsx --conditions=development apps/resync-worker/src/seed-redirect.ts",
     "resync:unlock": "tsx --conditions=development apps/resync-worker/src/unlock.ts",
     "resync:recount": "tsx --conditions=development apps/resync-worker/src/recount.ts",
+    "resync:reset-watermark": "tsx --conditions=development apps/resync-worker/src/reset-watermark.ts",
     "build:packages": "pnpm -r --filter \"./packages/*\" build",
     "build": "pnpm -r build",
     "typecheck": "tsc -b",
