@@ -14,6 +14,8 @@
  *   course_enrollment.date_start  ← course_enrollment.created (legacy date_start is null)
  *   affiliate_commissions.created_at ← affiliator_commision.created
  *   reviews.created_at            ← product_review.created (mapped by product+member)
+ *   post_likes.created_at         ← like.created (mapped by post+member; createMany
+ *   comment_likes.created_at      ← like.created  skipDuplicates never re-touches them)
  *
  * Bulk `UPDATE ... FROM (VALUES …)` in chunks. legacy_id / uuids / timestamps are the only
  * interpolated values (ints, uuids, fixed-format literals) — no injection surface.
@@ -128,6 +130,71 @@ async function fixReviews(legacy: any): Promise<void> {
   log(`reviews: created_at corrected on ${updated} rows`);
 }
 
+async function fixLikes(legacy: any): Promise<void> {
+  // likes have no legacyId and createMany(skipDuplicates) never re-touches an existing row
+  // → map the legacy `like` row by (post|comment, member) composite instead.
+  const memberByLegacy = new Map<number, string>();
+  for (const m of await prisma.member.findMany({ where: { legacyId: { not: null } }, select: { id: true, legacyId: true } })) {
+    if (m.legacyId !== null) memberByLegacy.set(m.legacyId, m.id);
+  }
+  const redirect = new Map<number, number>();
+  for (const r of await prisma.memberRedirect.findMany({ select: { loserLegacyId: true, winnerLegacyId: true } })) {
+    redirect.set(r.loserLegacyId, r.winnerLegacyId);
+  }
+  const resolveMember = (id: number) => memberByLegacy.get(redirect.get(id) ?? id);
+
+  const targets: Array<{
+    pg: string;
+    fk: string;
+    idMap: Map<number, string>;
+    where: string;
+    legacyCol: string;
+  }> = [];
+  const postMap = new Map<number, string>();
+  for (const p of await prisma.post.findMany({ where: { legacyId: { not: null } }, select: { id: true, legacyId: true } })) {
+    postMap.set(p.legacyId as number, p.id);
+  }
+  targets.push({ pg: 'post_likes', fk: 'post_id', idMap: postMap, where: '(comment_id IS NULL OR comment_id=0) AND post_id IN (?)', legacyCol: 'post_id' });
+  const commentMap = new Map<number, string>();
+  for (const c of await prisma.comment.findMany({ where: { legacyId: { not: null } }, select: { id: true, legacyId: true } })) {
+    commentMap.set(c.legacyId as number, c.id);
+  }
+  targets.push({ pg: 'comment_likes', fk: 'comment_id', idMap: commentMap, where: 'comment_id<>0 AND comment_id IN (?)', legacyCol: 'comment_id' });
+
+  for (const t of targets) {
+    let updated = 0;
+    for (const ids of chunk([...t.idMap.keys()], CHUNK)) {
+      if (!ids.length) continue;
+      const [rows] = await legacy.query(
+        `SELECT ${t.legacyCol} AS target_id, member_id, created FROM \`like\`
+          WHERE status=1 AND member_id IS NOT NULL AND ${t.where}`,
+        [ids],
+      );
+      const values: string[] = [];
+      const seen = new Set<string>();
+      for (const r of rows as any[]) {
+        const targetId = t.idMap.get(Number(r.target_id));
+        const memberId = resolveMember(Number(r.member_id));
+        const d = toDate(r.created);
+        if (!targetId || !memberId || !d) continue;
+        const key = `${targetId}|${memberId}`;
+        if (seen.has(key)) continue; // composite unique on the new side
+        seen.add(key);
+        values.push(`('${targetId}'::uuid, '${memberId}'::uuid, '${tsLiteral(d)}'::timestamp)`);
+      }
+      for (const v of chunk(values, CHUNK)) {
+        if (!v.length) continue;
+        updated += await prisma.$executeRawUnsafe(
+          `UPDATE "${t.pg}" t SET "created_at" = x.created
+             FROM (VALUES ${v.join(',')}) AS x(target_id, member_id, created)
+            WHERE t."${t.fk}" = x.target_id AND t.member_id = x.member_id`,
+        );
+      }
+    }
+    log(`${t.pg}: created_at corrected on ${updated} rows`);
+  }
+}
+
 async function main() {
   const started = Date.now();
   const legacy = await connectLegacyDb({ dateStrings: false }); // tz +07:00 baked in
@@ -135,6 +202,7 @@ async function main() {
   try {
     for (const cfg of TABLES) await fixByLegacyId(legacy, cfg);
     await fixReviews(legacy);
+    await fixLikes(legacy);
     log(`DONE in ${((Date.now() - started) / 1000).toFixed(1)}s`);
   } finally {
     await legacy.end();

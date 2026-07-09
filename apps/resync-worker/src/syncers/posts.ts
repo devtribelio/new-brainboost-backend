@@ -11,8 +11,9 @@
  *       and legacy un-likes (hard DELETE of a `like` row) do NOT propagate. See docs §3.
  */
 import type { RowDataPacket } from 'mysql2/promise';
+import { resyncConfig } from '../config';
 import { emptyStats, type Stats, type Syncer, type SyncerCtx } from '../types';
-import { bool, maxWatermark, nonEmpty, sinceBound, toDate } from '../util';
+import { bool, maxWatermark, nonEmpty, runConcurrent, sinceBound, toDate } from '../util';
 
 const NETWORK_LEGACY_IDS = [23410, 25136]; // BB-TIMELINE, BB-EDUCATION
 const IN_CHUNK = 1000;
@@ -90,18 +91,19 @@ export const postsSyncer: Syncer = {
       }
     }
 
-    for (const r of postRows as any[]) {
+    // one row per post_id (upsert key) → write-independent → parallel
+    await runConcurrent(postRows as any[], resyncConfig.writeConcurrency, async (r: any) => {
       stats.scanned += 1;
       watermark = maxWatermark(watermark, toDate(r.wm));
       const authorId = await ctx.ensureMember(Number(r.member_id));
       const networkId = networkMap.get(Number(r.network_id));
       if (!authorId || !networkId) {
         stats.skipped += 1;
-        continue;
+        return;
       }
       if (ctx.dryRun) {
         stats.upserted += 1;
-        continue;
+        return;
       }
       const imageUrls = imagesByPost.get(Number(r.post_id)) ?? [];
       const fields = {
@@ -131,7 +133,7 @@ export const postsSyncer: Syncer = {
       } catch {
         stats.errors += 1;
       }
-    }
+    });
 
     // 2) comments (two-pass: top-level, then replies). Build map after each pass.
     const commentBase = `SELECT comment_id, post_id, member_id, reply_id, content, created,
@@ -181,14 +183,19 @@ export const postsSyncer: Syncer = {
       [NETWORK_LEGACY_IDS, since],
     );
     let commentMap = await buildMap(ctx.prisma.comment);
-    for (const r of topComments as any[]) await upsertComment(r, postMap, commentMap);
+    // one row per comment_id (upsert key) → write-independent within each pass
+    await runConcurrent(topComments as any[], resyncConfig.writeConcurrency, (r: any) =>
+      upsertComment(r, postMap, commentMap),
+    );
 
     commentMap = await buildMap(ctx.prisma.comment); // refresh so replies resolve new parents
     const [replyComments] = await ctx.legacy.query<RowDataPacket[]>(
       `${commentBase} AND reply_id IS NOT NULL AND reply_id<>0 ORDER BY comment_id`,
       [NETWORK_LEGACY_IDS, since],
     );
-    for (const r of replyComments as any[]) await upsertComment(r, postMap, commentMap);
+    await runConcurrent(replyComments as any[], resyncConfig.writeConcurrency, (r: any) =>
+      upsertComment(r, postMap, commentMap),
+    );
 
     // 3) likes (new likes only — un-likes are hard deletes, not propagated). Watermarked,
     // Scoped to BB posts/comments by their legacy ids (the `like` table has no network_id,

@@ -8,8 +8,9 @@
  * See docs/legacy-resync-plan.md §6.
  */
 import type { RowDataPacket } from 'mysql2/promise';
+import { resyncConfig } from '../config';
 import { emptyStats, type Stats, type Syncer, type SyncerCtx } from '../types';
-import { maxWatermark, nonEmpty, sinceBound, toDate } from '../util';
+import { maxWatermark, nonEmpty, runConcurrent, sinceBound, toDate } from '../util';
 
 export const reviewsSyncer: Syncer = {
   name: 'reviews',
@@ -40,23 +41,32 @@ export const reviewsSyncer: Syncer = {
     if (!stats.scanned) return stats;
 
     let watermark = ctx.since;
+    // upsert key is (product, member) and legacy can hold several rows per pair — rows are
+    // ordered wm ASC, so sequentially the newest won. Keep that deterministically under
+    // concurrency: dedupe to the last (newest) row per pair BEFORE writing in parallel.
+    const byPair = new Map<string, any>();
     for (const r of rows as any[]) {
       watermark = maxWatermark(watermark, toDate(r.wm));
+      byPair.set(`${r.productable_id}|${ctx.redirect.get(Number(r.member_id)) ?? Number(r.member_id)}`, r);
+    }
+    stats.skipped += (rows as any[]).length - byPair.size; // superseded in-batch duplicates
+
+    await runConcurrent([...byPair.values()], resyncConfig.writeConcurrency, async (r: any) => {
       const productId = productByLegacy.get(Number(r.productable_id));
       const memberId = await ctx.ensureMember(Number(r.member_id));
       if (!productId || !memberId) {
         stats.skipped += 1;
-        continue;
+        return;
       }
       let stars = Number(r.rating);
       if (stars === 0) stars = 1;
       if (stars < 1 || stars > 5) {
         stats.skipped += 1;
-        continue;
+        return;
       }
       if (ctx.dryRun) {
         stats.upserted += 1;
-        continue;
+        return;
       }
       const comment = nonEmpty(r.note);
       try {
@@ -69,7 +79,7 @@ export const reviewsSyncer: Syncer = {
       } catch {
         stats.errors += 1;
       }
-    }
+    });
 
     if (watermark && !ctx.dryRun) await ctx.checkpoint(watermark);
     return stats;
