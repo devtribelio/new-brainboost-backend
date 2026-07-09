@@ -50,6 +50,8 @@ function fullNameOf(r: any): string | null {
 export function makeEnsureMember(deps: Deps) {
   const { prisma, legacy, redirect, memberByLegacy } = deps;
   const unresolvable = new Set<number>(); // legacy ids we've decided can't be created (junk/no-id/missing)
+  const inflight = new Map<number, Promise<string | undefined>>(); // concurrency guard: one create per legacyId
+  const newLegacyIds = new Set<number>(); // created/adopted this run → backfilled (kyc/tree/commissions/likes)
   let created = 0;
   let redirected = 0;
   let adopted = 0;
@@ -122,12 +124,57 @@ export function makeEnsureMember(deps: Deps) {
         return existing.id;
       }
       if (existing.legacyId === null) {
-        // new-app placeholder → adopt it as this legacy member
-        await prisma.member.update({
-          where: { id: existing.id },
-          data: { legacyId: legacyMemberId, ...profile, legacySyncedAt: new Date() },
-        });
+        // new-app placeholder → adopt it as this legacy member. updatedAt is set to the
+        // SAME instant as legacySyncedAt so the members syncer's touch-gate
+        // (updatedAt > legacySyncedAt) doesn't misread the fresh row as app-touched.
+        const now = new Date();
+        const adoptData: any = { legacyId: legacyMemberId, ...profile, legacySyncedAt: now, updatedAt: now };
+        try {
+          await prisma.member.update({ where: { id: existing.id }, data: adoptData });
+        } catch (err: any) {
+          // Identity split: the placeholder matched on one unique field but ANOTHER member
+          // owns a different one (e.g. matched by phone, email belongs to someone else).
+          // Drop the conflicting field(s) — they stay owned by the other member — and retry
+          // once. Without this catch a single split member aborts the whole calling syncer.
+          const targets: string[] = Array.isArray(err?.meta?.target) ? err.meta.target.map(String) : [];
+          if (err?.code !== 'P2002' || !targets.length) {
+            unresolvable.add(legacyMemberId);
+            return undefined;
+          }
+          if (targets.some((t) => t === 'legacyId' || t === 'legacy_id')) {
+            // legacyId already taken (race) → map to whoever migrated it
+            const winner = await prisma.member.findFirst({ where: { legacyId: legacyMemberId }, select: { id: true } });
+            if (winner) {
+              memberByLegacy.set(legacyMemberId, winner.id);
+              return winner.id;
+            }
+            unresolvable.add(legacyMemberId);
+            return undefined;
+          }
+          for (const t of targets) {
+            if (t === 'email') {
+              adoptData.email = null;
+              adoptData.isEmailVerified = false;
+            } else if (t === 'phone') {
+              adoptData.phone = null;
+              adoptData.phoneCode = null;
+              adoptData.isPhoneVerified = false;
+            } else if (t === 'googleSub' || t === 'google_sub') {
+              adoptData.googleSub = null;
+            } else if (t === 'appleSub' || t === 'apple_sub') {
+              adoptData.appleSub = null;
+            }
+          }
+          try {
+            await prisma.member.update({ where: { id: existing.id }, data: adoptData });
+            deps.log(`ensureMember: adopt conflict on ${targets.join(',')} for legacy ${legacyMemberId} — adopted without those fields`);
+          } catch {
+            unresolvable.add(legacyMemberId);
+            return undefined;
+          }
+        }
         memberByLegacy.set(legacyMemberId, existing.id);
+        newLegacyIds.add(legacyMemberId);
         adopted += 1;
         return existing.id;
       }
@@ -136,8 +183,9 @@ export function makeEnsureMember(deps: Deps) {
       return existing.id;
     }
 
-    // fresh create
+    // fresh create — updatedAt = legacySyncedAt (same instant) for the touch-gate, see adopt
     const legacyPassword = nonEmpty(r.password);
+    const now = new Date();
     try {
       const row = await prisma.member.create({
         data: {
@@ -145,12 +193,14 @@ export function makeEnsureMember(deps: Deps) {
           ...profile,
           passwordHash: legacyPassword ?? `${randomUUID()}${randomUUID()}`,
           passwordAlgo: legacyPassword ? 'legacy' : 'social',
-          createdAt: toDate(r.date_register) ?? new Date(),
-          legacySyncedAt: new Date(),
+          createdAt: toDate(r.date_register) ?? now,
+          legacySyncedAt: now,
+          updatedAt: now,
         },
         select: { id: true },
       });
       memberByLegacy.set(legacyMemberId, row.id);
+      newLegacyIds.add(legacyMemberId);
       created += 1;
       return row.id;
     } catch (err: any) {
@@ -178,9 +228,17 @@ export function makeEnsureMember(deps: Deps) {
     const known = memberByLegacy.get(winner);
     if (known) return known;
     if (unresolvable.has(legacyId)) return undefined;
-    return create(legacyId);
+    // concurrent callers for the same legacyId share one create() — without this, parallel
+    // row-writes referencing the same un-migrated member would race into double-creates.
+    const pending = inflight.get(legacyId);
+    if (pending) return pending;
+    const p = create(legacyId).finally(() => inflight.delete(legacyId));
+    inflight.set(legacyId, p);
+    return p;
   }
 
   ensureMember.stats = () => ({ created, redirected, adopted });
+  /** legacy ids materialised THIS run (created or adopted) — input for the backfill pass. */
+  ensureMember.newLegacyIds = () => [...newLegacyIds];
   return ensureMember;
 }

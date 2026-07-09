@@ -146,6 +146,62 @@ describe('auth social google grant', () => {
     expect(count).toBe(1);
   });
 
+  it('migrated member with googleSub but isEmailVerified=false → fast-path heals the flag', async () => {
+    const email = trackedEmail('heal');
+    const sub = `gs-${Date.now()}-heal`;
+    // Mimic a legacy-migrated row: sub present, flag not carried over.
+    await prisma.member.create({
+      data: {
+        email,
+        googleSub: sub,
+        fullName: 'Heal Target',
+        passwordHash: 'legacy-sentinel',
+        passwordAlgo: 'social',
+        isActive: true,
+        isEmailVerified: false,
+      },
+    });
+
+    setGoogleResponse({ sub, email, email_verified: true, name: 'Heal Target' });
+    const res = await tokenRequest({
+      grant_type: 'social',
+      provider: 'google',
+      social_token: 'fake.id.token',
+    });
+    expect(res.status).toBe(200);
+
+    const member = await prisma.member.findUnique({ where: { email } });
+    expect(member!.isEmailVerified).toBe(true);
+  });
+
+  it('fast-path does NOT flip isEmailVerified when provider email differs from stored email', async () => {
+    const storedEmail = trackedEmail('heal-stored');
+    const providerEmail = trackedEmail('heal-provider');
+    const sub = `gs-${Date.now()}-noheal`;
+    await prisma.member.create({
+      data: {
+        email: storedEmail,
+        googleSub: sub,
+        fullName: 'No Heal',
+        passwordHash: 'legacy-sentinel',
+        passwordAlgo: 'social',
+        isActive: true,
+        isEmailVerified: false,
+      },
+    });
+
+    setGoogleResponse({ sub, email: providerEmail, email_verified: true, name: 'No Heal' });
+    const res = await tokenRequest({
+      grant_type: 'social',
+      provider: 'google',
+      social_token: 'fake.id.token',
+    });
+    expect(res.status).toBe(200); // sub fast-path still logs in
+
+    const member = await prisma.member.findUnique({ where: { email: storedEmail } });
+    expect(member!.isEmailVerified).toBe(false);
+  });
+
   it('existing verified member same email + no googleSub → link (no duplicate)', async () => {
     const email = trackedEmail('link');
     const password = 'secret123';

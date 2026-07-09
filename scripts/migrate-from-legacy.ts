@@ -19,6 +19,12 @@ import { connectLegacyDb } from './legacy-db';
 const BATCH = Number.parseInt(process.env.MIGRATE_BATCH ?? '1000', 10);
 const PROGRESS_EVERY = 5;
 
+// Base URL of the legacy `s3-resource` disk (bucket tribelio-s3-production).
+// Banner images are polymorphic `resource` rows, not a column on tribeversity_banner.
+const LEGACY_RESOURCE_BASE_URL =
+  process.env.LEGACY_RESOURCE_BASE_URL ??
+  'https://tribelio-s3-production.s3.ap-southeast-1.amazonaws.com';
+
 const prisma = new PrismaClient({ log: ['warn', 'error'] });
 
 function log(msg: string) {
@@ -208,25 +214,56 @@ async function migrateReportCategories(legacy: Connection) {
   log(`report-categories: ${rows.length} done`);
 }
 
+// Build the public URL for the latest banner image held in the polymorphic
+// `resource` table. Legacy path layout (v1): resources/{Ymd created}/{model_type}/{resource_id}/{file_name}
+function bannerImageUrl(r: any): string | null {
+  if (!r.file_name || !r.resource_id || !r.resource_created) return null;
+  const d = date(r.resource_created);
+  if (!d) return null;
+  const p = (n: number) => String(n).padStart(2, '0');
+  const ymd = `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}`;
+  return `${LEGACY_RESOURCE_BASE_URL}/resources/${ymd}/TBModel_TribeversityBanner/${r.resource_id}/${r.file_name}`;
+}
+
 async function migrateBanners(legacy: Connection) {
   log('banners: fetching');
+  // Latest image per banner = the resource row with the highest order_column
+  // (tie-break on resource_id). Banner image lives in `resource`, not on the banner row.
   const [rows] = (await legacy.query(
-    `SELECT tribeversity_banner_id, client, link_url, is_active FROM tribeversity_banner WHERE status=1`,
+    `SELECT b.tribeversity_banner_id, b.client, b.link_url, b.is_active,
+            r.resource_id, r.file_name, r.created AS resource_created
+     FROM tribeversity_banner b
+     LEFT JOIN resource r
+       ON r.resource_id = (
+         SELECT r2.resource_id FROM resource r2
+         WHERE r2.model_type = 'TBModel_TribeversityBanner'
+           AND r2.model_id = b.tribeversity_banner_id
+           AND r2.collection_name = 'images'
+         ORDER BY r2.order_column DESC, r2.resource_id DESC
+         LIMIT 1
+       )
+     WHERE b.status = 1`,
   )) as [RowDataPacket[], unknown];
   let i = 0;
   for (const r of rows as any[]) {
     const title = nonEmpty(r.client) ?? `Banner ${r.tribeversity_banner_id}`;
+    const imageUrl = bannerImageUrl(r) ?? '';
+    const linkUrl = nonEmpty(r.link_url);
+    const isActive = bool(r.is_active);
+    // Active banners also show as popups (legacy has no separate popup flag).
+    const isPopup = isActive;
     await prisma.banner.upsert({
       where: { legacyId: r.tribeversity_banner_id },
       create: {
         legacyId: r.tribeversity_banner_id,
         title,
-        imageUrl: nonEmpty(r.link_url) ?? '',
-        linkUrl: nonEmpty(r.link_url),
+        imageUrl,
+        linkUrl,
         position: 0,
-        isActive: bool(r.is_active),
+        isActive,
+        isPopup,
       },
-      update: { title, isActive: bool(r.is_active) },
+      update: { title, imageUrl, linkUrl, isActive, isPopup },
     });
     i++;
   }

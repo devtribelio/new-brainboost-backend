@@ -19,6 +19,17 @@ export const resyncConfig = {
   syncers: (process.env.RESYNC_SYNCERS ?? 'all').trim(),
   /** Rows per fetch/upsert batch. */
   batchSize: num('RESYNC_BATCH_SIZE', 1000),
+  /**
+   * Max Postgres writes in flight per syncer. The write loops are RTT-bound on a remote
+   * DB; N concurrent independent row-writes cut wall-clock ~N×. Keep <= the Prisma pool
+   * size (default num_cpus*2+1) or writes just queue on the pool.
+   */
+  writeConcurrency: num('RESYNC_WRITE_CONCURRENCY', 10),
+  /**
+   * Seconds subtracted from a stored watermark on the next run (overlap re-scan).
+   * Covers boundary-second races and legacy rows whose `updated` predates their COMMIT.
+   */
+  watermarkLagSec: num('RESYNC_WATERMARK_LAG_SEC', 60),
   /** Reconnect attempts on a legacy ECONNRESET within a single run. */
   legacyReconnectRetries: num('RESYNC_LEGACY_RECONNECT_RETRIES', 3),
   /**

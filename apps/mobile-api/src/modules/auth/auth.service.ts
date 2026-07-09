@@ -630,6 +630,19 @@ export class AuthService {
     const bySub = await prisma.member.findUnique({ where: subWhere });
     if (bySub) {
       if (!bySub.isActive) throw new UnauthorizedException('Member not active');
+      // Heal legacy-migrated rows: legacy MariaDB has members with a social id
+      // but is_email_verified=0 (pre-dates the unconditional set in
+      // MemberLoginSocialMedia), and migration copies the flag as-is. The
+      // provider just attested this exact email (Google hard-rejects
+      // email_verified=false upstream; Apple relay arrives verified — same
+      // justification as isEmailVerified:true on the create path below), so
+      // flip the flag when it matches the stored email.
+      if (!bySub.isEmailVerified && email && bySub.email === email) {
+        await prisma.member.update({
+          where: { id: bySub.id },
+          data: { isEmailVerified: true },
+        });
+      }
       return this.issueTokenBundle(bySub.id, bySub.email ?? '', clientType);
     }
 
