@@ -34,7 +34,7 @@ Status: `todo` → `wip` → `done` (done = kode + test hijau; ✅ di kolom Jira
 | BE-18 Email receipt + bb-comms | BB-94 | **backend selesai — menunggu review; BLOCKED bb-comms utk end-to-end** | `subscription-email.listener.ts` (Activated/Renewed by refId=subId); commerce email skip product ber-plan; 3 template bb-comms = kerjaan eksternal terpisah |
 | BE-19 Modul HTTP /subscription | BB-95 | **selesai — menunggu review** | modul `apps/mobile-api/src/modules/subscription/`; 7 endpoint (plans public, me 3-role, seat ops, cancel web/IAP-aware); + `cancelIntentByOwner`; 5 test subscription-http.spec.ts |
 | BE-20 Script grant + eligibility | BB-96 | **selesai — menunggu review** | `pnpm grant:subscription`; eligibility = commerce_transactions PAID **+ legacy MariaDB langsung** (course_payment+bundle, brainboost, `amount−amount_voucher`) via legacyId+member_redirect; guard ledger `kind='grant'`; smoke nyata: 179 eligible, 655 legacy unmapped; 4 test grant-script.spec.ts |
-| BE-21 Integration tests | BB-97 | todo | |
+| BE-21 Integration tests | BB-97 | **selesai — menunggu review** | audit DoD PRD vs 14 spec existing (semua item ter-cover) + `edge-cases.spec.ts` menambal 6 gap: EXPIRED→repurchase sub baru, invite penuh 400, race duplikat konkuren, race initial paralel (branch retry), voucher-bypass 100%, in-grace entitled. Suite subscription 15 file / 93 test; full 567/567 |
 | BE-22 Docs + reporting | BB-98 | todo | |
 
 ## Urutan pengerjaan yang disarankan (dependency)
