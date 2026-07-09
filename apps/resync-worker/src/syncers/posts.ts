@@ -12,7 +12,7 @@
  */
 import type { RowDataPacket } from 'mysql2/promise';
 import { emptyStats, type Stats, type Syncer, type SyncerCtx } from '../types';
-import { maxWatermark, nonEmpty, sinceBound, toDate } from '../util';
+import { bool, maxWatermark, nonEmpty, sinceBound, toDate } from '../util';
 
 const NETWORK_LEGACY_IDS = [23410, 25136]; // BB-TIMELINE, BB-EDUCATION
 const IN_CHUNK = 1000;
@@ -61,7 +61,7 @@ export const postsSyncer: Syncer = {
     // 1) posts
     const [postRows] = await ctx.legacy.query<RowDataPacket[]>(
       `SELECT post_id, network_id, member_id, topic_id, title, post_type, content,
-              embed_url, excerpt, enganged_at, publish_status, created,
+              embed_url, excerpt, enganged_at, publish_status, pinned, created,
               COALESCE(\`updated\`, \`created\`) AS wm
          FROM post
         WHERE network_id IN (?) AND status=1 AND is_active=1 AND member_id IS NOT NULL
@@ -116,6 +116,8 @@ export const postsSyncer: Syncer = {
         imageUrls,
         publishStatus: (nonEmpty(r.publish_status) ?? 'PUBLISHED').toUpperCase(),
         engagedAt: toDate(r.enganged_at),
+        isPinned: bool(r.pinned),
+        // isAdminPost / isCurated have no legacy source (new-app features) → left default false
         isDeleted: false,
         createdAt: toDate(r.created) ?? new Date(),
       };

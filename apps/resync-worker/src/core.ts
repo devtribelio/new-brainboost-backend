@@ -13,6 +13,7 @@ import { connectResilientLegacy } from './legacy-db';
 import { resyncConfig } from './config';
 import { registry, SYNCER_ORDER } from './syncers';
 import { makeEnsureMember } from './ensure-member';
+import { recountCounters } from './recount';
 import { emptyStats, type RunCtx, type Stats, type SyncerCtx } from './types';
 
 const LOCK_ROW = '__lock__';
@@ -156,6 +157,15 @@ export async function runResync(opts: RunOpts): Promise<Record<string, Stats>> {
       const em = (ctx.ensureMember as any).stats?.();
       if (em && (em.created || em.redirected || em.adopted)) {
         log(`new legacy members: created=${em.created} redirected=${em.redirected} adopted=${em.adopted}`);
+      }
+
+      // posts writes comments/likes directly → rebuild denormalised counters when it ran
+      if (!opts.dryRun && opts.syncers.includes('posts') && !results.posts?.errors) {
+        try {
+          await recountCounters(prisma, log);
+        } catch (err: any) {
+          log(`recount failed (non-fatal): ${err?.message ?? err}`);
+        }
       }
 
       // completion summary (one line per cycle — useful for the long-running worker)
