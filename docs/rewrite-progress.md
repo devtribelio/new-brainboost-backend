@@ -135,6 +135,16 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` parity met for current s
 - Plan + tracker: see `docs/commerce-port.md`.
 - **Open items**: Xendit sandbox manual QA (CC + VA simulate-payment + eWallet OVO/DANA); fee table confirm with finance; refund flow (admin tool, defer).
 
+### subscription — [x] Phase 1 annual, BE-01…BE-22 selesai (2026-07)
+- BARU (bukan porting legacy): 4 tier annual all-access seat-based (model Spotify Family), PRD `docs/prd-subscription-backend.md`, Jira BB-77…BB-98.
+- Data: 5 tabel (`subscription_plans` 1:1 Product, `member_subscriptions`, `subscription_seats`, ledger `subscription_activations`, `subscription_reminder_logs`) + `course_enrollment.via_subscription_id` + 3 partial unique (migration `20260707140000`).
+- Integrasi ke sistem lama lewat 3 titik sempit: event `commerce.payment.success` (aktivasi), lazy enrollment (akses — row retail tak pernah disentuh), short-circuit komisi flat L1. Checkout/voucher/media/tracker tidak tahu subscription ada.
+- Jalur RC: EXPIRATION/CANCELLATION per `cancel_reason`, expiry otoritatif RC, SKU android fix, attributionKey per-periode (renewal bayar komisi 1×).
+- HTTP: modul `/subscription` (7 endpoint). Jobs: expire + renewal reminder (H-7/3/1). Script: `pnpm grant:subscription` (eligibility 2 sumber: Postgres + legacy MariaDB langsung).
+- Tests: 15 spec / 93 test subscription; full suite 567 green.
+- Aturan bisnis + runbook launch + query reporting: `docs/subscription-port.md`; log keputusan: `docs/subscription-progress.md`.
+- **Open items (eksternal)**: 3 template bb-comms (blocker jobs reminder di prod); SKU asli App Store/Play + entitlement RC; angka final `renewal_affiliate_rate` (COO); copy marketing; investigasi 655 legacy paying member tanpa akun baru (temuan BE-20).
+
 ## Not started ([ ])
 
 ### disbursement
