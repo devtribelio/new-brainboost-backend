@@ -54,9 +54,13 @@ bukan nama constraint — matcher idempotensi di `subscription.service.ts` menco
    dalam transaksi `activateFromPayment` — redelivery webhook → P2002 → seluruh tx
    rollback → no-op. Expiry tidak pernah dobel-extend. Race initial paralel → yang kalah
    retry sekali dan jatuh ke cabang renewal (kedua pembayaran dihormati).
-5. **Renewal math:** `newExpiry = providerExpiresAt ?? max(now, expiresAt) + periodMonths`
-   (lapsed-in-grace → basis now). Expiry provider (RC `expiration_at_ms`) SELALU menang.
-   Renewal juga meng-clear `canceled_at` (repurchase = batal niat cancel).
+5. **Renewal math (amandemen BB-79, 2026-07-10):** `newExpiry = providerExpiresAt ??
+   expiresAt + periodMonths` — anchor SELALU ke expiry lama, termasuk perpanjangan
+   saat grace (expired 9 Jul, bayar 10 Jul → 9 Jul tahun depan). **Grace = napas
+   untuk membayar, bukan bonus waktu.** Perpanjang lebih awal menumpuk di atas sisa
+   masa aktif; lewat grace = sub BARU berbasis tanggal beli (aturan #6). Expiry
+   provider (RC `expiration_at_ms`) SELALU menang. Renewal juga meng-clear
+   `canceled_at` (repurchase = batal niat cancel).
 6. **Repurchase setelah EXPIRED = sub BARU** (bukan extend); sub lama tinggal sebagai
    arsip. Seat zombie (di sub mati) dilepas on-demand saat member itu beli/claim lagi.
 7. **Plan change hanya via RC `PRODUCT_CHANGE`.** Web: beli plan beda saat ACTIVE →

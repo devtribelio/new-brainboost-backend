@@ -185,7 +185,9 @@ describe('SubscriptionService.activateFromPayment', () => {
     expect(ledger[1].previousExpiresAt?.getTime()).toBe(sub.expiresAt.getTime());
   });
 
-  it('renewal of a lapsed-in-grace sub extends from now, not from the old expiry', async () => {
+  it('renewal of a lapsed-in-grace sub anchors to the OLD expiry — grace is breathing room, not bonus time', async () => {
+    // BB-79 amendment (2026-07-10): expired 9 Jul, paid 10 Jul (in grace) →
+    // next expiry 9 Jul next year, NOT 10 Jul.
     const first = await activate();
     const sub = first.subscription!;
     const pastExpiry = new Date(Date.now() - 3 * DAY_MS); // expired 3 days ago, still ACTIVE (grace)
@@ -195,11 +197,9 @@ describe('SubscriptionService.activateFromPayment', () => {
     });
 
     const res = await activate();
-    const expected = new Date();
+    const expected = new Date(pastExpiry);
     expected.setMonth(expected.getMonth() + 12);
-    expect(Math.abs(res.subscription!.expiresAt.getTime() - expected.getTime())).toBeLessThan(
-      60_000,
-    );
+    expect(res.subscription!.expiresAt.getTime()).toBe(expected.getTime());
   });
 
   it('provider expiry (RC) wins over local math', async () => {

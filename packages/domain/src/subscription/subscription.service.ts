@@ -341,11 +341,14 @@ export class SubscriptionService {
     graceDays: number,
     meta: ActivationMeta,
   ): Promise<MemberSubscription> {
-    const now = new Date();
-    // Base = whichever is later: not-yet-expired subs extend from their expiry,
-    // lapsed-but-still-ACTIVE (in grace) subs extend from now.
-    const base = sub.expiresAt > now ? sub.expiresAt : now;
-    const expiresAt = meta.providerExpiresAt ?? addMonths(base, meta.months ?? periodMonths);
+    // Anchor to the CURRENT expiry, never to "now" (BB-79 amendment, 2026-07-10):
+    // a renewal inside the grace window extends from the date the sub expired —
+    // grace is breathing room to pay, not bonus time. Early renewals stack on
+    // top of the remaining period as before. Renewal is only reachable while
+    // ACTIVE (at worst in grace), so expiresAt is always the right anchor; a
+    // repurchase past grace lands on the new-sub branch (anchored at now).
+    const expiresAt =
+      meta.providerExpiresAt ?? addMonths(sub.expiresAt, meta.months ?? periodMonths);
 
     const updated = await tx.memberSubscription.update({
       where: { id: sub.id },
@@ -371,9 +374,10 @@ export class SubscriptionService {
     graceDays: number,
     meta: ActivationMeta,
   ): Promise<MemberSubscription> {
-    const now = new Date();
-    const base = sub.expiresAt > now ? sub.expiresAt : now;
-    const expiresAt = meta.providerExpiresAt ?? addMonths(base, meta.months ?? plan.periodMonths);
+    // Same expiry anchor as renew() (BB-79 amendment) — RC sends providerExpiresAt
+    // in practice, so this local math is a fallback only.
+    const expiresAt =
+      meta.providerExpiresAt ?? addMonths(sub.expiresAt, meta.months ?? plan.periodMonths);
 
     const updated = await tx.memberSubscription.update({
       where: { id: sub.id },
