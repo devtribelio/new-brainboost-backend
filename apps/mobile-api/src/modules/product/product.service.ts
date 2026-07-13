@@ -88,8 +88,11 @@ export class ProductService {
       prisma.product.count({ where }),
     ]);
     const ratingAvgByProduct = await this.batchRatingAvg(rows.map((r) => r.id));
-    const purchasedProductIds = await this.batchPurchased(q.memberId, rows);
-    return { rows, total, ratingAvgByProduct, purchasedProductIds };
+    const { purchasedProductIds, viaSubscriptionIds } = await this.batchOwnership(
+      q.memberId,
+      rows,
+    );
+    return { rows, total, ratingAvgByProduct, purchasedProductIds, viaSubscriptionIds };
   }
 
   private static orderByFor(sort?: ProductSort): Prisma.ProductOrderByWithRelationInput {
@@ -184,6 +187,7 @@ export class ProductService {
         total,
         ratingAvgByProduct: new Map<string, number>(),
         purchasedProductIds: new Set<string>(),
+        viaSubscriptionIds: new Set<string>(),
       };
     }
     const fetched = await prisma.product.findMany({ where: { id: { in: ids } } });
@@ -191,8 +195,11 @@ export class ProductService {
     const rows = ids.map((id) => byId.get(id)).filter((r): r is Product => r != null);
 
     const ratingAvgByProduct = await this.batchRatingAvg(ids);
-    const purchasedProductIds = await this.batchPurchased(q.memberId, rows);
-    return { rows, total, ratingAvgByProduct, purchasedProductIds };
+    const { purchasedProductIds, viaSubscriptionIds } = await this.batchOwnership(
+      q.memberId,
+      rows,
+    );
+    return { rows, total, ratingAvgByProduct, purchasedProductIds, viaSubscriptionIds };
   }
 
   // ownership=purchased: drive query off CourseEnrollment so we can paginate
@@ -223,7 +230,23 @@ export class ProductService {
       ]);
       const ratingAvgByProduct = await this.batchRatingAvg(rows.map((r) => r.id));
       const purchasedProductIds = new Set(rows.map((r) => r.id));
-      return { rows, total, ratingAvgByProduct, purchasedProductIds };
+      // Retail-owned rows are NOT "via subscription" — lifetime beats borrowed access.
+      const retailOwned = new Set(
+        (
+          await prisma.courseEnrollment.findMany({
+            where: {
+              memberId,
+              viaSubscriptionId: null,
+              course: { productId: { in: rows.map((r) => r.id) } },
+            },
+            select: { course: { select: { productId: true } } },
+          })
+        ).map((e) => e.course.productId),
+      );
+      const viaSubscriptionIds = new Set(
+        rows.map((r) => r.id).filter((id) => !retailOwned.has(id)),
+      );
+      return { rows, total, ratingAvgByProduct, purchasedProductIds, viaSubscriptionIds };
     }
 
     const enrollmentWhere: Prisma.CourseEnrollmentWhereInput = {
@@ -245,34 +268,41 @@ export class ProductService {
         orderBy: { createdAt: 'desc' },
         skip: p.skip,
         take: p.take,
-        select: { course: { select: { product: true } } },
+        select: { viaSubscriptionId: true, course: { select: { product: true } } },
       }),
       prisma.courseEnrollment.count({ where: enrollmentWhere }),
     ]);
     const rows: Product[] = enrollments.map((e) => e.course.product);
     const ratingAvgByProduct = await this.batchRatingAvg(rows.map((r) => r.id));
     const purchasedProductIds = new Set(rows.map((r) => r.id));
-    return { rows, total, ratingAvgByProduct, purchasedProductIds };
+    const viaSubscriptionIds = new Set(
+      enrollments.filter((e) => e.viaSubscriptionId !== null).map((e) => e.course.product.id),
+    );
+    return { rows, total, ratingAvgByProduct, purchasedProductIds, viaSubscriptionIds };
   }
 
-  private async batchPurchased(
+  /**
+   * Ownership per page row: `purchasedProductIds` = owned at all (badge), and
+   * `viaSubscriptionIds` ⊆ purchased = owned ONLY through the subscription —
+   * a valid RETAIL enrollment always wins (lifetime beats borrowed access), so
+   * a retail-owned course is purchased=true / viaSubscription=false even for
+   * an active subscriber.
+   */
+  private async batchOwnership(
     memberId: string | undefined,
     rows: { id: string; type: string }[],
-  ): Promise<Set<string>> {
-    const set = new Set<string>();
-    if (!memberId) return set;
+  ): Promise<{ purchasedProductIds: Set<string>; viaSubscriptionIds: Set<string> }> {
+    const purchasedProductIds = new Set<string>();
+    const viaSubscriptionIds = new Set<string>();
+    const result = { purchasedProductIds, viaSubscriptionIds };
+    if (!memberId) return result;
     // Course-backed types (course + mini_course) carry enrollment; gating on
     // 'course' alone hid owned mini_course products from the list. Enrollment
     // existence is the real ownership signal — the join below filters anyway.
     const courseProductIds = rows
       .filter((r) => r.type === 'course' || r.type === 'mini_course')
       .map((r) => r.id);
-    if (courseProductIds.length === 0) return set;
-
-    // All-access: an active subscription marks every course-backed row purchased.
-    if (await this.entitlement.hasActiveSubscription(memberId)) {
-      return new Set(courseProductIds);
-    }
+    if (courseProductIds.length === 0) return result;
 
     const enrollments = await prisma.courseEnrollment.findMany({
       where: {
@@ -280,10 +310,26 @@ export class ProductService {
         ...validEnrollmentWhere(new Date()), // lapsed lazy rows don't badge as owned
         course: { productId: { in: courseProductIds } },
       },
-      select: { course: { select: { productId: true } } },
+      select: { viaSubscriptionId: true, course: { select: { productId: true } } },
     });
-    for (const e of enrollments) set.add(e.course.productId);
-    return set;
+    const retailOwned = new Set(
+      enrollments.filter((e) => e.viaSubscriptionId === null).map((e) => e.course.productId),
+    );
+
+    // All-access: an active subscription marks every course-backed row purchased.
+    if (await this.entitlement.hasActiveSubscription(memberId)) {
+      for (const id of courseProductIds) {
+        purchasedProductIds.add(id);
+        if (!retailOwned.has(id)) viaSubscriptionIds.add(id);
+      }
+      return result;
+    }
+
+    for (const e of enrollments) {
+      purchasedProductIds.add(e.course.productId);
+      if (e.viaSubscriptionId !== null) viaSubscriptionIds.add(e.course.productId);
+    }
+    return result;
   }
 
   private async batchRatingAvg(productIds: string[]): Promise<Map<string, number>> {

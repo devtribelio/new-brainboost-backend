@@ -253,3 +253,51 @@ describe('media gate (BE-10)', () => {
     await expect(mediaService.assertEnrollment(courseAId, retailId)).resolves.toBeUndefined();
   });
 });
+
+describe('viaSubscription flag (list + detail sources)', () => {
+  it('subscriber: purchased everywhere, viaSubscription=true on courses they don’t retail-own', async () => {
+    const res = await productService.list(PAGE, { keyword: KW, memberId: subscriberId });
+    expect(res.purchasedProductIds.has(courseAProductId)).toBe(true);
+    expect(res.viaSubscriptionIds.has(courseAProductId)).toBe(true);
+    expect(res.viaSubscriptionIds.has(courseBProductId)).toBe(true);
+  });
+
+  it('retail owner: purchased=true but viaSubscription=false (lifetime beats borrowed access)', async () => {
+    const res = await productService.list(PAGE, { keyword: KW, memberId: retailId });
+    expect(res.purchasedProductIds.has(courseAProductId)).toBe(true);
+    expect(res.viaSubscriptionIds.has(courseAProductId)).toBe(false);
+  });
+
+  it('hybrid (active sub + retail-owned course): retail course false, the rest true — list and purchased tab agree', async () => {
+    const hybridId = await makeMember('hybrid');
+    await subscriptionService.activateFromPayment({
+      ownerId: hybridId,
+      productId: planProductId,
+      transactionId: randomUUID(),
+      source: 'xendit',
+    });
+    await prisma.courseEnrollment.create({
+      data: { memberId: hybridId, courseId: courseAId }, // retail row (no marker)
+    });
+
+    const list = await productService.list(PAGE, { keyword: KW, memberId: hybridId });
+    expect(list.purchasedProductIds.has(courseAProductId)).toBe(true);
+    expect(list.viaSubscriptionIds.has(courseAProductId)).toBe(false); // retail wins
+    expect(list.viaSubscriptionIds.has(courseBProductId)).toBe(true);
+
+    const purchased = await productService.list(PAGE, {
+      keyword: KW,
+      memberId: hybridId,
+      ownership: 'purchased',
+    });
+    expect(purchased.viaSubscriptionIds.has(courseAProductId)).toBe(false);
+    expect(purchased.viaSubscriptionIds.has(courseBProductId)).toBe(true);
+  });
+
+  it('lapsed sub / anonymous: viaSubscription empty', async () => {
+    const lapsed = await productService.list(PAGE, { keyword: KW, memberId: lapsedId });
+    expect(lapsed.viaSubscriptionIds.size).toBe(0);
+    const anon = await productService.list(PAGE, { keyword: KW });
+    expect(anon.viaSubscriptionIds.size).toBe(0);
+  });
+});

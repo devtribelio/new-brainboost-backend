@@ -119,6 +119,14 @@ export class ProductDto {
   @ApiProperty({ type: 'boolean', example: false })
   isPurchased!: boolean;
 
+  @ApiProperty({
+    type: 'boolean',
+    example: false,
+    description:
+      'Owned only through an active subscription (all-access). False when the member owns a valid retail enrollment — lifetime beats borrowed access. Always false on public endpoints.',
+  })
+  viaSubscription!: boolean;
+
   @ApiProperty({ type: 'number', example: 4.8 })
   productRatingAvg!: number;
 }
@@ -292,6 +300,14 @@ export class CourseDetailDto {
 
   @ApiProperty({ type: 'boolean', example: false })
   isPurchase!: boolean;
+
+  @ApiProperty({
+    type: 'boolean',
+    example: false,
+    description:
+      'Owned only through an active subscription (all-access). False when the member owns a valid retail enrollment. Always false on public endpoints.',
+  })
+  viaSubscription!: boolean;
 
   @ApiProperty({ example: 'https://brainboost.com/checkout/react-fundamentals' })
   productPaymentUrl!: string;

@@ -29,7 +29,13 @@ function deriveSlug(title: string | null): string {
 
 export function serializeProduct(
   p: Product,
-  opts: { ratingAvg?: number; isPurchased?: boolean; commissionRate?: number } = {},
+  opts: {
+    ratingAvg?: number;
+    isPurchased?: boolean;
+    /** Owned ONLY through an active subscription (valid retail enrollment wins → false). */
+    viaSubscription?: boolean;
+    commissionRate?: number;
+  } = {},
 ): Record<string, unknown> {
   const productId = p.legacyId ?? p.id;
   const label = productTypeLabel(p.type);
@@ -90,6 +96,7 @@ export function serializeProduct(
     commissionMax,
     productUrl,
     isPurchased: opts.isPurchased ?? false,
+    viaSubscription: opts.viaSubscription ?? false,
     productRatingAvg: opts.ratingAvg ?? 0,
   };
 }
@@ -343,7 +350,12 @@ function buildStarSummary(
 export function serializeCourseDetailLegacy(
   p: ProductWithCourseDetail,
   reviewAggregate: ReviewAggregateInput,
-  opts: { isPurchase?: boolean; affiliateCode?: string | null } = {},
+  opts: {
+    isPurchase?: boolean;
+    /** Owned ONLY through an active subscription (valid retail enrollment wins → false). */
+    viaSubscription?: boolean;
+    affiliateCode?: string | null;
+  } = {},
 ): Record<string, unknown> {
   const baseUrl = process.env.PUBLIC_WEB_URL ?? 'https://brainboost.com';
   const code = p.code ?? String(p.legacyId ?? p.id);
@@ -391,6 +403,7 @@ export function serializeCourseDetailLegacy(
     sellingPoint: normalizeSellingPoints(p.sellingPoints),
     imageUrl: p.thumbnail,
     isPurchase: opts.isPurchase ?? false,
+    viaSubscription: opts.viaSubscription ?? false,
     productShareDetailUrl: shareUrl,
     productPaymentUrl: `${baseUrl}/checkout/${code}`,
     price: p.price,

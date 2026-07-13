@@ -74,17 +74,15 @@ export class ProductController {
     const p = parsePagination(req.query as Record<string, unknown>, { perPage: 100 });
     const q = req.query as unknown as ListProductsQueryDto;
     const memberId = (req as { user?: { id?: string } }).user?.id;
-    const { rows, total, ratingAvgByProduct, purchasedProductIds } = await this.productService.list(
-      p,
-      {
+    const { rows, total, ratingAvgByProduct, purchasedProductIds, viaSubscriptionIds } =
+      await this.productService.list(p, {
         keyword: q.keyword,
         type: q.type,
         memberId,
         ownership: q.ownership,
         sort: q.sort,
         media: q.media,
-      },
-    );
+      });
     // PERFORMANCE-tier rate for commisionFixAmount preview. One lookup per request;
     // anon (public list) → tier 1 (20%) default inside the serializer.
     const commissionRate = memberId
@@ -94,6 +92,7 @@ export class ProductController {
       serializeProduct(r, {
         ratingAvg: ratingAvgByProduct.get(r.id) ?? 0,
         isPurchased: purchasedProductIds.has(r.id),
+        viaSubscription: viaSubscriptionIds.has(r.id),
         commissionRate,
       }),
     );
@@ -110,6 +109,7 @@ export class ProductController {
     const memberId = (req as { user?: { id?: string } }).user?.id;
     let affiliateCode: string | null = null;
     let isPurchase = false;
+    let viaSubscription = false;
     if (memberId) {
       const m = await prisma.member.findUnique({
         where: { id: memberId },
@@ -119,18 +119,27 @@ export class ProductController {
       if (product.course) {
         // Valid enrollment (retail by existence, lazy row by date — BE-06
         // predicate) OR an active subscription = "owned" (BE-11).
+        // viaSubscription marks access that exists ONLY because of the sub —
+        // a valid RETAIL enrollment wins (lifetime beats borrowed access).
         const enrollment = await prisma.courseEnrollment.findUnique({
           where: { memberId_courseId: { memberId, courseId: product.course.id } },
           select: { viaSubscriptionId: true, expiredDate: true },
         });
+        const validEnrollment =
+          enrollment != null && this.entitlement.isEnrollmentValid(enrollment);
+        const validRetail = validEnrollment && enrollment!.viaSubscriptionId === null;
         isPurchase =
-          (enrollment != null && this.entitlement.isEnrollmentValid(enrollment)) ||
-          (await this.entitlement.hasActiveSubscription(memberId));
+          validEnrollment || (await this.entitlement.hasActiveSubscription(memberId));
+        viaSubscription = isPurchase && !validRetail;
       }
     }
     return ok(
       res,
-      serializeCourseDetailLegacy(product, reviewAggregate, { affiliateCode, isPurchase }),
+      serializeCourseDetailLegacy(product, reviewAggregate, {
+        affiliateCode,
+        isPurchase,
+        viaSubscription,
+      }),
     );
   };
 
