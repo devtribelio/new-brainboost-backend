@@ -32,7 +32,8 @@ interface Deps {
 
 const COLS = `member_id, email, name, first_name, last_name, phone, password, image_url,
               biography, is_active, is_email_verified, is_phone_verified, google_id,
-              sign_in_with_apple_id, date_register, is_deleted`;
+              sign_in_with_apple_id, date_register, is_deleted,
+              bank_account_bank, bank_account_number, bank_account_name`;
 
 function isJunk(name: string | null, rawEmail: string | null): boolean {
   if (rawEmail && /@example\.com$/i.test(rawEmail)) return true;
@@ -99,7 +100,20 @@ export function makeEnsureMember(deps: Deps) {
     if (googleSub) or.push({ googleSub });
     if (appleSub) or.push({ appleSub });
     const existing = or.length
-      ? await prisma.member.findFirst({ where: { OR: or }, select: { id: true, legacyId: true } })
+      ? await prisma.member.findFirst({
+          where: { OR: or },
+          select: { id: true, legacyId: true, bankAccountNumber: true },
+        })
+      : null;
+
+    // legacy profile-level payout account (rarely filled; the KYC-sourced bank rides the
+    // kyc syncer). Only offered when legacy actually has a number — never nulls anything.
+    const bank = nonEmpty(r.bank_account_number)
+      ? {
+          bankCode: nonEmpty(r.bank_account_bank),
+          bankAccountNumber: nonEmpty(r.bank_account_number),
+          bankAccountName: nonEmpty(r.bank_account_name),
+        }
       : null;
 
     const profile = {
@@ -129,6 +143,8 @@ export function makeEnsureMember(deps: Deps) {
         // (updatedAt > legacySyncedAt) doesn't misread the fresh row as app-touched.
         const now = new Date();
         const adoptData: any = { legacyId: legacyMemberId, ...profile, legacySyncedAt: now, updatedAt: now };
+        // fill bank only when the placeholder has none — never clobber an app-set account
+        if (bank && existing.bankAccountNumber === null) Object.assign(adoptData, bank);
         try {
           await prisma.member.update({ where: { id: existing.id }, data: adoptData });
         } catch (err: any) {
@@ -191,6 +207,7 @@ export function makeEnsureMember(deps: Deps) {
         data: {
           legacyId: legacyMemberId,
           ...profile,
+          ...(bank ?? {}),
           passwordHash: legacyPassword ?? `${randomUUID()}${randomUUID()}`,
           passwordAlgo: legacyPassword ? 'legacy' : 'social',
           createdAt: toDate(r.date_register) ?? now,
