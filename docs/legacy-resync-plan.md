@@ -73,6 +73,15 @@ All 7 syncers implemented and validated end-to-end:
   Still pending on bb_backend: run fix-dates once AFTER the in-flight first run finishes
   (posts/comments self-heal via the posts syncer's upsert-update; members/enrollments/
   commissions/reviews/likes need the script).
+- **Bank account carry (2026-07-13):** legacy payout-account data now flows on all three
+  member paths, always fill-if-NULL (never overwrites an app-set account → never trips the
+  BANK_CHANGE re-KYC): ① `migrate-members.ts` + ② resync `ensureMember` (create/adopt) copy
+  `member.bank_account_bank/number/name` (profile-level, rarely filled: ~1.1k/704k); ③ the
+  kyc syncer's `applyKycDecisions` fills bank from the latest **APPROVED** `member_data_kyc`
+  row (`bank_type`=bank code, **`bank_name`=ACCOUNT HOLDER name**, `bank_number`=account
+  number — legacy naming trap), independent of the kycSource guard (bank data is
+  provider-agnostic). Backfill for the existing stock = `pnpm resync:reset-watermark kyc &&
+  pnpm resync kyc` (re-evaluates everyone through the bank-aware path).
 - **Stale-lock gotcha:** a hard-killed run (SIGKILL / host teardown) can't run its
   release finally-block, so `__lock__` stays held until the TTL (`RESYNC_LOCK_TTL_SEC`,
   default 2× interval = 2h). `pnpm resync:unlock` clears it immediately. Graceful SIGTERM

@@ -20,6 +20,11 @@ interface KycTarget {
   nik: string | null;
   reason: string | null;
   reviewedAt: Date | null;
+  // payout account from the APPROVED submission (legacy naming: bank_type = bank code,
+  // bank_name = ACCOUNT HOLDER name, bank_number = account number). null on REJECTED.
+  bankCode: string | null;
+  bankAccountNumber: string | null;
+  bankAccountName: string | null;
 }
 
 /** winner legacyId -> all legacy member ids in its dedup cluster (winner + losers). */
@@ -61,7 +66,8 @@ export async function applyKycDecisions(ctx: RunCtx, memberLegacyIds: number[], 
     const chunk = ids.slice(i, i + 5000);
     const [rows] = await ctx.legacy.query<RowDataPacket[]>(
       `SELECT k.member_data_kyc_id, k.member_id, k.kyc_status, k.nik, k.reason,
-              k.actionat, k.\`updated\`, k.\`created\`
+              k.actionat, k.\`updated\`, k.\`created\`,
+              k.bank_type, k.bank_name, k.bank_number
          FROM member_data_kyc k
          JOIN (SELECT member_id, MAX(member_data_kyc_id) mx FROM member_data_kyc
                 WHERE kyc_status IN ('APPROVED','REJECTED') AND member_id IN (?)
@@ -76,6 +82,7 @@ export async function applyKycDecisions(ctx: RunCtx, memberLegacyIds: number[], 
         continue;
       }
       const status = String(r.kyc_status) as 'APPROVED' | 'REJECTED';
+      const bankOk = status === 'APPROVED' && nonEmpty(r.bank_number) !== null;
       const target: KycTarget = {
         id: Number(r.member_data_kyc_id),
         winnerLegacy,
@@ -83,6 +90,9 @@ export async function applyKycDecisions(ctx: RunCtx, memberLegacyIds: number[], 
         nik: nonEmpty(r.nik),
         reason: status === 'REJECTED' ? nonEmpty(r.reason) : null,
         reviewedAt: toDate(r.actionat) ?? toDate(r.updated) ?? toDate(r.created),
+        bankCode: bankOk ? nonEmpty(r.bank_type) : null,
+        bankAccountNumber: bankOk ? nonEmpty(r.bank_number) : null,
+        bankAccountName: bankOk ? nonEmpty(r.bank_name) : null,
       };
       const prev = byWinner.get(winnerLegacy);
       if (!prev || target.id > prev.id) byWinner.set(winnerLegacy, target);
@@ -97,6 +107,7 @@ export async function applyKycDecisions(ctx: RunCtx, memberLegacyIds: number[], 
   }
 
   const targets = [...byWinner.values()];
+  let bankFilled = 0;
   for (let i = 0; i < targets.length; i += 100) {
     const batch = targets.slice(i, i + 100);
     const res = await Promise.all(
@@ -117,7 +128,26 @@ export async function applyKycDecisions(ctx: RunCtx, memberLegacyIds: number[], 
       if (r.count > 0) stats.upserted += r.count;
       else stats.skipped += 1; // guard-blocked (MANUAL/SUMSUB/EXPIRED)
     }
+    // payout account from the APPROVED submission — fill-if-NULL only (never overwrite an
+    // app-set account → also never trips the BANK_CHANGE re-KYC semantics). Independent of
+    // the kycSource guard: bank data is provider-agnostic.
+    const bankRes = await Promise.all(
+      batch
+        .filter((t) => t.bankAccountNumber !== null)
+        .map((t) =>
+          ctx.prisma.member.updateMany({
+            where: { id: ctx.memberByLegacy.get(t.winnerLegacy)!, bankAccountNumber: null },
+            data: {
+              bankCode: t.bankCode,
+              bankAccountNumber: t.bankAccountNumber,
+              bankAccountName: t.bankAccountName,
+            },
+          }),
+        ),
+    );
+    for (const r of bankRes) bankFilled += r.count;
   }
+  if (bankFilled) ctx.log(`bank account filled from legacy KYC on ${bankFilled} members`);
 }
 
 export const kycSyncer: Syncer = {

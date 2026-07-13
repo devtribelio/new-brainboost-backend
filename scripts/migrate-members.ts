@@ -128,6 +128,9 @@ interface LegacyMember {
   passwordAlgo: string;
   avatarUrl: string | null;
   bio: string | null;
+  bankCode: string | null; // legacy member.bank_account_bank (rarely filled; KYC bank rides resync kyc)
+  bankAccountNumber: string | null;
+  bankAccountName: string | null;
   isActive: boolean;
   isEmailVerified: boolean;
   isPhoneVerified: boolean;
@@ -155,7 +158,8 @@ async function fetchMembers(legacy: Connection, scope: Scope): Promise<LegacyMem
     const [rows] = await legacy.query<RowDataPacket[]>(
       `SELECT member_id, email, name, first_name, last_name, phone, password, image_url,
               biography, is_active, is_email_verified, is_phone_verified, google_id,
-              sign_in_with_apple_id, date_register, is_deleted, login_count, last_active
+              sign_in_with_apple_id, date_register, is_deleted, login_count, last_active,
+              bank_account_bank, bank_account_number, bank_account_name
          FROM member WHERE member_id IN (?)`,
       [chunk],
     );
@@ -199,6 +203,9 @@ async function fetchMembers(legacy: Connection, scope: Scope): Promise<LegacyMem
         passwordAlgo: legacyPassword ? 'legacy' : 'social',
         avatarUrl: nonEmpty(r.image_url),
         bio: nonEmpty(r.biography),
+        bankCode: nonEmpty(r.bank_account_bank),
+        bankAccountNumber: nonEmpty(r.bank_account_number),
+        bankAccountName: nonEmpty(r.bank_account_name),
         isActive: bool(r.is_active) && !bool(r.is_deleted),
         isEmailVerified: email ? bool(r.is_email_verified) : false,
         isPhoneVerified: phone ? bool(r.is_phone_verified) : false,
@@ -319,6 +326,9 @@ async function insertMembers(winners: LegacyMember[]): Promise<void> {
       passwordAlgo: w.passwordAlgo,
       avatarUrl: w.avatarUrl,
       bio: w.bio,
+      bankCode: w.bankCode,
+      bankAccountNumber: w.bankAccountNumber,
+      bankAccountName: w.bankAccountName,
       isActive: w.isActive,
       isEmailVerified: w.isEmailVerified,
       isPhoneVerified: w.isPhoneVerified,
