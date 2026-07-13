@@ -101,9 +101,14 @@ describe('DisbursementService — payout flow', () => {
       data: { code: `${TAG}-prog`, name: 'Disb Flow Program', productId, isActive: true },
     });
     programId = program.id;
+    // The AUTO lane is OFF by default (launch posture) — this suite exercises the
+    // full TBWithdraw::validateStatus parity rules, so switch it on for the run.
+    await settingsService.set(SETTING_KEYS.disbursementAutoEnabled, 'true');
   });
 
   afterAll(async () => {
+    await prisma.appSetting.deleteMany({ where: { key: SETTING_KEYS.disbursementAutoEnabled } });
+    SettingsService.clearCache();
     for (const id of createdMembers) {
       await prisma.affiliateDisbursement.deleteMany({ where: { memberId: id } });
       await prisma.affiliateCommission.deleteMany({ where: { recipientId: id } });
@@ -146,6 +151,19 @@ describe('DisbursementService — payout flow', () => {
     expect(row.mode).toBe('MANUAL');
     expect(row.status).toBe('PENDING');
     expect(createDisbursementMock).not.toHaveBeenCalled();
+  });
+
+  it('AUTO lane disabled (kill-switch) → MANUAL even for an eligible member', async () => {
+    await settingsService.set(SETTING_KEYS.disbursementAutoEnabled, 'false');
+    try {
+      const id = await member({ balance: 50_000, priorPaid: true }); // would be AUTO otherwise
+      const row = await svc.requestDisbursement(id);
+      expect(row.mode).toBe('MANUAL');
+      expect(row.status).toBe('PENDING');
+      expect(createDisbursementMock).not.toHaveBeenCalled();
+    } finally {
+      await settingsService.set(SETTING_KEYS.disbursementAutoEnabled, 'true');
+    }
   });
 
   it('repeat + small amount → AUTO (fires Xendit, status PROCESSING)', async () => {

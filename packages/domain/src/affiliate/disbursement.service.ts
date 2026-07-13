@@ -15,6 +15,7 @@ import {
   DISBURSEMENT_STATUS,
   DISBURSEMENT_HOLD_STATUSES,
   DISBURSEMENT_AUTO_APPROVE_MAX,
+  DISBURSEMENT_AUTO_ENABLED_DEFAULT,
   DISBURSEMENT_AUTO_MAX_PER_DAY,
   DISBURSEMENT_AUTO_MAX_PER_WEEK,
   DISBURSEMENT_MIN_BALANCE,
@@ -282,6 +283,8 @@ export class DisbursementService {
   /**
    * AUTO vs MANUAL — port of legacy TBWithdraw::validateStatus.
    * AUTO requires ALL of:
+   *   0. AUTO lane enabled (app_settings `disbursement.autoEnabled`, default OFF —
+   *      launch posture: every payout is reviewed until finance signs off)
    *   1. member has a prior PAID disbursement (first-time is ALWAYS manual)
    *   2. netAmount <= autoApproveMax (app_settings `disbursement.autoApproveMax`)
    *   3. <=1 disbursement today AND <=3 this week (counting PROCESSING|PAID)
@@ -292,6 +295,13 @@ export class DisbursementService {
     netAmount: number,
     db: Tx | typeof prisma = prisma,
   ): Promise<'AUTO' | 'MANUAL'> {
+    // (0) AUTO lane kill-switch.
+    const autoEnabled = await settingsService.getBoolean(
+      SETTING_KEYS.disbursementAutoEnabled,
+      DISBURSEMENT_AUTO_ENABLED_DEFAULT,
+    );
+    if (!autoEnabled) return 'MANUAL';
+
     // (1) prior successful payout? First-time withdrawers are always reviewed.
     const priorPaid = await db.affiliateDisbursement.count({
       where: { memberId, status: DISBURSEMENT_STATUS.PAID },

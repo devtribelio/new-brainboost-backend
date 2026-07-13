@@ -35,6 +35,12 @@ export const DISBURSEMENT_MIN_NET = 10_000; // IDR — net (balance - fee) must 
 // app_settings `kyc.minBalance` (runtime-overridable, see seed-settings.ts).
 export const KYC_MIN_BALANCE_DEFAULT = 0; // IDR
 
+// Kill-switch for the AUTO payout lane. Default OFF for launch: every payout goes
+// through backoffice approval until finance signs off on auto-disbursement.
+// Runtime-overridable via app_settings `disbursement.autoEnabled` ('true' to enable) —
+// no deploy needed to flip it.
+export const DISBURSEMENT_AUTO_ENABLED_DEFAULT = false;
+
 // AUTO-approval cap (legacy TBWithdraw::AMOUNT_MIN_NEED_APPROVAL was 10,000,000).
 // We pick a conservative default; runtime-overridable via app_settings
 // `disbursement.autoApproveMax`. A payout whose NET exceeds this always goes MANUAL.

@@ -249,7 +249,7 @@ Module status (one-line summary; details in `docs/rewrite-progress.md`):
 - [x] admin — was done (EJS internal sysadmin), but `apps/admin-ejs` REMOVED 2026-07 (recover from git history if needed)
 - [x] commerce / purchase — Xendit-only (CC + VA + eWallet), 2-step checkout→payment, voucher bypass, webhook + cron expire, event-driven side effects (enrollment + affiliate commission + voucher redeem). See `docs/commerce-port.md`. Pending: manual Xendit sandbox QA
 - [ ] backoffice — `apps/backoffice-api` scaffold REMOVED 2026-07 (was never started). Plan docs kept: `docs/backoffice-port-plan.md` + `docs/backoffice-port/`
-- [ ] disbursement — payout to bank/e-wallet (NOT STARTED — folded into backoffice sprint 2)
+- [~] disbursement — bank payout flow COMPLETE in `@bb/domain` (request AUTO/MANUAL + `disburseViaXendit` + webhook `/api/webhook/xendit/disbursement` + job `executeApprovedDisbursements` sweeps backoffice-approved rows & re-checks KYC at execution). Approval UI = **backoffice-bb repo** (`/disbursements`, perms `disbursements.view/manage`; approve = stamp `approved_at` via SQL only — Xendit key & state machine stay here). Legacy is bank-ONLY (e-wallet payout never existed — `TBBank` has no wallet entries; OVO/GoPay refs are payment-IN); e-wallet payout = new product decision (Payouts v2), not parity. Pending: legacy bank backfill (`bank_account_bank` lowercase keys → Xendit codes; `mandiri-syariah`→BSI), Xendit env keys + dashboard callback URL, sandbox QA
 - [ ] chat / broadcast — drop or defer
 - [ ] certificate — drop or defer
 - [ ] cron / queue — drop (use Postgres LISTEN or external scheduler later)
