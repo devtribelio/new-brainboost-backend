@@ -11,6 +11,7 @@
   },
   "scripts": {
     "dev:mobile": "pnpm -F @bb/mobile-api dev",
+    "jobs": "tsx --conditions=development apps/mobile-api/src/jobs-runner.ts",
     "relay:comms": "tsx --conditions=development apps/mobile-api/src/workers/comms-relay.ts",
     "resync": "tsx --conditions=development apps/resync-worker/src/run.ts",
     "resync:worker": "tsx --conditions=development apps/resync-worker/src/worker.ts",
