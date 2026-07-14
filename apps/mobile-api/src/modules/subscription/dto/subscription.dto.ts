@@ -29,6 +29,28 @@ export class PlanItemDto {
 
   @ApiProperty({ example: 999000, description: 'Web price (IDR) from Product.price' })
   price!: number;
+
+  @ApiPropertyOptional({
+    example: 'com.brainboost.ios.sub_solo_annual',
+    nullable: true,
+    description: 'App Store SKU for the IAP purchase path (RevenueCat)',
+  })
+  iosProductId?: string | null;
+
+  @ApiPropertyOptional({
+    example: 'com.brainboost.android.sub_solo_annual',
+    nullable: true,
+    description: 'Play Store SKU for the IAP purchase path (RevenueCat)',
+  })
+  androidProductId?: string | null;
+
+  @ApiPropertyOptional({
+    example: 1099000,
+    nullable: true,
+    description:
+      'Gross iOS IAP display price (IDR, marked up to offset Apple’s cut). null = same as web price.',
+  })
+  iosPrice?: number | null;
 }
 
 export class SeatItemDto {

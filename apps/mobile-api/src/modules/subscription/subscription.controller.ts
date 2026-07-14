@@ -38,12 +38,25 @@ export class SubscriptionController {
   ) {}
 
   @ApiOperation({ summary: 'Active subscription plans (paywall source)' })
-  @ApiResponse({ status: 200, type: () => [PlanItemDto] })
+  // isArray (not `[Dto]`) — the openapi registry only resolves the flag form;
+  // the tuple form silently produced an empty response schema in Swagger.
+  @ApiResponse({ status: 200, type: () => PlanItemDto, isArray: true })
   plans = async (_req: Request, res: Response) => {
     const plans = await prisma.subscriptionPlan.findMany({
       where: { isActive: true, product: { isActive: true } },
       orderBy: { sortOrder: 'asc' },
-      include: { product: { select: { id: true, title: true, price: true } } },
+      include: {
+        product: {
+          select: {
+            id: true,
+            title: true,
+            price: true,
+            iosProductId: true,
+            androidProductId: true,
+            iosPrice: true,
+          },
+        },
+      },
     });
     return ok(res, plans.map(serializePlan));
   };

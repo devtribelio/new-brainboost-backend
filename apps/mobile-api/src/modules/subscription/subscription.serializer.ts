@@ -6,7 +6,14 @@ import type {
 import type { PlanItemDto, SeatItemDto, SubscriptionMeDto } from './dto/subscription.dto';
 
 type PlanWithProduct = SubscriptionPlan & {
-  product: { id: string; title: string; price: number };
+  product: {
+    id: string;
+    title: string;
+    price: number;
+    iosProductId: string | null;
+    androidProductId: string | null;
+    iosPrice: number | null;
+  };
 };
 
 export function serializePlan(plan: PlanWithProduct): PlanItemDto {
@@ -18,6 +25,12 @@ export function serializePlan(plan: PlanWithProduct): PlanItemDto {
     productId: plan.product.id,
     title: plan.product.title,
     price: plan.product.price,
+    // Store SKUs for the RevenueCat/IAP purchase path (placeholder until the
+    // real store products exist); iosPrice = gross IAP display price (marked
+    // up to offset Apple's cut), null = same as web price.
+    iosProductId: plan.product.iosProductId,
+    androidProductId: plan.product.androidProductId,
+    iosPrice: plan.product.iosPrice,
   };
 }
 

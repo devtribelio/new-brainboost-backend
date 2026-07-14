@@ -57,6 +57,9 @@ async function makePlanProduct(tag: string, seatCount: number, sortOrder: number
       price: 999_000,
       isActive: true,
       status: 'active',
+      iosProductId: `com.brainboost.ios.tsth_${tag.toLowerCase()}_${uniq}`,
+      androidProductId: `com.brainboost.android.tsth_${tag.toLowerCase()}_${uniq}`,
+      iosPrice: 1_099_000,
     },
   });
   await prisma.subscriptionPlan.create({
@@ -118,6 +121,12 @@ describe('/subscription HTTP module (BE-19)', () => {
     expect(ours.map((p) => p.planCode)).toEqual([`TSTH_DUO_${uniq}`, `TSTH_SOLO_${uniq}`]);
     expect(ours[0].productId).toBe(duoProductId);
     expect(ours[0].price).toBe(999_000);
+    // IAP purchase-path fields (BB-95 addition)
+    expect(ours[0]).toMatchObject({
+      iosProductId: `com.brainboost.ios.tsth_duo_${uniq}`,
+      androidProductId: `com.brainboost.android.tsth_duo_${uniq}`,
+      iosPrice: 1_099_000,
+    });
   });
 
   it('GET /me requires auth; returns none / owner-with-seats / member-with-own-seat', async () => {
