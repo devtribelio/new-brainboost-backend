@@ -85,6 +85,7 @@ export class ProfileController {
     const body = req.body ?? {};
     await this.profileService.updateInfo(req.user.id, {
       fullName: body.name ?? body.fullName,
+      email: body.email,
       phone: body.phone,
       phoneCode: body.phoneCode,
       bio: body.biography ?? body.bio,
