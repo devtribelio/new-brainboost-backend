@@ -165,9 +165,9 @@ describe('generic contact verification (post-login)', () => {
     expect(info.body.data.isEmailVerified).toBe(true);
   });
 
-  it('profile/update email is fill-if-null: an existing email is silently kept', async () => {
+  it('profile/update email is locked once verified: a verified email is silently kept', async () => {
     const app = buildApp();
-    const token = await emailMemberToken(app);
+    const token = await emailMemberToken(app); // email verified by register OTP
     const auth = { Authorization: `Bearer ${token}` };
 
     const upd = await request(app)
@@ -177,6 +177,31 @@ describe('generic contact verification (post-login)', () => {
     expect(upd.status).toBe(200);
     expect(upd.body.data.email).toBe(EMAIL); // unchanged
     expect(upd.body.data.isEmailVerified).toBe(true); // verification untouched
+  });
+
+  it('profile/update email can still be changed while unverified', async () => {
+    const app = buildApp();
+    const token = await phoneMemberToken(app);
+    const auth = { Authorization: `Bearer ${token}` };
+
+    await request(app)
+      .post('/api/member/account/profile/update')
+      .set(auth)
+      .send({ email: EMAIL });
+    // Typo'd / second thoughts before verifying — replace is allowed.
+    const upd = await request(app)
+      .post('/api/member/account/profile/update')
+      .set(auth)
+      .send({ email: EMAIL2 });
+    expect(upd.status).toBe(200);
+    expect(upd.body.data.email).toBe(EMAIL2);
+    expect(upd.body.data.isEmailVerified).toBe(false);
+
+    const reqRes = await request(app)
+      .post('/api/member/auth/requestVerify')
+      .set(auth)
+      .send({ type: 'email' });
+    expect(reqRes.body.data.target).toBe(EMAIL2);
   });
 
   it('profile/update email rejects invalid format and an email owned by another member', async () => {

@@ -54,18 +54,20 @@ export class ProfileService {
       }
     }
 
-    // Fill-if-null: email is a login identifier — once set it can only be
-    // verified (auth/requestVerify type=email), never changed from here.
+    // Email is changeable only while unverified; once verified
+    // (auth/requestVerify type=email) it is locked — silently ignored here.
     let email: string | undefined;
-    if (dto.email && member.email === null) {
+    if (dto.email && !member.isEmailVerified) {
       const normalized = dto.email.trim().toLowerCase();
       if (!isEmail(normalized)) throw new BadRequestException('Invalid email');
-      const emailTaken = await prisma.member.findFirst({
-        where: { email: normalized, NOT: { id: memberId } },
-        select: { id: true },
-      });
-      if (emailTaken) throw new BadRequestException('Email already used by another member');
-      email = normalized;
+      if (normalized !== member.email) {
+        const emailTaken = await prisma.member.findFirst({
+          where: { email: normalized, NOT: { id: memberId } },
+          select: { id: true },
+        });
+        if (emailTaken) throw new BadRequestException('Email already used by another member');
+        email = normalized;
+      }
     }
 
     let phone = dto.phone;
