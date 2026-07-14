@@ -59,7 +59,7 @@ describe('commerce.payment.success → notification listener', () => {
     expect(rows.length).toBeGreaterThanOrEqual(1);
     const match = rows.find((r) => r.dedupeKey === `paymentSuccess:${paymentId}:${memberId}`);
     expect(match).toBeDefined();
-    expect(match?.title).toBe('Payment successful');
+    expect(match?.title).toBe('Pembayaran berhasil');
   });
 
   it('dedupes on re-emit of same paymentId', async () => {
