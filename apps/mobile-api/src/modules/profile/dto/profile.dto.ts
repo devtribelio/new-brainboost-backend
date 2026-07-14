@@ -10,6 +10,13 @@ export class UpdateProfileRequestDto {
   @ApiPropertyOptional({ nullable: true, example: 'John Doe', description: 'Full name (alias: fullName).' })
   name?: string | null;
 
+  @ApiPropertyOptional({
+    nullable: true,
+    example: 'john@mail.com',
+    description: 'Applied only while the member email is unverified (stored normalized, unverified); silently ignored once verified.',
+  })
+  email?: string | null;
+
   @ApiPropertyOptional({ nullable: true, example: '81234567890' })
   phone?: string | null;
 
