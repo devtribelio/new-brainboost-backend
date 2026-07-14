@@ -20,14 +20,14 @@ export function registerCommerceNotificationListener(): void {
       const named = product ? product.title : null;
 
       const type = e.isRenewal ? ActionLabel.SubscriptionRenewed : ActionLabel.PaymentSuccess;
-      const title = e.isRenewal ? 'Subscription renewed' : 'Payment successful';
+      const title = e.isRenewal ? 'Langganan diperpanjang' : 'Pembayaran berhasil';
       const body = e.isRenewal
         ? named
-          ? `Your subscription to ${named} was renewed.`
-          : 'Your subscription was renewed.'
+          ? `Langganan ${named} kamu diperpanjang.`
+          : 'Langganan kamu diperpanjang.'
         : named
-          ? `Your order for ${named} is paid.`
-          : 'Your order is paid.';
+          ? `Pesanan ${named} kamu sudah dibayar.`
+          : 'Pesanan kamu sudah dibayar.';
       const dedupePrefix = e.isRenewal ? 'subscriptionRenewed' : 'paymentSuccess';
 
       await producer.createForMember({
@@ -57,14 +57,14 @@ export function registerCommerceNotificationListener(): void {
         ? await prisma.product.findUnique({ where: { id: e.productId }, select: { title: true, code: true } })
         : null;
       const body = product
-        ? `Your purchase of ${product.title} was refunded and access removed.`
-        : 'Your purchase was refunded and access removed.';
+        ? `Pembelian ${product.title} kamu telah di-refund dan aksesnya dicabut.`
+        : 'Pembelian kamu telah di-refund dan aksesnya dicabut.';
 
       await producer.createForMember({
         memberId: e.memberId,
         type: ActionLabel.PaymentRefunded,
         notifGroup: NotifGroup.General,
-        title: 'Purchase refunded',
+        title: 'Pembelian di-refund',
         body,
         payload: {
           refTable: 'commerce_payment',

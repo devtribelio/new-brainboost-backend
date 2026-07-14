@@ -1,3 +1,4 @@
+import { isEmail } from 'class-validator';
 import { prisma } from '@bb/db';
 import { BadRequestException, NotFoundException } from '@bb/common/exceptions';
 import { assertUuid } from '@bb/common/utils/uuid.util';
@@ -20,6 +21,7 @@ export class ProfileService {
 
   async updateInfo(memberId: string, dto: {
     fullName?: string;
+    email?: string | null;
     phone?: string;
     phoneCode?: string;
     gender?: string;
@@ -52,6 +54,22 @@ export class ProfileService {
       }
     }
 
+    // Email is changeable only while unverified; once verified
+    // (auth/requestVerify type=email) it is locked — silently ignored here.
+    let email: string | undefined;
+    if (dto.email && !member.isEmailVerified) {
+      const normalized = dto.email.trim().toLowerCase();
+      if (!isEmail(normalized)) throw new BadRequestException('Invalid email');
+      if (normalized !== member.email) {
+        const emailTaken = await prisma.member.findFirst({
+          where: { email: normalized, NOT: { id: memberId } },
+          select: { id: true },
+        });
+        if (emailTaken) throw new BadRequestException('Email already used by another member');
+        email = normalized;
+      }
+    }
+
     let phone = dto.phone;
     let phoneCode = dto.phoneCode;
     let phoneChanged = false;
@@ -76,6 +94,7 @@ export class ProfileService {
       where: { id: memberId },
       data: {
         fullName: dto.fullName,
+        ...(email !== undefined ? { email } : {}),
         phone,
         phoneCode,
         // A new number was never OTP'd — verified status must not carry over.

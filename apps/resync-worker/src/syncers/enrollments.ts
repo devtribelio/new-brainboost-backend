@@ -9,8 +9,9 @@
  * See docs/legacy-resync-plan.md §6.
  */
 import type { RowDataPacket } from 'mysql2/promise';
+import { resyncConfig } from '../config';
 import { emptyStats, type Stats, type Syncer, type SyncerCtx } from '../types';
-import { maxWatermark, nonEmpty, sinceBound, toDate } from '../util';
+import { maxWatermark, nonEmpty, runConcurrent, sinceBound, toDate } from '../util';
 
 const BB_COURSES = `course_id IN (SELECT course_id FROM course WHERE client = 'brainboost')`;
 
@@ -60,28 +61,31 @@ export const enrollmentsSyncer: Syncer = {
     }
 
     let watermark = ctx.since;
-    for (const r of rows as any[]) {
+    await runConcurrent(rows as any[], resyncConfig.writeConcurrency, async (r: any) => {
       watermark = maxWatermark(watermark, toDate(r.wm));
       const access =
         r.course_ps === 'SUCCESS' || r.bundle_ps === 'SUCCESS' || (r.course_ps == null && r.bundle_ps == null);
       if (!access) {
         stats.skipped += 1;
-        continue;
+        return;
       }
       const memberId = await ctx.ensureMember(Number(r.member_id));
       const courseId = courseByLegacy.get(Number(r.course_id));
       if (!memberId || !courseId) {
         stats.skipped += 1;
-        continue;
+        return;
       }
       const legacyId = Number(r.course_enrollment_id);
       const pairKey = `${memberId}|${courseId}`;
-      const existing = byPair.get(pairKey);
 
       if (ctx.dryRun) {
         stats.upserted += 1;
-        continue;
+        return;
       }
+      // read-decide-claim synchronously (no await between get and set) so a concurrent
+      // row for the same pair sees the claim and takes the skip path, not a create race.
+      const existing = byPair.get(pairKey);
+      if (!existing) byPair.set(pairKey, { id: 'new', legacyId }); // dedup further in-run rows for this pair
       try {
         if (existing) {
           // Member already has access. Only refresh mutable fields when this row IS that
@@ -114,14 +118,13 @@ export const enrollmentsSyncer: Syncer = {
               progress: Number(r.progress ?? 0) || 0,
             },
           });
-          byPair.set(pairKey, { id: 'new', legacyId }); // dedup further in-run rows for this pair
           stats.upserted += 1;
         }
       } catch (err: any) {
         if (err?.code === 'P2002') stats.skipped += 1;
         else stats.errors += 1;
       }
-    }
+    });
 
     if (watermark && !ctx.dryRun) await ctx.checkpoint(watermark);
     return stats;

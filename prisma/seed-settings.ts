@@ -28,6 +28,12 @@ const SETTINGS: Array<{ key: string; value: string; description: string }> = [
       'Days an IAP-channel commission stays PENDING before BALANCE (longer: covers store refund window).',
   },
   {
+    key: 'disbursement.autoEnabled',
+    value: 'false',
+    description:
+      "Kill-switch for the AUTO payout lane ('true' to enable). false = every payout goes through backoffice approval.",
+  },
+  {
     key: 'disbursement.autoApproveMax',
     value: '1000000',
     description:

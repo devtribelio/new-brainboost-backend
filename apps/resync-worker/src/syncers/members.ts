@@ -18,8 +18,9 @@
  * whole ~700k legacy member table — the bulk of which it used to fetch then discard.
  */
 import type { RowDataPacket } from 'mysql2/promise';
+import { resyncConfig } from '../config';
 import { emptyStats, type Stats, type Syncer, type SyncerCtx } from '../types';
-import { bool, maxWatermark, nonEmpty, sinceBound, toDate } from '../util';
+import { bool, maxWatermark, nonEmpty, runConcurrent, sinceBound, toDate } from '../util';
 
 const CHUNK = 5000; // legacy member_id IN (...) batch
 
@@ -61,7 +62,8 @@ export const membersSyncer: Syncer = {
         current.set(m.id, { updatedAt: m.updatedAt, legacySyncedAt: m.legacySyncedAt });
       }
 
-      for (const r of rows as any[]) {
+      // one member_id per row (PK IN) → rows are write-independent → safe to parallelise
+      await runConcurrent(rows as any[], resyncConfig.writeConcurrency, async (r) => {
         stats.scanned += 1;
         watermark = maxWatermark(watermark, toDate(r.wm));
         const id = ctx.memberByLegacy.get(Number(r.member_id))!; // guaranteed: member_id ∈ our set
@@ -71,21 +73,25 @@ export const membersSyncer: Syncer = {
 
         if (ctx.dryRun) {
           stats.upserted += 1;
-          continue;
+          return;
         }
         try {
           if (!touched) {
-            // untouched → overwrite legacy-owned fields; markers set to the same now()
+            // untouched → overwrite legacy-owned fields; both markers get the SAME app-side
+            // timestamp ($6). NOT server now(): the columns are tz-less `timestamp` that
+            // Prisma fills with app-clock UTC — a non-UTC server TimeZone (or app↔DB clock
+            // skew) would corrupt the updatedAt/legacySyncedAt touch-gate comparison.
             await ctx.prisma.$executeRawUnsafe(
               `UPDATE "members"
                   SET "full_name" = $1, "avatar_url" = $2, "bio" = $3, "is_active" = $4,
-                      "updated_at" = now(), "legacy_synced_at" = now()
+                      "updated_at" = $6, "legacy_synced_at" = $6
                 WHERE "id" = $5::uuid`,
               fullNameOf(r),
               nonEmpty(r.image_url),
               nonEmpty(r.biography),
               isActive,
               id,
+              new Date(),
             );
             stats.upserted += 1;
           } else if (!isActive) {
@@ -98,7 +104,7 @@ export const membersSyncer: Syncer = {
         } catch {
           stats.errors += 1;
         }
-      }
+      });
     }
 
     // checkpoint once after all chunks — interruption re-runs the (bounded) syncer idempotently

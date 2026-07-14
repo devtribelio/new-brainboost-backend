@@ -3,6 +3,7 @@ import 'dotenv/config'; // load root .env first so DATABASE_URL etc. are set bef
 import { logger } from '@bb/common/config/logger';
 import { prisma } from '@bb/db';
 import { affiliatePendingToBalance } from '@bb/domain/jobs/affiliate-pending-to-balance';
+import { executeApprovedDisbursements } from '@bb/domain/jobs/execute-approved-disbursements';
 import { expirePendingPayments } from '@bb/domain/jobs/expire-pending-payments';
 import { subscriptionExpire } from '@bb/domain/jobs/subscription-expire';
 import { subscriptionRenewalReminder } from '@bb/domain/jobs/subscription-renewal-reminder';
@@ -22,6 +23,9 @@ import { subscriptionRenewalReminder } from '@bb/domain/jobs/subscription-renewa
  */
 const JOBS: Array<{ name: string; run: () => Promise<unknown> }> = [
   { name: 'affiliatePendingToBalance', run: () => affiliatePendingToBalance() },
+  // AFTER pending-to-balance (a payout approved this tick sees fresh balance state);
+  // sweeps backoffice-approved MANUAL payouts + crashed AUTO rows to Xendit.
+  { name: 'executeApprovedDisbursements', run: () => executeApprovedDisbursements() },
   { name: 'expirePendingPayments', run: () => expirePendingPayments() },
   // Expire BEFORE reminders: a sub past grace must not get a renewal reminder
   // in the same tick it dies.

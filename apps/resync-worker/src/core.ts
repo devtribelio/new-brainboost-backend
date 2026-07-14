@@ -13,6 +13,8 @@ import { connectResilientLegacy } from './legacy-db';
 import { resyncConfig } from './config';
 import { registry, SYNCER_ORDER } from './syncers';
 import { makeEnsureMember } from './ensure-member';
+import { backfillNewMembers } from './backfill-new-members';
+import { recountCounters } from './recount';
 import { emptyStats, type RunCtx, type Stats, type SyncerCtx } from './types';
 
 const LOCK_ROW = '__lock__';
@@ -48,6 +50,20 @@ async function releaseLock(prisma: PrismaClient, acquiredAt: Date): Promise<void
     where: { syncer: LOCK_ROW, lastRunAt: acquiredAt },
     data: { lastRunAt: null },
   });
+}
+
+/**
+ * Refresh the lock's lastRunAt so a run longer than the TTL isn't taken over mid-write
+ * (the first full run exceeded the default 2h TTL). Returns the new stamp while we still
+ * own the lock, or null when another process took it — the caller must stop writing.
+ */
+async function heartbeatLock(prisma: PrismaClient, ownedAt: Date): Promise<Date | null> {
+  const now = new Date();
+  const res = await prisma.syncState.updateMany({
+    where: { syncer: LOCK_ROW, lastRunAt: ownedAt },
+    data: { lastRunAt: now },
+  });
+  return res.count === 1 ? now : null;
 }
 
 async function buildCtx(prisma: PrismaClient, legacy: any, dryRun: boolean): Promise<RunCtx> {
@@ -152,10 +168,51 @@ export async function runResync(opts: RunOpts): Promise<Record<string, Stats>> {
           log(`ERROR ${name}: ${err?.message ?? err} — continuing with next syncer`);
           console.error(err);
         }
+
+        // keep the run-lock alive across long syncers; a lost lock means another process
+        // holds it now → stop writing immediately.
+        if (!opts.dryRun) {
+          const stamp = await heartbeatLock(prisma, acquired);
+          if (!stamp) {
+            log('ERROR: run-lock lost (TTL takeover by another process) — aborting remaining syncers');
+            acquired = null; // not ours anymore; don't release someone else's lock
+            break;
+          }
+          acquired = stamp;
+        }
       }
       const em = (ctx.ensureMember as any).stats?.();
       if (em && (em.created || em.redirected || em.adopted)) {
         log(`new legacy members: created=${em.created} redirected=${em.redirected} adopted=${em.adopted}`);
+      }
+
+      // members materialised this run have pre-watermark legacy rows elsewhere (kyc/tree/
+      // commissions/likes) that the incremental scans will never revisit → targeted backfill
+      const newIds: number[] = (ctx.ensureMember as any).newLegacyIds?.() ?? [];
+      if (!opts.dryRun && acquired && newIds.length) {
+        try {
+          const bf = await backfillNewMembers(ctx, newIds);
+          results.backfill = bf;
+          log(
+            `backfill (${newIds.length} new members): scanned=${bf.scanned} upserted=${bf.upserted} ` +
+              `skipped=${bf.skipped} errors=${bf.errors}`,
+          );
+        } catch (err: any) {
+          results.backfill = { ...emptyStats(), errors: 1 };
+          log(`ERROR backfill: ${err?.message ?? err} — continuing`);
+          console.error(err);
+        }
+      }
+
+      // posts writes comments/likes directly (and backfill can add likes) → rebuild the
+      // denormalised counters when either ran
+      const backfillWrote = (results.backfill?.upserted ?? 0) > 0;
+      if (!opts.dryRun && ((opts.syncers.includes('posts') && !results.posts?.errors) || backfillWrote)) {
+        try {
+          await recountCounters(prisma, log);
+        } catch (err: any) {
+          log(`recount failed (non-fatal): ${err?.message ?? err}`);
+        }
       }
 
       // completion summary (one line per cycle — useful for the long-running worker)

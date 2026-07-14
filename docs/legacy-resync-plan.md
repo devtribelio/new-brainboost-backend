@@ -35,10 +35,53 @@ All 7 syncers implemented and validated end-to-end:
 - new-wins invariant verified: after a resync, `updated_at == legacy_synced_at` for all
   57696 winners → next run sees them untouched; an app write trips the gate. members run-2
   scanned=1 confirms `updated` does NOT bump on mere login.
-- **First-run is slow** (tree ~6.6min, posts ~6.5min, members ~5min): a full legacy scan
-  since epoch + per-row sequential writes (members raw UPDATE, tree member.update). Steady
-  hourly runs are tiny. Optional optimization: batch the members/tree writes with
-  concurrency (like backfill-affiliate-tree's CONCURRENCY=25) to cut first-run ~3-4×.
+- **Write concurrency (implemented 2026-07-09):** every syncer's per-row write loop now
+  runs through `runConcurrent(rows, RESYNC_WRITE_CONCURRENCY, fn)` (worker-pool, default
+  10) — the loops were RTT-bound on a remote Postgres (first live run on bb_backend ≈4-5h
+  at 1 sequential write/row). Safety under concurrency:
+  - `ensureMember` has an in-flight promise memo (one create per legacyId, no
+    double-create) and stamps `updatedAt = legacySyncedAt` from the SAME `Date` at
+    create/adopt so the members touch-gate can't misread a fresh row (ms skew).
+  - pair-keyed tables (enrollments, member_affiliators) read-decide-**claim** their
+    in-memory pair map in one synchronous block → same-pair rows can't race a create.
+  - tree inviters / reviews dedupe to the newest row per subject before the parallel
+    write (deterministic last-write-wins instead of by-chance ordering).
+  - checkpoints still fire only after the whole page/syncer settles → watermark semantics
+    across runs unchanged; per-row errors stay isolated (each op try/catches itself).
+- **Watermark overlap lag (implemented):** stored watermarks are pulled back
+  `RESYNC_WATERMARK_LAG_SEC` (default 60) via `sinceBound()`. Legacy `updated` is assigned
+  at PHP save() time but only becomes visible at COMMIT — a strict `>` could permanently
+  skip rows that commit late or share the boundary second. The overlap re-scan is free
+  (all writes idempotent). Implements the mitigation described under "Watermark format".
+- **New-member backfill (implemented):** members materialised on demand by `ensureMember`
+  mid-run have pre-existing legacy rows elsewhere whose `updated` already fell behind the
+  kyc/tree/commissions watermarks → those scans would never revisit them. After the syncer
+  loop, `backfill-new-members.ts` re-scans (IN-list, since=epoch, widened to dedup losers)
+  kyc decisions, inviter chain (winner-scoped), program memberships, received commissions
+  (incl. non-BB rows that count toward lifetime tier) and given likes for JUST the new
+  ids. Surfaced as the `backfill` entry in run stats; triggers a recount when it wrote.
+- **Lock heartbeat (implemented):** the run refreshes the `__lock__` stamp after each
+  syncer, so a run longer than the TTL (4-5h first run vs 2h default) can't be taken over
+  mid-write; a lost heartbeat aborts the remaining syncers instead of double-writing.
+- **members raw UPDATE tz fix (implemented):** `updated_at`/`legacy_synced_at` are now an
+  app-side `Date` param (was server `now()`): the columns are tz-less `timestamp` filled
+  with app-clock UTC by Prisma everywhere else — a non-UTC server TimeZone or app↔DB
+  clock skew would have corrupted the touch-gate comparison.
+- **fix-dates covers likes too (2026-07-09):** `post_likes`/`comment_likes.created_at`
+  added to `pnpm resync:fix-dates` (mapped by composite key) — `createMany skipDuplicates`
+  never re-touches an existing like, so pre-tz-fix likes were otherwise stuck +7h.
+  Still pending on bb_backend: run fix-dates once AFTER the in-flight first run finishes
+  (posts/comments self-heal via the posts syncer's upsert-update; members/enrollments/
+  commissions/reviews/likes need the script).
+- **Bank account carry (2026-07-13):** legacy payout-account data now flows on all three
+  member paths, always fill-if-NULL (never overwrites an app-set account → never trips the
+  BANK_CHANGE re-KYC): ① `migrate-members.ts` + ② resync `ensureMember` (create/adopt) copy
+  `member.bank_account_bank/number/name` (profile-level, rarely filled: ~1.1k/704k); ③ the
+  kyc syncer's `applyKycDecisions` fills bank from the latest **APPROVED** `member_data_kyc`
+  row (`bank_type`=bank code, **`bank_name`=ACCOUNT HOLDER name**, `bank_number`=account
+  number — legacy naming trap), independent of the kycSource guard (bank data is
+  provider-agnostic). Backfill for the existing stock = `pnpm resync:reset-watermark kyc &&
+  pnpm resync kyc` (re-evaluates everyone through the bank-aware path).
 - **Stale-lock gotcha:** a hard-killed run (SIGKILL / host teardown) can't run its
   release finally-block, so `__lock__` stays held until the TTL (`RESYNC_LOCK_TTL_SEC`,
   default 2× interval = 2h). `pnpm resync:unlock` clears it immediately. Graceful SIGTERM
@@ -88,6 +131,8 @@ re-running the dedicated `migrate:*` scripts on demand, not by the cron.
 | `RESYNC_INTERVAL_SEC` | `3600` | Worker loop interval. |
 | `RESYNC_SYNCERS` | `all` | `all` or CSV subset (`enrollments,kyc,...`). |
 | `RESYNC_BATCH_SIZE` | `1000` | Rows per upsert batch / chunk. |
+| `RESYNC_WRITE_CONCURRENCY` | `10` | Max Postgres writes in flight per syncer (keep ≤ Prisma pool size). |
+| `RESYNC_WATERMARK_LAG_SEC` | `60` | Overlap window subtracted from a stored watermark on the next run. |
 | `RESYNC_LEGACY_RECONNECT_RETRIES` | `3` | Reconnect attempts on `ECONNRESET` within a run. |
 
 Reuses existing `LEGACY_DB_*` creds via `scripts/legacy-db.ts`.
@@ -314,6 +359,16 @@ new-system state.
   (BB comments)` (legacy ids from the new DB, chunked) — **never a full-table scan** of
   every tribelio like.
 - Two-pass comments (top-level then replies) preserved so `parentId` resolves.
+- **Denormalised counters NOT maintained by the syncer.** Posts/comments carry cached
+  `count_comment` / `count_like` / `count_replies` that the app increments/decrements on
+  app-driven likes/comments AND reads (serializers + feed sort by `count_like`). Resync
+  writes comments/likes directly (`createMany`/`upsert`), bypassing that increment, so the
+  counters drift (0 / understated) for migrated + resynced content. Fix = a separate
+  **recompute pass**: `pnpm resync:recount` (`apps/resync-worker/src/recount.ts`) — a
+  set-based one-shot that rebuilds all five counters from actual rows, matching the app's
+  exact semantics (`count_comment` = top-level comments, `count_replies` = replies,
+  `is_deleted=false`). Idempotent + self-healing (~2.5s for 7.4k posts / 88k comments).
+  Run it after a big posts sync and/or periodically (e.g. its own cron).
 
 ---
 

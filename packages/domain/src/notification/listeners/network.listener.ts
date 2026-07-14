@@ -32,7 +32,7 @@ export function registerNetworkNotificationListener(): void {
           type: ActionLabel.RequestJoin,
           notifGroup: NotifGroup.Creator,
           networkId: e.networkId,
-          title: `${requester.fullName} requested to join ${network.name}`,
+          title: `${requester.fullName} meminta bergabung ke ${network.name}`,
           payload: {
             refTable: 'network_member_request',
             refId: e.requestId,
@@ -60,8 +60,8 @@ export function registerNetworkNotificationListener(): void {
         type: ActionLabel.ApproveJoin,
         notifGroup: NotifGroup.General,
         networkId: e.networkId,
-        title: `Your request to join ${network.name} was approved`,
-        body: `Approved by ${approver.fullName}`,
+        title: `Permintaanmu bergabung ke ${network.name} disetujui`,
+        body: `Disetujui oleh ${approver.fullName}`,
         payload: {
           refTable: 'network',
           refId: e.networkId,
@@ -90,7 +90,7 @@ export function registerNetworkNotificationListener(): void {
           type: ActionLabel.MemberJoin,
           notifGroup: NotifGroup.Creator,
           networkId: e.networkId,
-          title: `${member.fullName} joined ${network.name}`,
+          title: `${member.fullName} bergabung ke ${network.name}`,
           payload: {
             refTable: 'network_member',
             refId: e.networkId,
