@@ -12,7 +12,7 @@
  *   - collides with a new-app placeholder (legacyId=null) → adopt it (stamp legacyId + profile)
  *   - otherwise → create a fresh member (frozen as its own winner)
  *
- * Existing winners are FROZEN (never re-ranked) — matches docs/legacy-resync-plan.md §6.
+ * Existing winners are FROZEN (never re-ranked) — matches docs/specs/legacy-resync-plan.md §6.
  * Mutates the in-run redirect / memberByLegacy maps so later syncers resolve the new id.
  */
 import { randomUUID } from 'node:crypto';

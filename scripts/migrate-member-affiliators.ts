@@ -7,7 +7,7 @@
  * Run AFTER migrate-members + backfill:affiliate-program-product. Scoped to brainboost
  * programs (the linked/active ones) and to already-migrated members. A member's join is
  * the record behind "my affiliate programs" + a populated `affiliatorId` on commissions
- * (which is otherwise nullable). See docs/member-migration-plan.md §7.
+ * (which is otherwise nullable). See docs/specs/member-migration-plan.md §7.
  *
  * Resolution:
  *   legacy mpa.network_account_affiliator_id  -> network_account_affiliator.member_id (member)

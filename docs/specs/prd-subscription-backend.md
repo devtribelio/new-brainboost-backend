@@ -63,7 +63,7 @@ Phase 2 (6 bulan, Q4 2026) dan Phase 3 (bulanan, Q2 2027) **harus zero-code**: h
 | BE-19 | Modul HTTP `/subscription` | `GET /plans` (public), `GET /me`, `POST /seats/invite`, `POST /seats/claim`, `DELETE /seats/:id`, `POST /seats/leave`, `POST /cancel` (IAP → pesan "atur di store"). Pola `bindRoute` + DTO + envelope standar. | M | BE-05, BE-06 |
 | BE-20 | Script grant + eligibility | `scripts/grant-subscription.ts`: `--email/--member-id/--plan/--dry-run`, `--list-eligible` (SUM amount PAID > 2jt), `--grant-eligible` batch (skip yang sudah punya sub/seat). | S | BE-04 |
 | BE-21 | Integration tests | Suite: activation (idempoten, extension math), RC (expiry/EXPIRATION/cancel_reason/SKU android/komisi renewal), seats (claim/limit/race), entitlement-media (lazy enrollment, lapsed 403, retail utuh), flat-commission, jobs (dedupe reminder, expire). Postgres asli, tanpa mock DB. | L | semua |
-| BE-22 | Docs + reporting | `docs/subscription-port.md` (aturan bisnis + edge case), update CLAUDE.md §5 + rewrite-progress; query reporting subscriber per tier terdokumentasi. | S | semua |
+| BE-22 | Docs + reporting | `docs/specs/subscription-port.md` (aturan bisnis + edge case), update CLAUDE.md §5 + rewrite-progress; query reporting subscriber per tier terdokumentasi. | S | semua |
 
 **Total estimasi kasar:** ~6–8 hari-orang (AI-assisted; tanpa AI ~12–15).
 

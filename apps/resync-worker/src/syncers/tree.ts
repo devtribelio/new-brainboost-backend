@@ -9,7 +9,7 @@
  *    unique (memberId, programId)); deleted/exit rides the `updated` watermark → isActive=false.
  *
  * Tree is legacy-authoritative for migrated members (the new app doesn't edit referral
- * structure), so no new-wins gate here. See docs/legacy-resync-plan.md §6.
+ * structure), so no new-wins gate here. See docs/specs/legacy-resync-plan.md §6.
  */
 import type { RowDataPacket } from 'mysql2/promise';
 import { resyncConfig } from '../config';

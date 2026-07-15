@@ -1,7 +1,7 @@
 # Re-KYC / KYC reset design
 
 Status: **IMPLEMENTED 2026-06-24** (pending the same provider QA as the base flow).
-Extends the KYC gate (`docs/kyc-didit.md`).
+Extends the KYC gate (`docs/specs/kyc-didit.md`).
 
 > Provider note (2026-06-26): KYC provider switched **Sumsub → Didit**. The re-KYC
 > business rules below are unchanged; the only mechanical change is **§7**: there is no

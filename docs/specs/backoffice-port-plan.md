@@ -165,12 +165,12 @@ Every legacy query is `org_id`-scoped. **Drop entirely** — bb-backend-new is s
 
 | Cluster | Endpoints inventoried | P0 | P1 | P2 | SKIP |
 |---|---|---|---|---|---|
-| [A — Member/Auth/Network/Log/Sysadmin](backoffice-port/cluster-a-member-auth.md) | 107 | 8 | 24 | — | 75 |
-| [B — Course/Content/CMS](backoffice-port/cluster-b-course-content.md) | 60 | 9 | 14 | 2 | 35 |
-| [C — Finance/Voucher/Disbursement](backoffice-port/cluster-c-finance.md) | 34 | 5 | 14 | 2 | 13 |
-| [D — Affiliate/Bot/Campaign](backoffice-port/cluster-d-affiliate.md) | 26 | 7 | 4 | — | 15 |
-| [E — Dashboard/Insight/Integration/Cron](backoffice-port/cluster-e-dashboard-insight.md) | 56 | 6 | 38 | 1 | 11 |
-| [F — Oracle API methods (`/api/oracle/*`)](backoffice-port/cluster-f-oracle-methods.md) | 8 | 2 | 2 | — | 4 |
+| [A — Member/Auth/Network/Log/Sysadmin](../backoffice-port/cluster-a-member-auth.md) | 107 | 8 | 24 | — | 75 |
+| [B — Course/Content/CMS](../backoffice-port/cluster-b-course-content.md) | 60 | 9 | 14 | 2 | 35 |
+| [C — Finance/Voucher/Disbursement](../backoffice-port/cluster-c-finance.md) | 34 | 5 | 14 | 2 | 13 |
+| [D — Affiliate/Bot/Campaign](../backoffice-port/cluster-d-affiliate.md) | 26 | 7 | 4 | — | 15 |
+| [E — Dashboard/Insight/Integration/Cron](../backoffice-port/cluster-e-dashboard-insight.md) | 56 | 6 | 38 | 1 | 11 |
+| [F — Oracle API methods (`/api/oracle/*`)](../backoffice-port/cluster-f-oracle-methods.md) | 8 | 2 | 2 | — | 4 |
 | **TOTAL** | **291** | **37** | **96** | **5** | **153** |
 
 ~53% drop (multi-tenant orgs, page-builder, blog/CMS, FB/TikTok pixel, email-blast bots, smartlist CRM, MongoDB monitors).

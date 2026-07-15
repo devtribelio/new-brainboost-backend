@@ -4,7 +4,7 @@
  *
  *   pnpm tsx scripts/migrate-members.ts [--dry-run]
  *
- * Full rationale + decisions: docs/member-migration-plan.md. Summary:
+ * Full rationale + decisions: docs/specs/member-migration-plan.md. Summary:
  *   SCOPE  = enrolled-in-brainboost ∪ BB-commission-recipients ∪ upline-closure
  *            ∪ valid-downlines-of-in-scope (Tier 2). ≈ 57.6k of 701k.
  *   FILTER = drop junk (@example.com, lxbfYeaa bot) + no-identity. `@brainboost.id`

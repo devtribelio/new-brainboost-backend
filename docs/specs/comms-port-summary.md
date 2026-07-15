@@ -3,7 +3,7 @@
 Outbound messaging (email + WhatsApp OTP + transactional email) extracted from
 `bb-platform` into a separate worker repo `bb-comms`, decoupled via RabbitMQ.
 
-- Decision + rationale: [ADR-0002](adr/0002-email-otp-service-boundary.md)
+- Decision + rationale: [ADR-0002](../adr/0002-email-otp-service-boundary.md)
 - Scope inventory + producer checklist: [email-scope.md](email-scope.md)
 - Status tracker: [rewrite-progress.md](rewrite-progress.md) (§ comms)
 

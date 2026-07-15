@@ -306,7 +306,7 @@ async function migrateMembers(legacy: Connection) {
       const email = nonEmpty(r.email)?.toLowerCase() ?? null;
 
       // Canonical (phone, phoneCode) — the same forms the API stores (rules
-      // #7/#8, docs/register-verification-flow.md). Legacy kept E.164-ish
+      // #7/#8, docs/specs/register-verification-flow.md). Legacy kept E.164-ish
       // strings ('+628…'/'628…'/'08…'); too short after canonicalizing = junk.
       const rawPhone = nonEmpty(r.phone);
       const pair = rawPhone ? normalizePhonePair(rawPhone, '+62') : null;

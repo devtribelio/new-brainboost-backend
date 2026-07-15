@@ -1,7 +1,7 @@
 # Tracker module (listening streak / sessions / total / challenge / recap)
 
-Implements the listening-tracker backend. Spec: `docs/brainboost-tracker-spec.md`
-(contract = §5, logic = §6/§8). Tasks: `docs/brainboost-tracker-tasks-backend.md`.
+Implements the listening-tracker backend. Spec: `docs/specs/brainboost-tracker-spec.md`
+(contract = §5, logic = §6/§8). Tasks: `docs/specs/brainboost-tracker-tasks-backend.md`.
 
 Two `AppModule`s share this folder (one prefix each):
 

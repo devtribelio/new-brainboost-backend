@@ -2,7 +2,7 @@
   "name": "@bb/resync-worker",
   "version": "0.1.0",
   "private": true,
-  "description": "Transition-period tool: incremental resync of already-migrated data from legacy MariaDB into Postgres. Throwaway after cutover. Spec: docs/legacy-resync-plan.md.",
+  "description": "Transition-period tool: incremental resync of already-migrated data from legacy MariaDB into Postgres. Throwaway after cutover. Spec: docs/specs/legacy-resync-plan.md.",
   "scripts": {
     "typecheck": "tsc --noEmit"
   },

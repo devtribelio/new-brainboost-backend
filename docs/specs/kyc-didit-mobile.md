@@ -1,6 +1,6 @@
 # KYC Didit — Handoff Integrasi Mobile/FE
 
-Audience: **tim mobile/FE**. Backend reference: `docs/kyc-didit.md`.
+Audience: **tim mobile/FE**. Backend reference: `docs/specs/kyc-didit.md`.
 Status backend: code complete; tinggal Console setup + creds (lihat §10).
 
 KYC = **gate pencairan komisi affiliate** (disbursement). Member harus `APPROVED` sebelum
@@ -234,4 +234,4 @@ Yang harus FE ganti: ① package SDK, ② baca `sessionToken` (bukan `token`) + 
 - [ ] Hapus screen upload KTP/selfie manual lama setelah Didit live.
 
 Blocker backend (FE bisa mulai pakai stub/sandbox lebih dulu): Didit Console workflow + creds,
-konfirmasi free-tier. Lihat `docs/kyc-didit.md` §Outstanding.
+konfirmasi free-tier. Lihat `docs/specs/kyc-didit.md` §Outstanding.

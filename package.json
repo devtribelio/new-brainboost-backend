@@ -26,6 +26,7 @@
     "lint": "eslint \"packages/*/src/**/*.ts\" \"apps/*/src/**/*.ts\" \"apps/*/tests/**/*.ts\"",
     "lint:fix": "pnpm lint --fix",
     "format": "prettier --write \"packages/*/src/**/*.ts\" \"apps/*/src/**/*.ts\"",
+    "docs:api": "tsx scripts/gen-api-docs.ts",
     "test": "vitest run --no-file-parallelism",
     "test:watch": "vitest",
     "prisma:generate": "prisma generate",

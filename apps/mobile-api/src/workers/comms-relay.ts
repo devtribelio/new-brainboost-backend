@@ -14,7 +14,7 @@ import { runStartupChecks, startConnectionMonitor } from '../core/startup-checks
  * Comms relay daemon (F1). Polls NotificationOutbox PENDING rows and publishes
  * them to Amazon SQS → at-least-once dispatch with no dual-write race (the
  * producer wrote the row in the same transaction as its domain mutation).
- * bb-comms consumes and delivers. See docs/adr/0002 + docs/email-scope.md §4.
+ * bb-comms consumes and delivers. See docs/adr/0002 + docs/specs/email-scope.md §4.
  *
  * NOTE (scaling): this single-instance loop uses a plain PENDING→SENT flip. To run
  * multiple relay instances, switch the claim to `SELECT … FOR UPDATE SKIP LOCKED`.

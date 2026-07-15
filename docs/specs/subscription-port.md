@@ -1,7 +1,7 @@
 # Subscription (Phase 1: Annual) — Business Rules & Ops
 
-> Implementasi PRD `docs/prd-subscription-backend.md` (BE-01…BE-22, Jira BB-77…BB-98,
-> branch `feat/subscription`). Progres & log keputusan: `docs/subscription-progress.md`.
+> Implementasi PRD `docs/specs/prd-subscription-backend.md` (BE-01…BE-22, Jira BB-77…BB-98,
+> branch `feat/subscription`). Progres & log keputusan: `docs/specs/subscription-progress.md`.
 > Dokumen ini = aturan bisnis yang MENGIKAT + edge case + runbook operasional + query reporting.
 
 ## 1. Model ringkas

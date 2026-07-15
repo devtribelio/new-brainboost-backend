@@ -144,7 +144,7 @@ export const env = {
   },
   rekyc: {
     // Re-KYC thresholds: an APPROVED affiliate is forced to re-verify on a risk
-    // event before the next disbursement. See docs/kyc-rekyc.md.
+    // event before the next disbursement. See docs/specs/kyc-rekyc.md.
     // Reactivation after this many days idle (lastActiveAt gap) resets KYC.
     dormantDays: Number.parseInt(optional('REKYC_DORMANT_DAYS', '365'), 10),
     // A disbursement >= this amount (IDR) forces re-KYC when the last review is stale.
@@ -195,7 +195,7 @@ export const env = {
     tokenTtlSeconds: Number.parseInt(optional('MEDIA_TOKEN_TTL_SECONDS', '21600'), 10),
     defaultResolution: optional('MEDIA_DEFAULT_RESOLUTION', '720p'),
     // 'proxy' = Model B (backend streams the bytes); 'signed' = Model C (302 to a
-    // signed Bunny URL, client streams from the edge). See docs/media-model-c-migration.md.
+    // signed Bunny URL, client streams from the edge). See docs/specs/media-model-c-migration.md.
     mode: (optional('MEDIA_MODE', 'proxy') === 'signed' ? 'signed' : 'proxy') as 'proxy' | 'signed',
     // Signed-URL lifetime for Model C streaming, seconds.
     signedUrlTtlSeconds: Number.parseInt(optional('MEDIA_SIGNED_URL_TTL_SECONDS', '7200'), 10),
@@ -238,7 +238,7 @@ export const env = {
  *
  * SECURITY: must be a kill-switch (default OFF) limited to dummy accounts only.
  * Adding a real user's identifier here lets `000000` reset their password via
- * forgot-password. See docs/test-account.md.
+ * forgot-password. See docs/specs/test-account.md.
  */
 export function testAccountConfig(): {
   enabled: boolean;

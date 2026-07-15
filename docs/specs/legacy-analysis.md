@@ -227,7 +227,7 @@ Legacy PageRank is dominated by demo/starter controllers (e.g. `Controller_Demo`
 
 The Flutter app added defensive converters over time to absorb backend
 flakiness. Each entry below documents the **original failure** so we can
-decide when FE can safely drop the coercion. See `docs/api-fe.md` §3.2-3.3
+decide when FE can safely drop the coercion. See `docs/specs/api-fe.md` §3.2-3.3
 for the full type/shape drift table.
 
 - **InfoModel maintenance / community[].networkId** (FE commit `dbc63de`, 2026-05-12).

@@ -4,7 +4,7 @@
  *
  *   pnpm tsx scripts/migrate-affiliate-commissions.ts [--dry-run]
  *
- * WHY (docs/member-migration-plan.md): `currentTier`/`currentRate` in /affiliate/me/summary
+ * WHY (docs/specs/member-migration-plan.md): `currentTier`/`currentRate` in /affiliate/me/summary
  * are derived from `lifetimeAmount = SUM(AffiliateCommission.amount WHERE status != VOIDED
  * AND affiliateBased != INACTIVE)`. Without commissions every member is Tier 1.
  *

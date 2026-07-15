@@ -528,7 +528,7 @@ export class AuthService {
       // to distinguish a rotation-reuse ATTACK from a token revoked for benign
       // reasons (second login in the single-session bucket, logout, password
       // change). Without it, blanket family-revocation here logs legitimate
-      // users out. Tracked as a follow-up (see docs/security-audit-followups.md).
+      // users out. Tracked as a follow-up (see docs/specs/security-audit-followups.md).
       throw new UnauthorizedException('session_revoked');
     }
     if (stored.expiresAt < new Date()) {

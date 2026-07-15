@@ -17,7 +17,7 @@ embed in a WebView. That exposes the Bunny identifiers (and the account) to the 
 ## 2. Bunny audit (probed 2026-05-21)
 
 Findings from probing the live Bunny endpoints — these correct earlier assumptions in
-`docs/legacy-providers.md` and `docs/api-fe.md` §2.8:
+`docs/specs/legacy-providers.md` and `docs/specs/api-fe.md` §2.8:
 
 - **One Stream library, not Stream + Storage.** Audio and video are both objects in a
   single Bunny **Stream** library — id `157244`, CDN host `vz-5439ef3e-878.b-cdn.net`.
@@ -123,7 +123,7 @@ src/modules/media/
 - **Bandwidth** — every media byte transits the backend. For volume, consider a reverse
   proxy in front, or enable Bunny Token Authentication (`bunnynetAPIKey` → pull zone
   `ZoneSecurityKey`) and move to signed URLs (Model C) — note that exposes the `guid`.
-- **TX.1** admin-side upload to Bunny (see `docs/legacy-providers.md`).
+- **TX.1** admin-side upload to Bunny (see `docs/specs/legacy-providers.md`).
 - **Integration tests** (`tests/media.spec.ts`, 10 cases) pass against a host Postgres on
   `localhost:5433`; full suite 168/168 green.
 
@@ -177,4 +177,4 @@ requirement and no other model achieves it. The cost of that choice:
 - If "hide the `guid`" is ever relaxed, switch to **Model C** (signed URLs — enable Token
   Authentication on the pull zone via the account API). That removes the bandwidth, latency
   and SPOF costs, at the price of exposing the `guid` in the URL.
-  **Ready-to-execute migration plan: `docs/media-model-c-migration.md`.**
+  **Ready-to-execute migration plan: `docs/specs/media-model-c-migration.md`.**

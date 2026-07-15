@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /**
- * Shared types for the legacy resync framework. See docs/legacy-resync-plan.md.
+ * Shared types for the legacy resync framework. See docs/specs/legacy-resync-plan.md.
  */
 import type { PrismaClient } from '@prisma/client';
 import type { LegacyClient } from './legacy-db';
@@ -32,7 +32,7 @@ export interface RunCtx {
    * spot (with email/phone/sub dedup against existing members) and the in-run maps + the
    * member_redirect table are updated. Returns undefined only if the legacy member is junk
    * / has no identity / doesn't exist. Used by syncers whose rows are already brainboost-
-   * scoped (a referenced member is in scope by definition). See docs/legacy-resync-plan.md §6.
+   * scoped (a referenced member is in scope by definition). See docs/specs/legacy-resync-plan.md §6.
    */
   ensureMember(legacyId: number | null | undefined): Promise<string | undefined>;
   batchSize: number;

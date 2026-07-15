@@ -5,7 +5,7 @@
  * SOURCE legacy product_review (status=1) for migrated products.
  * KEY    no legacyId on Review → upsert on @@unique(productId, memberId).
  * RATING 0 → clamped to 1; outside 1..5 skipped (legacy parity).
- * See docs/legacy-resync-plan.md §6.
+ * See docs/specs/legacy-resync-plan.md §6.
  */
 import type { RowDataPacket } from 'mysql2/promise';
 import { resyncConfig } from '../config';

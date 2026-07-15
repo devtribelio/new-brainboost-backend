@@ -8,7 +8,7 @@ import { enqueueComms } from '@bb/common/services/comms-outbox';
  * member_subscriptions.id (joins plan + owner) — the 3 subscription templates
  * (these two + SubscriptionRenewalReminder used by the BE-15 job) are an
  * EXTERNAL dependency in the bb-comms repo; until they ship, these outbox rows
- * fail at bb-comms (see docs/subscription-progress.md).
+ * fail at bb-comms (see docs/specs/subscription-progress.md).
  *
  * Best-effort + post-commit, same contract as the commerce receipts. The
  * commerce CoursePaymentSuccess listener skips plan-backed products, so a

@@ -2,7 +2,7 @@
 
 Inventory of email + OTP templates the **mobile** backend actually needs, extracted
 from `tribelio-platform`. Drives the service-boundary decision in
-[ADR-0002](adr/0002-email-otp-service-boundary.md).
+[ADR-0002](../adr/0002-email-otp-service-boundary.md).
 
 Each row cites the legacy dispatch site so it can be re-verified.
 
@@ -45,7 +45,7 @@ Two trigger sources:
 - **direct** — fired by the mobile API surface (`libraries/TBApi/**`, GROUP_MEMBER).
 - **event** — fired downstream of a mobile-initiated flow (Xendit payment callback,
   affiliate commission, disbursement). In the new backend these map to the commerce
-  module's event-driven side effects (see `docs/commerce-port.md`).
+  module's event-driven side effects (see `docs/specs/commerce-port.md`).
 
 ### A. Auth / OTP — ✅ shipped (inline text/string, no HTML template)
 
@@ -149,10 +149,10 @@ Why a separate repo (vs ADR-0001 keeping backoffice in-monorepo): the split is a
 **lifecycle independence** (deploy/scale/on-call/template iteration) + **no shared
 domain logic**, NOT decoupling from the DB — bb-comms *does* share the Postgres (reads
 business tables, writes `comms_*`). Shared surfaces = message shape + read-schema, both
-versioned. See [ADR-0002](adr/0002-email-otp-service-boundary.md).
+versioned. See [ADR-0002](../adr/0002-email-otp-service-boundary.md).
 
-Related: `docs/otp-port.md`, `docs/legacy-providers.md` (Qontak T1.4),
-`docs/notification-port.md §12` (RabbitMQ outbox).
+Related: `docs/specs/otp-port.md`, `docs/specs/legacy-providers.md` (Qontak T1.4),
+`docs/specs/notification-port.md §12` (RabbitMQ outbox).
 
 ---
 

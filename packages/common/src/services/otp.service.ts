@@ -60,7 +60,7 @@ function isEmail(target: string): boolean {
 class OtpService {
   /**
    * A tester target is matched (case-insensitively) against the env whitelist.
-   * Returns false unless the bypass is explicitly enabled. See docs/test-account.md.
+   * Returns false unless the bypass is explicitly enabled. See docs/specs/test-account.md.
    */
   private isTestTarget(target: string): boolean {
     const cfg = testAccountConfig();
@@ -87,7 +87,7 @@ class OtpService {
     // Tester account (e.g. Apple App Review): no real OTP is generated, stored,
     // or delivered — the reviewer enters the fixed code (env TEST_ACCOUNT_OTP_CODE).
     // Skipping issuance also sidesteps the resend guard + daily cap so the reviewer
-    // can re-request freely. See docs/test-account.md.
+    // can re-request freely. See docs/specs/test-account.md.
     if (this.isTestTarget(input.target)) {
       const ttl = input.ttlSeconds ?? DEFAULT_TTL[input.purpose];
       logger.info(

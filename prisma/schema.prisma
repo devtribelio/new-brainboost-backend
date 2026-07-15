@@ -54,7 +54,7 @@ model Member {
   kycStatus         String    @default("NONE") @map("kyc_status") // NONE | PENDING | APPROVED | REJECTED | EXPIRED
   // EXPIRED = previously APPROVED but a risk event (bank change / dormant reactivation /
   // large disbursement / suspicious) forced a re-KYC. Treated as NOT-approved by the
-  // disbursement gate; member must re-verify before the next payout. See docs/kyc-rekyc.md.
+  // disbursement gate; member must re-verify before the next payout. See docs/specs/kyc-rekyc.md.
   // Provenance of the current kycStatus: NONE (never KYC'd) | LEGACY (imported from
   // legacy member_data_kyc — no provider session / images live in legacy S3) |
   // MANUAL (admin-reviewed manual flow) | DIDIT (driven by Didit webhook).
@@ -70,7 +70,7 @@ model Member {
   // ACTIVE verification session_id (session-per-attempt). A provider webhook is
   // only honoured when its session_id matches this value — that guards against a
   // stale "Approved" webhook from an old session re-approving an EXPIRED member
-  // (replaces Sumsub's resetApplicant call). See docs/kyc-rekyc.md.
+  // (replaces Sumsub's resetApplicant call). See docs/specs/kyc-rekyc.md.
   // null = KYC never went through an external provider (manual flow or none).
   kycProviderRef    String?   @unique @map("kyc_provider_ref")
 
@@ -80,7 +80,7 @@ model Member {
   // Legacy resync (new-wins-on-touch): the timestamp the resync last wrote this row.
   // If updatedAt > legacySyncedAt, the app touched the row since → legacy-owned fields
   // are NOT overwritten. null = never resynced (treat as legacy-owned). See
-  // docs/legacy-resync-plan.md §6.
+  // docs/specs/legacy-resync-plan.md §6.
   legacySyncedAt DateTime? @map("legacy_synced_at")
 
   profile                MemberProfile?
@@ -111,7 +111,7 @@ model Member {
 
 // Audit trail for every KYC status transition (AML). Writes are append-only;
 // the Member.kyc* columns hold the current state, this holds the history.
-// See docs/kyc-rekyc.md.
+// See docs/specs/kyc-rekyc.md.
 model KycEvent {
   id         String   @id @default(uuid(7)) @db.Uuid
   memberId   String   @map("member_id") @db.Uuid
@@ -200,7 +200,7 @@ model OtpCode {
 /// publishes to RabbitMQ → at-least-once, no dual-write race. The row id is the
 /// message id used downstream for idempotency (bb-comms). Serves external comms
 /// now (whatsapp/email/sms) and is forward-compatible with FCM push.
-/// See docs/adr/0002 + docs/email-scope.md §4.
+/// See docs/adr/0002 + docs/specs/email-scope.md §4.
 model NotificationOutbox {
   id          String    @id @default(uuid(7)) @db.Uuid
   /// Template/handler discriminator: 'otp' | 'CoursePaymentSuccess' | …
@@ -1044,7 +1044,7 @@ model AffiliateDisbursement {
 
 // ============================================================================
 // Commerce / Purchase (Xendit-only; CC + VA + eWallet; no IAP, no cart, no shipping)
-// See docs/commerce-port.md
+// See docs/specs/commerce-port.md
 // ============================================================================
 
 enum CommerceTransactionStatus {
@@ -1281,7 +1281,7 @@ model ThirdPartyCredential {
 
 // ---------------------------------------------------------------------------
 // Legacy resync (transition period): incremental sync of already-migrated data
-// from legacy MariaDB into Postgres. See docs/legacy-resync-plan.md.
+// from legacy MariaDB into Postgres. See docs/specs/legacy-resync-plan.md.
 // ---------------------------------------------------------------------------
 
 // Per-syncer watermark + last-run stats. One row per syncer ("members",
@@ -1309,7 +1309,7 @@ model MemberRedirect {
 }
 
 // ============================================================================
-// Subscription (Phase 1: annual) — see docs/prd-subscription-backend.md
+// Subscription (Phase 1: annual) — see docs/specs/prd-subscription-backend.md
 // ============================================================================
 
 enum SubscriptionStatus {

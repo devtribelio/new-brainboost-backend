@@ -6,7 +6,7 @@ import { signBunnyUrl, signBunnyHlsUrl, signBunnyMp4Url } from '../src/modules/m
  * Unit tests for Bunny CDN URL token signing (Model C).
  *
  * Verifies the official HMAC-SHA256 / `HS256-` scheme. The *correctness against
- * the live Bunny CDN* is a manual probe step — see docs/media-model-c-migration.md §8.
+ * the live Bunny CDN* is a manual probe step — see docs/specs/media-model-c-migration.md §8.
  */
 describe('bunny-sign', () => {
   describe('signBunnyUrl', () => {

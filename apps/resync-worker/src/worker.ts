@@ -3,7 +3,7 @@
  * Resync worker (long-running). Loops every RESYNC_INTERVAL_SEC, running all
  * configured syncers each tick with fresh legacy + Postgres connections (opened and
  * closed inside runResync per tick → survives legacy RDS ECONNRESET). Change cadence
- * by editing RESYNC_INTERVAL_SEC and restarting. See docs/legacy-resync-plan.md §2.
+ * by editing RESYNC_INTERVAL_SEC and restarting. See docs/specs/legacy-resync-plan.md §2.
  *
  *   pnpm resync:worker
  */

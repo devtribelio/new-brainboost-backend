@@ -4,7 +4,7 @@
  * member id map), then runs the requested syncers in dependency order, persisting a
  * per-syncer watermark (checkpointed per batch) and last-run stats to `sync_state`.
  *
- * See docs/legacy-resync-plan.md. Uses a dedicated PrismaClient + console logging to
+ * See docs/specs/legacy-resync-plan.md. Uses a dedicated PrismaClient + console logging to
  * match the migrate:* script runtime (plain `tsx scripts/...`, no app env required).
  */
 import os from 'node:os';

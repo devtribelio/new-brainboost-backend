@@ -211,4 +211,4 @@ the placeholder member. Our webhook provisions a placeholder **`Member`** row, n
 - Placeholder predicate: `packages/common/src/utils/member-state.util.ts`
 - Register / reuse: `apps/mobile-api/src/modules/auth/auth.service.ts` (`register`)
 - Routes/controller: `apps/mobile-api/src/modules/webhook/webhook.routes.ts`, `webhook.controller.ts`
-- Sibling design doc: `docs/revenuecat-webhook-port.md`
+- Sibling design doc: `docs/specs/revenuecat-webhook-port.md`

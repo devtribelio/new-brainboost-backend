@@ -88,7 +88,7 @@ export class BbEcsStack extends cdk.Stack {
       // Diamankan kill-switch (TEST_ACCOUNT_ENABLED) + whitelist exact-match
       // (TEST_ACCOUNT_IDENTIFIERS). testAccountConfig() baca LIVE per-request. Semua
       // optional di env.ts (default OFF), tapi di-reference sbg secret → 3 key ini
-      // WAJIB ada di bb/prod/app (sudah diverifikasi). Spec: docs/test-account.md.
+      // WAJIB ada di bb/prod/app (sudah diverifikasi). Spec: docs/specs/test-account.md.
       TEST_ACCOUNT_ENABLED: sm('TEST_ACCOUNT_ENABLED'),
       TEST_ACCOUNT_OTP_CODE: sm('TEST_ACCOUNT_OTP_CODE'),
       TEST_ACCOUNT_IDENTIFIERS: sm('TEST_ACCOUNT_IDENTIFIERS'),

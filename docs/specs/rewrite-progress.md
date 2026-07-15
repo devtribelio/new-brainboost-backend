@@ -23,7 +23,7 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` parity met for current s
   OTP validate activates; abandoned placeholders reusable on re-register; password
   login on placeholder → generic 401 (403 discriminator written, disabled); `/auth/register` returns
   `{member_id, email, expired_date}` instead of tokens; new pre-login pair
-  `requestVerificationEmail` / `validateOtpEmail`. See `docs/register-verification-flow.md`.
+  `requestVerificationEmail` / `validateOtpEmail`. See `docs/specs/register-verification-flow.md`.
 - Outstanding: parity tests against legacy social-login provider tokens; cleanup cron
   for stale unverified placeholders (optional — rows are reusable, no dead-end).
 
@@ -51,16 +51,16 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` parity met for current s
 ### product — `src/modules/product/`
 - Course detail endpoint at full 1:1 parity with legacy `Controller_Product::detail` (commits `b1370fe`, `d2bd550`).
 - DTOs match the exact shape mobile expects (8 DTOs).
-- Course-detail serializer scrubs Bunny `guid`/`videoLibraryId`/iframe-HTML from `slidesData` + `dataContent`; audio/video slides expose `streamUrl` (opaque media token) — see `media` module + `docs/media-port.md`.
+- Course-detail serializer scrubs Bunny `guid`/`videoLibraryId`/iframe-HTML from `slidesData` + `dataContent`; audio/video slides expose `streamUrl` (opaque media token) — see `media` module + `docs/specs/media-port.md`.
 - Outstanding: catalog filters, purchase flow (lives in unstarted `commerce` module).
 
 ### media — `src/modules/media/`
 - Backend proxy for BunnyCDN Stream — streams MP4 renditions so the raw `guid`/`library_id` never reach the client.
 - Endpoint `GET|HEAD /api/member/media/stream?t={token}&res={360p|480p|720p}`; opaque AES-256-GCM token carries `guid`/`courseId`/`isPreview`.
 - Preview media open (anonymous OK); non-preview gated on `CourseEnrollment`. HTTP Range forwarded for seek/resume.
-- Model C (signed-URL) code shipped behind `MEDIA_MODE` (default `proxy`); `signed` mode 302-redirects to a Token-Auth signed Bunny HLS URL. Flip needs the new-library content migration — see `docs/media-model-c-migration.md` §11.
+- Model C (signed-URL) code shipped behind `MEDIA_MODE` (default `proxy`); `signed` mode 302-redirects to a Token-Auth signed Bunny HLS URL. Flip needs the new-library content migration — see `docs/specs/media-model-c-migration.md` §11.
 - Tests: `media-token` (5), `bunny-sign` (7), `media` (10), `media-signed` (5) — all green.
-- Plan + Bunny audit: `docs/media-port.md`, `docs/media-model-c-migration.md`.
+- Plan + Bunny audit: `docs/specs/media-port.md`, `docs/specs/media-model-c-migration.md`.
 
 ### commission — `src/modules/commission/`
 - Read-only list, performance schema metadata.
@@ -102,7 +102,7 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` parity met for current s
 - Login `/oauth/token` now wrapped; webhook stays raw (provider contract).
 - Status 201 applied to all POST-creates (checkout, payment, affiliate enroll, post/comment/report/register).
 - Error vocabulary: `BAD_REQUEST`, `VALIDATION_ERROR`, `UNAUTHORIZED`, `FORBIDDEN`, `NOT_FOUND`, `CONFLICT`, `INTERNAL_ERROR`.
-- Big-bang mobile rollout — see `docs/api-envelope.md` for spec + client migration notes.
+- Big-bang mobile rollout — see `docs/specs/api-envelope.md` for spec + client migration notes.
 
 ---
 
@@ -113,7 +113,7 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` parity met for current s
 - `code-generator.ts`, `compute-amount.ts`, `walk-inviter-chain.ts` ✅
 - `affiliator.service.ts`, `enrollment.service.ts`, `program.service.ts`, `visit.service.ts` — wired ✅
 - Recursive CTE for inviter chain (`walkInviterChain`) ✅
-- KYC via Didit (disbursement gate): session token endpoint + `/api/webhook/didit` HMAC+timestamp webhook + status mapping ✅ — code complete (switched from Sumsub 2026-06-26), Console setup (workflow + creds) / free-tier confirm + mobile SDK pending. See `docs/kyc-didit.md`.
+- KYC via Didit (disbursement gate): session token endpoint + `/api/webhook/didit` HMAC+timestamp webhook + status mapping ✅ — code complete (switched from Sumsub 2026-06-26), Console setup (workflow + creds) / free-tier confirm + mobile SDK pending. See `docs/specs/kyc-didit.md`.
 - **Outstanding:**
   - Parity tests against legacy fixture rows (commission compute, multitier walk).
   - PENDING → BALANCE state machine (cron job + the 7-day delay).
@@ -132,17 +132,17 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` parity met for current s
 - Side effects (course enrollment, affiliate commission, voucher redeem) idempotent via unique constraints; emitted from PaymentService SUCCESS path + webhook.
 - Cron `expirePendingPayments` (call from external scheduler) flips overdue PENDING → EXPIRED.
 - Tests: 47 commerce + 6 smoke = 53 specs, 125 total project green.
-- Plan + tracker: see `docs/commerce-port.md`.
+- Plan + tracker: see `docs/specs/commerce-port.md`.
 - **Open items**: Xendit sandbox manual QA (CC + VA simulate-payment + eWallet OVO/DANA); fee table confirm with finance; refund flow (admin tool, defer).
 
 ### subscription — [x] Phase 1 annual, BE-01…BE-22 selesai (2026-07)
-- BARU (bukan porting legacy): 4 tier annual all-access seat-based (model Spotify Family), PRD `docs/prd-subscription-backend.md`, Jira BB-77…BB-98.
+- BARU (bukan porting legacy): 4 tier annual all-access seat-based (model Spotify Family), PRD `docs/specs/prd-subscription-backend.md`, Jira BB-77…BB-98.
 - Data: 5 tabel (`subscription_plans` 1:1 Product, `member_subscriptions`, `subscription_seats`, ledger `subscription_activations`, `subscription_reminder_logs`) + `course_enrollment.via_subscription_id` + 3 partial unique (migration `20260707140000`).
 - Integrasi ke sistem lama lewat 3 titik sempit: event `commerce.payment.success` (aktivasi), lazy enrollment (akses — row retail tak pernah disentuh), short-circuit komisi flat L1. Checkout/voucher/media/tracker tidak tahu subscription ada.
 - Jalur RC: EXPIRATION/CANCELLATION per `cancel_reason`, expiry otoritatif RC, SKU android fix, attributionKey per-periode (renewal bayar komisi 1×).
 - HTTP: modul `/subscription` (7 endpoint). Jobs: expire + renewal reminder (H-7/3/1). Script: `pnpm grant:subscription` (eligibility 2 sumber: Postgres + legacy MariaDB langsung).
 - Tests: 15 spec / 93 test subscription; full suite 567 green.
-- Aturan bisnis + runbook launch + query reporting: `docs/subscription-port.md`; log keputusan: `docs/subscription-progress.md`.
+- Aturan bisnis + runbook launch + query reporting: `docs/specs/subscription-port.md`; log keputusan: `docs/specs/subscription-progress.md`.
 - **Open items (eksternal)**: 3 template bb-comms (blocker jobs reminder di prod); SKU asli App Store/Play + entitlement RC; angka final `renewal_affiliate_rate` (COO); copy marketing; investigasi 655 legacy paying member tanpa akun baru (temuan BE-20).
 
 ## Not started ([ ])
@@ -211,4 +211,4 @@ When marking a module `[x]`:
 3. OpenAPI schema renders without warning (`tests/swagger-smoke.spec.ts`).
 4. Any new env vars are declared in `src/config/env.ts` and listed in `.env.example`.
 5. `index_file` run on every edited file.
-6. Anything non-obvious added under `docs/legacy-analysis.md`.
+6. Anything non-obvious added under `docs/specs/legacy-analysis.md`.

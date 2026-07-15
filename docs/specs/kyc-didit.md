@@ -1,13 +1,13 @@
 # KYC via Didit (affiliate disbursement gate)
 
 Status: code complete, **pending Didit Console setup (workflow + creds) + mobile SDK
-integration + QA**. Mobile FE integration guide: `docs/kyc-didit-mobile.md`.
+integration + QA**. Mobile FE integration guide: `docs/specs/kyc-didit-mobile.md`.
 
 > Provider history: the new review flow was first built on **Sumsub**, then switched to
 > **Didit** (cost — Didit's KYC is effectively free for the ID + liveness + face-match
 > workflow we use; confirm the workflow stays on the free tier in the Console). The data
 > model, the disbursement gate, the re-KYC rules, and the manual fallback are unchanged —
-> only the provider adapter (client + webhook + env) was swapped. See `docs/kyc-rekyc.md`.
+> only the provider adapter (client + webhook + env) was swapped. See `docs/specs/kyc-rekyc.md`.
 
 ## Context
 

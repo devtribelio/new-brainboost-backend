@@ -1,7 +1,7 @@
 # Subscription Phase 1 — Progress Tracker
 
-> Sumber kebenaran progres implementasi PRD `docs/prd-subscription-backend.md`.
-> **Cara resume sesi baru:** prompt — *"baca docs/prd-subscription-backend.md + docs/subscription-progress.md, lanjut task berikutnya yang belum selesai"*.
+> Sumber kebenaran progres implementasi PRD `docs/specs/prd-subscription-backend.md`.
+> **Cara resume sesi baru:** prompt — *"baca docs/specs/prd-subscription-backend.md + docs/specs/subscription-progress.md, lanjut task berikutnya yang belum selesai"*.
 > **Aturan update (WAJIB tiap akhir sesi / selesai task):** update baris task di tabel (status, branch, catatan) dan catat keputusan/penemuan non-obvious di bagian "Log keputusan".
 > **Aturan status Jira (revisi 2026-07-08):** mulai task → flip ke **Development**; user bilang commit → git commit + flip ke **Done** (satu langkah). Doneness juga dicatat di tabel tracker ini.
 
@@ -35,7 +35,7 @@ Status: `todo` → `wip` → `done` (done = kode + test hijau; ✅ di kolom Jira
 | BE-19 Modul HTTP /subscription | BB-95 | **selesai — menunggu review** | modul `apps/mobile-api/src/modules/subscription/`; 7 endpoint (plans public, me 3-role, seat ops, cancel web/IAP-aware); + `cancelIntentByOwner`; 5 test subscription-http.spec.ts |
 | BE-20 Script grant + eligibility | BB-96 | **selesai — menunggu review** | `pnpm grant:subscription`; eligibility = commerce_transactions PAID **+ legacy MariaDB langsung** (course_payment+bundle, brainboost, `amount−amount_voucher`) via legacyId+member_redirect; guard ledger `kind='grant'`; smoke nyata: 179 eligible, 655 legacy unmapped; 4 test grant-script.spec.ts |
 | BE-21 Integration tests | BB-97 | **selesai — menunggu review** | audit DoD PRD vs 14 spec existing (semua item ter-cover) + `edge-cases.spec.ts` menambal 6 gap: EXPIRED→repurchase sub baru, invite penuh 400, race duplikat konkuren, race initial paralel (branch retry), voucher-bypass 100%, in-grace entitled. Suite subscription 15 file / 93 test; full 567/567 |
-| BE-22 Docs + reporting | BB-98 | **selesai — menunggu review** | `docs/subscription-port.md` (15 aturan bisnis + runbook launch 7 langkah + 6 query reporting tervalidasi jalan) + CLAUDE.md §5/§7 + rewrite-progress.md |
+| BE-22 Docs + reporting | BB-98 | **selesai — menunggu review** | `docs/specs/subscription-port.md` (15 aturan bisnis + runbook launch 7 langkah + 6 query reporting tervalidasi jalan) + CLAUDE.md §5/§7 + rewrite-progress.md |
 
 ## Urutan pengerjaan yang disarankan (dependency)
 

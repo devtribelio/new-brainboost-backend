@@ -7,7 +7,7 @@ import { PrismaClient } from '@prisma/client';
  * The account logs in with a normal password; OTP-gated flows it hits (register,
  * re-verify, delete-account) are satisfied by the fixed code 000000 — but ONLY
  * once this identifier is added to TEST_ACCOUNT_IDENTIFIERS and
- * TEST_ACCOUNT_ENABLED=true. See docs/test-account.md.
+ * TEST_ACCOUNT_ENABLED=true. See docs/specs/test-account.md.
  *
  * Env:
  *   TEST_ACCOUNT_SEED_PASSWORD  (required)

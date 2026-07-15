@@ -3,11 +3,11 @@
 - **Status:** Accepted (implemented 2026-05-29; repo rename deferred)
 - **Date:** 2026-05-26
 - **Deciders:** brainboost@tribelio.com
-- **Related:** [`docs/backoffice-port-plan.md`](../backoffice-port-plan.md)
+- **Related:** [`docs/specs/backoffice-port-plan.md`](../specs/backoffice-port-plan.md)
 
 ## Context
 
-`bb-backend-new` was scoped as the mobile backend rewrite of `tribelio-platform`. We now need to add a **backoffice product-ops API** (port of legacy Tribelio admin web + Oracle methods — see `docs/backoffice-port-plan.md`). Estimated surface: ~140 P0/P1 JSON endpoints across 12 sub-domains (auth/2FA, sales, refund, withdraw, balance-adjust, affiliate-admin, moderation, dashboard, insight, search, integration, feedback).
+`bb-backend-new` was scoped as the mobile backend rewrite of `tribelio-platform`. We now need to add a **backoffice product-ops API** (port of legacy Tribelio admin web + Oracle methods — see `docs/specs/backoffice-port-plan.md`). Estimated surface: ~140 P0/P1 JSON endpoints across 12 sub-domains (auth/2FA, sales, refund, withdraw, balance-adjust, affiliate-admin, moderation, dashboard, insight, search, integration, feedback).
 
 Three deployment shapes were on the table:
 
@@ -46,7 +46,7 @@ bb-platform/                              # repo root (renamed from bb-backend-n
     domain/                               # @bb/domain — commerce, affiliate, notification, voucher (services + pure rules; no Express)
   apps/
     mobile-api/                           # current mobile modules (auth, account, member, product, post, …)
-    backoffice-api/                       # new JSON product-ops API (per docs/backoffice-port-plan.md)
+    backoffice-api/                       # new JSON product-ops API (per docs/specs/backoffice-port-plan.md)
     admin-ejs/                            # current src/modules/admin/ (internal sysadmin EJS, kept as-is)
   docs/
     adr/
@@ -154,14 +154,14 @@ Tracked separately as the migration script. Steps:
 4. Extract domain-shared services (`src/modules/commerce/`, `src/modules/affiliate/`, `src/modules/notification/`, voucher logic) → `packages/domain`. Controllers stay in apps.
 5. `src/modules/{auth,account,member,product,post,…}` → `apps/mobile-api/src/modules/`. Rewrite imports.
 6. `src/modules/admin/` → `apps/admin-ejs/`. Rewrite imports.
-7. Scaffold `apps/backoffice-api/` per `docs/backoffice-port-plan.md` §1.
+7. Scaffold `apps/backoffice-api/` per `docs/specs/backoffice-port-plan.md` §1.
 8. Per-app `package.json`, `tsconfig.json`, `Dockerfile`, `vitest.config.ts`.
 9. CI: path-filter triggers per app, parallel build matrix.
 10. Update `CLAUDE.md` §1 (stack delta), §2 (legacy map), §7 (progress) to reflect new layout.
 11. `git mv` operations one PR per package/app to keep diff reviewable.
 12. Rename `bb-backend-new` → `bb-platform`.
 
-Sprint 1 backoffice work (per `docs/backoffice-port-plan.md` §4) starts **after** monorepo extraction lands.
+Sprint 1 backoffice work (per `docs/specs/backoffice-port-plan.md` §4) starts **after** monorepo extraction lands.
 
 ## Implementation addendum (2026-05-29)
 

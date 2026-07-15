@@ -7,7 +7,7 @@
  *        → VOIDED (excluded from lifetime). Both ride the `updated` watermark.
  * GUARD  upsert keyed legacyId — new Xendit commissions have legacyId=null, so this never
  *        touches PENDING/BALANCE/VOIDED rows owned by the new flow.
- * See docs/legacy-resync-plan.md §6.
+ * See docs/specs/legacy-resync-plan.md §6.
  */
 import type { RowDataPacket } from 'mysql2/promise';
 import { resyncConfig } from '../config';

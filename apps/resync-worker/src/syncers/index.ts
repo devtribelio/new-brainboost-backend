@@ -1,7 +1,7 @@
 /**
  * Syncer registry. SYNCER_ORDER is the dependency order used by a full run
  * (members first so downstream syncers can resolve legacyId -> uuid). See
- * docs/legacy-resync-plan.md §7.
+ * docs/specs/legacy-resync-plan.md §7.
  */
 import type { Syncer } from '../types';
 import { membersSyncer } from './members';

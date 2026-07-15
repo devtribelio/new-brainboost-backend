@@ -35,7 +35,7 @@ log in freely.
    unverified error is the actionable one.
 6. **Email register issues OTP, not tokens.** `/auth/register` response changed from
    TokenBundle to `{ member_id, email, expired_date }` (mirror of `registerByPhone`).
-   FE logs in via `/oauth/token` after validating. Per `docs/api-fe.md` #38 the email
+   FE logs in via `/oauth/token` after validating. Per `docs/specs/api-fe.md` #38 the email
    register endpoint is likely dead in the mobile app — verify with PM.
 
 7. **Phone canonical form (added 2026-06-11).** Both register paths normalize via

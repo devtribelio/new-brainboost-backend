@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /**
- * Members syncer — incremental, NEW-WINS-ON-TOUCH (docs/legacy-resync-plan.md §6).
+ * Members syncer — incremental, NEW-WINS-ON-TOUCH (docs/specs/legacy-resync-plan.md §6).
  *
  * Only migrated winners (Member.legacyId set) are touched. Identity (email/phone/verified),
  * password, kyc*, bank*, affiliate* are NOT owned here — only profile fields + deactivation:

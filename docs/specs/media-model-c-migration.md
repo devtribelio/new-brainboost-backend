@@ -8,18 +8,18 @@
 ## 0. How to use this document
 
 When the preconditions in **§2** are met, the implementation can be run directly:
-"read `docs/media-model-c-migration.md` and implement". Steps §5–§7 are file-by-file and
+"read `docs/specs/media-model-c-migration.md` and implement". Steps §5–§7 are file-by-file and
 ordered. Do **not** start until every box in §2 is ticked — Model C without Token
 Authentication enabled is just Model A (no access control).
 
-Background context: `docs/media-port.md` (the Model B implementation + the Bunny audit) and
-`docs/legacy-providers.md` (BunnyCDN entry).
+Background context: `docs/specs/media-port.md` (the Model B implementation + the Bunny audit) and
+`docs/specs/legacy-providers.md` (BunnyCDN entry).
 
 ---
 
 ## 1. Why Model C
 
-Model B proxies every media byte through the backend — see `docs/media-port.md` §7 for the
+Model B proxies every media byte through the backend — see `docs/specs/media-port.md` §7 for the
 full limitation list (2× bandwidth, latency, streaming bottleneck, no edge cache, SPOF).
 
 Model C: the backend verifies access and returns a **short-lived signed Bunny URL**; the
@@ -216,7 +216,7 @@ No change (same endpoint, same query DTO; `res` is ignored when signed-HLS is us
       (`bunny-sign.util.ts`) is confirmed correct against the real Bunny CDN.
 - [ ] Mobile player follows the `302` and streams from the Bunny edge.
 - [ ] Backend egress for media drops to ~0 (metrics).
-- [ ] `docs/media-port.md` + `docs/rewrite-progress.md` updated to say media runs Model C.
+- [ ] `docs/specs/media-port.md` + `docs/specs/rewrite-progress.md` updated to say media runs Model C.
 
 ### Library prerequisite — `BlockNoneReferrer` must be OFF
 

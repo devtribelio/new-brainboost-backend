@@ -20,7 +20,7 @@ export interface EnqueueCommsInput {
 /**
  * Minimal Prisma surface the helper needs — satisfied by the client OR a
  * transaction client, so callers can enqueue inside their domain transaction
- * (no dual-write race). See docs/adr/0002 + docs/email-scope.md §4.
+ * (no dual-write race). See docs/adr/0002 + docs/specs/email-scope.md §4.
  */
 type OutboxWriter = Pick<PrismaClient, 'notificationOutbox'> | Prisma.TransactionClient;
 

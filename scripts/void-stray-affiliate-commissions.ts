@@ -1,7 +1,7 @@
 /* eslint-disable no-console */
 /**
  * Data cleanup for the IAP affiliate over-attribution bug (B-2/B-3).
- * See docs/affiliate-overattribution-fix.md.
+ * See docs/specs/affiliate-overattribution-fix.md.
  *
  * Before the fix, a sticky RevenueCat `affiliate_code` subscriber attribute paid
  * commission on purchases the affiliator never referred (renewals, re-syncs,

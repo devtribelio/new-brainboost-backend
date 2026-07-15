@@ -168,7 +168,7 @@ Query single round-trip per resolve (Prisma `findMany select: {memberId}` + `whe
 
 Status modul di `CLAUDE.md §7` saat ini: `[x] notification — list, read`. Setelah port: update jadi `[~] notification — read API done; producer + FCM in progress`, lalu `[x]` setelah fase-4 lulus QA.
 
-Update `docs/rewrite-progress.md` per fase.
+Update `docs/specs/rewrite-progress.md` per fase.
 
 ---
 

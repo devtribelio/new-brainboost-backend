@@ -3,7 +3,7 @@
 - **Status:** Accepted (direction set by owner 2026-06-08; implementation deferred until first transactional template / Qontak wiring)
 - **Date:** 2026-06-08
 - **Deciders:** brainboost@tribelio.com
-- **Related:** [`docs/email-scope.md`](../email-scope.md), [`docs/otp-port.md`](../otp-port.md), [`docs/legacy-providers.md`](../legacy-providers.md), [`docs/notification-port.md`](../notification-port.md) §12, [ADR-0001](0001-monorepo-split-for-backoffice.md), memory `[[feedback_messaging_config]]`
+- **Related:** [`docs/specs/email-scope.md`](../specs/email-scope.md), [`docs/specs/otp-port.md`](../specs/otp-port.md), [`docs/specs/legacy-providers.md`](../specs/legacy-providers.md), [`docs/specs/notification-port.md`](../specs/notification-port.md) §12, [ADR-0001](0001-monorepo-split-for-backoffice.md), memory `[[feedback_messaging_config]]`
 
 ## Context
 
@@ -11,7 +11,7 @@ Where does outbound, non-push messaging live — email, phone OTP via WhatsApp (
 and other outbound notifications? Owner direction: a **separate git repo**, a worker,
 **outside the `bb-platform` monorepo**.
 
-Findings (full inventory in `docs/email-scope.md`):
+Findings (full inventory in `docs/specs/email-scope.md`):
 
 1. **Legacy already runs email async, reading the DB for data.** `TBEmail::send($type, $id)`
    enqueues to 4 SQS tiers; a worker resolves `TBEmail_Engine_<Type>`, which **loads the
@@ -180,7 +180,7 @@ Two surfaces now, both versioned:
 
 ### Neutral
 
-- OTP parity rules (`docs/otp-port.md`) + `otp_codes` schema unchanged.
+- OTP parity rules (`docs/specs/otp-port.md`) + `otp_codes` schema unchanged.
 - `notification-port.md` §12 outbox table lives in bb-platform either way; now shared by
   FCM push (backend) + external comms (bb-comms relay source).
 - Backend keeps a thin **enqueue** helper in `@bb/common`; `mailer.service.ts` (SMTP) +
@@ -190,7 +190,7 @@ Two surfaces now, both versioned:
 
 Stand up `bb-comms` when the **first** lands:
 
-- First transactional email ported (commerce/affiliate — bucket B/C, `docs/email-scope.md`).
+- First transactional email ported (commerce/affiliate — bucket B/C, `docs/specs/email-scope.md`).
 - Qontak WhatsApp OTP wired (`legacy-providers.md` T1.4) — the natural first slice
   (one channel, the OTP inline-code message type, proves the contract end to end).
 

@@ -11,7 +11,7 @@ Applies to **both** variants (same query contract, same response):
 | `GET /api/member/product/list` | Bearer (member) |
 | `GET /api/member/product/list/public` | optional Bearer (guest allowed) |
 
-> The legacy doc entry for this endpoint is `docs/api-fe.md` §55. The response shape
+> The legacy doc entry for this endpoint is `docs/specs/api-fe.md` §55. The response shape
 > (`ProductModel`) is unchanged — only new request params + a new `type` value.
 
 ---
@@ -84,7 +84,7 @@ GET /api/member/product/list/public
 
 ## Response
 
-Standard **paginated envelope** (see `docs/api-envelope.md`). Unchanged from before —
+Standard **paginated envelope** (see `docs/specs/api-envelope.md`). Unchanged from before —
 the same `ProductModel` items; `data` is the array, pagination in `meta.pagination`.
 
 ```jsonc

@@ -29,7 +29,7 @@ const HOLD: string[] = [...DISBURSEMENT_HOLD_STATUSES];
 
 const DAY_MS = 86_400_000;
 
-/** Risk events that revoke an APPROVED KYC and force re-verification. See docs/kyc-rekyc.md. */
+/** Risk events that revoke an APPROVED KYC and force re-verification. See docs/specs/kyc-rekyc.md. */
 export type ReKycReason =
   | 'BANK_CHANGE'
   | 'DORMANT_REACTIVATION'

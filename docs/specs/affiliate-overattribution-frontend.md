@@ -2,7 +2,7 @@
 
 **Untuk:** tim mobile `brainboost-apps`
 **Terkait backend:** `new-brainboost-backend` branch `feat/affiliate-overattribution-fix` (commit `ff707e6` B-2/B-3, `ec28d20` B-5, + strict per-product)
-**Spec lengkap (root cause + backend):** `docs/affiliate-overattribution-fix.md`
+**Spec lengkap (root cause + backend):** `docs/specs/affiliate-overattribution-fix.md`
 
 ---
 

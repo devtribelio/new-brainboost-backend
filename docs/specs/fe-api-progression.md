@@ -1,10 +1,10 @@
 # FE API Progression Tracker
 
-Tracker for reconciling `docs/api-fe.md` (frozen FE contract, 61 endpoints) against current bb-backend-new implementation. Each item below is one PR-sized unit.
+Tracker for reconciling `docs/specs/api-fe.md` (frozen FE contract, 61 endpoints) against current bb-backend-new implementation. Each item below is one PR-sized unit.
 
 Status legend: `[ ]` pending · `[~]` in progress · `[x]` done · `[!]` blocked.
 
-Source-of-truth contract: `docs/api-fe.md`.
+Source-of-truth contract: `docs/specs/api-fe.md`.
 Audit baseline: 24 ✅ · 17 ⚠️ · 14 ❌ · 6 🔴 + 1 global blocker (G1).
 
 ---
@@ -287,7 +287,7 @@ PostDto + CommentDto + ProfileDto have 20-30 fields each with fallback chains. V
   - Backend already mirrors `commisionSummary`, `commisionFixAmount`. Decide: keep typo for compat (FE depends on key) OR rename + add alias.
 
 - [x] **T5.4** Historical bug log — done 2026-05-12
-  - Appended `§8.1 FE coercion history` section to `docs/legacy-analysis.md`. Captures the two `dbc63de` failure modes (InfoModel TypeError hang + cloudMessagingId "null" literal loop) and notes which backend tasks (T3.11, T2.12, P2) closed each loop.
+  - Appended `§8.1 FE coercion history` section to `docs/specs/legacy-analysis.md`. Captures the two `dbc63de` failure modes (InfoModel TypeError hang + cloudMessagingId "null" literal loop) and notes which backend tasks (T3.11, T2.12, P2) closed each loop.
 
 ---
 
@@ -318,7 +318,7 @@ Each task should:
 
 ## Out of scope
 
-- Commerce/purchase/disbursement (per `docs/rewrite-progress.md` — not started).
+- Commerce/purchase/disbursement (per `docs/specs/rewrite-progress.md` — not started).
 - Mobile-side type drift fixes (FE pinned per audit).
 - Affiliate payout compute (separate workstream).
 
@@ -369,7 +369,7 @@ Each task should:
 | ⚠️ Partial | 0 | — Phase 4 DTO audits all done |
 | Gated | 3 | T5.1, T5.2, T5.3 (PM/FE decisions) |
 | T1.x follow-ups | 2 | Qontak dispatcher + Member.email relax-to-nullable |
-| Legacy provider gaps | 8 | Per `docs/legacy-providers.md` — FCM outbound, BunnyCDN, S3, IAP, disbursement, queue, search, Qontak |
+| Legacy provider gaps | 8 | Per `docs/specs/legacy-providers.md` — FCM outbound, BunnyCDN, S3, IAP, disbursement, queue, search, Qontak |
 
 ### Required ops action
 
@@ -412,7 +412,7 @@ Two migrations created this session — apply on dev/staging/prod via `pnpm pris
 ### Next priority candidates
 
 **T1.x follow-ups (production-readiness for phone-register):**
-- **T1.4** Qontak WhatsApp dispatcher — wire `qontak.service.ts`, hook into `otpService.issue` for phone targets. Details + hardcoded IDs documented in `docs/legacy-providers.md`.
+- **T1.4** Qontak WhatsApp dispatcher — wire `qontak.service.ts`, hook into `otpService.issue` for phone targets. Details + hardcoded IDs documented in `docs/specs/legacy-providers.md`.
 - **T1.5** TTL tighten (10 → 2 min) + resend cooldown + 5/day rate limit for parity with legacy Qontak constraints.
 - **T1.6** Relax `Member.email` to nullable (migration) — drop synthetic placeholder.
 
@@ -421,7 +421,7 @@ Two migrations created this session — apply on dev/staging/prod via `pnpm pris
 - T5.2 (formalize /network/join body)
 - T5.3 (naming typo decisions)
 
-**Legacy provider integrations** (full feature work, per `docs/legacy-providers.md`):
+**Legacy provider integrations** (full feature work, per `docs/specs/legacy-providers.md`):
 - FCM outbound `send()` — token enrollment wired, server-side push missing
 - BunnyCDN admin uploads
 - S3 / TBAWS asset migration
@@ -432,9 +432,9 @@ Two migrations created this session — apply on dev/staging/prod via `pnpm pris
 
 ### Related docs
 
-- `docs/api-fe.md` — frozen FE contract (61 endpoints).
-- `docs/legacy-providers.md` — external integrations not yet wired (Qontak, Bunny, S3, FCM, etc.).
-- `docs/legacy-analysis.md` — symbol-level legacy mapping + §8.1 FE coercion history.
+- `docs/specs/api-fe.md` — frozen FE contract (61 endpoints).
+- `docs/specs/legacy-providers.md` — external integrations not yet wired (Qontak, Bunny, S3, FCM, etc.).
+- `docs/specs/legacy-analysis.md` — symbol-level legacy mapping + §8.1 FE coercion history.
 
 ---
 

@@ -4,7 +4,7 @@
  * Idempotent — an existing row (matched by unique code) is NEVER touched:
  * operators may have tuned Product.price or plan rates at runtime (e.g. the
  * final renewalAffiliateRate once the COO decides), and a re-run must not
- * revert that. See docs/prd-subscription-backend.md (BE-02).
+ * revert that. See docs/specs/prd-subscription-backend.md (BE-02).
  *
  *   pnpm seed:subscription-plans            (apply)
  *   pnpm seed:subscription-plans --dry-run  (report only)

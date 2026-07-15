@@ -39,7 +39,7 @@ export function connectLegacyDb(extra?: ConnectionOptions): Promise<Connection> 
 // Resilient client — reconnect + retry on a dropped legacy connection.
 // The legacy RDS drops idle/long connections (ECONNRESET / connection lost);
 // every resync query is a read-only SELECT, so retrying after a reconnect is
-// side-effect-free. See docs/legacy-resync-plan.md §8.
+// side-effect-free. See docs/specs/legacy-resync-plan.md §8.
 // ---------------------------------------------------------------------------
 
 /** Minimal surface the syncers use (query) + core uses (end). */

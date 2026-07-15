@@ -2,7 +2,7 @@
  * Re-KYC (KYC reset) triggers + gate. Member-scoped; seeds its own data.
  * resetKyc is DB-only (Didit is session-per-attempt — no applicant to reset); it
  * clears kycProviderRef so a stale webhook can't re-approve an EXPIRED member.
- * Requires a reachable Postgres test DB (DATABASE_URL). See docs/kyc-rekyc.md.
+ * Requires a reachable Postgres test DB (DATABASE_URL). See docs/specs/kyc-rekyc.md.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { randomUUID } from 'node:crypto';

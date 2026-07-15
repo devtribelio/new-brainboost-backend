@@ -7,7 +7,7 @@
  * AUTH    latest APPROVED/REJECTED row across the dedup cluster wins (MAX id).
  * GUARD   only writes members whose kycSource is still NONE/LEGACY — never clobbers a
  *         MANUAL/SUMSUB decision, never downgrades an EXPIRED (re-KYC in progress).
- * See docs/legacy-resync-plan.md §6.
+ * See docs/specs/legacy-resync-plan.md §6.
  */
 import type { RowDataPacket } from 'mysql2/promise';
 import { emptyStats, type RunCtx, type Stats, type Syncer, type SyncerCtx } from '../types';
