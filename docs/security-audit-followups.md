@@ -108,3 +108,47 @@ listed member. Now that the route is auth-gated this is no longer an anonymous l
 exposing the whole member base's contact PII to any logged-in user is over-exposure —
 strip contact fields (or scope to network team members). Needs FE coordination since the
 flat `NetworkMemberModel` declares those fields.
+
+---
+
+## 2026-07-15 — Rate limiter defeated in the deployed environment (CRITICAL, FIXED in app)
+
+**Source:** live black-box pentest of `https://be-bb-staging.brainboostos.com` + config review.
+
+**Symptom:** 60 login attempts against `/api/member/oauth/token` (limit 30/15min) produced
+**zero 429s**; `RateLimit-Remaining` bounced 13–29 and never reached 0.
+
+**Root cause (confirmed on the box, not inferred):** the deployed chain is
+`Cloudflare → nginx (proxy_pass 127.0.0.1:3000, X-Forwarded-For = $proxy_add_x_forwarded_for) → Node`
+— **two** proxy hops — but the app boots with `TRUST_PROXY=1` (trusts nginx only).
+Express therefore resolves `req.ip` to the **rotating Cloudflare edge IP**, not the
+visitor. `express-rate-limit` keyed on `req.ip`, so every few requests landed on a new
+CF-edge key and no per-IP bucket ever filled. PM2 runs a single `fork` instance
+(`instances: 1`), so this was NOT a multi-store problem — the key itself was wrong.
+There is also no edge rate limiting (CDK `// TODO WAF` is unbuilt; Cloudflare has no
+rate rule on these paths).
+
+**Fix (app, shipped):** `packages/common/src/middlewares/rate-limit.middleware.ts` now
+keys every limiter on a `clientIp()` helper that prefers the `CF-Connecting-IP` header
+(Cloudflare always sets it to the real visitor and strips client-supplied copies),
+falling back to `req.ip`. Unit-tested in
+`apps/mobile-api/tests/rate-limit-client-ip.spec.ts`. Deploy = rebuild `@bb/common` +
+`pm2 reload bb-mobile-api`.
+
+**Required infra hardening (NOT yet done — must accompany the app fix):**
+1. **Firewall the origin to Cloudflare IP ranges.** nginx listens on `0.0.0.0:80/443`;
+   if the origin IP is reachable directly, an attacker can bypass Cloudflare and forge
+   `CF-Connecting-IP`, re-defeating the limiter. Restrict inbound 80/443 to Cloudflare's
+   published CIDRs (security group / ufw / nginx `allow`+`deny`), or use Cloudflare
+   Tunnel so the origin has no public port.
+2. **(Recommended) Fix `req.ip` globally too** so logs/audit show the real client: either
+   set `TRUST_PROXY=2` (CF + nginx) OR add nginx `ngx_http_realip_module`
+   (`set_real_ip_from <CF CIDRs>; real_ip_header CF-Connecting-IP;`) and keep
+   `TRUST_PROXY=1`. The realip-module route is preferred (Cloudflare-range-aware, not a
+   brittle hop count).
+3. **When the API scales beyond one instance** (ECS or `pm2 -i >1`), the in-memory store
+   no longer suffices — move to a shared store (`rate-limit-redis` + ElastiCache/Upstash).
+
+**Verify after deploy:** re-run ~40 rapid login attempts from one client; expect a `429`
+after the 30th within the 15-min window, and `RateLimit-Remaining` decrementing
+monotonically.
