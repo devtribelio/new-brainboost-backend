@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import rateLimit from 'express-rate-limit';
 import type { Request, RequestHandler } from 'express';
 import type { IncrementResponse, Options, Store } from 'express-rate-limit';
@@ -6,6 +7,7 @@ import { Redis } from 'ioredis';
 import { fail } from '@bb/common/utils/response.util';
 import { env } from '@bb/common/config/env';
 import { logger } from '@bb/common/config/logger';
+import { otpPhoneTarget } from '@bb/common/utils/phone.util';
 
 // Real client IP for rate-limit keying.
 //
@@ -29,13 +31,16 @@ export function clientIp(req: Pick<Request, 'headers' | 'ip'>): string {
 }
 
 // Brute-force / abuse throttling for unauthenticated, credential-facing
-// endpoints (oauth token, register, forgot-password, OTP, admin login).
+// endpoints (oauth token, register, forgot-password, OTP).
 //
 // Each export below is its OWN rateLimit() instance, so each endpoint gets an
-// independent per-IP bucket and can be tuned separately — spending the budget
-// on one endpoint does not lock the others. All limiters are keyed by client
-// IP and emit the repo's standard error envelope
-// (`{ success:false, error:{ code, message } }`) on 429.
+// independent bucket and can be tuned separately — spending the budget on one
+// endpoint does not lock the others. Limiters are keyed on the ACCOUNT
+// IDENTIFIER carried in the request body (username / email / phone / memberId),
+// NOT the client IP — a whole office or mobile carrier shares one NAT'd IP, so
+// IP keying would make them lock each other out (see `byIdentifier`). IP is only
+// a fallback when the body has no usable identifier. All emit the repo's
+// standard error envelope (`{ success:false, error:{ code, message } }`) on 429.
 
 const WINDOW_MS = 15 * 60 * 1000; // 15 minutes
 
@@ -145,51 +150,172 @@ function storeOption(name: string): { store?: Store } {
   return { store: new FailOpenStore(inner) };
 }
 
+// --- Per-identifier keying (shared-IP / carrier-NAT safe) -------------------
+// Credential endpoints behind a single office/carrier NAT share ONE public IP,
+// so keying on IP makes colleagues (or thousands of mobile users on one carrier)
+// share a bucket and lock each other out — the tight 3-attempt OTP limiters
+// especially. Instead key on the account identifier in the request body. IP is
+// used ONLY when the body has no usable identifier (malformed request, or a
+// social/refresh login grant that carries no username). Per-identifier is also
+// STRICTER against a targeted attack: an OTP-guess budget is per victim, not per
+// attacker-IP, so rotating IPs can't multiply the number of guesses.
+//
+// The identifier is normalized (casing/formatting can't spawn a fresh bucket)
+// and hashed (raw emails/phones never land in Redis keys).
+
+type BodyIdentifier = (body: Record<string, unknown>) => string | undefined;
+
+function str(v: unknown): string | undefined {
+  return typeof v === 'string' && v.trim() !== '' ? v.trim() : undefined;
+}
+
+// keyGenerator that keys on a body-derived identifier, falling back to the
+// client IP when absent. `kind` namespaces identifier types so e.g. an email and
+// a memberId with the same text can never collide.
+function byIdentifier(kind: string, extract: BodyIdentifier): (req: Request) => string {
+  return (req) => {
+    const id = extract((req.body ?? {}) as Record<string, unknown>);
+    if (!id) return `ip:${clientIp(req)}`;
+    const hash = createHash('sha256').update(`${kind}:${id}`).digest('base64url').slice(0, 24);
+    return `${kind}:${hash}`;
+  };
+}
+
+const byUsername = byIdentifier('username', (b) => str(b.username)?.toLowerCase());
+const byMemberId = byIdentifier('member', (b) => str(b.memberId));
+const byTarget = byIdentifier('target', (b) => str(b.target)?.toLowerCase());
+// Phone register: canonical '+628111…' (same target the OTP service builds).
+const byPhoneTarget = byIdentifier('phone', (b) => {
+  const phone = str(b.phone);
+  const code = str(b.phoneCode);
+  return phone && code ? otpPhoneTarget(code, phone) : undefined;
+});
+// Register: the username (email/handle) or, failing that, the phone target.
+const byRegisterTarget = byIdentifier('register', (b) => {
+  const username = str(b.username)?.toLowerCase();
+  if (username) return username;
+  const phone = str(b.phone);
+  const code = str(b.phoneCode);
+  return phone && code ? otpPhoneTarget(code, phone) : undefined;
+});
+// Forgot-password: email, or a digits-normalized phone (no phoneCode field here).
+const byEmailOrPhone = byIdentifier('reset', (b) => {
+  const email = str(b.email)?.toLowerCase();
+  if (email) return email;
+  const phone = str(b.phone);
+  return phone ? phone.replace(/[^0-9]/g, '') || undefined : undefined;
+});
+
+/** Internal: identifier keyers exposed for unit tests. Not part of the public API. */
+export const _keyers = {
+  byUsername,
+  byMemberId,
+  byTarget,
+  byPhoneTarget,
+  byRegisterTarget,
+  byEmailOrPhone,
+};
+
 /**
- * Build a per-client rate limiter. Keyed on the real client IP (CF-Connecting-IP
- * behind Cloudflare, else req.ip). `name` namespaces the bucket — distinct names
- * count independently, which is what keeps endpoints separate once a shared
- * Redis store is in play.
+ * Build a rate limiter. Keyed by `opts.keyGenerator` (default: client IP);
+ * credential limiters pass a per-identifier keyer so shared NAT'd clients don't
+ * collide. `name` namespaces the bucket (Redis key prefix) so distinct endpoints
+ * count independently even when two share the same identifier keyer.
  *
- * @param name     unique bucket id (also the Redis key prefix)
- * @param limit    max requests per client per window
- * @param windowMs rolling window length (default 15 min)
+ * @param name                   unique bucket id (also the Redis key prefix)
+ * @param limit                  max requests per key per window
+ * @param windowMs               rolling window length (default 15 min)
+ * @param keyGenerator           how to derive the bucket key (default clientIp)
+ * @param skipSuccessfulRequests only count failures (login: don't punish success)
  */
-function makeRateLimiter(
-  name: string,
-  limit: number,
-  windowMs: number = WINDOW_MS,
-): RequestHandler {
+function makeRateLimiter(opts: {
+  name: string;
+  limit: number;
+  windowMs?: number;
+  keyGenerator?: (req: Request) => string;
+  skipSuccessfulRequests?: boolean;
+}): RequestHandler {
   return rateLimit({
-    windowMs,
-    limit,
+    windowMs: opts.windowMs ?? WINDOW_MS,
+    limit: opts.limit,
     standardHeaders: true,
     legacyHeaders: false,
-    keyGenerator: clientIp,
-    ...storeOption(name),
+    keyGenerator: opts.keyGenerator ?? clientIp,
+    skipSuccessfulRequests: opts.skipSuccessfulRequests ?? false,
+    ...storeOption(opts.name),
     handler: tooManyRequestsHandler,
     skip: skipInTest,
   });
 }
 
-// --- OTP-guess endpoints — lowest budget; code-guessing is the attack -------
-export const validateOtpRateLimiter: RequestHandler = makeRateLimiter('otp-validate', 3);
-export const validateOtpPhoneRateLimiter: RequestHandler = makeRateLimiter('otp-validate-phone', 3);
-export const validateOtpEmailRateLimiter: RequestHandler = makeRateLimiter('otp-validate-email', 3);
-export const forgotPasswordVerifyRateLimiter: RequestHandler = makeRateLimiter('forgot-verify', 3);
+// --- OTP-guess endpoints — lowest budget; code-guessing is the attack. Keyed
+//     on the identifier being verified so 3 guesses is per-victim, not per-IP. --
+export const validateOtpRateLimiter: RequestHandler = makeRateLimiter({
+  name: 'otp-validate',
+  limit: 3,
+  keyGenerator: byTarget,
+});
+export const validateOtpPhoneRateLimiter: RequestHandler = makeRateLimiter({
+  name: 'otp-validate-phone',
+  limit: 3,
+  keyGenerator: byMemberId,
+});
+export const validateOtpEmailRateLimiter: RequestHandler = makeRateLimiter({
+  name: 'otp-validate-email',
+  limit: 3,
+  keyGenerator: byMemberId,
+});
+export const forgotPasswordVerifyRateLimiter: RequestHandler = makeRateLimiter({
+  name: 'forgot-verify',
+  limit: 3,
+  keyGenerator: byEmailOrPhone,
+});
 
-// --- OTP/email SEND endpoints — medium budget; abuse = spamming a victim ----
-export const forgotPasswordRequestRateLimiter: RequestHandler = makeRateLimiter('forgot-request', 10);
-export const requestVerificationPhoneRateLimiter: RequestHandler = makeRateLimiter('verify-request-phone', 10);
-export const requestVerificationEmailRateLimiter: RequestHandler = makeRateLimiter('verify-request-email', 10);
+// --- OTP/email SEND endpoints — medium budget; abuse = spamming a victim.
+//     Keyed on the target (memberId / email|phone) being messaged. ------------
+export const forgotPasswordRequestRateLimiter: RequestHandler = makeRateLimiter({
+  name: 'forgot-request',
+  limit: 10,
+  keyGenerator: byEmailOrPhone,
+});
+export const requestVerificationPhoneRateLimiter: RequestHandler = makeRateLimiter({
+  name: 'verify-request-phone',
+  limit: 10,
+  keyGenerator: byMemberId,
+});
+export const requestVerificationEmailRateLimiter: RequestHandler = makeRateLimiter({
+  name: 'verify-request-email',
+  limit: 10,
+  keyGenerator: byMemberId,
+});
 
-// --- Account creation -------------------------------------------------------
-export const registerRateLimiter: RequestHandler = makeRateLimiter('register', 15);
-export const registerByPhoneRateLimiter: RequestHandler = makeRateLimiter('register-phone', 15);
+// --- Account creation — keyed on the identity being registered --------------
+export const registerRateLimiter: RequestHandler = makeRateLimiter({
+  name: 'register',
+  limit: 15,
+  keyGenerator: byRegisterTarget,
+});
+export const registerByPhoneRateLimiter: RequestHandler = makeRateLimiter({
+  name: 'register-phone',
+  limit: 15,
+  keyGenerator: byPhoneTarget,
+});
 
-// --- Login — looser; legit users mistype passwords -------------------------
-export const loginRateLimiter: RequestHandler = makeRateLimiter('login', 30);
-export const adminLoginRateLimiter: RequestHandler = makeRateLimiter('admin-login', 10);
+// --- Login — keyed per-account (username); only FAILED attempts count, so a
+//     colleague logging in successfully never spends a shared budget. Social /
+//     refresh grants carry no username -> IP fallback (they can't brute-force). --
+export const loginRateLimiter: RequestHandler = makeRateLimiter({
+  name: 'login',
+  limit: 30,
+  keyGenerator: byUsername,
+  skipSuccessfulRequests: true,
+});
+
+// NOTE: the former `adminLoginRateLimiter` was removed with the admin app
+// (deleted 2026-07) — it had no consumers. Volumetric per-IP protection for
+// these endpoints belongs at the edge (Cloudflare / AWS WAF rate rules with a
+// CAPTCHA challenge), NOT an in-app per-IP cap, which would re-introduce the
+// carrier-NAT lockout this per-identifier keying exists to prevent.
 
 // --- Voucher validation — per-member (or per-IP fallback). The dry-run lookup
 //     returns a distinct reason per failure mode, i.e. a code-validity oracle.
