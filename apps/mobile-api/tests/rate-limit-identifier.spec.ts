@@ -69,4 +69,14 @@ describe('rate-limit per-identifier keying', () => {
     expect(k).toBe(byMemberId(req({ memberId: 'uuid-123' }, '9.9.9.9')));
     expect(k).not.toContain('uuid-123');
   });
+
+  it('trims surrounding whitespace so " alice " and "alice" share a bucket', () => {
+    expect(byUsername(req({ username: '  alice  ' }))).toBe(byUsername(req({ username: 'alice' })));
+  });
+
+  it('treats a whitespace-only / empty identifier as absent → IP fallback', () => {
+    expect(byUsername(req({ username: '   ' }, '203.0.113.7'))).toBe('ip:203.0.113.7');
+    expect(byUsername(req({ username: '' }, '203.0.113.7'))).toBe('ip:203.0.113.7');
+    expect(byMemberId(req({ memberId: undefined }, '203.0.113.7'))).toBe('ip:203.0.113.7');
+  });
 });
