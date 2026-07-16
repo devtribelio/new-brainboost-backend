@@ -43,7 +43,7 @@ export ECR=$ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$PROJECT
 | **cron** | job uang (PENDING→BALANCE, expire) | 🔴 **SINGLETON** | EventBridge Scheduled → RunTask |
 | Comms broker | queue (managed) | ❌ | **Amazon SQS** (2 Standard queue: urgent, normal + DLQ) |
 | PostgreSQL | DB (stateful) | ❌ | RDS Multi-AZ |
-| Redis | (ditunda — belum dipasang) | ❌ | ElastiCache (nanti) |
+| Redis | shared rate-limit store (multi-task) | ❌ | ElastiCache `cache.t4g.micro` (dipasang di CDK; `REDIS_URL` di-inject ke task) |
 
 **Image:** 3 dari repo ini (`mobile-api`, `backoffice-api`, `admin-ejs`) + 1 `bb-comms`. Image `mobile-api` dipakai **3 service** (command beda): `dist/main.js` (api), `dist/workers/comms-relay.js` (relay), `dist/jobs-runner.js` (cron). Jadi **4 image → 6 service**.
 
@@ -93,6 +93,7 @@ Rekomendasi: **Multi-AZ no replica** (uptime buat user bayar), **tambah replica 
 Simpan SEMUA di Secrets Manager. `DATABASE_URL` & `SQS_COMMS_*_URL` diisi setelah RDS/SQS jadi (Phase 3).
 ```
 NODE_ENV PORT BASE_URL APP_NAME LOG_LEVEL TRUST_PROXY API_DOCS_ENABLED
+REDIS_URL   (rate-limit shared store; di-set otomatis oleh CDK dari ElastiCache. Kosong = MemoryStore per-proses)
 DATABASE_URL
 SQS_REGION SQS_COMMS_URGENT_URL SQS_COMMS_NORMAL_URL COMMS_RELAY_BATCH_SIZE COMMS_RELAY_INTERVAL_MS
 (prod: SQS_ENDPOINT/SQS_ACCESS_KEY_ID/SQS_SECRET_ACCESS_KEY dikosongkan → pakai IAM task role)

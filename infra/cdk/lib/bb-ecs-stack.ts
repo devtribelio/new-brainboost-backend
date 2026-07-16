@@ -8,6 +8,7 @@ import * as elbv2 from 'aws-cdk-lib/aws-elasticloadbalancingv2';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
+import * as elasticache from 'aws-cdk-lib/aws-elasticache';
 import * as events from 'aws-cdk-lib/aws-events';
 
 export interface BbEcsStackProps extends cdk.StackProps {
@@ -136,6 +137,33 @@ export class BbEcsStack extends cdk.Stack {
     rdsSg.addIngressRule(appSg, ec2.Port.tcp(5432), 'Fargate tasks to RDS');
 
     const placement = { vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC }, assignPublicIp: true, securityGroups: [appSg] };
+
+    // === ElastiCache Redis — shared rate-limit store across mobile-api tasks ===
+    // mobile-api autoscales 2->6 tasks; express-rate-limit's default store is
+    // per-process, so without a shared store the effective limit is
+    // `limit x taskCount` and resets on every deploy. One small node is plenty
+    // for rate-limit counters (add a replica / CfnReplicationGroup later if HA is
+    // wanted — the app fails open on Redis loss, so a single node is safe). The
+    // resulting endpoint is injected as REDIS_URL into the task env below.
+    const redisSg = new ec2.SecurityGroup(this, 'RedisSg', {
+      vpc, description: 'bb rate-limit redis', allowAllOutbound: false,
+    });
+    redisSg.addIngressRule(appSg, ec2.Port.tcp(6379), 'Fargate tasks to Redis');
+    const redisSubnets = new elasticache.CfnSubnetGroup(this, 'RedisSubnets', {
+      description: 'bb rate-limit redis subnets',
+      subnetIds: vpc.selectSubnets({ subnetType: ec2.SubnetType.PUBLIC }).subnetIds,
+    });
+    const redis = new elasticache.CfnCacheCluster(this, 'Redis', {
+      engine: 'redis',
+      cacheNodeType: 'cache.t4g.micro',
+      numCacheNodes: 1,
+      port: 6379,
+      vpcSecurityGroupIds: [redisSg.securityGroupId],
+      cacheSubnetGroupName: redisSubnets.ref,
+    });
+    redis.addDependency(redisSubnets);
+    // rate-limit.middleware.ts reads REDIS_URL; empty => per-process MemoryStore.
+    env.REDIS_URL = `redis://${redis.attrRedisEndpointAddress}:${redis.attrRedisEndpointPort}`;
 
     // ============ HTTP service helper (di belakang ALB) ============
     const makeHttpService = (id: string, image: ecs.ContainerImage, port: number, command?: string[]) => {

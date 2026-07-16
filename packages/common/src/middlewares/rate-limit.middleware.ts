@@ -1,7 +1,11 @@
 import rateLimit from 'express-rate-limit';
 import type { Request, RequestHandler } from 'express';
+import type { IncrementResponse, Options, Store } from 'express-rate-limit';
+import { RedisStore, type RedisReply } from 'rate-limit-redis';
+import { Redis } from 'ioredis';
 import { fail } from '@bb/common/utils/response.util';
 import { env } from '@bb/common/config/env';
+import { logger } from '@bb/common/config/logger';
 
 // Real client IP for rate-limit keying.
 //
@@ -48,44 +52,144 @@ const tooManyRequestsHandler: RequestHandler = (_req, res) => {
 // endpoints from a single IP and would otherwise trip the limiter (429).
 const skipInTest = (): boolean => env.isTest;
 
+// --- Shared store (multi-instance deployments) ------------------------------
+// The default store is an in-memory MemoryStore, one per Node process. On a
+// multi-instance deployment (ECS with 2-6 Fargate tasks) each task keeps its
+// own counter, so the effective limit becomes `limit x taskCount` and resets on
+// every deploy — the limiter is defeated even with correct keying. When
+// REDIS_URL is set, every limiter is backed by Redis so all instances share one
+// counter. REDIS_URL unset (local dev, single-process PM2 staging) => default
+// MemoryStore, behaviour unchanged. Each limiter passes a distinct `name` used
+// as the Redis key prefix so buckets stay independent (MemoryStore got this for
+// free by being a fresh instance per rateLimit() call).
+
+let redisClient: Redis | undefined;
+function getRedisClient(): Redis {
+  if (!redisClient) {
+    redisClient = new Redis(env.redisUrl, {
+      // Rate limiting must never take the API down. Bound retries so a dead
+      // Redis rejects fast (-> FailOpenStore lets the request through) instead
+      // of hanging the request.
+      maxRetriesPerRequest: 2,
+      connectTimeout: 3000,
+    });
+    // ioredis emits 'error' on each failed (re)connect; swallow + log so an
+    // unhandled 'error' event can never crash the process.
+    redisClient.on('error', (err) => logger.error({ err }, 'rate-limit redis client error'));
+  }
+  return redisClient;
+}
+
 /**
- * Build a per-IP rate limiter. Each call returns a fresh instance with its
- * own in-memory store, so distinct endpoints count independently even though
- * they share this module.
+ * Connectivity probe for the rate-limit Redis, for startup checks / the
+ * connection monitor. Returns 'skipped' when REDIS_URL is unset (in-memory
+ * MemoryStore — nothing to check), 'ok' when a PING succeeds, throws otherwise.
+ * Reuses the exact client the limiters use, so a success also warms the pool.
  *
- * @param limit    max requests per IP per window
+ * NON-fatal by contract: callers must NOT exit the process on failure. The store
+ * fails open, so a missing Redis degrades to per-process limiting — it must
+ * never take the API down (that would be worse than the runtime behaviour).
+ */
+export async function checkRedisConnection(): Promise<'ok' | 'skipped'> {
+  if (!env.redisUrl) return 'skipped';
+  await getRedisClient().ping();
+  return 'ok';
+}
+
+// Fail-OPEN wrapper: if Redis is unreachable, allow the request rather than
+// 500 the endpoint. A limiter outage should degrade to "no throttling", never
+// to "auth is down". The only cost of an outage is a window of unthrottled
+// traffic; correct counting resumes automatically once Redis is back.
+export class FailOpenStore implements Store {
+  constructor(private readonly inner: Store) {}
+  init(options: Options): void {
+    this.inner.init?.(options);
+  }
+  async increment(key: string): Promise<IncrementResponse> {
+    try {
+      return await this.inner.increment(key);
+    } catch (err) {
+      logger.error({ err }, 'rate-limit store increment failed — failing open');
+      return { totalHits: 0, resetTime: undefined };
+    }
+  }
+  async decrement(key: string): Promise<void> {
+    try {
+      await this.inner.decrement(key);
+    } catch (err) {
+      logger.error({ err }, 'rate-limit store decrement failed');
+    }
+  }
+  async resetKey(key: string): Promise<void> {
+    try {
+      await this.inner.resetKey(key);
+    } catch (err) {
+      logger.error({ err }, 'rate-limit store resetKey failed');
+    }
+  }
+}
+
+// A Redis-backed store when REDIS_URL is set, wrapped so a Redis outage fails
+// open. Returns `{}` (no `store` key) otherwise, so express-rate-limit keeps its
+// default per-process MemoryStore. Spreading `{}` avoids overriding that default
+// with an explicit `undefined`.
+function storeOption(name: string): { store?: Store } {
+  if (!env.redisUrl) return {};
+  const inner = new RedisStore({
+    prefix: `rl:${name}:`,
+    // ioredis transport: rate-limit-redis runs the atomic increment via Lua; we
+    // only forward the raw command.
+    sendCommand: (...args: string[]) =>
+      getRedisClient().call(...(args as [string, ...string[]])) as Promise<RedisReply>,
+  });
+  return { store: new FailOpenStore(inner) };
+}
+
+/**
+ * Build a per-client rate limiter. Keyed on the real client IP (CF-Connecting-IP
+ * behind Cloudflare, else req.ip). `name` namespaces the bucket — distinct names
+ * count independently, which is what keeps endpoints separate once a shared
+ * Redis store is in play.
+ *
+ * @param name     unique bucket id (also the Redis key prefix)
+ * @param limit    max requests per client per window
  * @param windowMs rolling window length (default 15 min)
  */
-function makeRateLimiter(limit: number, windowMs: number = WINDOW_MS): RequestHandler {
+function makeRateLimiter(
+  name: string,
+  limit: number,
+  windowMs: number = WINDOW_MS,
+): RequestHandler {
   return rateLimit({
     windowMs,
     limit,
     standardHeaders: true,
     legacyHeaders: false,
     keyGenerator: clientIp,
+    ...storeOption(name),
     handler: tooManyRequestsHandler,
     skip: skipInTest,
   });
 }
 
 // --- OTP-guess endpoints — lowest budget; code-guessing is the attack -------
-export const validateOtpRateLimiter: RequestHandler = makeRateLimiter(3);
-export const validateOtpPhoneRateLimiter: RequestHandler = makeRateLimiter(3);
-export const validateOtpEmailRateLimiter: RequestHandler = makeRateLimiter(3);
-export const forgotPasswordVerifyRateLimiter: RequestHandler = makeRateLimiter(3);
+export const validateOtpRateLimiter: RequestHandler = makeRateLimiter('otp-validate', 3);
+export const validateOtpPhoneRateLimiter: RequestHandler = makeRateLimiter('otp-validate-phone', 3);
+export const validateOtpEmailRateLimiter: RequestHandler = makeRateLimiter('otp-validate-email', 3);
+export const forgotPasswordVerifyRateLimiter: RequestHandler = makeRateLimiter('forgot-verify', 3);
 
 // --- OTP/email SEND endpoints — medium budget; abuse = spamming a victim ----
-export const forgotPasswordRequestRateLimiter: RequestHandler = makeRateLimiter(10);
-export const requestVerificationPhoneRateLimiter: RequestHandler = makeRateLimiter(10);
-export const requestVerificationEmailRateLimiter: RequestHandler = makeRateLimiter(10);
+export const forgotPasswordRequestRateLimiter: RequestHandler = makeRateLimiter('forgot-request', 10);
+export const requestVerificationPhoneRateLimiter: RequestHandler = makeRateLimiter('verify-request-phone', 10);
+export const requestVerificationEmailRateLimiter: RequestHandler = makeRateLimiter('verify-request-email', 10);
 
 // --- Account creation -------------------------------------------------------
-export const registerRateLimiter: RequestHandler = makeRateLimiter(15);
-export const registerByPhoneRateLimiter: RequestHandler = makeRateLimiter(15);
+export const registerRateLimiter: RequestHandler = makeRateLimiter('register', 15);
+export const registerByPhoneRateLimiter: RequestHandler = makeRateLimiter('register-phone', 15);
 
 // --- Login — looser; legit users mistype passwords -------------------------
-export const loginRateLimiter: RequestHandler = makeRateLimiter(30);
-export const adminLoginRateLimiter: RequestHandler = makeRateLimiter(10);
+export const loginRateLimiter: RequestHandler = makeRateLimiter('login', 30);
+export const adminLoginRateLimiter: RequestHandler = makeRateLimiter('admin-login', 10);
 
 // --- Voucher validation — per-member (or per-IP fallback). The dry-run lookup
 //     returns a distinct reason per failure mode, i.e. a code-validity oracle.
@@ -99,6 +203,7 @@ export const voucherValidateRateLimiter: RequestHandler = rateLimit({
     const user = (req as unknown as { user?: { id?: string } }).user;
     return user?.id ?? clientIp(req);
   },
+  ...storeOption('voucher-validate'),
   handler: tooManyRequestsHandler,
   skip: skipInTest,
 });
@@ -115,6 +220,7 @@ export const mediaDownloadRateLimiter: RequestHandler = rateLimit({
     const user = (req as unknown as { user?: { id?: string } }).user;
     return user?.id ?? clientIp(req);
   },
+  ...storeOption('media-download'),
   handler: tooManyRequestsHandler,
   skip: skipInTest,
 });

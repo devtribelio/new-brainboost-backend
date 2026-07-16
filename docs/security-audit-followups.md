@@ -147,7 +147,15 @@ falling back to `req.ip`. Unit-tested in
    `TRUST_PROXY=1`. The realip-module route is preferred (Cloudflare-range-aware, not a
    brittle hop count).
 3. **When the API scales beyond one instance** (ECS or `pm2 -i >1`), the in-memory store
-   no longer suffices — move to a shared store (`rate-limit-redis` + ElastiCache/Upstash).
+   no longer suffices — a shared store is required. **IMPLEMENTED:** every limiter now
+   uses a Redis store (`rate-limit-redis` + `ioredis`) when `REDIS_URL` is set, gated so
+   `REDIS_URL` unset falls back to the per-process MemoryStore (single-process staging /
+   local dev, unchanged). Each limiter has its own key prefix (`rl:<name>:`) so buckets
+   stay independent, and the store is wrapped in a **fail-open** decorator: a Redis outage
+   degrades to "no throttling" rather than 500-ing auth. The ElastiCache node
+   (`cache.t4g.micro`, single node) + `REDIS_URL` injection are provisioned in
+   `infra/cdk/lib/bb-ecs-stack.ts`. Code: `packages/common/src/middlewares/rate-limit.middleware.ts`;
+   tests: `apps/mobile-api/tests/rate-limit-store.spec.ts`.
 
 **Verify after deploy:** re-run ~40 rapid login attempts from one client; expect a `429`
 after the 30th within the 15-min window, and `RateLimit-Remaining` decrementing
