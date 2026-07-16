@@ -1,0 +1,46 @@
+# OSV-Scanner ignore list for the BLOCKING production audit (see
+# .github/workflows/security.yml). Every entry below is a DEV / build / test
+# tooling advisory that is NOT present in the production dependency tree
+# (verified: `pnpm ls --prod --depth Infinity` lists none of these packages).
+# The production tree must stay clean — do NOT add a production package here;
+# fix it instead. The advisory (non-blocking) step scans WITHOUT this file, so
+# these stay visible in CI logs. Re-triage whenever the dev toolchain is bumped.
+
+# --- vite (dev server / test bundler) ---
+[[IgnoredVulns]]
+id = "GHSA-4w7w-66w2-5vf9"
+reason = "vite — dev/test tooling only, not in the production tree"
+[[IgnoredVulns]]
+id = "GHSA-fx2h-pf6j-xcff"
+reason = "vite — dev/test tooling only, not in the production tree"
+[[IgnoredVulns]]
+id = "GHSA-v6wh-96g9-6wx3"
+reason = "vite — dev/test tooling only, not in the production tree"
+
+# --- vitest (test runner) ---
+[[IgnoredVulns]]
+id = "GHSA-5xrq-8626-4rwp"
+reason = "vitest — test tooling only, not in the production tree"
+
+# --- esbuild (bundler, pulled by tsup/vite) ---
+[[IgnoredVulns]]
+id = "GHSA-67mh-4wv8-2f99"
+reason = "esbuild — build tooling only, not in the production tree"
+[[IgnoredVulns]]
+id = "GHSA-g7r4-m6w7-qqqr"
+reason = "esbuild — build tooling only, not in the production tree"
+
+# --- js-yaml (dev transitive) ---
+[[IgnoredVulns]]
+id = "GHSA-h67p-54hq-rp68"
+reason = "js-yaml — dev transitive, not in the production tree"
+
+# --- form-data (dev transitive) ---
+[[IgnoredVulns]]
+id = "GHSA-hmw2-7cc7-3qxx"
+reason = "form-data — dev transitive, not in the production tree"
+
+# --- brace-expansion (dev transitive) ---
+[[IgnoredVulns]]
+id = "GHSA-jxxr-4gwj-5jf2"
+reason = "brace-expansion — dev transitive, not in the production tree"
