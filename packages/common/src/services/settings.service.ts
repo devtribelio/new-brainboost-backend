@@ -25,6 +25,7 @@ export const SETTING_KEYS = {
   disbursementFee: 'disbursement.fee',
   disbursementMinBalance: 'disbursement.minBalance',
   kycMinBalance: 'kyc.minBalance',
+  salesAlertEmail: 'sales.alertEmail',
 } as const;
 
 export class SettingsService {
