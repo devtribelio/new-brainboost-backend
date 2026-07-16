@@ -147,8 +147,59 @@ falling back to `req.ip`. Unit-tested in
    `TRUST_PROXY=1`. The realip-module route is preferred (Cloudflare-range-aware, not a
    brittle hop count).
 3. **When the API scales beyond one instance** (ECS or `pm2 -i >1`), the in-memory store
-   no longer suffices — move to a shared store (`rate-limit-redis` + ElastiCache/Upstash).
+   no longer suffices — a shared store is required. **IMPLEMENTED:** every limiter now
+   uses a Redis store (`rate-limit-redis` + `ioredis`) when `REDIS_URL` is set, gated so
+   `REDIS_URL` unset falls back to the per-process MemoryStore (single-process staging /
+   local dev, unchanged). Each limiter has its own key prefix (`rl:<name>:`) so buckets
+   stay independent, and the store is wrapped in a **fail-open** decorator: a Redis outage
+   degrades to "no throttling" rather than 500-ing auth. The ElastiCache node
+   (`cache.t4g.micro`, single node) + `REDIS_URL` injection are provisioned in
+   `infra/cdk/lib/bb-ecs-stack.ts`. Code: `packages/common/src/middlewares/rate-limit.middleware.ts`;
+   tests: `apps/mobile-api/tests/rate-limit-store.spec.ts`.
 
 **Verify after deploy:** re-run ~40 rapid login attempts from one client; expect a `429`
 after the 30th within the 15-min window, and `RateLimit-Remaining` decrementing
 monotonically.
+
+---
+
+## 2026-07-16 — Per-identifier rate-limit keying (shared-IP / carrier-NAT fix)
+
+**Problem:** credential limiters keyed on client IP. A whole office (one NAT'd
+public IP) — and, in production, thousands of mobile users behind one **carrier
+CGNAT** IP — share a single bucket, so one user's failed logins / OTP attempts
+`429` everyone else. The 3-attempt OTP-verify limiters are the worst: 3 people
+on one carrier IP verifying their own codes in 15 min block the 4th.
+
+**Fix (implemented, `rate-limit.middleware.ts`):** credential limiters now key on
+the **account identifier from the request body**, not the IP. IP is only a
+fallback when no identifier is present (malformed body, social/refresh grant).
+The identifier is normalized (casing/formatting can't spawn a fresh bucket) and
+SHA-256 hashed (no raw email/phone in Redis keys). Mapping:
+
+| Limiter | Body field → key |
+|---|---|
+| login | `username` (IP fallback for social/refresh grants) + `skipSuccessfulRequests` |
+| register | `username` else phone target |
+| registerByPhone | `otpPhoneTarget(phoneCode, phone)` |
+| forgotPassword request/verify | `email` else digits-normalized `phone` |
+| validateOtp | `target` |
+| validateOtpEmail / validateOtpPhone | `memberId` |
+| requestVerificationEmail / Phone | `memberId` |
+
+This also **hardens** targeted attacks: an OTP-guess budget is now per-victim,
+not per-attacker-IP, so rotating IPs can't multiply the guesses.
+
+**Verified:** unit tests `apps/mobile-api/tests/rate-limit-identifier.spec.ts`
+(normalization, kind-isolation, IP fallback, phone canonicalization) + live
+2-account/1-IP run: exhausting user A's 30-login budget left user B on the same
+IP completely unblocked (5/5 passed).
+
+**Deliberately NOT done — per-IP volumetric backstop in-app.** Adding an in-app
+per-IP cap would re-introduce the carrier-NAT lockout this change removes.
+Volumetric per-IP protection belongs at the **edge (Cloudflare rate rules / AWS
+WAF) with a CAPTCHA challenge** (a challenged carrier user solves a captcha; a
+bot fails it), not a hard app-layer block. Ties to the existing `// TODO WAF`.
+
+**Cleanup:** removed the dead `adminLoginRateLimiter` (admin app deleted 2026-07,
+no consumers).
