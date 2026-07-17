@@ -20,10 +20,12 @@ export const SETTING_KEYS = {
   affiliateCookieDays: 'affiliate.cookieDays',
   affiliateHoldDays: 'affiliate.holdDays',
   affiliateIapHoldDays: 'affiliate.iapHoldDays',
+  disbursementAutoEnabled: 'disbursement.autoEnabled',
   disbursementAutoApproveMax: 'disbursement.autoApproveMax',
   disbursementFee: 'disbursement.fee',
   disbursementMinBalance: 'disbursement.minBalance',
   kycMinBalance: 'kyc.minBalance',
+  salesAlertEmail: 'sales.alertEmail',
 } as const;
 
 export class SettingsService {
@@ -44,6 +46,13 @@ export class SettingsService {
     const raw = await this.get(key, String(fallback));
     const n = Number(raw);
     return Number.isFinite(n) ? n : fallback;
+  }
+
+  async getBoolean(key: string, fallback: boolean): Promise<boolean> {
+    const raw = (await this.get(key, String(fallback))).trim().toLowerCase();
+    if (raw === 'true' || raw === '1') return true;
+    if (raw === 'false' || raw === '0') return false;
+    return fallback;
   }
 
   async set(key: string, value: string, description?: string): Promise<void> {

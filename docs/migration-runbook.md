@@ -16,6 +16,12 @@ only the data the new mobile app needs (≈58 courses, ≈57k members, 2 communi
 - **Idempotent**: every script is safe to re-run (keyed on `legacyId` / `skipDuplicates`).
 - **Legacy RDS resets** (`ECONNRESET`) on the two long scripts — `backfill-affiliate-tree`
   and `migrate:network-posts`. Just **re-run until `DONE`** (took 2 runs each on the trial).
+- **Timezone**: legacy DATETIMEs are WIB wall-clock (UTC+7). `scripts/legacy-db.ts` sets
+  mysql2 `timezone: '+07:00'` so Postgres stores UTC (= legacy −7h). A DB migrated **before
+  2026-07-13** has `created_at` +7h off on members/enrollments/commissions/reviews/likes →
+  fix once with `pnpm resync:fix-dates` (idempotent, re-reads legacy). Fresh migrations from
+  this point are correct with no follow-up. Verify: any legacy wall-clock vs its Postgres
+  `to_char(created_at, ...)` must differ by exactly 7h.
 
 ---
 
@@ -58,7 +64,7 @@ pnpm backfill:affiliate-program-product                       # link 58 course p
 
 ## 4. Members + enrollments + tree
 ```bash
-pnpm migrate:members              # ≈57k members + ≈62k enrollments; writes scripts/member-redirect.json
+pnpm migrate:members              # ≈57k members + ≈62k enrollments + profile bank account; writes scripts/member-redirect.json
 npx tsx scripts/backfill-affiliate-tree.ts    # inviterId / affiliateBased / affiliateCode (reads redirect.json)  ← may ECONNRESET, re-run
 pnpm migrate:member-affiliators   # MemberAffiliator join records (scoped, redirect-aware)
 pnpm migrate:affiliate-commissions # ≈46k commissions as status=MIGRATED → drives currentTier/currentRate
@@ -68,9 +74,16 @@ pnpm migrate:kyc                   # legacy member_data_kyc → kycStatus + kycS
 `migrate:kyc` runs after `migrate:members` (reads member-redirect.json; idempotent, guarded so re-runs
 never clobber a MANUAL/SUMSUB decision). Source = legacy `member_data_kyc` (the real KYC table written by
 tribelio-admin), NOT `member.last_kyc_status` (stale cache). APPROVED + REJECTED carried (latest row per
-member, redirect-aware); PENDING skipped → those members re-KYC fresh via Sumsub. Backfills
+member, redirect-aware); PENDING skipped → those members re-KYC fresh via **Didit** (the provider since
+2026-06-26; the `kycSource` flag value `SUMSUB` is legacy naming only). Backfills
 `kycIdNumber=nik`, `kycReviewedAt=actionat`, `kycRejectedReason=reason`. Trial DB: ≈2.4k members
 (APPROVED ≈1.5k, REJECTED ≈0.86k). Legacy KTP/selfie images live in legacy S3 and are NOT migrated.
+
+**Bank account:** `migrate:members` carries `member.bank_account_*` (profile-level, rarely filled —
+≈1.1k/704k). The real payout data lives on the **APPROVED `member_data_kyc` row** and is carried by the
+**resync kyc syncer**, not by `migrate:kyc` — so after the resync tool is wired up (below), run
+`pnpm resync kyc` to fill bank on the ≈4.2k members who have it. All bank writes are fill-if-NULL
+(never overwrite an app-set account → never trips the BANK_CHANGE re-KYC).
 `migrate:affiliate-commissions` runs after member-affiliators + backfill:affiliate-program-product.
 
 **Commissions / tier (status MIGRATED):** `currentTier`/`currentRate` in `/affiliate/me/summary`
@@ -111,6 +124,20 @@ pnpm issue:credential revenuecat --affiliate --refund
 #   --refund    → Apple/RevenueCat refund events auto-revoke enrollment + void commission
 ```
 
+## 9. Hand off to the resync worker (transition period)
+This runbook is a **one-shot** load. Legacy keeps being written to until each module is cut
+over, so the migrated data goes stale immediately — the incremental resync tool takes over
+from here. Spec: [`legacy-resync-plan.md`](./legacy-resync-plan.md).
+```bash
+pnpm resync:seed-redirect         # scripts/member-redirect.json → member_redirect table (once)
+pnpm resync kyc                   # fills bank from APPROVED member_data_kyc (see §4)
+pnpm resync --dry-run             # sanity check: counts only, no writes
+pnpm resync                       # first full drain (all 7 syncers)
+pnpm resync:worker                # then run continuously (RESYNC_INTERVAL_SEC, default 3600)
+```
+The syncers own **updates** to already-migrated rows; do NOT re-run `migrate:*` for that
+(they are insert-only). `pnpm resync:unlock` clears a stale run-lock left by a hard-kill.
+
 ---
 
 ## Validated result (trial DB)
@@ -125,9 +152,12 @@ pnpm issue:credential revenuecat --affiliate --refund
 | IAP | iosProductId 54 |
 
 ## Known follow-ups (not part of this runbook)
-- **Affiliate commission flow**: `commitCommissionsForPayment` requires a `programId`, but the
-  app OneLink sends `product + affCode` with no program — needs a visit→program resolver, and a
-  decision on the programId-required-vs-optional inconsistency. Programs are linked (step 3) but
-  this gap means commissions may not fire yet. See member-migration-plan.md §7.
 - **Resilience**: add reconnect/retry to `backfill-affiliate-tree` + `migrate:network-posts`
-  so an `ECONNRESET` resumes instead of restarting the full scan.
+  so an `ECONNRESET` resumes instead of restarting the full scan. (The resync worker already
+  has this — `connectResilientLegacy`, `RESYNC_LEGACY_RECONNECT_RETRIES`; the one-shot
+  migrate scripts still don't.)
+
+**Resolved since this runbook was written:**
+- ~~Affiliate commission flow needs a visit→program resolver~~ — done: `VisitService` resolves
+  `programCode` → program, with a fallback that auto-picks when the affiliator is enrolled in
+  exactly one active program (`affiliate.visit.registration.fallback_single_program`).

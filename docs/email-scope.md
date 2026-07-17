@@ -73,6 +73,19 @@ Fired from payment success (`controllers/payment.php`, `TBEvent/PaymentSubscribe
 | `PayNow` | invoice / pay reminder (legacy: `sqsUrgent`) |
 | `VoucherCodeForAffiliate` | voucher delivery (`TBTaskQueue/Course/VoucherCodeSendEmail`) |
 
+> **SaleAlert (NEW, ✅ shipped 2026-07-16)** — single-tenant replacement for legacy's
+> chief email (`TBEmail_Engine_CoursePaymentSuccess`, "Produk X Berhasil Terjual!",
+> sent to `networkAccount->member->email`). Recipients now come from app_settings
+> **`sales.alertEmail`** (comma-separated, empty = off, seeded empty) — one outbox row
+> per address with `recipient` set (relay maps it to `msg.to`; bb-comms sends there
+> instead of the buyer). Producer: `packages/domain/src/comms/listeners/commerce-email.listener.ts`
+> on `commerce.payment.success`. Skips renewals; the plan-backed (subscription) skip
+> lands with the subscription branch. bb-comms side (pending, separate repo): handler
+> `sale_alert.go` + template `sale_alert.html`, reads `commerce_transactions` by refId
+> (+ `m.phone` in `GetCommerceTxn`), buyer name/email/phone included, `To` = `msg.To`,
+> subject "Produk {title} Berhasil Terjual!". Note: legacy only fired via the Xendit webhook, so
+> voucher-100% sales never emailed the chief — the event-driven port covers them too.
+
 ### C. Affiliate / disbursement — ❌ email not ported (module ~partial)
 
 Fired from commission compute + disbursement callback.

@@ -20,7 +20,7 @@ export function registerPostNotificationListener(): void {
         memberId: e.postAuthorId,
         type: ActionLabel.NewLike,
         notifGroup: NotifGroup.General,
-        title: `${actor.fullName} liked your post`,
+        title: `${actor.fullName} menyukai postinganmu`,
         payload: { refTable: 'post', refId: e.postId, actorId: e.actorId },
         dedupeKey: `newLike:post:${e.postId}:${e.actorId}`,
       });

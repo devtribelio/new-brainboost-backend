@@ -28,6 +28,12 @@ const SETTINGS: Array<{ key: string; value: string; description: string }> = [
       'Days an IAP-channel commission stays PENDING before BALANCE (longer: covers store refund window).',
   },
   {
+    key: 'disbursement.autoEnabled',
+    value: 'false',
+    description:
+      "Kill-switch for the AUTO payout lane ('true' to enable). false = every payout goes through backoffice approval.",
+  },
+  {
     key: 'disbursement.autoApproveMax',
     value: '1000000',
     description:
@@ -36,19 +42,25 @@ const SETTINGS: Array<{ key: string; value: string; description: string }> = [
   {
     key: 'disbursement.fee',
     value: '5000',
-    description: 'Flat platform fee (IDR) deducted from the gross payout (member receives gross - fee).',
+    description:
+      'Flat platform fee (IDR) deducted from the gross payout (member receives gross - fee).',
   },
   {
     key: 'disbursement.minBalance',
     value: '55000',
-    description:
-      'Minimum withdrawable balance (IDR) required to request a payout (gross >= this).',
+    description: 'Minimum withdrawable balance (IDR) required to request a payout (gross >= this).',
   },
   {
     key: 'kyc.minBalance',
     value: '55000',
     description:
       'Minimum withdrawable balance (IDR) required before a member may request KYC. 0 = gate off.',
+  },
+  {
+    key: 'sales.alertEmail',
+    value: '',
+    description:
+      'Comma-separated email address(es) that receive a SaleAlert email on every successful (non-subscription) sale. Empty = off.',
   },
 ];
 

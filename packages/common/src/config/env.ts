@@ -107,6 +107,12 @@ export const env = {
   // the real client IP — required for per-IP rate limiting to work correctly.
   // Also accepts Express values like "loopback" or a CIDR list.
   trustProxy: optional('TRUST_PROXY', ''),
+  // Redis connection string for the shared rate-limit store. Empty = per-process
+  // in-memory store (fine for single-process PM2 staging / local dev). Set on
+  // multi-instance deployments (ECS 2-6 tasks) so all instances share one
+  // counter — otherwise the effective limit is `limit x instanceCount`. See
+  // rate-limit.middleware.ts + docs/security-audit-followups.md.
+  redisUrl: optional('REDIS_URL', ''),
   log: {
     level: optional('LOG_LEVEL', 'info'),
   },

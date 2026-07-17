@@ -64,12 +64,12 @@ export function registerCommentNotificationListener(): void {
         const label = targets.get(memberId)!;
         const title =
           label === ActionLabel.Tag
-            ? `${actor.fullName} tagged you in a ${isReply ? 'reply' : 'comment'}`
+            ? `${actor.fullName} menandai kamu di ${isReply ? 'balasan' : 'komentar'}`
             : label === ActionLabel.NewReply
-              ? `${actor.fullName} replied to your comment`
+              ? `${actor.fullName} membalas komentarmu`
               : network
-                ? `${actor.fullName} commented on your post in ${network.name}`
-                : `${actor.fullName} commented on your post`;
+                ? `${actor.fullName} mengomentari postinganmu di ${network.name}`
+                : `${actor.fullName} mengomentari postinganmu`;
 
         await producer.createForMember({
           memberId,
@@ -106,7 +106,7 @@ export function registerCommentNotificationListener(): void {
         memberId: e.commentAuthorId,
         type: ActionLabel.NewLike,
         notifGroup: NotifGroup.General,
-        title: `${actor.fullName} liked your comment`,
+        title: `${actor.fullName} menyukai komentarmu`,
         payload: { refTable: 'comment', refId: e.commentId, actorId: e.actorId },
         dedupeKey: `newLike:comment:${e.commentId}:${e.actorId}`,
       });
