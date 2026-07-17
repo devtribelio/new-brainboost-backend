@@ -232,23 +232,43 @@ export class BbEcsStack extends cdk.Stack {
       circuitBreaker: { rollback: true },
     });
 
-    // ============ cron (EventBridge → RunTask, tiap jam) ============
+    // ============ cron (EventBridge → RunTask) ============
+    // Dua lane, binary sama (dist/jobs-runner.js), argv = filter nama job (lihat
+    // apps/mobile-api/src/jobs-runner.ts — nama salah = exit 1, bukan diem-diem no-op).
     // Task def eksplisit biar bisa set ARM64 + taskRole.
-    const cronTd = new ecs.FargateTaskDefinition(this, 'CronTask', {
-      cpu: 256, memoryLimitMiB: 512, taskRole,
-      runtimePlatform: { cpuArchitecture: ecs.CpuArchitecture.ARM64 },
-    });
-    cronTd.addContainer('cron', {
-      image: mobileApiImg, command: ['node', 'dist/jobs-runner.js'],
-      environment: env, secrets,
-      logging: ecs.LogDrivers.awsLogs({ streamPrefix: 'cron', logGroup: logGroup('cron') }),
-    });
+    //  - Cron (hourly): affiliate PENDING->BALANCE + expire stale payments.
+    //  - CronDisburse (tiap 5 mnt): sweep payout yang sudah di-approve backoffice ke
+    //    Xendit, biar approval MANUAL nggak nunggu sampai jam berikutnya. Idempotent —
+    //    cuma ambil row PENDING dengan approvedAt terisi, overlap antar lane aman.
+    const makeCronLane = (id: string, streamPrefix: string, jobNames: string[]) => {
+      const td = new ecs.FargateTaskDefinition(this, `${id}Task`, {
+        cpu: 256, memoryLimitMiB: 512, taskRole,
+        runtimePlatform: { cpuArchitecture: ecs.CpuArchitecture.ARM64 },
+      });
+      td.addContainer(streamPrefix, {
+        image: mobileApiImg, command: ['node', 'dist/jobs-runner.js', ...jobNames],
+        environment: env, secrets,
+        logging: ecs.LogDrivers.awsLogs({ streamPrefix, logGroup: logGroup(streamPrefix) }),
+      });
+      return td;
+    };
     new ecsPatterns.ScheduledFargateTask(this, 'Cron', {
       cluster,
       schedule: events.Schedule.cron({ minute: '0' }), // 0 * * * *  hourly
       subnetSelection: { subnetType: ec2.SubnetType.PUBLIC },
       securityGroups: [appSg],
-      scheduledFargateTaskDefinitionOptions: { taskDefinition: cronTd },
+      scheduledFargateTaskDefinitionOptions: {
+        taskDefinition: makeCronLane('Cron', 'cron', ['affiliatePendingToBalance', 'expirePendingPayments']),
+      },
+    });
+    new ecsPatterns.ScheduledFargateTask(this, 'CronDisburse', {
+      cluster,
+      schedule: events.Schedule.cron({ minute: '*/5' }), // tiap 5 menit
+      subnetSelection: { subnetType: ec2.SubnetType.PUBLIC },
+      securityGroups: [appSg],
+      scheduledFargateTaskDefinitionOptions: {
+        taskDefinition: makeCronLane('CronDisburse', 'cron-disburse', ['executeApprovedDisbursements']),
+      },
     });
     // CATATAN: ScheduledFargateTask nggak set assignPublicIp. Kalau cron gagal pull image
     // (no route ke ECR di public subnet), tambah VPC endpoint (ECR/S3/Logs/Secrets) atau NAT.
