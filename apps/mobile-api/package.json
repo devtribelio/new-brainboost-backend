@@ -39,6 +39,7 @@
     "swagger-ui-express": "^5.0.1"
   },
   "devDependencies": {
+    "@types/multer": "^2.2.0",
     "@types/node": "^22.9.0",
     "aws-sdk-client-mock": "^4.1.0"
   }
