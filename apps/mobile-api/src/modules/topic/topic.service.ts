@@ -9,6 +9,9 @@ interface TopicListQuery {
   networkInput?: string;
   // Authed member id. When provided, each row gets `isSubscribed` set.
   memberId?: string;
+  // Filter by subscription state of the authed member. Anonymous callers are
+  // treated as subscribed-to-nothing: true → empty, false → no-op.
+  isSubscribe?: boolean;
 }
 
 export interface TopicSubscribeResult {
@@ -31,6 +34,15 @@ export class TopicService {
       if (!networkId) return { rows: [], total: 0 };
       where.networkId = networkId;
     }
+    if (q.isSubscribe !== undefined) {
+      if (q.memberId) {
+        where.subscriptions = q.isSubscribe
+          ? { some: { memberId: q.memberId } }
+          : { none: { memberId: q.memberId } };
+      } else if (q.isSubscribe) {
+        return { rows: [], total: 0 };
+      }
+    }
 
     const [rows, total] = await Promise.all([
       prisma.topic.findMany({
@@ -44,6 +56,12 @@ export class TopicService {
 
     if (!q.memberId || rows.length === 0) {
       return { rows, total };
+    }
+
+    // Filter already pins the subscription state of every row.
+    if (q.isSubscribe !== undefined) {
+      const decorated = rows.map((r) => Object.assign(r, { isSubscribed: q.isSubscribe }));
+      return { rows: decorated, total };
     }
 
     const topicIds = rows.map((r) => r.id);

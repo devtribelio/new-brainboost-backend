@@ -31,6 +31,14 @@ export class TopicController {
     description: 'Network code (FE primary). Falls back to legacyId int / UUID.',
   })
   @ApiQuery({ name: 'networkId', type: 'string', required: false, example: 'network-uuid-1234' })
+  @ApiQuery({
+    name: 'isSubscribe',
+    type: 'boolean',
+    required: false,
+    example: true,
+    description:
+      'Filter by subscription state of the authed member. Omit to list all. Anonymous + true → empty list.',
+  })
   @ApiResponse({ status: 200, type: () => TopicDto, isArray: true, envelope: 'paginated' })
   list = async (req: AuthenticatedRequest, res: Response) => {
     const p = parsePagination(req.query as Record<string, unknown>);
@@ -38,10 +46,16 @@ export class TopicController {
     // FE sends `code` (network code). `networkId` accepted as alias for backwards compat.
     const networkInput =
       (req.query.code as string) ?? (req.query.networkId as string) ?? undefined;
+    const rawIsSubscribe = req.query.isSubscribe as string | undefined;
+    const isSubscribe =
+      rawIsSubscribe === undefined
+        ? undefined
+        : rawIsSubscribe === 'true' || rawIsSubscribe === '1';
     const { rows, total } = await this.topicService.list(p, {
       keyword,
       networkInput,
       memberId: req.user?.id,
+      isSubscribe,
     });
     return okPaginated(res, rows.map(serializeTopic), { page: p.page, perPage: p.perPage, total });
   };

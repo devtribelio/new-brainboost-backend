@@ -13,7 +13,7 @@ export class UpdateProfileRequestDto {
   @ApiPropertyOptional({
     nullable: true,
     example: 'john@mail.com',
-    description: 'Applied only while the member email is unverified (stored normalized, unverified); silently ignored once verified.',
+    description: 'Changeable only while the member email is unverified (stored normalized, unverified); once verified a different address → 400, re-sending the current one is a no-op.',
   })
   email?: string | null;
 

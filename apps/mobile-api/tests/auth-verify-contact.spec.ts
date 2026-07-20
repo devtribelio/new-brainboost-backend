@@ -165,7 +165,7 @@ describe('generic contact verification (post-login)', () => {
     expect(info.body.data.isEmailVerified).toBe(true);
   });
 
-  it('profile/update email is locked once verified: a verified email is silently kept', async () => {
+  it('profile/update email is locked once verified: a different address → 400, own address is a no-op', async () => {
     const app = buildApp();
     const token = await emailMemberToken(app); // email verified by register OTP
     const auth = { Authorization: `Bearer ${token}` };
@@ -174,9 +174,18 @@ describe('generic contact verification (post-login)', () => {
       .post('/api/member/account/profile/update')
       .set(auth)
       .send({ email: EMAIL2 });
-    expect(upd.status).toBe(200);
-    expect(upd.body.data.email).toBe(EMAIL); // unchanged
-    expect(upd.body.data.isEmailVerified).toBe(true); // verification untouched
+    expect(upd.status).toBe(400);
+    expect(upd.body.error.message).toBe('Email sudah terverifikasi dan tidak dapat diubah');
+
+    // FE form echo: re-sending the current email alongside other fields is fine.
+    const echo = await request(app)
+      .post('/api/member/account/profile/update')
+      .set(auth)
+      .send({ email: EMAIL.toUpperCase(), bio: 'still me' });
+    expect(echo.status).toBe(200);
+    expect(echo.body.data.email).toBe(EMAIL);
+    expect(echo.body.data.isEmailVerified).toBe(true); // verification untouched
+    expect(echo.body.data.bio).toBe('still me');
   });
 
   it('profile/update email can still be changed while unverified', async () => {

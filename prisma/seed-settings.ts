@@ -42,13 +42,13 @@ const SETTINGS: Array<{ key: string; value: string; description: string }> = [
   {
     key: 'disbursement.fee',
     value: '5000',
-    description: 'Flat platform fee (IDR) deducted from the gross payout (member receives gross - fee).',
+    description:
+      'Flat platform fee (IDR) deducted from the gross payout (member receives gross - fee).',
   },
   {
     key: 'disbursement.minBalance',
     value: '55000',
-    description:
-      'Minimum withdrawable balance (IDR) required to request a payout (gross >= this).',
+    description: 'Minimum withdrawable balance (IDR) required to request a payout (gross >= this).',
   },
   {
     key: 'kyc.minBalance',
@@ -65,8 +65,13 @@ const SETTINGS: Array<{ key: string; value: string; description: string }> = [
   {
     key: 'subscription.reminderDaysBefore',
     value: '7,3,1',
+    description: 'Comma-separated H-minus buckets for the renewal reminder job (email + push).',
+  },
+  {
+    key: 'sales.alertEmail',
+    value: '',
     description:
-      'Comma-separated H-minus buckets for the renewal reminder job (email + push).',
+      'Comma-separated email address(es) that receive a SaleAlert email on every successful (non-subscription) sale. Empty = off.',
   },
 ];
 

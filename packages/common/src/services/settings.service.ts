@@ -27,6 +27,7 @@ export const SETTING_KEYS = {
   kycMinBalance: 'kyc.minBalance',
   subscriptionGraceDays: 'subscription.graceDays',
   subscriptionReminderDaysBefore: 'subscription.reminderDaysBefore',
+  salesAlertEmail: 'sales.alertEmail',
 } as const;
 
 export class SettingsService {
