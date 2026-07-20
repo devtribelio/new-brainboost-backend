@@ -55,12 +55,16 @@ export class ProfileService {
     }
 
     // Email is changeable only while unverified; once verified
-    // (auth/requestVerify type=email) it is locked — silently ignored here.
+    // (auth/requestVerify type=email) it is locked. Re-sending the current
+    // address is a no-op so FE form echoes don't error.
     let email: string | undefined;
-    if (dto.email && !member.isEmailVerified) {
+    if (dto.email) {
       const normalized = dto.email.trim().toLowerCase();
       if (!isEmail(normalized)) throw new BadRequestException('Invalid email');
       if (normalized !== member.email) {
+        if (member.isEmailVerified) {
+          throw new BadRequestException('Email sudah terverifikasi dan tidak dapat diubah');
+        }
         const emailTaken = await prisma.member.findFirst({
           where: { email: normalized, NOT: { id: memberId } },
           select: { id: true },
