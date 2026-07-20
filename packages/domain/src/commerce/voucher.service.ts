@@ -18,10 +18,14 @@ export class VoucherService {
    * Caller computes discount via `computeTotals()` using returned voucher meta.
    */
   async validate(code: string, productId: string): Promise<VoucherCheckResult> {
-    const voucher = await prisma.voucher.findUnique({ where: { code } });
+    const voucher = await prisma.voucher.findUnique({
+      where: { code },
+      include: { products: { select: { productId: true } } },
+    });
     if (!voucher) return { valid: false, reason: 'Voucher not found' };
     if (!voucher.isActive) return { valid: false, reason: 'Voucher inactive' };
-    if (voucher.productId && voucher.productId !== productId) {
+    // Product whitelist: 0 rows = global; >=1 rows = only the listed products.
+    if (voucher.products.length > 0 && !voucher.products.some((p) => p.productId === productId)) {
       return { valid: false, reason: 'Voucher not applicable to this product' };
     }
     const now = new Date();
