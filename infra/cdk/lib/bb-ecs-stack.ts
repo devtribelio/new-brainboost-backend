@@ -166,7 +166,14 @@ export class BbEcsStack extends cdk.Stack {
     env.REDIS_URL = `redis://${redis.attrRedisEndpointAddress}:${redis.attrRedisEndpointPort}`;
 
     // ============ HTTP service helper (di belakang ALB) ============
-    const makeHttpService = (id: string, image: ecs.ContainerImage, port: number, command?: string[]) => {
+    // desiredCount WAJIB >= minCapacity autoscaler-nya. Kalau lebih kecil, tiap
+    // `cdk deploy` menurunkan service ke angka ini dan Application Auto Scaling
+    // baru menaikkannya lagi saat ada alarm — pada CPU rendah alarm itu tidak
+    // pernah datang, jadi prod berjalan di bawah floor tanpa ketahuan (mobile-api
+    // sempat 1 task padahal min 2, 21 Juli 2026).
+    const makeHttpService = (
+      id: string, image: ecs.ContainerImage, port: number, command?: string[], desiredCount = 1,
+    ) => {
       const td = new ecs.FargateTaskDefinition(this, `${id}Task`, {
         cpu: 512, memoryLimitMiB: 1024, taskRole,
         runtimePlatform: { cpuArchitecture: ecs.CpuArchitecture.ARM64 }, // Graviton: native build di Mac + ~20% lebih murah
@@ -179,14 +186,14 @@ export class BbEcsStack extends cdk.Stack {
         portMappings: [{ containerPort: port }],
       });
       return new ecs.FargateService(this, `${id}Svc`, {
-        cluster, taskDefinition: td, desiredCount: 1,
+        cluster, taskDefinition: td, desiredCount,
         minHealthyPercent: 100, maxHealthyPercent: 200, ...placement,
         circuitBreaker: { rollback: true }, // deploy gagal → cepet stop + rollback (bukan gantung 3 jam)
       });
     };
 
     // ---- mobile-api (autoscale 2->6 berdasar CPU; min 2 = floor) ----
-    const mobileSvc = makeHttpService('mobile-api', mobileApiImg, 3000, ['node', 'dist/main.js']);
+    const mobileSvc = makeHttpService('mobile-api', mobileApiImg, 3000, ['node', 'dist/main.js'], 2);
     const scaling = mobileSvc.autoScaleTaskCount({ minCapacity: 2, maxCapacity: 6 });
     scaling.scaleOnCpuUtilization('Cpu', { targetUtilizationPercent: 60 });
 
