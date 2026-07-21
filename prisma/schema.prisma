@@ -379,8 +379,8 @@ model Product {
   affiliatePrograms    AffiliateProgram[]
   affiliateCommissions AffiliateCommission[]
   commerceTransactions CommerceTransaction[]
-  vouchers             Voucher[]
   subscriptionPlan     SubscriptionPlan?
+  voucherProducts      VoucherProduct[]
 
   @@map("products")
 }
@@ -1194,7 +1194,6 @@ model Voucher {
   id        String    @id @default(uuid(7)) @db.Uuid
   legacyId  Int?      @unique @map("legacy_id")
   code      String    @unique
-  productId String?   @map("product_id") @db.Uuid // null = global
   type      String // "PERCENT" | "AMOUNT"
   value     Int
   maxAmount Int?      @map("max_amount") // cap for PERCENT
@@ -1206,10 +1205,24 @@ model Voucher {
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt @map("updated_at")
 
-  product      Product?              @relation(fields: [productId], references: [id])
+  // Product scope whitelist: 0 rows = global (all products), >=1 rows = only those
+  // products (VoucherService.validate). Replaced the old single nullable product_id
+  // column (migration 20260719120000_voucher_multi_product).
+  products     VoucherProduct[]
   transactions CommerceTransaction[]
 
   @@map("vouchers")
+}
+
+/// Junction: which products a voucher applies to. No rows = voucher is global.
+model VoucherProduct {
+  voucherId String  @map("voucher_id") @db.Uuid
+  productId String  @map("product_id") @db.Uuid
+  voucher   Voucher @relation(fields: [voucherId], references: [id], onDelete: Cascade)
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@id([voucherId, productId])
+  @@map("voucher_products")
 }
 
 /// Idempotency guard for voucher redemption. One row per order (CommerceTransaction)
