@@ -3,6 +3,7 @@ import type { AffiliateProgramService } from '@bb/domain/affiliate/program.servi
 import type { AffiliatorService } from '@bb/domain/affiliate/affiliator.service';
 import type { EnrollmentService } from '@bb/domain/affiliate/enrollment.service';
 import type { DisbursementService } from '@bb/domain/affiliate/disbursement.service';
+import type { AffiliateLeaderboardService } from '@bb/domain/affiliate/leaderboard.service';
 import { VisitService } from '@bb/domain/affiliate/visit.service';
 import { ok, okCreated, okPaginated } from '@bb/common/utils/response.util';
 import { UnauthorizedException, BadRequestException } from '@bb/common/exceptions';
@@ -39,6 +40,7 @@ import {
   MemberAffiliatorDto,
   SetModeResultDto,
   VisitLogResultDto,
+  AffiliateLeaderboardDto,
 } from './dto/affiliate-response.dto';
 
 @ApiTags('Affiliate')
@@ -49,7 +51,23 @@ export class AffiliateController {
     private readonly enrollmentService: EnrollmentService,
     private readonly visitService: VisitService,
     private readonly disbursementService: DisbursementService,
+    private readonly leaderboardService: AffiliateLeaderboardService,
   ) {}
+
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Monthly affiliate leaderboard (top-N + own position); other names censored' })
+  @ApiQuery({ name: 'year', required: false, type: 'integer' })
+  @ApiQuery({ name: 'month', required: false, type: 'integer', description: 'WIB calendar month 1..12' })
+  @ApiResponse({ status: 200, type: () => AffiliateLeaderboardDto })
+  getLeaderboard = async (req: AuthenticatedRequest, res: Response) => {
+    if (!req.user) throw new UnauthorizedException();
+    const year = req.query.year !== undefined ? Number(req.query.year) : undefined;
+    const month = req.query.month !== undefined ? Number(req.query.month) : undefined;
+    if ((year !== undefined && !Number.isInteger(year)) || (month !== undefined && !Number.isInteger(month))) {
+      throw new BadRequestException('year and month must be integers');
+    }
+    return ok(res, await this.leaderboardService.getLeaderboard(req.user.id, year, month));
+  };
 
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Get my affiliator profile (auto-generates affiliateCode if missing)' })

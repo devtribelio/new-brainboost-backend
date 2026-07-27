@@ -10,6 +10,10 @@ export const GROWTH_MAX_DEPTH = 4;
 // INACTIVE (legacy: TBAffiliator::INACTIVE_COMMISION_PERCENT)
 export const INACTIVE_RATE = 20;
 
+// Monthly leaderboard (§11 / BB-121)
+export const AFFILIATE_LEADERBOARD_TOPN_DEFAULT = 20; // runtime-configurable via app_settings
+export const AFFILIATE_LEADERBOARD_FREEZE_DAYS = 7; // a past month freezes this many days after its WIB month end
+
 // Attribution & status flow
 export const PENDING_TO_BALANCE_DAYS = 7; // marketing-facing: "5 hari kerja"
 // IAP (Apple/Google via RevenueCat) settles monthly; hold longer before allowing payout.

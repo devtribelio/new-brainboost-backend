@@ -473,3 +473,46 @@ export class VisitLogResultDto {
   @ApiPropertyOptional({ description: 'Set when status is `invalid` or `error`.' })
   reason?: string;
 }
+
+// ── Monthly leaderboard (§11 / BB-121) ────────────────────────────────────────
+
+export class LeaderboardPeriodDto {
+  @ApiProperty({ type: 'integer', example: 2026 })
+  year!: number;
+
+  @ApiProperty({ type: 'integer', example: 7, description: 'WIB calendar month (1..12)' })
+  month!: number;
+
+  @ApiProperty({ description: 'True once the month is frozen (commissions matured); rankings no longer change.' })
+  frozen!: boolean;
+}
+
+export class LeaderboardEntryDto {
+  @ApiProperty({ type: 'integer', example: 1 })
+  rank!: number;
+
+  @ApiProperty({ example: 'Bud* S.', description: 'Censored display name (deterministic); own row is uncensored.' })
+  displayName!: string;
+
+  @ApiProperty({ type: 'integer', example: 12500000, description: 'Total commission (IDR), incl PENDING, excl VOIDED' })
+  totalCommission!: number;
+}
+
+export class LeaderboardMeDto extends LeaderboardEntryDto {
+  @ApiProperty({ description: 'Whether the caller is within the returned top-N.' })
+  inTop!: boolean;
+}
+
+export class AffiliateLeaderboardDto {
+  @ApiProperty({ type: () => LeaderboardPeriodDto })
+  period!: LeaderboardPeriodDto;
+
+  @ApiPropertyOptional({ nullable: true, format: 'date-time', description: 'Last aggregation run for this period; null if never computed.' })
+  updatedAt!: string | null;
+
+  @ApiProperty({ type: 'array', itemType: () => LeaderboardEntryDto })
+  top!: LeaderboardEntryDto[];
+
+  @ApiPropertyOptional({ type: () => LeaderboardMeDto, nullable: true, description: 'Caller position; null when they have no commission this period.' })
+  me!: LeaderboardMeDto | null;
+}

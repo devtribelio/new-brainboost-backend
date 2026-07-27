@@ -3,6 +3,7 @@ import 'dotenv/config'; // load root .env first so DATABASE_URL etc. are set bef
 import { logger } from '@bb/common/config/logger';
 import { prisma } from '@bb/db';
 import { affiliatePendingToBalance } from '@bb/domain/jobs/affiliate-pending-to-balance';
+import { refreshAffiliateLeaderboard } from '@bb/domain/jobs/affiliate-leaderboard';
 import { executeApprovedDisbursements } from '@bb/domain/jobs/execute-approved-disbursements';
 import { expirePendingPayments } from '@bb/domain/jobs/expire-pending-payments';
 import { subscriptionExpire } from '@bb/domain/jobs/subscription-expire';
@@ -35,6 +36,8 @@ const JOBS: Array<{ name: string; run: () => Promise<unknown> }> = [
   // rows to Xendit. Also scheduled solo on a faster tick (bb-cron-disburse).
   { name: 'executeApprovedDisbursements', run: () => executeApprovedDisbursements() },
   { name: 'expirePendingPayments', run: () => expirePendingPayments() },
+  // Recompute the monthly affiliate leaderboard (current + unfrozen prev month).
+  { name: 'refreshAffiliateLeaderboard', run: () => refreshAffiliateLeaderboard() },
   // Expire BEFORE reminders: a sub past grace must not get a renewal reminder
   // in the same tick it dies.
   { name: 'subscriptionExpire', run: () => subscriptionExpire() },

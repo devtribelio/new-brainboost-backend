@@ -5,6 +5,7 @@ import { AffiliatorService } from '@bb/domain/affiliate/affiliator.service';
 import { EnrollmentService } from '@bb/domain/affiliate/enrollment.service';
 import { VisitService } from '@bb/domain/affiliate/visit.service';
 import { DisbursementService } from '@bb/domain/affiliate/disbursement.service';
+import { AffiliateLeaderboardService } from '@bb/domain/affiliate/leaderboard.service';
 import { authGuard, optionalAuthGuard } from '@bb/common/middlewares/auth.middleware';
 import { validateDto } from '@bb/common/middlewares/validation.middleware';
 import { bindRoute } from '@bb/common/openapi/route-binder';
@@ -18,6 +19,7 @@ export function affiliateRoutes(): Router {
     new EnrollmentService(),
     new VisitService(),
     new DisbursementService(),
+    new AffiliateLeaderboardService(),
   );
 
   // Affiliator profile
@@ -25,6 +27,9 @@ export function affiliateRoutes(): Router {
   bindRoute({ router, controller: ctrl, method: 'post', path: '/affiliate/me/mode', handlerKey: 'setMode', middlewares: [authGuard] });
   bindRoute({ router, controller: ctrl, method: 'get', path: '/affiliate/me/summary', handlerKey: 'getSummary', middlewares: [authGuard] });
   bindRoute({ router, controller: ctrl, method: 'get', path: '/affiliate/me/commissions', handlerKey: 'listMyCommissions', middlewares: [authGuard] });
+
+  // Leaderboard (top-N + own position; not under /me since it's not only about the caller)
+  bindRoute({ router, controller: ctrl, method: 'get', path: '/affiliate/leaderboard', handlerKey: 'getLeaderboard', middlewares: [authGuard] });
 
   // Programs
   bindRoute({ router, controller: ctrl, method: 'get', path: '/affiliate/programs', handlerKey: 'listPrograms' });

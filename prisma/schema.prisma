@@ -98,6 +98,7 @@ model Member {
   affiliateCommissions   AffiliateCommission[]   @relation("AffiliateCommissionRecipient")
   affiliateVisits        AffiliateVisit[]        @relation("AffiliateVisitAffiliator")
   affiliateDisbursements AffiliateDisbursement[] @relation("MemberDisbursements")
+  leaderboardEntries     AffiliateLeaderboardMonthly[] @relation("MemberLeaderboardEntries")
   courseEnrollments      CourseEnrollment[]
   commerceTransactions   CommerceTransaction[]
   commercePayments       CommercePayment[]
@@ -982,6 +983,29 @@ model AffiliateCommission {
   @@index([status])
   @@index([status, channel])
   @@map("affiliate_commissions")
+}
+
+// Pre-aggregated monthly affiliate leaderboard (§11 / BB-121). Derived, read-only
+// data — NOT a source of truth (no legacyId). A scheduled job recomputes it:
+// SUM(amount) per recipient per WIB calendar month, status != VOIDED (PENDING and
+// MIGRATED both count), ranked desc. The current month is fully recomputed each
+// run (PENDING counted + refund->VOIDED means a rank can DROP); a past month is
+// frozen once its commissions mature (7 days after month end) and never touched
+// again. `frozen` is derived at read time (period vs now), not stored.
+model AffiliateLeaderboardMonthly {
+  id              String   @id @default(uuid(7)) @db.Uuid
+  periodYear      Int      @map("period_year")
+  periodMonth     Int      @map("period_month") // 1..12 (WIB calendar month)
+  memberId        String   @map("member_id") @db.Uuid // commission recipient
+  totalCommission Int      @default(0) @map("total_commission") // Σ amount, excl VOIDED (IDR)
+  rank            Int // 1-based rank within the period
+  updatedAt       DateTime @updatedAt @map("updated_at") // last aggregation run for this period
+
+  member Member @relation("MemberLeaderboardEntries", fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@unique([periodYear, periodMonth, memberId], map: "alm_period_member_key")
+  @@index([periodYear, periodMonth, rank], map: "alm_period_rank_idx")
+  @@map("affiliate_leaderboard_monthly")
 }
 
 /// Affiliate link click log. Marketing-grade tracking + sumber attribution.
