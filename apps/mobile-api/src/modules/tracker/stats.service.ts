@@ -1,8 +1,8 @@
 import { prisma } from '@bb/db';
 import { MIN_SESSION_SEC, MIN_QUALIFY_SEC, WEEKLY_DAYS_TARGET } from './tracker.constants';
-import { toLocalDayWIB, weekStartMondayWIB } from './tracker.time';
+import { addDays, dayKey, toLocalDayWIB, weekStartMondayWIB } from './tracker.time';
 import { computeStreak } from './tracker.streak';
-import type { StatsHomeDto } from './dto/stats-home.dto';
+import type { StatsHomeDto, WeeklyStreakEntryDto } from './dto/stats-home.dto';
 
 const WEEK_MS = 7 * 86_400_000;
 
@@ -87,6 +87,17 @@ export class StatsService {
     const listenSec = weekGroups.reduce((s, g) => s + (g._sum.listenedSec ?? 0), 0);
     const daysActive = qualifyingDays(weekGroups).length;
 
+    // ---- Weekly streak strip (Mon..Sun of the current WIB week) ---------
+    // Always exactly 7 entries. A day qualifies when its total audio ≥
+    // MIN_QUALIFY_SEC (global, all courses). Future days have no sessions, so
+    // they fall out naturally as `qualified: false` — the client renders the
+    // "future" vs "missed" distinction from `date` vs `today`.
+    const qualifiedKeys = new Set(qualifyingDays(dayGroups).map(dayKey));
+    const weeklyStreak: WeeklyStreakEntryDto[] = Array.from({ length: 7 }, (_, i) => {
+      const key = dayKey(addDays(currentWeekStart, i));
+      return { date: key, qualified: qualifiedKeys.has(key) };
+    });
+
     return {
       streakDays,
       sessionsPlayed,
@@ -99,6 +110,9 @@ export class StatsService {
         streakDays,
         listenSec,
       },
+      weeklyStreak,
+      today: dayKey(todayWIB),
+      qualifyThresholdSec: MIN_QUALIFY_SEC,
     };
   }
 }
