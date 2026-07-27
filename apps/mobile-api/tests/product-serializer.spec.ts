@@ -207,6 +207,13 @@ describe('serializeCourseDetailLegacy — Bunny identifier scrubbing', () => {
     expect(deepIncludes(out, 'originalhash')).toBe(false);
   });
 
+  it('emits courseId as the Course UUID and preserves the legacy int as courseLegacyId', () => {
+    const out = serializeCourseDetailLegacy(buildProduct(), reviewAggregate) as Record<string, unknown>;
+    expect(out.courseId).toBe(COURSE_UUID); // Course UUID, not Product id
+    expect(out.id).toBe('01890000-0000-7000-8000-0000000000aa'); // Product UUID stays distinct
+    expect(out.courseLegacyId).toBe(7);
+  });
+
   it('replaces the audio slide Bunny object with data.audio.streamUrl, keeping title/description', () => {
     const out = serializeCourseDetailLegacy(buildProduct(), reviewAggregate) as Record<
       string,

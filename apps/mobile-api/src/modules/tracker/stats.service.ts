@@ -3,6 +3,7 @@ import { MIN_SESSION_SEC, MIN_QUALIFY_SEC, WEEKLY_DAYS_TARGET } from './tracker.
 import { addDays, dayKey, toLocalDayWIB, weekStartMondayWIB } from './tracker.time';
 import { computeStreak } from './tracker.streak';
 import type { StatsHomeDto, WeeklyStreakEntryDto } from './dto/stats-home.dto';
+import type { CourseStatsDto } from './dto/course-stats.dto';
 
 const WEEK_MS = 7 * 86_400_000;
 
@@ -11,6 +12,15 @@ function qualifyingDays(groups: { localDay: Date; _sum: { listenedSec: number | 
   return groups
     .filter((g) => (g._sum.listenedSec ?? 0) >= MIN_QUALIFY_SEC)
     .map((g) => g.localDay);
+}
+
+/** Build the Mon→Sun (WIB) 7-entry streak strip from a set of qualifying day keys. */
+function buildWeeklyStreak(qualifyingKeys: Set<string>, todayWIB: Date): WeeklyStreakEntryDto[] {
+  const weekStart = weekStartMondayWIB(todayWIB);
+  return Array.from({ length: 7 }, (_, i) => {
+    const key = dayKey(addDays(weekStart, i));
+    return { date: key, qualified: qualifyingKeys.has(key) };
+  });
 }
 
 export class StatsService {
@@ -92,11 +102,7 @@ export class StatsService {
     // MIN_QUALIFY_SEC (global, all courses). Future days have no sessions, so
     // they fall out naturally as `qualified: false` — the client renders the
     // "future" vs "missed" distinction from `date` vs `today`.
-    const qualifiedKeys = new Set(qualifyingDays(dayGroups).map(dayKey));
-    const weeklyStreak: WeeklyStreakEntryDto[] = Array.from({ length: 7 }, (_, i) => {
-      const key = dayKey(addDays(currentWeekStart, i));
-      return { date: key, qualified: qualifiedKeys.has(key) };
-    });
+    const weeklyStreak = buildWeeklyStreak(new Set(qualifyingDays(dayGroups).map(dayKey)), todayWIB);
 
     return {
       streakDays,
@@ -113,6 +119,42 @@ export class StatsService {
       weeklyStreak,
       today: dayKey(todayWIB),
       qualifyThresholdSec: MIN_QUALIFY_SEC,
+    };
+  }
+
+  /**
+   * Per-course listening stats for the course detail screen (spec §2 / BB-114).
+   * Pure audio for THIS course only — the §1 video-OR union does NOT apply here.
+   * A never-listened course yields zeros / null (not a 404): the caller just has
+   * no rows, so streak=0, totalListenSec=0, lastListenedAt=null.
+   */
+  async courseStats(memberId: string, courseId: string): Promise<CourseStatsDto> {
+    const todayWIB = toLocalDayWIB(new Date());
+
+    const [dayGroups, totalAgg, last] = await Promise.all([
+      prisma.listeningSession.groupBy({
+        by: ['localDay'],
+        where: { memberId, courseId },
+        _sum: { listenedSec: true },
+      }),
+      prisma.listeningSession.aggregate({
+        where: { memberId, courseId },
+        _sum: { listenedSec: true },
+      }),
+      prisma.listeningSession.findFirst({
+        where: { memberId, courseId },
+        orderBy: { startedAt: 'desc' },
+        select: { startedAt: true },
+      }),
+    ]);
+
+    const qualifying = qualifyingDays(dayGroups);
+    return {
+      courseId,
+      streak: computeStreak(qualifying, todayWIB),
+      weeklyStreak: buildWeeklyStreak(new Set(qualifying.map(dayKey)), todayWIB),
+      totalListenSec: totalAgg._sum.listenedSec ?? 0,
+      lastListenedAt: last?.startedAt.toISOString() ?? null,
     };
   }
 }

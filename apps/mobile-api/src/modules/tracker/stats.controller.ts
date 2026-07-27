@@ -1,7 +1,8 @@
 import type { Response } from 'express';
+import { isUUID } from 'class-validator';
 import { StatsService } from './stats.service';
 import { ok } from '@bb/common/utils/response.util';
-import { UnauthorizedException } from '@bb/common/exceptions';
+import { BadRequestException, UnauthorizedException } from '@bb/common/exceptions';
 import type { AuthenticatedRequest } from '@bb/common/interfaces/authenticated-request';
 import {
   ApiBearerAuth,
@@ -10,6 +11,7 @@ import {
   ApiTags,
 } from '@bb/common/openapi/decorators';
 import { StatsHomeDto } from './dto/stats-home.dto';
+import { CourseStatsDto } from './dto/course-stats.dto';
 
 @ApiTags('Tracker')
 @ApiBearerAuth()
@@ -21,5 +23,14 @@ export class StatsController {
   home = async (req: AuthenticatedRequest, res: Response) => {
     if (!req.user) throw new UnauthorizedException();
     return ok(res, await this.statsService.home(req.user.id));
+  };
+
+  @ApiOperation({ summary: 'Per-course stats: streak, weekly strip, total listened, last listened (this course only)' })
+  @ApiResponse({ status: 200, type: () => CourseStatsDto })
+  courseStats = async (req: AuthenticatedRequest, res: Response) => {
+    if (!req.user) throw new UnauthorizedException();
+    const { courseId } = req.params;
+    if (!isUUID(courseId)) throw new BadRequestException('Invalid courseId');
+    return ok(res, await this.statsService.courseStats(req.user.id, courseId));
   };
 }

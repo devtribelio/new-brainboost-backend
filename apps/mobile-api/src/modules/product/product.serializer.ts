@@ -363,8 +363,9 @@ export function serializeCourseDetailLegacy(
   const productUrl = p.marketingLink ?? `${baseUrl}/p/${slug}`;
   const shareUrl = opts.affiliateCode ? `${productUrl}?affCode=${opts.affiliateCode}` : productUrl;
   const courseLegacyId = p.course?.legacyCourseId ?? p.legacyId ?? 0;
-  // Course UUID — required to mint media tokens. `p.course` is null only for
-  // non-course products; in that case there are no slides to scrub anyway.
+  // Course UUID — emitted as `courseId` (FE ids-as-strings convention; needed to
+  // call GET /user/stats/course/:courseId) and used to mint media tokens.
+  // `p.course` is null only for non-course products; there are no slides to scrub then.
   const courseUuid = p.course?.id ?? '';
 
   // FE reads only `name` (section) and `lessonName / lessonDescription / duration /
@@ -394,7 +395,8 @@ export function serializeCourseDetailLegacy(
 
   return {
     id: p.id,
-    courseId: courseLegacyId,
+    courseId: courseUuid,
+    courseLegacyId,
     iosProductId: p.iosProductId,
     androidProductId: p.androidProductId,
     code,

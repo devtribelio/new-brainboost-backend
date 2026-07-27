@@ -238,13 +238,20 @@ export class CourseDetailDto {
   })
   id!: string;
 
+  @ApiProperty({
+    format: 'uuid',
+    example: '550e8400-e29b-41d4-a716-446655440000',
+    description: 'Course UUID (distinct from `id`, which is the Product UUID). Pass to GET /user/stats/course/:courseId.',
+  })
+  courseId!: string;
+
   @ApiPropertyOptional({
     nullable: true,
     type: 'integer',
     example: 123,
-    description: 'Legacy int id — pending P3 removal. Use `id` (UUID) instead.',
+    description: 'Legacy int course id — pending P3 removal. Use `courseId` (UUID) instead.',
   })
-  courseId?: number | null;
+  courseLegacyId?: number | null;
 
   @ApiPropertyOptional({
     nullable: true,

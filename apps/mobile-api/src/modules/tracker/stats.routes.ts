@@ -17,5 +17,14 @@ export function statsRoutes(): Router {
     middlewares: [authGuard],
   });
 
+  bindRoute({
+    router,
+    controller: ctrl,
+    method: 'get',
+    path: '/stats/course/:courseId',
+    handlerKey: 'courseStats',
+    middlewares: [authGuard],
+  });
+
   return router;
 }
