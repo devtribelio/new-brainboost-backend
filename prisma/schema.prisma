@@ -388,7 +388,7 @@ model Product {
 model Course {
   id             String   @id @default(uuid(7)) @db.Uuid
   productId      String   @unique @map("product_id") @db.Uuid
-  legacyCourseId Int?     @unique @map("legacy_course_id") // legacy `course.id` int — emitted as `courseId` in response
+  legacyCourseId Int?     @unique @map("legacy_course_id") // legacy `course.id` int — emitted as `courseLegacyId` in response
   durationMin    Int      @default(0) @map("duration_min")
   programDays    Int      @default(30) @map("program_days") // listening-challenge duration in days (90/60/30); challenge `target`
   updatedAt      DateTime @updatedAt @map("updated_at")
@@ -396,8 +396,35 @@ model Course {
   product     Product            @relation(fields: [productId], references: [id], onDelete: Cascade)
   sections    CourseSection[]
   enrollments CourseEnrollment[]
+  bonuses     CourseBonus[]
 
   @@map("courses")
+}
+
+// Bonus attachments (PDF workbooks etc.) shown on the course detail screen.
+// NEW feature (no legacy counterpart → intentionally no `legacyId`). Files live
+// under the S3 `private/` prefix; `fileKey` is server-only and never leaves the
+// backend — clients get an opaque `bonusId` and mint a short-lived presigned URL
+// via POST /member/course/bonus/:bonusId/access-url. Upload/ingestion is done by
+// backoffice-bb (raw SQL INSERT + S3 write); this backend owns the read/gate side.
+model CourseBonus {
+  id           String   @id @default(uuid(7)) @db.Uuid
+  courseId     String   @map("course_id") @db.Uuid
+  title        String
+  fileName     String   @map("file_name") // original name — shown to user + Content-Disposition
+  fileKey      String   @map("file_key") // S3 key under private/ — NEVER exposed to the client
+  sizeBytes    Int      @map("size_bytes") // FE needs it for the >20MB progress UI
+  mimeType     String   @default("application/pdf") @map("mime_type")
+  downloadable Boolean  @default(true) // false = view-only in-app
+  sortOrder    Int      @default(0) @map("sort_order") // display order within a course
+  isActive     Boolean  @default(true) @map("is_active") // soft-hide without deleting the S3 object
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@index([courseId, sortOrder])
+  @@map("course_bonuses")
 }
 
 model CourseEnrollment {

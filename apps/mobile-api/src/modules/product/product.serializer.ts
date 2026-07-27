@@ -1,5 +1,6 @@
 import type { Product } from '@prisma/client';
 import { signMediaToken } from '@/modules/media/media-token.util';
+import { serializeBonusItem } from '@/modules/bonus/bonus.dto';
 import { env } from '@bb/common/config/env';
 
 /**
@@ -120,11 +121,22 @@ interface SectionLite {
   legacySectionId: number;
 }
 
+interface CourseBonusLite {
+  id: string;
+  title: string;
+  fileName: string;
+  sizeBytes: number;
+  mimeType: string;
+  downloadable: boolean;
+  createdAt: Date;
+}
+
 interface CourseLite {
   /** Course UUID — needed to mint media tokens. Prisma `include`s the full course at runtime. */
   id: string;
   legacyCourseId: number | null;
   sections: SectionLite[];
+  bonuses: CourseBonusLite[];
 }
 
 interface ProductWithCourseDetail extends Product {
@@ -412,6 +424,7 @@ export function serializeCourseDetailLegacy(
     iosPrice: p.iosPrice,
     status: legacyStatus(p.status),
     lessonsData,
+    bonuses: (p.course?.bonuses ?? []).map(serializeBonusItem),
     ratingSummary: {
       totalReview: reviewAggregate.total,
       avgReviewStart: roundOneDecimal(reviewAggregate.avg),
