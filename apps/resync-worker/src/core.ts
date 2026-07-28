@@ -33,7 +33,7 @@ export interface RunOpts {
 }
 
 /** Acquire the DB run-lock. Returns the owned acquiredAt, or null if held elsewhere. */
-async function acquireLock(prisma: PrismaClient): Promise<Date | null> {
+export async function acquireLock(prisma: PrismaClient): Promise<Date | null> {
   await prisma.syncState.createMany({ data: [{ syncer: LOCK_ROW }], skipDuplicates: true });
   const now = new Date();
   const cutoff = new Date(now.getTime() - resyncConfig.lockTtlSec * 1000);
@@ -44,7 +44,7 @@ async function acquireLock(prisma: PrismaClient): Promise<Date | null> {
   return res.count === 1 ? now : null;
 }
 
-async function releaseLock(prisma: PrismaClient, acquiredAt: Date): Promise<void> {
+export async function releaseLock(prisma: PrismaClient, acquiredAt: Date): Promise<void> {
   // Only clear if we still own it (TTL takeover could have reassigned it).
   await prisma.syncState.updateMany({
     where: { syncer: LOCK_ROW, lastRunAt: acquiredAt },
