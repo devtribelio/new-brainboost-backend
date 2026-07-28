@@ -30,17 +30,17 @@ reason = "esbuild — build tooling only, not in the production tree"
 id = "GHSA-g7r4-m6w7-qqqr"
 reason = "esbuild — build tooling only, not in the production tree"
 
-# --- js-yaml (dev transitive) ---
-[[IgnoredVulns]]
-id = "GHSA-h67p-54hq-rp68"
-reason = "js-yaml — dev transitive, not in the production tree"
-
 # --- form-data (dev transitive) ---
 [[IgnoredVulns]]
 id = "GHSA-hmw2-7cc7-3qxx"
 reason = "form-data — dev transitive, not in the production tree"
 
 # --- brace-expansion (dev transitive) ---
+# 1.x reaches the lockfile only through minimatch@3 <- eslint / @typescript-eslint
+# (all devDependencies); `pnpm ls --prod --depth Infinity -r` lists it nowhere.
+# The 5.x copy IS pinned to a fixed release via pnpm.overrides — only the 1.x line
+# is triaged here, because GHSA-mh99-v99m-4gvg has no fix on 1.x (first fixed
+# version is 5.0.8, a major jump minimatch@3 cannot take).
 [[IgnoredVulns]]
-id = "GHSA-jxxr-4gwj-5jf2"
-reason = "brace-expansion — dev transitive, not in the production tree"
+id = "GHSA-mh99-v99m-4gvg"
+reason = "brace-expansion 1.x — dev transitive (minimatch@3 <- eslint), not in the production tree"
