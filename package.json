@@ -6,7 +6,12 @@
   "type": "commonjs",
   "pnpm": {
     "overrides": {
-      "qs@>=6.11.1 <=6.15.1": ">=6.15.2"
+      "qs@>=6.11.1 <=6.15.1": ">=6.15.2",
+      "body-parser@<1.20.6": "^1.20.6",
+      "brace-expansion@<2.0.0": "^1.1.16",
+      "brace-expansion@>=2.0.0 <5.0.8": "^5.0.8",
+      "js-yaml@<4.3.0": "^4.3.0",
+      "postcss@<8.5.18": "^8.5.18"
     }
   },
   "scripts": {
@@ -17,6 +22,7 @@
     "resync:worker": "tsx --conditions=development apps/resync-worker/src/worker.ts",
     "resync:seed-redirect": "tsx --conditions=development apps/resync-worker/src/seed-redirect.ts",
     "resync:unlock": "tsx --conditions=development apps/resync-worker/src/unlock.ts",
+    "resync:identity": "tsx --conditions=development apps/resync-worker/src/identity.ts",
     "resync:recount": "tsx --conditions=development apps/resync-worker/src/recount.ts",
     "resync:reset-watermark": "tsx --conditions=development apps/resync-worker/src/reset-watermark.ts",
     "resync:fix-dates": "tsx --conditions=development apps/resync-worker/src/fix-dates.ts",
