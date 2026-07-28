@@ -368,7 +368,7 @@ export class BbEcsStack extends cdk.Stack {
         // diomit → default 2× RESYNC_INTERVAL_SEC.
         environment: {
           NODE_ENV: 'production',
-          RESYNC_INTERVAL_SEC: '3600',            // loop worker (detik). 1800 = tiap 30 mnt
+          RESYNC_INTERVAL_SEC: '600',             // loop worker (detik). 600 = tiap 10 mnt (was 3600/1jam)
           RESYNC_SYNCERS: 'all',                  // "all" atau CSV: members,enrollments,kyc,tree,commissions,reviews,posts
           RESYNC_BATCH_SIZE: '1000',              // row per batch
           RESYNC_LEGACY_RECONNECT_RETRIES: '3',   // reconnect saat legacy ECONNRESET
