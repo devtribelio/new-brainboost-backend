@@ -1,4 +1,6 @@
-import sharp from 'sharp';
+// sharp ≥0.35 resolves to its ESM types (`dist/index.d.mts`), which export
+// `Sharp`/`Metadata` as named types instead of a `sharp.*` namespace.
+import sharp, { type Metadata, type Sharp } from 'sharp';
 import { env } from '../config/env';
 import { badRequest, ERROR_CODES } from '../exceptions';
 
@@ -28,8 +30,8 @@ export class ImageProcessor {
     const maxDimension = opts.maxDimension ?? env.s3.imageMaxDimension;
     const quality = opts.quality ?? env.s3.imageWebpQuality;
 
-    let pipeline: sharp.Sharp;
-    let metadata: sharp.Metadata;
+    let pipeline: Sharp;
+    let metadata: Metadata;
     try {
       // `failOn: 'error'` rejects truncated/corrupt images.
       pipeline = sharp(input, { failOn: 'error' });
