@@ -66,7 +66,7 @@ module.exports = {
       name: 'bb-cron',
       cwd: root,
       script: 'apps/mobile-api/dist/jobs-runner.js',
-      args: 'affiliatePendingToBalance expirePendingPayments refreshAffiliateLeaderboard',
+      args: 'affiliatePendingToBalance expirePendingPayments refreshAffiliateLeaderboard sweepOrphanUploads',
       exec_mode: 'fork',
       instances: 1,
       autorestart: false,

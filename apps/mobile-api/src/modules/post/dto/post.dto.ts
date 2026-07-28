@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@bb/common/openapi/decorators';
 import { MemberLiteDto } from '@bb/common/openapi/member.dto';
+import { PostKindDto } from '@/modules/post-kind/dto/post-kind.dto';
 
 class PostContentDataDto {
   @ApiProperty({ example: 'Great insights from today\'s workshop on React patterns.' })
@@ -169,6 +170,9 @@ export class PostDto {
   @ApiPropertyOptional({ nullable: true, type: () => PostTopicDto })
   topic?: PostTopicDto | null;
 
+  @ApiPropertyOptional({ nullable: true, type: () => PostKindDto, description: 'Post taxonomy (§4); null on posts created before kinds existed.' })
+  kind?: PostKindDto | null;
+
   @ApiProperty({ type: 'boolean', example: false })
   canEdit!: boolean;
 
@@ -220,6 +224,9 @@ export class PostDto {
 
   @ApiPropertyOptional({ nullable: true, format: 'uuid', example: 'topic-uuid-1234' })
   topicId?: string | null;
+
+  @ApiPropertyOptional({ nullable: true, format: 'uuid', example: '01991a00-0000-7000-8000-000000000003' })
+  kindId?: string | null;
 
   @ApiProperty({ type: 'integer', example: 0 })
   countReplies!: number;
@@ -288,11 +295,21 @@ export class PostCreateBodyDto {
   @ApiPropertyOptional({ example: 'topic-uuid-1234', description: 'Topic UUID — must belong to networkId when both set.' })
   topicId?: string;
 
+  @ApiPropertyOptional({
+    format: 'uuid',
+    example: '01991a00-0000-7000-8000-000000000003',
+    description: 'Post kind UUID (see GET /api/community/post-kinds). Omitted → server applies the default kind.',
+  })
+  kindId?: string;
+
   @ApiPropertyOptional({ example: 'network-uuid-1234', description: 'Target network UUID. Omit for global timeline.' })
   networkId?: string;
 
   @ApiPropertyOptional({ example: 'My First Post' })
   title?: string;
+
+  @ApiPropertyOptional({ description: 'Optional; derived from the first 200 chars of `content` when absent.' })
+  excerpt?: string;
 
   @ApiPropertyOptional({ enum: ['status', 'image', 'video', 'embed'], example: 'status' })
   postType?: string;

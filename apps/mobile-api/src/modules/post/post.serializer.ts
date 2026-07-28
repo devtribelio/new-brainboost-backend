@@ -1,10 +1,11 @@
-import type { Member, Post, Topic } from '@prisma/client';
+import type { Member, Post, PostKind, Topic } from '@prisma/client';
 import { serializeMember } from '@bb/common/serializers/member-lite.serializer';
 import { dateAgoString, timeAgoString } from '@bb/common/serializers/time-format';
 
 interface PostWithRelations extends Post {
   author?: Member | null;
   topic?: Topic | null;
+  kind?: PostKind | null;
 }
 
 // Detect FE video platform from URL. Bunny stream URLs contain "vz-" /
@@ -37,6 +38,12 @@ function buildPostTopic(t: Topic | null | undefined) {
     topicType: t.type,
     topicIcon: t.iconUrl,
   };
+}
+
+function buildPostKind(k: PostKind | null | undefined) {
+  if (!k) return null;
+  // Mirrors the topic block: `{kindId, name}` (§4).
+  return { kindId: k.id, name: k.name };
 }
 
 function buildPostCreator(m: Member | null | undefined) {
@@ -91,6 +98,7 @@ export function serializePost(
     timeAgo: timeAgoString(p.createdAt),
     dateAgo: dateAgoString(p.createdAt),
     topic: buildPostTopic(p.topic),
+    kind: buildPostKind(p.kind),
     canEdit: isAuthor,
     canDelete: isAuthor,
     pinned: p.isPinned ? 1 : 0,
@@ -107,6 +115,7 @@ export function serializePost(
     memberId,
     networkId: p.networkId,
     topicId: p.topicId,
+    kindId: p.kindId,
     countReplies: p.countReplies,
     viewCount: p.viewCount,
     videoUrl: p.videoUrl,

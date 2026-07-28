@@ -73,6 +73,18 @@ const SETTINGS: Array<{ key: string; value: string; description: string }> = [
     description:
       'Comma-separated email address(es) that receive a SaleAlert email on every successful (non-subscription) sale. Empty = off.',
   },
+  {
+    key: 'affiliate.leaderboardTopN',
+    value: '20',
+    description:
+      'How many rows GET /member/affiliate/leaderboard returns in `top`. The aggregate table always stores the FULL ranking — this only caps the read.',
+  },
+  {
+    key: 'upload.orphanTtlHours',
+    value: '168',
+    description:
+      'Age (hours) after which an unreferenced `kind=post` upload is deleted by the sweep job. Generous by design: deletion is irreversible.',
+  },
 ];
 
 async function main() {

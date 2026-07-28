@@ -17,6 +17,7 @@ import { CommissionModule } from '@/modules/commission/commission.module';
 import { AffiliateModule } from '@/modules/affiliate/affiliate.module';
 import { TopicModule } from '@/modules/topic/topic.module';
 import { PostModule } from '@/modules/post/post.module';
+import { PostKindModule } from '@/modules/post-kind/post-kind.module';
 import { CommentModule } from '@/modules/comment/comment.module';
 import { ReplyModule } from '@/modules/reply/reply.module';
 import { NetworkModule } from '@/modules/network/network.module';
@@ -46,6 +47,7 @@ const modules: AppModule[] = [
   SubscriptionModule,
   TopicModule,
   PostModule,
+  PostKindModule,
   CommentModule,
   ReplyModule,
   NetworkModule,

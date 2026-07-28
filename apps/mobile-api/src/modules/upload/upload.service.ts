@@ -7,6 +7,7 @@ import {
   PUBLIC_PREFIX,
 } from '@bb/common/services/s3-storage.service';
 import { ImageProcessor, imageProcessor } from '@bb/common/services/image-processor.service';
+import { recordUpload } from '@bb/common/services/upload-registry.service';
 
 // Defence-in-depth: even though we re-encode every image through sharp (which
 // already neutralises non-image payloads), reject obviously executable
@@ -107,6 +108,20 @@ export class UploadService {
         contentType: processed.contentType,
       });
 
+      const fullUrl = this.storage.getPublicUrl(key);
+
+      // Register the object so an upload never consumed by a post can be swept
+      // later (§4). Best-effort — a bookkeeping failure must not fail the upload.
+      await recordUpload({
+        key,
+        publicUrl: fullUrl,
+        ownerId,
+        kind,
+        fileName: f.originalname,
+        mimeType: processed.contentType,
+        sizeBytes: processed.size,
+      });
+
       results.push({
         filename: f.originalname,
         size: processed.size,
@@ -114,7 +129,7 @@ export class UploadService {
         status: 'success',
         message: 'OK',
         url: key,
-        fullUrl: this.storage.getPublicUrl(key),
+        fullUrl,
         type: processed.contentType,
       });
     }

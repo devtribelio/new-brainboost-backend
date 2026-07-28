@@ -4,6 +4,7 @@ import { BadRequestException, ForbiddenException, NotFoundException } from '@bb/
 import type { PaginationParams } from '@bb/common/utils/pagination.util';
 import { notificationEvents } from '@bb/common/events/notification-events';
 import { assertUuid } from '@bb/common/utils/uuid.util';
+import { markUploadsReferenced } from '@bb/common/services/upload-registry.service';
 import { PUBLISHED_STATUS, PUBLISHED_STATUS_FILTER, isPublished } from '@bb/common/utils/post-status.util';
 
 interface PostListQuery {
@@ -39,8 +40,12 @@ function orderByFor(sortBy: string | undefined, filter: string | undefined): Pos
 interface PostCreateDto {
   content: string;
   topicId?: string;
+  /** Post taxonomy (§4). Omitted → the server applies the default kind. */
+  kindId?: string;
   networkId?: string;
   title?: string;
+  /** Optional; derived from `content` when absent. */
+  excerpt?: string;
   postType?: string;
   imageUrls?: string[];
   videoUrl?: string;
@@ -54,7 +59,10 @@ const DUPLICATE_WINDOW_MS = 10 * 60 * 1000;
 const postInclude = {
   author: true,
   topic: true,
+  kind: true,
 } as const;
+
+const EXCERPT_CHARS = 200;
 
 export class PostService {
   async list(p: PaginationParams, q: PostListQuery) {
@@ -242,6 +250,23 @@ export class PostService {
       }
     }
 
+    // Post kind (§4). An explicit kindId must exist and be active; when omitted
+    // the server applies the default kind, so old app versions that never send
+    // the field keep working. A missing default row leaves kindId null rather
+    // than failing the post.
+    let kindId: string | null = null;
+    if (dto.kindId) {
+      const kind = await prisma.postKind.findUnique({ where: { id: dto.kindId } });
+      if (!kind || !kind.isActive) throw new BadRequestException('Post kind not available');
+      kindId = kind.id;
+    } else {
+      const fallback = await prisma.postKind.findFirst({
+        where: { isDefault: true, isActive: true },
+        select: { id: true },
+      });
+      kindId = fallback?.id ?? null;
+    }
+
     const dupSince = new Date(Date.now() - DUPLICATE_WINDOW_MS);
     const dup = await prisma.post.findFirst({
       where: {
@@ -258,11 +283,13 @@ export class PostService {
       data: {
         authorId: memberId,
         topicId: dto.topicId ?? null,
+        kindId,
         networkId: dto.networkId ?? null,
         title: dto.title ?? null,
         content,
         postType: dto.postType ?? 'status',
-        excerpt: content.slice(0, 200),
+        // Derived only when the client did not supply one (§4).
+        excerpt: dto.excerpt?.trim() || content.slice(0, EXCERPT_CHARS),
         imageUrls,
         videoUrl: dto.videoUrl ?? null,
         embedUrl: dto.embedUrl ?? null,
@@ -271,6 +298,11 @@ export class PostService {
       },
       include: postInclude,
     });
+
+    // Claim the uploads this post references so the orphan sweep skips them.
+    // Best-effort: a bookkeeping failure must never fail a published post.
+    await markUploadsReferenced(imageUrls, 'post', post.id);
+
     notificationEvents.emit('post.published', {
       postId: post.id,
       authorId: post.authorId,

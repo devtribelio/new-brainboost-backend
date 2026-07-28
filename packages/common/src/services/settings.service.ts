@@ -29,6 +29,7 @@ export const SETTING_KEYS = {
   subscriptionReminderDaysBefore: 'subscription.reminderDaysBefore',
   salesAlertEmail: 'sales.alertEmail',
   affiliateLeaderboardTopN: 'affiliate.leaderboardTopN',
+  uploadOrphanTtlHours: 'upload.orphanTtlHours',
 } as const;
 
 export class SettingsService {

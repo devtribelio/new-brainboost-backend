@@ -6,6 +6,7 @@ import { affiliatePendingToBalance } from '@bb/domain/jobs/affiliate-pending-to-
 import { refreshAffiliateLeaderboard } from '@bb/domain/jobs/affiliate-leaderboard';
 import { executeApprovedDisbursements } from '@bb/domain/jobs/execute-approved-disbursements';
 import { expirePendingPayments } from '@bb/domain/jobs/expire-pending-payments';
+import { sweepOrphanUploads } from '@bb/domain/jobs/sweep-orphan-uploads';
 import { subscriptionExpire } from '@bb/domain/jobs/subscription-expire';
 import { subscriptionRenewalReminder } from '@bb/domain/jobs/subscription-renewal-reminder';
 
@@ -38,6 +39,8 @@ const JOBS: Array<{ name: string; run: () => Promise<unknown> }> = [
   { name: 'expirePendingPayments', run: () => expirePendingPayments() },
   // Recompute the monthly affiliate leaderboard (current + unfrozen prev month).
   { name: 'refreshAffiliateLeaderboard', run: () => refreshAffiliateLeaderboard() },
+  // Delete post uploads never referenced by a post (orphans past the TTL).
+  { name: 'sweepOrphanUploads', run: () => sweepOrphanUploads() },
   // Expire BEFORE reminders: a sub past grace must not get a renewal reminder
   // in the same tick it dies.
   { name: 'subscriptionExpire', run: () => subscriptionExpire() },

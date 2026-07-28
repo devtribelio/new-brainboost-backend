@@ -157,8 +157,10 @@ export class PostController {
     const post = await this.postService.create(req.user.id, {
       content: body.content ?? '',
       topicId: body.topicId,
+      kindId: body.kindId,
       networkId: body.networkId,
       title: body.title,
+      excerpt: body.excerpt,
       postType: body.postType,
       imageUrls: Array.isArray(body.images) ? body.images : body.imageUrls,
       videoUrl: body.videoUrl,
