@@ -22,6 +22,11 @@ export interface BbEcsStackProps extends cdk.StackProps {
   // service-nya sama sekali, jadi bisa merge dulu tanpa butuh image/secret siap.
   resyncEnabled?: boolean;
   resyncImageTag?: string;     // tag image bb/resync-worker (default: sama dgn imageTag)
+  // bb-comms di-build dari repo TERPISAH (bb-notification-service, Go) → siklus
+  // rilisnya sendiri. `commsImageTag` melepasnya dari lockstep imageTag mobile-api
+  // (pola sama dgn resyncImageTag), jadi bisa deploy notification tanpa rebuild
+  // mobile-api. Default: sama dgn imageTag (backward compatible).
+  commsImageTag?: string;
 }
 
 export class BbEcsStack extends cdk.Stack {
@@ -103,11 +108,12 @@ export class BbEcsStack extends cdk.Stack {
     };
 
     // === ECR images ===
-    const img = (repo: string) =>
+    const img = (repo: string, tag: string = props.imageTag) =>
       ecs.ContainerImage.fromEcrRepository(
-        ecr.Repository.fromRepositoryName(this, `${repo}Repo`, `bb/${repo}`), props.imageTag);
+        ecr.Repository.fromRepositoryName(this, `${repo}Repo`, `bb/${repo}`), tag);
     const mobileApiImg = img('mobile-api');   // dipakai 3×: api, comms-relay, cron
-    const commsImg = img('bb-comms');
+    // bb-comms: repo terpisah → tag sendiri (default = imageTag kalau tak diisi).
+    const commsImg = img('bb-comms', props.commsImageTag ?? props.imageTag);
     // backoffice-api & admin-ejs sudah DIHAPUS dari monorepo (2026-07) — tidak ada service-nya di sini.
 
     // === Task role (perm runtime: SQS) ===
