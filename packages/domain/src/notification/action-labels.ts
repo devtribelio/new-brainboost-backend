@@ -1,5 +1,7 @@
 export const ActionLabel = {
   NewPost: 'newPost',
+  /** Nightly 21:00 WIB recap: "9 post baru di Topic A". One row per topic. */
+  TopicDigest: 'topicDigest',
   NewComment: 'newComment',
   NewReply: 'newReply',
   NewLike: 'newLike',

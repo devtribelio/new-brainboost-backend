@@ -1,0 +1,23 @@
+{
+  "name": "@bb/notification-worker",
+  "version": "0.1.0",
+  "private": true,
+  "main": "dist/main.js",
+  "scripts": {
+    "dev": "tsx --conditions=development src/main.ts",
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "start": "node dist/main.js"
+  },
+  "dependencies": {
+    "@aws-sdk/client-sqs": "^3.1058.0",
+    "@bb/common": "workspace:*",
+    "@bb/db": "workspace:*",
+    "@bb/domain": "workspace:*",
+    "@prisma/client": "^5.22.0",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0"
+  }
+}

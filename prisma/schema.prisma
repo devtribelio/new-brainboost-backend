@@ -253,6 +253,18 @@ model CommsIdempotency {
   @@map("comms_idempotency")
 }
 
+/// Idempotency guard for FCM push delivery — written by apps/notification-worker.
+/// SQS Standard queues are at-least-once, so a redelivered message must not send
+/// the same push twice. One row per message that was successfully pushed; the
+/// worker claims it BEFORE calling FCM (unique insert = the claim), mirroring
+/// `CommsIdempotency` on the comms side.
+model PushIdempotency {
+  messageId String   @id @map("message_id") /// = NotificationOutbox.id
+  sentAt    DateTime @default(now()) @map("sent_at")
+
+  @@map("push_idempotency")
+}
+
 model PraMember {
   id                 String   @id @default(uuid(7)) @db.Uuid
   email              String?

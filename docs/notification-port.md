@@ -107,7 +107,7 @@ Setelah row tertulis: `setImmediate(() => fcm.dispatch(memberId, ...))` — tida
 
 | Event modul | Emit di | Listener | Action label |
 |---|---|---|---|
-| post publish | `post.service.ts` setelah `prisma.post.create` (status published) | **topic.listener** | `newPost` — fan-out ke `TopicSubscription` dari `post.topicId` |
+| post publish | `post.service.ts` setelah `prisma.post.create` (status published) | **tidak ada listener** — direkap job harian, lihat §7 | `topicDigest` (21:00 WIB) |
 | comment create (non-reply) | `comment.service.ts` create | comment.listener | `newComment`, `tag` (jika mentioned) |
 | reply create | `reply.service.ts` create | comment.listener | `newReply`, `tag` |
 | post-like create | `post.service.ts:169` like create | post.listener | `newLike` |
@@ -129,13 +129,85 @@ resolveForNetwork(networkId, role?): memberIds   // 'admin' filter via NetworkMe
 resolveForTopic(topicId, excludeMemberId?): memberIds  // TopicSubscription rows, exclude author, filterEnabled
 ```
 
-**Topic fan-out (implemented 2026-07-29).** `post.published` sempat jadi *dead event* — di-emit tapi
-tanpa listener, sehingga `ActionLabel.NewPost` tidak pernah terpakai dan subscribe ke topic tidak
-menghasilkan push apa pun. Sekarang `topic.listener.ts` mengonsumsinya: event membawa `topicId`,
-resolver mengambil `TopicSubscription`, mute dicek pada scope `topic` **dan** scope `network` induknya
-(mute network lama tetap berlaku), dedupe `newPost:<postId>:<memberId>`. Scope `topic` ikut
-di-allow-list pada `POST /notification/mute`. Post tanpa `topicId` tidak memicu apa-apa —
-notifikasi level-network belum ada.
+### Topic recap harian 21:00 WIB (implemented 2026-07-29)
+
+Post baru di topic **tidak** di-push saat kejadian. Sempat dibuat instan (listener `post.published`),
+lalu diganti jadi rekap harian atas permintaan produk: satu push jam 21:00 WIB berisi
+*"9 post baru di Topic A"*, bukan 9 push sepanjang hari.
+
+Job: `packages/domain/src/jobs/topic-digest-notifications.ts`, terdaftar di `jobs-runner.ts` dan
+ikut lane `bb-cron` (hourly) di `ecosystem.config.js`.
+
+- **Jam kirim runtime-configurable**: `app_settings` key `notification.topicDigestHour` (0-23, WIB,
+  default + fallback `DIGEST_HOUR_WIB`=21, di-seed `pnpm seed:settings`). Nilai non-integer atau di
+  luar 0-23 di-log warn lalu jatuh ke default — salah ketik tidak boleh membuat job mengirim di jam
+  acak. Ubah jam = update satu baris DB, tanpa deploy (propagasi ≤ TTL cache settings 30 detik;
+  job one-shot selalu baca fresh).
+- **Window tetap 24 jam** berakhir pada jam cutoff hari itu → antar-hari tidak pernah overlap. Post
+  jam 21:05 masuk rekap besok.
+- **Self-guarding pada jam WIB**, bukan pada jam pemicu. Ini disengaja: **tidak ada TZ yang dipin
+  di repo ini** (`ecosystem.config.js` tanpa TZ, tidak ada Dockerfile TZ) dan PM2 mengevaluasi
+  `cron_restart` pakai waktu lokal daemon. Job no-op sebelum boundary, jadi tick hourly tetap
+  mengirim tepat jam 21:00 WIB apa pun TZ server. Tick yang bolong tidak menggandakan apa pun.
+- **Idempoten per hari WIB** lewat `dedupeKey = topicDigest:<hari>:<topicId>:<memberId>` (kolom
+  UNIQUE). Run kedua di hari yang sama → nol row, nol push.
+- **Row per topic, push sekali.** Feed tetap granular (tiap baris deep-link ke topic-nya) tapi FCM
+  digabung: >1 topic → *"12 post baru di 2 topic yang kamu ikuti"*. Karena itu producer punya
+  `skipPush` — row ditulis tanpa push, push dikirim sekali di akhir per member.
+- Hitungan mengecualikan post si member sendiri, `isDeleted`, dan non-published; mute dihormati
+  pada scope `topic` **dan** `network` induk. Scope `topic` masuk allow-list `POST /notification/mute`.
+- `runConcurrent` (limit `DIGEST_CONCURRENCY`=10) menahan spike jam 21:00 — `sendToMember` loop
+  per device dan tidak ada multicast, jadi fan-out tanpa batas akan menghantam pool DB + FCM.
+
+#### Pengiriman push: outbox → SQS → worker
+
+Job **tidak** memanggil FCM langsung saat queue tersedia. Alurnya:
+
+```
+topicDigestNotifications (job 21:00)
+  └─ $transaction([ ...notification rows, notification_outbox row (channel='fcm') ])
+       ↓
+bb-push-relay  (apps/mobile-api/src/workers/push-relay.ts)
+  └─ poll PENDING channel='fcm' → publishPush() → SQS notif-push → status SENT
+       ↓
+bb-push-worker (apps/notification-worker)
+  └─ long-poll → claim push_idempotency → fcmService.sendToMember → delete message
+```
+
+- **Row feed + job push commit bersama** dalam satu `$transaction`. Ini menutup lubang durabilitas
+  desain sebelumnya: dulu kalau job crash setelah row ditulis tapi sebelum push, run berikutnya kena
+  dedupe lalu melewati push-nya → push hilang permanen. Sekarang crash = tidak ada yang tertulis,
+  run berikutnya mengulang member itu. Ada tes yang memaksa insert outbox gagal dan memastikan
+  row feed ikut ter-rollback.
+- **Outbox-nya tabel yang sudah ada** (`notification_outbox`) — kolom `channel` memang sudah
+  didokumentasikan menampung `'fcm'` sejak awal. Konsekuensinya `comms-relay` **wajib** di-scope ke
+  `COMMS_CHANNELS`; tanpa itu ia akan mempublish baris push ke queue comms dan bb-comms menerima
+  kerjaan yang tidak bisa ia kirim.
+- **Queue terpisah** `notif-push` (bukan `comms-*`): fan-out rekap yang bursty tidak boleh mengantre
+  di depan OTP. Relay-nya pun proses sendiri (`bb-push-relay`) dengan alasan yang sama.
+- **Idempotensi consumer**: SQS Standard at-least-once, jadi worker meng-*claim* `messageId` di
+  tabel baru `push_idempotency` (PK) **sebelum** memanggil FCM. Redelivery kena PK → di-skip.
+  Claim diambil sebelum kirim, bukan sesudah: push dobel lebih buruk daripada satu yang hilang,
+  dan baris outbox tetap menjadi catatan bahwa ia pernah di-queue.
+- **Poison message** (kontrak beda versi / body tidak terparse) dihapus, tidak di-retry — ia tidak
+  akan pernah sukses dan hanya menghabiskan jatah redrive. Kegagalan FCM sebaliknya di-*throw*
+  supaya SQS redeliver lalu redrive ke DLQ.
+- **Fallback tanpa queue**: kalau `SQS_NOTIF_PUSH_URL` kosong, job kembali mengirim in-process
+  (perilaku lama). Jadi dev dan periode sebelum queue di-provision tetap jalan.
+- **Scaling**: relay `instances:1` (masih plain PENDING→SENT flip, belum `FOR UPDATE SKIP LOCKED`).
+  Worker **aman di-scale out** — klaim via visibility timeout + PK `push_idempotency`.
+
+**Belum dikerjakan (di luar repo):** provisioning queue `notif-push` + DLQ/redrive via IaC, IAM
+untuk producer (SendMessage) dan consumer (ReceiveMessage/DeleteMessage), lalu isi
+`SQS_NOTIF_PUSH_URL`. Sampai itu ada, jalur fallback yang aktif.
+
+Konsekuensi: `post.published` sekarang **tidak punya listener sama sekali** (job baca tabel `posts`
+langsung). Event-nya sengaja dipertahankan beserta field `topicId`-nya.
+
+**Butuh dukungan mobile:** type `topicDigest` adalah label baru. Serializer meneruskan `type` +
+`payload` apa adanya; `payload` berisi `refTable:'topic'`, `refId`, `topicId`, `postCount`,
+`digestDay`. Kalau FE me-route berdasar `refTable` maka tap-through sudah jalan; kalau me-`switch`
+berdasar `type`, `topicDigest` harus ditambahkan di sisi app.
 
 Legacy tidak pernah mengirim `newPost` (`ACTION_LABEL_NEW_POST` di `TBNotification.php` cuma
 dideklarasikan, nol call-site), jadi ini fitur baru, bukan paritas.

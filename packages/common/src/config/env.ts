@@ -227,6 +227,13 @@ export const env = {
     // One Standard queue per priority (former direct-exchange routing keys).
     urgentQueueUrl: optional('SQS_COMMS_URGENT_URL', ''),
     normalQueueUrl: optional('SQS_COMMS_NORMAL_URL', ''),
+    // FCM push queue (consumed by apps/notification-worker). Empty = push queue
+    // not provisioned yet; producers fall back to sending in-process.
+    pushQueueUrl: optional('SQS_NOTIF_PUSH_URL', ''),
+    // notification-worker consumer tuning.
+    pushWaitTimeSec: Number.parseInt(optional('PUSH_WORKER_WAIT_SEC', '20'), 10),
+    pushBatchSize: Number.parseInt(optional('PUSH_WORKER_BATCH_SIZE', '10'), 10),
+    pushVisibilityTimeoutSec: Number.parseInt(optional('PUSH_WORKER_VISIBILITY_SEC', '60'), 10),
     // Relay daemon poll interval + batch size.
     relayIntervalMs: Number.parseInt(optional('COMMS_RELAY_INTERVAL_MS', '2000'), 10),
     relayBatchSize: Number.parseInt(optional('COMMS_RELAY_BATCH_SIZE', '50'), 10),

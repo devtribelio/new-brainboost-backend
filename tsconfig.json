@@ -5,6 +5,7 @@
     { "path": "packages/common" },
     { "path": "packages/domain" },
     { "path": "apps/mobile-api" },
+    { "path": "apps/notification-worker" },
     { "path": "apps/resync-worker" }
   ]
 }

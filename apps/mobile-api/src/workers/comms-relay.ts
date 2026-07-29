@@ -8,6 +8,7 @@ import {
   type CommsMessage,
   type CommsPriority,
 } from '@bb/common/mq/comms-contract';
+import { COMMS_CHANNELS } from '@bb/common/mq/push-contract';
 import { runStartupChecks, startConnectionMonitor } from '../core/startup-checks';
 
 /**
@@ -58,7 +59,10 @@ async function tick(): Promise<void> {
   }
 
   const rows = await prisma.notificationOutbox.findMany({
-    where: { status: 'PENDING' },
+    // Scoped to the comms channels: the same outbox also carries `fcm` rows,
+    // which go to the push queue via workers/push-relay.ts. bb-comms cannot
+    // deliver a push, so an unscoped query would hand it undeliverable work.
+    where: { status: 'PENDING', channel: { in: [...COMMS_CHANNELS] } },
     orderBy: { scheduledAt: 'asc' },
     take: BATCH,
   });

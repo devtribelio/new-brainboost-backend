@@ -57,6 +57,12 @@ const SETTINGS: Array<{ key: string; value: string; description: string }> = [
       'Minimum withdrawable balance (IDR) required before a member may request KYC. 0 = gate off.',
   },
   {
+    key: 'notification.topicDigestHour',
+    value: '21',
+    description:
+      'Hour (0-23, WIB) at which the daily topic recap push goes out ("9 post baru di Topic A"). Out-of-range or non-numeric falls back to 21.',
+  },
+  {
     key: 'sales.alertEmail',
     value: '',
     description:

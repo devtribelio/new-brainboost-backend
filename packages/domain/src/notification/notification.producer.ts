@@ -13,6 +13,13 @@ export interface CreateNotificationInput {
   payload?: Record<string, unknown>;
   url?: string;
   dedupeKey?: string;
+  /**
+   * Create the row but send no push. Used by the nightly topic digest, which
+   * writes one row per topic and then sends a SINGLE combined push for all of
+   * them — pushing per row would recreate the notification storm the digest
+   * exists to prevent.
+   */
+  skipPush?: boolean;
 }
 
 export class NotificationProducer {
@@ -84,6 +91,7 @@ export class NotificationProducer {
   }
 
   private dispatchPush(input: CreateNotificationInput, notificationId: string): void {
+    if (input.skipPush) return;
     if (!fcmService.isEnabled()) {
       logger.debug({ notificationId }, '[notification] push skipped — fcm disabled');
       return;

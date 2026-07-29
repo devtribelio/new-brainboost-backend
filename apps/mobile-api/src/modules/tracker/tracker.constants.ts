@@ -13,9 +13,12 @@ export const MIN_SESSION_SEC = 30;
  */
 export const MIN_QUALIFY_SEC = 600;
 
-/** Day-boundary timezone. Indonesia (WIB) is UTC+7 with no DST. */
-export const TZ = 'Asia/Jakarta';
-export const WIB_OFFSET_MS = 7 * 60 * 60 * 1000;
+/**
+ * Day-boundary timezone. Indonesia (WIB) is UTC+7 with no DST.
+ * Canonical values live in `@bb/common/utils/wib.util` (shared with the
+ * notification digest job); re-exported here so tracker imports don't change.
+ */
+export { WIB_TZ as TZ, WIB_OFFSET_MS } from '@bb/common/utils/wib.util';
 
 /**
  * Default challenge target (days), mirrored as the DB default of

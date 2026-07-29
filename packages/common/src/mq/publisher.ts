@@ -3,6 +3,8 @@ import { env } from '@bb/common/config/env';
 import { logger } from '@bb/common/config/logger';
 import { queueNameFor } from '@bb/common/mq/topology';
 import type { CommsMessage, CommsPriority } from '@bb/common/mq/comms-contract';
+import type { PushMessage } from '@bb/common/mq/push-contract';
+import { TOPOLOGY } from '@bb/common/mq/topology';
 
 /**
  * Lazy-singleton SQS publisher for the comms queues. Used by the comms-relay
@@ -55,6 +57,29 @@ export async function publishComms(msg: CommsMessage): Promise<void> {
       MessageBody: JSON.stringify(msg),
       // Standard queue = at-least-once; dedup/idempotency is consumer-side via
       // messageId. Surface key fields as attributes for tracing/filtering.
+      MessageAttributes: {
+        messageId: { DataType: 'String', StringValue: msg.messageId },
+        type: { DataType: 'String', StringValue: msg.type },
+      },
+    }),
+  );
+}
+
+/**
+ * Publish one FCM push message. Throws on failure so the relay leaves the outbox
+ * row PENDING for the next tick.
+ */
+export async function publishPush(msg: PushMessage): Promise<void> {
+  if (!env.sqs.pushQueueUrl) {
+    throw new Error(`SQS queue URL not configured for push (${TOPOLOGY.pushQueue})`);
+  }
+  const sqs = getClient();
+  await sqs.send(
+    new SendMessageCommand({
+      QueueUrl: env.sqs.pushQueueUrl,
+      MessageBody: JSON.stringify(msg),
+      // Standard queue = at-least-once; the consumer dedupes on messageId via
+      // the push_idempotency table.
       MessageAttributes: {
         messageId: { DataType: 'String', StringValue: msg.messageId },
         type: { DataType: 'String', StringValue: msg.type },

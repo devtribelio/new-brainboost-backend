@@ -57,6 +57,32 @@ module.exports = {
       max_memory_restart: '200M',
     },
     {
+      // Push outbox → SQS relay (channel='fcm' rows only). Separate process from
+      // bb-comms-relay so a bursty nightly digest can never queue up in front of
+      // an OTP. instances:1 REQUIRED — same plain PENDING→SENT flip.
+      // Idle-safe: with SQS_NOTIF_PUSH_URL unset it logs once and leaves rows
+      // PENDING (and the digest job falls back to pushing in-process).
+      name: 'bb-push-relay',
+      cwd: root,
+      script: 'apps/mobile-api/dist/workers/push-relay.js',
+      exec_mode: 'fork',
+      instances: 1,
+      env: { NODE_ENV: 'production' },
+      max_memory_restart: '200M',
+    },
+    {
+      // FCM push consumer. Unlike the relays this one is SAFE to scale out:
+      // work is claimed via SQS visibility timeout + the push_idempotency PK,
+      // so N instances never double-send. Exits 1 if the queue URL is unset.
+      name: 'bb-push-worker',
+      cwd: root,
+      script: 'apps/notification-worker/dist/main.js',
+      exec_mode: 'fork',
+      instances: 1,
+      env: { NODE_ENV: 'production' },
+      max_memory_restart: '300M',
+    },
+    {
       // Scheduled jobs, hourly lane (affiliate PENDING->BALANCE, expire stale payments).
       // One-shot per cron tick: PM2 spawns it, it runs the listed jobs once and exits,
       // PM2 waits for the next tick (autorestart:false + cron_restart). Single
@@ -66,7 +92,10 @@ module.exports = {
       name: 'bb-cron',
       cwd: root,
       script: 'apps/mobile-api/dist/jobs-runner.js',
-      args: 'affiliatePendingToBalance expirePendingPayments',
+      // topicDigestNotifications rides this lane on purpose: it no-ops until
+      // 21:00 WIB and is idempotent per WIB day, so an hourly tick delivers the
+      // recap at 21:00 without this file having to assume the daemon's timezone.
+      args: 'affiliatePendingToBalance expirePendingPayments topicDigestNotifications',
       exec_mode: 'fork',
       instances: 1,
       autorestart: false,

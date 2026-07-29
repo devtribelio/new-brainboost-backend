@@ -5,6 +5,7 @@ import { prisma } from '@bb/db';
 import { affiliatePendingToBalance } from '@bb/domain/jobs/affiliate-pending-to-balance';
 import { executeApprovedDisbursements } from '@bb/domain/jobs/execute-approved-disbursements';
 import { expirePendingPayments } from '@bb/domain/jobs/expire-pending-payments';
+import { topicDigestNotifications } from '@bb/domain/jobs/topic-digest-notifications';
 
 /**
  * Standalone scheduled-jobs entrypoint. Runs the registered jobs ONCE, then exits.
@@ -33,6 +34,10 @@ const JOBS: Array<{ name: string; run: () => Promise<unknown> }> = [
   // rows to Xendit. Also scheduled solo on a faster tick (bb-cron-disburse).
   { name: 'executeApprovedDisbursements', run: () => executeApprovedDisbursements() },
   { name: 'expirePendingPayments', run: () => expirePendingPayments() },
+  // Self-guarding on the WIB clock: a no-op until 21:00 WIB, then idempotent for
+  // the rest of the day (dedupeKey per WIB day). Safe on the hourly lane — it
+  // does NOT depend on the scheduler daemon's timezone, which this repo never pins.
+  { name: 'topicDigestNotifications', run: () => topicDigestNotifications() },
 ];
 
 const requested = process.argv.slice(2);
