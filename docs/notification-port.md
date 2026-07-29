@@ -107,7 +107,7 @@ Setelah row tertulis: `setImmediate(() => fcm.dispatch(memberId, ...))` — tida
 
 | Event modul | Emit di | Listener | Action label |
 |---|---|---|---|
-| post publish | `post.service.ts` setelah `prisma.post.create` (status published) | post.listener | `newPost` |
+| post publish | `post.service.ts` setelah `prisma.post.create` (status published) | **topic.listener** | `newPost` — fan-out ke `TopicSubscription` dari `post.topicId` |
 | comment create (non-reply) | `comment.service.ts` create | comment.listener | `newComment`, `tag` (jika mentioned) |
 | reply create | `reply.service.ts` create | comment.listener | `newReply`, `tag` |
 | post-like create | `post.service.ts:169` like create | post.listener | `newLike` |
@@ -126,7 +126,19 @@ Idempotensi: dedupeKey unik. Re-emit (webhook redelivery, retries) silent-skip.
 resolveForPost(post): memberIds         // NetworkMember of post.networkId, exclude author, exclude muted, exclude notificationsEnabled=false
 resolveForComment(comment): memberIds   // postAuthor ∪ repliedCommentAuthor ∪ mentioned, exclude self, exclude muted post
 resolveForNetwork(networkId, role?): memberIds   // 'admin' filter via NetworkMember.role; else all members
+resolveForTopic(topicId, excludeMemberId?): memberIds  // TopicSubscription rows, exclude author, filterEnabled
 ```
+
+**Topic fan-out (implemented 2026-07-29).** `post.published` sempat jadi *dead event* — di-emit tapi
+tanpa listener, sehingga `ActionLabel.NewPost` tidak pernah terpakai dan subscribe ke topic tidak
+menghasilkan push apa pun. Sekarang `topic.listener.ts` mengonsumsinya: event membawa `topicId`,
+resolver mengambil `TopicSubscription`, mute dicek pada scope `topic` **dan** scope `network` induknya
+(mute network lama tetap berlaku), dedupe `newPost:<postId>:<memberId>`. Scope `topic` ikut
+di-allow-list pada `POST /notification/mute`. Post tanpa `topicId` tidak memicu apa-apa —
+notifikasi level-network belum ada.
+
+Legacy tidak pernah mengirim `newPost` (`ACTION_LABEL_NEW_POST` di `TBNotification.php` cuma
+dideklarasikan, nol call-site), jadi ini fitur baru, bukan paritas.
 
 Query single round-trip per resolve (Prisma `findMany select: {memberId}` + `where notificationsEnabled: true`).
 

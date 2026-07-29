@@ -275,6 +275,7 @@ export class PostService {
       postId: post.id,
       authorId: post.authorId,
       networkId: post.networkId,
+      topicId: post.topicId,
       excerpt: post.excerpt ?? '',
     });
     return post;

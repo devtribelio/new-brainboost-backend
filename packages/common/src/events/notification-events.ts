@@ -4,6 +4,7 @@ export interface PostPublishedEvent {
   postId: string;
   authorId: string;
   networkId: string | null;
+  topicId: string | null;
   excerpt: string;
 }
 

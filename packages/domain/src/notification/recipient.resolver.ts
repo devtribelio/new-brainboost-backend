@@ -12,6 +12,17 @@ export class RecipientResolver {
     return this.filterEnabled(rows.map((r) => r.memberId));
   }
 
+  async resolveForTopic(topicId: string, excludeMemberId?: string): Promise<string[]> {
+    const rows = await prisma.topicSubscription.findMany({
+      where: {
+        topicId,
+        ...(excludeMemberId ? { memberId: { not: excludeMemberId } } : {}),
+      },
+      select: { memberId: true },
+    });
+    return this.filterEnabled(rows.map((r) => r.memberId));
+  }
+
   async resolveSingle(memberId: string): Promise<string | null> {
     const m = await prisma.member.findUnique({
       where: { id: memberId },
