@@ -8,6 +8,7 @@ import * as elbv2 from 'aws-cdk-lib/aws-elasticloadbalancingv2';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
+import * as ssm from 'aws-cdk-lib/aws-ssm';
 import * as elasticache from 'aws-cdk-lib/aws-elasticache';
 import * as events from 'aws-cdk-lib/aws-events';
 
@@ -214,6 +215,23 @@ export class BbEcsStack extends cdk.Stack {
         port: 80, open: true,
         defaultAction: elbv2.ListenerAction.redirect({ protocol: 'HTTPS', port: '443', permanent: true }),
       });
+
+      // ALB ini di-share ke stack app lain (BackofficeBbStack, BbMarketplaceStack)
+      // via host-based routing — mereka menambah target group + listener rule sendiri
+      // ke listener 443 ini. Kontraknya param SSM di bawah; default action (mobile-api)
+      // tidak tersentuh. Stack konsumen menempelkan cert domainnya sendiri lewat SNI.
+      new ssm.StringParameter(this, 'SharedAlbListenerArnParam', {
+        parameterName: '/bb/shared-alb/https-listener-arn',
+        stringValue: https.listenerArn,
+      });
+      new ssm.StringParameter(this, 'SharedAlbSgIdParam', {
+        parameterName: '/bb/shared-alb/sg-id',
+        stringValue: alb.connections.securityGroups[0].securityGroupId,
+      });
+      new ssm.StringParameter(this, 'SharedAlbDnsParam', {
+        parameterName: '/bb/shared-alb/dns-name',
+        stringValue: alb.loadBalancerDnsName,
+      });
     } else {
       // belum ada cert → HTTP:80 doang
       const http = alb.addListener('Http', { port: 80, open: true });
@@ -350,7 +368,7 @@ export class BbEcsStack extends cdk.Stack {
         // diomit → default 2× RESYNC_INTERVAL_SEC.
         environment: {
           NODE_ENV: 'production',
-          RESYNC_INTERVAL_SEC: '3600',            // loop worker (detik). 1800 = tiap 30 mnt
+          RESYNC_INTERVAL_SEC: '600',             // loop worker (detik). 600 = tiap 10 mnt (was 3600/1jam)
           RESYNC_SYNCERS: 'all',                  // "all" atau CSV: members,enrollments,kyc,tree,commissions,reviews,posts
           RESYNC_BATCH_SIZE: '1000',              // row per batch
           RESYNC_LEGACY_RECONNECT_RETRIES: '3',   // reconnect saat legacy ECONNRESET
