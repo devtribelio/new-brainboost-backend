@@ -504,8 +504,19 @@ export class LeaderboardMeDto extends LeaderboardEntryDto {
 }
 
 export class AffiliateLeaderboardDto {
-  @ApiProperty({ type: () => LeaderboardPeriodDto })
-  period!: LeaderboardPeriodDto;
+  @ApiProperty({
+    enum: ['lifetime', 'month'],
+    example: 'lifetime',
+    description: 'No year/month params → `lifetime` (all-time). With both → `month`.',
+  })
+  scope!: 'lifetime' | 'month';
+
+  @ApiPropertyOptional({
+    type: () => LeaderboardPeriodDto,
+    nullable: true,
+    description: 'Null when scope is `lifetime` — the all-time board has no calendar period.',
+  })
+  period!: LeaderboardPeriodDto | null;
 
   @ApiPropertyOptional({ nullable: true, format: 'date-time', description: 'Last aggregation run for this period; null if never computed.' })
   updatedAt!: string | null;

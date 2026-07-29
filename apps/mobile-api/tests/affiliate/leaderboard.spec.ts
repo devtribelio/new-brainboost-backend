@@ -104,6 +104,28 @@ describe('refreshAffiliateLeaderboard — aggregation + rank (real Postgres)', (
     });
     expect(count).toBe(2);
   });
+
+  it('also writes the lifetime board (period 0/0), ignoring month windows', async () => {
+    await refreshAffiliateLeaderboard(nowInM);
+
+    const lifeA = await prisma.affiliateLeaderboardMonthly.findFirst({
+      where: { periodYear: 0, periodMonth: 0, memberId: mA },
+    });
+    const lifeB = await prisma.affiliateLeaderboardMonthly.findFirst({
+      where: { periodYear: 0, periodMonth: 0, memberId: mB },
+    });
+
+    // mA: 700k + 300k + 200k, all inside M.
+    expect(lifeA!.totalCommission).toBe(1_200_000);
+    // mB: 500k inside M + 999k in the NEXT month — lifetime counts both.
+    expect(lifeB!.totalCommission).toBe(1_499_000);
+    // mC only has a VOIDED row → absent from lifetime too.
+    expect(
+      await prisma.affiliateLeaderboardMonthly.findFirst({
+        where: { periodYear: 0, periodMonth: 0, memberId: mC },
+      }),
+    ).toBeNull();
+  });
 });
 
 // ── Integration: read service ─────────────────────────────────────────────────
@@ -147,6 +169,7 @@ describe('AffiliateLeaderboardService.getLeaderboard (real Postgres)', () => {
   it('returns censored top + uncensored me + frozen past period', async () => {
     const res = await svc.getLeaderboard(meM, P.year, P.month);
 
+    expect(res.scope).toBe('month');
     expect(res.period).toEqual({ year: 2001, month: 3, frozen: true });
     expect(res.updatedAt).not.toBeNull();
     expect(res.top[0]).toMatchObject({ rank: 1, displayName: 'Bud* S.', totalCommission: 1_000_000 });
@@ -163,5 +186,63 @@ describe('AffiliateLeaderboardService.getLeaderboard (real Postgres)', () => {
 
   it('rejects a future period', async () => {
     await expect(svc.getLeaderboard(meM, 2999, 1)).rejects.toThrow();
+  });
+
+  it('rejects half a period (year without month, or vice versa)', async () => {
+    await expect(svc.getLeaderboard(meM, 2001, undefined)).rejects.toThrow(/together/i);
+    await expect(svc.getLeaderboard(meM, undefined, 3)).rejects.toThrow(/together/i);
+  });
+});
+
+// ── Integration: lifetime board (no params) ───────────────────────────────────
+describe('AffiliateLeaderboardService.getLeaderboard — lifetime (real Postgres)', () => {
+  const svc = new AffiliateLeaderboardService();
+  let lead = '';
+  let meM = '';
+  let stranger = '';
+
+  async function mkNamed(fullName: string): Promise<string> {
+    const m = await prisma.member.create({
+      data: { email: `lbl-${uid()}@test.local`, passwordHash: await bcrypt.hash('s', 4), fullName },
+    });
+    return m.id;
+  }
+
+  beforeAll(async () => {
+    lead = await mkNamed('Budi Santoso');
+    meM = await mkNamed('Rahmat Hidayat');
+    stranger = await mkNamed('Nobody Here');
+
+    // Isolate the all-time board: it is a single shared period (0/0).
+    await prisma.affiliateLeaderboardMonthly.deleteMany({ where: { periodYear: 0, periodMonth: 0 } });
+    const now = new Date();
+    await prisma.affiliateLeaderboardMonthly.createMany({
+      data: [
+        { periodYear: 0, periodMonth: 0, memberId: lead, totalCommission: 9_000_000, rank: 1, updatedAt: now },
+        { periodYear: 0, periodMonth: 0, memberId: meM, totalCommission: 250_000, rank: 2, updatedAt: now },
+      ],
+    });
+  });
+
+  afterAll(async () => {
+    await prisma.affiliateLeaderboardMonthly.deleteMany({ where: { periodYear: 0, periodMonth: 0 } });
+    await prisma.member.deleteMany({ where: { id: { in: [lead, meM, stranger] } } });
+    await prisma.$disconnect();
+  });
+
+  it('no params → all-time board with scope=lifetime and period=null', async () => {
+    const res = await svc.getLeaderboard(meM);
+
+    expect(res.scope).toBe('lifetime');
+    expect(res.period).toBeNull();
+    expect(res.top[0]).toMatchObject({ rank: 1, displayName: 'Bud* S.', totalCommission: 9_000_000 });
+    expect(res.me).toMatchObject({ rank: 2, displayName: 'Rahmat Hidayat', totalCommission: 250_000, inTop: true });
+  });
+
+  it('me is null on the lifetime board when the caller never earned', async () => {
+    const res = await svc.getLeaderboard(stranger);
+    expect(res.scope).toBe('lifetime');
+    expect(res.me).toBeNull();
+    expect(res.top).toHaveLength(2);
   });
 });

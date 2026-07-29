@@ -55,9 +55,13 @@ export class AffiliateController {
   ) {}
 
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Monthly affiliate leaderboard (top-N + own position); other names censored' })
-  @ApiQuery({ name: 'year', required: false, type: 'integer' })
-  @ApiQuery({ name: 'month', required: false, type: 'integer', description: 'WIB calendar month 1..12' })
+  @ApiOperation({
+    summary: 'Affiliate leaderboard (top-N + own position); other names censored',
+    description:
+      'No params → ALL-TIME board (`scope: "lifetime"`, `period: null`). Send year AND month together for one WIB calendar month; sending only one is a 400.',
+  })
+  @ApiQuery({ name: 'year', required: false, type: 'integer', description: 'Must be sent together with `month`.' })
+  @ApiQuery({ name: 'month', required: false, type: 'integer', description: 'WIB calendar month 1..12; must be sent together with `year`.' })
   @ApiResponse({ status: 200, type: () => AffiliateLeaderboardDto })
   getLeaderboard = async (req: AuthenticatedRequest, res: Response) => {
     if (!req.user) throw new UnauthorizedException();

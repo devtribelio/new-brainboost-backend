@@ -4,10 +4,10 @@ import { settingsService, SETTING_KEYS } from '@bb/common/services/settings.serv
 import { AFFILIATE_LEADERBOARD_TOPN_DEFAULT, AFFILIATE_LEADERBOARD_FREEZE_DAYS } from './constants';
 import {
   type Period,
-  wibPeriodOf,
   isPeriodFrozen,
   isPeriodFuture,
   censorAffiliateName,
+  LIFETIME_PERIOD,
 } from './leaderboard.util';
 
 export interface LeaderboardEntry {
@@ -20,8 +20,12 @@ export interface LeaderboardMe extends LeaderboardEntry {
   inTop: boolean;
 }
 
+export type LeaderboardScope = 'lifetime' | 'month';
+
 export interface LeaderboardResult {
-  period: { year: number; month: number; frozen: boolean };
+  /** `lifetime` when no year/month was requested — `period` is then null. */
+  scope: LeaderboardScope;
+  period: { year: number; month: number; frozen: boolean } | null;
   updatedAt: string | null;
   top: LeaderboardEntry[];
   me: LeaderboardMe | null;
@@ -36,14 +40,25 @@ export interface LeaderboardResult {
 export class AffiliateLeaderboardService {
   async getLeaderboard(memberId: string, year?: number, month?: number): Promise<LeaderboardResult> {
     const now = new Date();
-    const period: Period =
-      year !== undefined && month !== undefined ? { year, month } : wibPeriodOf(now);
-
-    if (period.month < 1 || period.month > 12) {
-      throw new BadRequestException('month must be between 1 and 12');
+    const hasYear = year !== undefined;
+    const hasMonth = month !== undefined;
+    // Half a period is ambiguous — fail loudly instead of silently serving the
+    // all-time board to a caller who meant one month.
+    if (hasYear !== hasMonth) {
+      throw new BadRequestException('year and month must be provided together');
     }
-    if (isPeriodFuture(period, now)) {
-      throw new BadRequestException('Periode belum tersedia');
+
+    // No params at all → the all-time board (§11 amendment).
+    const isLifetimeRequest = !hasYear && !hasMonth;
+    const period: Period = isLifetimeRequest ? LIFETIME_PERIOD : { year: year!, month: month! };
+
+    if (!isLifetimeRequest) {
+      if (period.month < 1 || period.month > 12) {
+        throw new BadRequestException('month must be between 1 and 12');
+      }
+      if (isPeriodFuture(period, now)) {
+        throw new BadRequestException('Periode belum tersedia');
+      }
     }
 
     const topN = await settingsService.getNumber(
@@ -82,11 +97,15 @@ export class AffiliateLeaderboardService {
     const updatedAt = topRows[0]?.updatedAt ?? meRow?.updatedAt ?? null;
 
     return {
-      period: {
-        year: period.year,
-        month: period.month,
-        frozen: isPeriodFrozen(period, now, AFFILIATE_LEADERBOARD_FREEZE_DAYS),
-      },
+      scope: isLifetimeRequest ? 'lifetime' : 'month',
+      // Lifetime has no calendar period, and it never freezes.
+      period: isLifetimeRequest
+        ? null
+        : {
+            year: period.year,
+            month: period.month,
+            frozen: isPeriodFrozen(period, now, AFFILIATE_LEADERBOARD_FREEZE_DAYS),
+          },
       updatedAt: updatedAt ? updatedAt.toISOString() : null,
       top,
       me,

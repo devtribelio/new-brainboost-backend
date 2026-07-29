@@ -8,6 +8,8 @@ import {
   nextPeriod,
   prevPeriod,
   isPeriodFrozen,
+  isLifetime,
+  LIFETIME_PERIOD,
 } from '@bb/domain/affiliate/leaderboard.util';
 
 /**
@@ -31,6 +33,8 @@ export async function refreshAffiliateLeaderboard(
   const current = wibPeriodOf(now);
   const candidates = [current, prevPeriod(current)];
   const periods = candidates.filter((p) => !isPeriodFrozen(p, now, AFFILIATE_LEADERBOARD_FREEZE_DAYS));
+  // The all-time board is never frozen — it moves with every new commission.
+  periods.push(LIFETIME_PERIOD);
 
   let rows = 0;
   for (const p of periods) {
@@ -42,14 +46,16 @@ export async function refreshAffiliateLeaderboard(
 }
 
 async function recomputePeriod(p: Period, now: Date): Promise<number> {
-  const start = wibMonthStartUtc(p);
-  const end = wibMonthStartUtc(nextPeriod(p));
+  // Lifetime spans every commission ever — no date window at all.
+  const window = isLifetime(p)
+    ? {}
+    : { createdAt: { gte: wibMonthStartUtc(p), lt: wibMonthStartUtc(nextPeriod(p)) } };
 
   const grouped = await prisma.affiliateCommission.groupBy({
     by: ['recipientId'],
     where: {
       status: { not: COMMISSION_STATUS.VOIDED },
-      createdAt: { gte: start, lt: end },
+      ...window,
     },
     _sum: { amount: true },
   });

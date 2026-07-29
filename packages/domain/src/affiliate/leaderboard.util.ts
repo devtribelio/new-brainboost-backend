@@ -8,6 +8,18 @@ export interface Period {
   month: number; // 1..12
 }
 
+/**
+ * Sentinel "period" holding the all-time ranking in the same table as the
+ * monthly ones. `0/0` can never collide with a real WIB month, so the lifetime
+ * board reuses the unique index, the rank column and the whole read path — a
+ * member's all-time rank stays a single indexed lookup, exactly like a month.
+ */
+export const LIFETIME_PERIOD: Period = { year: 0, month: 0 };
+
+export function isLifetime(p: Period): boolean {
+  return p.year === LIFETIME_PERIOD.year && p.month === LIFETIME_PERIOD.month;
+}
+
 /** The WIB calendar period (year, month 1..12) that `instant` falls in. */
 export function wibPeriodOf(instant: Date): Period {
   const wib = new Date(instant.getTime() + WIB_OFFSET_MS);
