@@ -29,7 +29,7 @@ that doesn't exist on a fresh DB. Use `db push` until the migration history is r
 | HIGH | PERCENT voucher `maxAmount` cap silently bypassed | Thread `maxAmount` through `validate()` → `voucherMeta` → `computeTotals` | `packages/domain/src/commerce/voucher.service.ts`, `checkout.service.ts` |
 | HIGH | TOCTOU double-spend in `requestDisbursement` | Transaction-scoped `pg_advisory_xact_lock(hashtext(memberId))` serialises concurrent requests | `packages/domain/src/affiliate/disbursement.service.ts` |
 | HIGH | Self-referral / circular inviter-chain pays buyer on own purchase | `cutChainCycles()` cycle-guard in `walkInviterChain` + skip `node.id === buyerMemberId` in commit loop | `packages/domain/src/affiliate/utils/walk-inviter-chain.ts`, `affiliator.service.ts` |
-| MEDIUM | Password change did not revoke other sessions | `changePassword` now revokes all non-revoked refresh tokens (mirrors `resetPassword`) | `apps/mobile-api/src/modules/account/account.service.ts` |
+| MEDIUM | Password change did not revoke other sessions | `changePassword` revokes every non-revoked refresh token **except the caller's own** (`NOT: { id: currentSessionId }`, sid threaded from `authGuard`) — see note below | `apps/mobile-api/src/modules/account/account.service.ts` |
 | MEDIUM | Unbounded multipart upload (memory/S3 DoS) | `limits.files`/`parts` cap + `upload.array('image', MAX)` (MAX=10) | `apps/mobile-api/src/modules/upload/upload.routes.ts` |
 | LOW | Swagger UI + OpenAPI JSON exposed in prod | Gated behind `API_DOCS_ENABLED` flag (default ON, so staging keeps docs; set `=false` in real production) | `packages/common/src/openapi/swagger.middleware.ts`, `config/env.ts` |
 | LOW | Voucher-validate enumeration (no rate limit) | Per-member `voucherValidateRateLimiter` (20/15min) on the route | `packages/common/src/middlewares/rate-limit.middleware.ts`, `apps/mobile-api/.../commerce.routes.ts` |
@@ -38,6 +38,28 @@ New regression tests: `network-auth.spec.ts`, `admin-rbac.spec.ts`,
 `affiliate/inviter-chain-cycle.spec.ts`, voucher-`maxAmount` case in
 `commerce/voucher.spec.ts`. `api-smoke.spec.ts` network assertions updated to the
 auth-gated behaviour.
+
+### Note — password change keeps the caller's session (2026-07-30)
+
+The original fix revoked **all** refresh tokens, which logged the member out of
+the very device they had just used: `authGuard` calls `assertSessionActive(sid)`
+on every request, so the caller's own access token died instantly (not after the
+15m TTL), and `changePassword` returns a profile object, not a fresh token
+bundle. Product decision: keep the caller's session, evict the rest.
+
+Why this does not weaken the original threat model: a stolen refresh token is a
+*different* `refresh_token` row, so it is still revoked. The one surviving
+session is the one that presented a valid access token **and** proved knowledge
+of the old password. Both degenerate paths fail safe toward *more* revocation —
+a missing `sessionId` falls back to revoke-all, and the `memberId` filter means
+a `currentSessionId` that isn't this member's simply excludes nothing.
+
+`forgotPasswordVerification` is deliberately **left revoking everything**: that
+caller is unauthenticated and only proved control of the OTP channel, so every
+pre-existing session stays suspect.
+
+Covered by `apps/mobile-api/tests/account-change-password.spec.ts` (7 cases,
+incl. caller-survives / other-device-evicted / live-token-count).
 
 ---
 

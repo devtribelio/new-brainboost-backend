@@ -171,7 +171,7 @@ export class AccountService {
     return { loggedOut: true, logoutFrom: null };
   }
 
-  async changePassword(memberId: string, dto: ChangePasswordDto) {
+  async changePassword(memberId: string, dto: ChangePasswordDto, currentSessionId?: string) {
     if (dto.newPassword !== dto.confirmNewPassword) {
       throw badRequest(ERROR_CODES.PASSWORD_CONFIRMATION_MISMATCH);
     }
@@ -205,10 +205,19 @@ export class AccountService {
 
     // SECURITY: a password change must evict any other (possibly compromised)
     // session. Without this, a stolen refresh token keeps minting access tokens
-    // indefinitely after the victim changes their password. Mirrors the
-    // forgot-password resetPassword + logout revoke-all behaviour.
+    // indefinitely after the victim changes their password.
+    //
+    // Unlike forgot-password (where the caller is unauthenticated, so every
+    // session is suspect) the caller here proved knowledge of the OLD password,
+    // so their own session is trusted and kept alive — `authGuard` re-checks
+    // `refreshToken.revokedAt` on every request, so revoking it would log the
+    // member out of the very device they just used. Only the OTHER devices go.
     await prisma.refreshToken.updateMany({
-      where: { memberId, revokedAt: null },
+      where: {
+        memberId,
+        revokedAt: null,
+        ...(currentSessionId ? { NOT: { id: currentSessionId } } : {}),
+      },
       data: { revokedAt: new Date() },
     });
 

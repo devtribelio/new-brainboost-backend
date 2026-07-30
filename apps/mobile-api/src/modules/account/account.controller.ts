@@ -67,7 +67,11 @@ export class AccountController {
   @ApiResponse({ status: 200, type: () => GenericOkDto })
   changePassword = async (req: Request, res: Response) => {
     const user = requireUser(req);
-    const result = await this.accountService.changePassword(user.id, req.body as ChangePasswordDto);
+    const result = await this.accountService.changePassword(
+      user.id,
+      req.body as ChangePasswordDto,
+      user.sessionId,
+    );
     return ok(res, result);
   };
 
