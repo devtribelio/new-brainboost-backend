@@ -2,10 +2,20 @@ import type { Response } from 'express';
 import { ProfileService } from './profile.service';
 import { prisma } from '@bb/db';
 import { ok } from '@bb/common/utils/response.util';
-import { UnauthorizedException } from '@bb/common/exceptions';
+import { unauthorized, ERROR_CODES } from '@bb/common/exceptions';
 import type { AuthenticatedRequest } from '@bb/common/interfaces/authenticated-request';
-import { ApiBearerAuth, ApiBody, ApiOperation, ApiResponse, ApiTags } from '@bb/common/openapi/decorators';
-import { MemberProfileDto, UpdateProfileRequestDto, UpdateLocationRequestDto } from './dto/profile.dto';
+import {
+  ApiBearerAuth,
+  ApiBody,
+  ApiOperation,
+  ApiResponse,
+  ApiTags,
+} from '@bb/common/openapi/decorators';
+import {
+  MemberProfileDto,
+  UpdateProfileRequestDto,
+  UpdateLocationRequestDto,
+} from './dto/profile.dto';
 
 @ApiTags('Profile')
 @ApiBearerAuth()
@@ -73,7 +83,7 @@ export class ProfileController {
   @ApiOperation({ summary: 'Get my profile info' })
   @ApiResponse({ status: 200, type: () => MemberProfileDto })
   getInfo = async (req: AuthenticatedRequest, res: Response) => {
-    if (!req.user) throw new UnauthorizedException();
+    if (!req.user) throw unauthorized(ERROR_CODES.AUTH_REQUIRED);
     return ok(res, await this.serializeProfileLegacy(req.user.id));
   };
 
@@ -81,7 +91,7 @@ export class ProfileController {
   @ApiBody({ type: () => UpdateProfileRequestDto })
   @ApiResponse({ status: 200, type: () => MemberProfileDto })
   update = async (req: AuthenticatedRequest, res: Response) => {
-    if (!req.user) throw new UnauthorizedException();
+    if (!req.user) throw unauthorized(ERROR_CODES.AUTH_REQUIRED);
     const body = req.body ?? {};
     await this.profileService.updateInfo(req.user.id, {
       fullName: body.name ?? body.fullName,
@@ -101,7 +111,7 @@ export class ProfileController {
   @ApiBody({ type: () => UpdateLocationRequestDto })
   @ApiResponse({ status: 200, type: () => MemberProfileDto })
   updateLocation = async (req: AuthenticatedRequest, res: Response) => {
-    if (!req.user) throw new UnauthorizedException();
+    if (!req.user) throw unauthorized(ERROR_CODES.AUTH_REQUIRED);
     const body = req.body ?? {};
     await this.profileService.updateLocation(req.user.id, {
       countryId: body.countryId,

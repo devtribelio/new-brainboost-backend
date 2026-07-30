@@ -5,10 +5,13 @@ import type { EnrollmentService } from '@bb/domain/affiliate/enrollment.service'
 import type { DisbursementService } from '@bb/domain/affiliate/disbursement.service';
 import { VisitService } from '@bb/domain/affiliate/visit.service';
 import { ok, okCreated, okPaginated } from '@bb/common/utils/response.util';
-import { UnauthorizedException, BadRequestException } from '@bb/common/exceptions';
+import { badRequest, unauthorized, ERROR_CODES } from '@bb/common/exceptions';
 import type { AuthenticatedRequest } from '@bb/common/interfaces/authenticated-request';
 import type { AffiliateBased } from '@bb/domain/affiliate/constants';
-import { AFFILIATE_COOKIE_NAME, AFFILIATE_COOKIE_DAYS_DEFAULT } from '@bb/domain/affiliate/constants';
+import {
+  AFFILIATE_COOKIE_NAME,
+  AFFILIATE_COOKIE_DAYS_DEFAULT,
+} from '@bb/domain/affiliate/constants';
 import { settingsService, SETTING_KEYS } from '@bb/common/services/settings.service';
 import {
   ApiBearerAuth,
@@ -55,7 +58,7 @@ export class AffiliateController {
   @ApiOperation({ summary: 'Get my affiliator profile (auto-generates affiliateCode if missing)' })
   @ApiResponse({ status: 200, type: () => AffiliatorProfileDto })
   getMe = async (req: AuthenticatedRequest, res: Response) => {
-    if (!req.user) throw new UnauthorizedException();
+    if (!req.user) throw unauthorized(ERROR_CODES.AUTH_REQUIRED);
     const profile = await this.affiliatorService.getMe(req.user.id);
     return ok(res, profile);
   };
@@ -65,35 +68,69 @@ export class AffiliateController {
   @ApiBody({ type: () => SetModeDto })
   @ApiResponse({ status: 200, type: () => SetModeResultDto })
   setMode = async (req: AuthenticatedRequest, res: Response) => {
-    if (!req.user) throw new UnauthorizedException();
+    if (!req.user) throw unauthorized(ERROR_CODES.AUTH_REQUIRED);
     const mode = (req.body?.mode as AffiliateBased) || (req.body?.affiliateBased as AffiliateBased);
-    if (!mode) throw new BadRequestException('mode required');
+    if (!mode) throw badRequest(ERROR_CODES.AFFILIATE_MODE_REQUIRED);
     const updated = await this.affiliatorService.setMode(req.user.id, mode);
     return ok(res, updated);
   };
 
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Affiliator dashboard summary (lifetime, balance, pending, current tier)' })
+  @ApiOperation({
+    summary: 'Affiliator dashboard summary (lifetime, balance, pending, current tier)',
+  })
   @ApiResponse({ status: 200, type: () => AffiliatorSummaryDto })
   getSummary = async (req: AuthenticatedRequest, res: Response) => {
-    if (!req.user) throw new UnauthorizedException();
+    if (!req.user) throw unauthorized(ERROR_CODES.AUTH_REQUIRED);
     const summary = await this.affiliatorService.getSummary(req.user.id);
     return ok(res, summary);
   };
 
   @ApiBearerAuth()
   @ApiOperation({
-    summary: 'Commission history (paginated) — enriched with product, buyer & channel ("dari mana saja")',
+    summary:
+      'Commission history (paginated) — enriched with product, buyer & channel ("dari mana saja")',
   })
   @ApiQuery({ name: 'page', type: 'integer', required: false, example: 1 })
-  @ApiQuery({ name: 'perPage', type: 'integer', required: false, example: 20, description: 'Max 100.' })
-  @ApiQuery({ name: 'status', type: 'string', required: false, description: 'PENDING | BALANCE | VOIDED' })
-  @ApiQuery({ name: 'productId', type: 'string', required: false, description: 'Filter by source product (UUID).' })
-  @ApiQuery({ name: 'from', type: 'string', required: false, description: 'ISO date — createdAt lower bound.' })
-  @ApiQuery({ name: 'to', type: 'string', required: false, description: 'ISO date — createdAt upper bound.' })
-  @ApiResponse({ status: 200, type: () => AffiliateCommissionDto, isArray: true, envelope: 'paginated' })
+  @ApiQuery({
+    name: 'perPage',
+    type: 'integer',
+    required: false,
+    example: 20,
+    description: 'Max 100.',
+  })
+  @ApiQuery({
+    name: 'status',
+    type: 'string',
+    required: false,
+    description: 'PENDING | BALANCE | VOIDED',
+  })
+  @ApiQuery({
+    name: 'productId',
+    type: 'string',
+    required: false,
+    description: 'Filter by source product (UUID).',
+  })
+  @ApiQuery({
+    name: 'from',
+    type: 'string',
+    required: false,
+    description: 'ISO date — createdAt lower bound.',
+  })
+  @ApiQuery({
+    name: 'to',
+    type: 'string',
+    required: false,
+    description: 'ISO date — createdAt upper bound.',
+  })
+  @ApiResponse({
+    status: 200,
+    type: () => AffiliateCommissionDto,
+    isArray: true,
+    envelope: 'paginated',
+  })
   listMyCommissions = async (req: AuthenticatedRequest, res: Response) => {
-    if (!req.user) throw new UnauthorizedException();
+    if (!req.user) throw unauthorized(ERROR_CODES.AUTH_REQUIRED);
     const page = Math.max(1, Number(req.query.page) || 1);
     const perPage = Math.min(100, Math.max(1, Number(req.query.perPage) || 20));
     const status = typeof req.query.status === 'string' ? req.query.status : undefined;
@@ -120,25 +157,41 @@ export class AffiliateController {
   @ApiOperation({ summary: 'Enroll in a program by code' })
   @ApiResponse({ status: 201, type: () => MemberAffiliatorDto })
   enroll = async (req: AuthenticatedRequest, res: Response) => {
-    if (!req.user) throw new UnauthorizedException();
+    if (!req.user) throw unauthorized(ERROR_CODES.AUTH_REQUIRED);
     const code = req.params.code;
-    if (!code) throw new BadRequestException('program code required');
+    if (!code) throw badRequest(ERROR_CODES.AFFILIATE_PROGRAM_CODE_REQUIRED);
     const enrollment = await this.enrollmentService.joinByCode(req.user.id, code);
     return okCreated(res, enrollment);
   };
 
-  @ApiOperation({ summary: 'Log an affiliate link click. Always returns 200 — never breaks marketing ads.' })
+  @ApiOperation({
+    summary: 'Log an affiliate link click. Always returns 200 — never breaks marketing ads.',
+  })
   @ApiBody({ type: () => LogVisitDto })
-  @ApiQuery({ name: 'program', type: 'string', required: false, description: 'Program code — query fallback for `programCode`.' })
-  @ApiQuery({ name: 'affCode', type: 'string', required: false, description: 'Affiliator code — query fallback for `affiliatorCode`.' })
+  @ApiQuery({
+    name: 'program',
+    type: 'string',
+    required: false,
+    description: 'Program code — query fallback for `programCode`.',
+  })
+  @ApiQuery({
+    name: 'affCode',
+    type: 'string',
+    required: false,
+    description: 'Affiliator code — query fallback for `affiliatorCode`.',
+  })
   @ApiResponse({ status: 200, type: () => VisitLogResultDto })
   logVisit = async (req: AuthenticatedRequest, res: Response) => {
     const body = (req.body ?? {}) as Record<string, unknown>;
     const programCode = (body.programCode || body.program_code || req.query.program) as string;
-    const affiliatorCode = (body.affiliatorCode || body.affCode || body.aff || req.query.affCode) as string;
-    const productCode = (body.productCode || body.product_code || body.product || req.query.product) as
-      | string
-      | undefined;
+    const affiliatorCode = (body.affiliatorCode ||
+      body.affCode ||
+      body.aff ||
+      req.query.affCode) as string;
+    const productCode = (body.productCode ||
+      body.product_code ||
+      body.product ||
+      req.query.product) as string | undefined;
 
     const queryParsed = VisitService.parseQuery({ ...req.query, ...body });
     const result = await this.visitService.logVisit({
@@ -156,12 +209,18 @@ export class AffiliateController {
       ipAddress: extractIp(req),
       userAgent: req.headers['user-agent'],
       referer: req.headers.referer,
-      deviceId: (req.headers['x-device-id'] as string | undefined) ?? (body.deviceId as string | undefined),
-      platform: (req.headers['x-platform'] as string | undefined) ?? (body.platform as string | undefined),
-      appVersion: (req.headers['x-app-version'] as string | undefined) ?? (body.appVersion as string | undefined),
+      deviceId:
+        (req.headers['x-device-id'] as string | undefined) ?? (body.deviceId as string | undefined),
+      platform:
+        (req.headers['x-platform'] as string | undefined) ?? (body.platform as string | undefined),
+      appVersion:
+        (req.headers['x-app-version'] as string | undefined) ??
+        (body.appVersion as string | undefined),
       installReferrer: body.installReferrer as string | undefined,
       rawQueryString: req.url.includes('?') ? req.url.slice(req.url.indexOf('?') + 1) : undefined,
-      rawHeaders: VisitService.sanitizeHeaders(req.headers as Record<string, string | string[] | undefined>),
+      rawHeaders: VisitService.sanitizeHeaders(
+        req.headers as Record<string, string | string[] | undefined>,
+      ),
       clientEventId: body.clientEventId as string | undefined,
     });
 
@@ -186,17 +245,21 @@ export class AffiliateController {
   };
 
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Bind affiliate attribution to logged-in member (deep-link post-login)' })
+  @ApiOperation({
+    summary: 'Bind affiliate attribution to logged-in member (deep-link post-login)',
+  })
   @ApiBody({ type: () => LogAttributionDto })
   @ApiResponse({ status: 200, type: () => VisitLogResultDto })
   logAttribution = async (req: AuthenticatedRequest, res: Response) => {
-    if (!req.user) throw new UnauthorizedException();
+    if (!req.user) throw unauthorized(ERROR_CODES.AUTH_REQUIRED);
     const body = (req.body ?? {}) as Record<string, unknown>;
     const programCode = (body.programCode || body.program_code) as string;
     const affiliatorCode = (body.affiliatorCode || body.affCode || body.aff) as string;
-    const productCode = (body.productCode || body.product_code || body.product) as string | undefined;
+    const productCode = (body.productCode || body.product_code || body.product) as
+      | string
+      | undefined;
     if (!programCode || !affiliatorCode) {
-      throw new BadRequestException('programCode and affiliatorCode required');
+      throw badRequest(ERROR_CODES.AFFILIATE_ENROLL_PARAMS_REQUIRED);
     }
 
     const result = await this.visitService.logAttribution({
@@ -211,9 +274,13 @@ export class AffiliateController {
       utmTerm: body.utmTerm as string | undefined,
       adId: body.adId as string | undefined,
       adNetwork: body.adNetwork as string | undefined,
-      deviceId: (req.headers['x-device-id'] as string | undefined) ?? (body.deviceId as string | undefined),
-      platform: (req.headers['x-platform'] as string | undefined) ?? (body.platform as string | undefined),
-      appVersion: (req.headers['x-app-version'] as string | undefined) ?? (body.appVersion as string | undefined),
+      deviceId:
+        (req.headers['x-device-id'] as string | undefined) ?? (body.deviceId as string | undefined),
+      platform:
+        (req.headers['x-platform'] as string | undefined) ?? (body.platform as string | undefined),
+      appVersion:
+        (req.headers['x-app-version'] as string | undefined) ??
+        (body.appVersion as string | undefined),
       installReferrer: body.installReferrer as string | undefined,
       ipAddress: extractIp(req),
       userAgent: req.headers['user-agent'],
@@ -227,17 +294,20 @@ export class AffiliateController {
   @ApiOperation({ summary: 'Withdrawable balance + payout eligibility' })
   @ApiResponse({ status: 200, type: () => DisbursementSummaryDto })
   getDisbursementSummary = async (req: AuthenticatedRequest, res: Response) => {
-    if (!req.user) throw new UnauthorizedException();
+    if (!req.user) throw unauthorized(ERROR_CODES.AUTH_REQUIRED);
     const summary = await this.disbursementService.getSummary(req.user.id);
     return ok(res, summary);
   };
 
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Request a payout (full balance, or a partial `amount`)' })
-  @ApiBody({ type: () => RequestDisbursementDto, description: 'Optional body. Omit to withdraw the full balance.' })
+  @ApiBody({
+    type: () => RequestDisbursementDto,
+    description: 'Optional body. Omit to withdraw the full balance.',
+  })
   @ApiResponse({ status: 201, type: () => AffiliateDisbursementDto })
   requestDisbursement = async (req: AuthenticatedRequest, res: Response) => {
-    if (!req.user) throw new UnauthorizedException();
+    if (!req.user) throw unauthorized(ERROR_CODES.AUTH_REQUIRED);
     const { amount } = req.body as RequestDisbursementDto;
     const disbursement = await this.disbursementService.requestDisbursement(req.user.id, amount);
     return okCreated(res, disbursement);
@@ -246,13 +316,28 @@ export class AffiliateController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'List my payout requests (paginated)' })
   @ApiQuery({ name: 'page', type: 'integer', required: false, example: 1 })
-  @ApiQuery({ name: 'perPage', type: 'integer', required: false, example: 20, description: 'Max 100.' })
-  @ApiResponse({ status: 200, type: () => AffiliateDisbursementDto, isArray: true, envelope: 'paginated' })
+  @ApiQuery({
+    name: 'perPage',
+    type: 'integer',
+    required: false,
+    example: 20,
+    description: 'Max 100.',
+  })
+  @ApiResponse({
+    status: 200,
+    type: () => AffiliateDisbursementDto,
+    isArray: true,
+    envelope: 'paginated',
+  })
   listDisbursements = async (req: AuthenticatedRequest, res: Response) => {
-    if (!req.user) throw new UnauthorizedException();
+    if (!req.user) throw unauthorized(ERROR_CODES.AUTH_REQUIRED);
     const page = Math.max(1, Number(req.query.page) || 1);
     const perPage = Math.min(100, Math.max(1, Number(req.query.perPage) || 20));
-    const { rows, total } = await this.disbursementService.listDisbursements(req.user.id, page, perPage);
+    const { rows, total } = await this.disbursementService.listDisbursements(
+      req.user.id,
+      page,
+      perPage,
+    );
     return okPaginated(res, rows, { page, perPage, total });
   };
 
@@ -262,7 +347,7 @@ export class AffiliateController {
   @ApiOperation({ summary: 'Get my payout bank account' })
   @ApiResponse({ status: 200, type: () => BankAccountDto })
   getBankAccount = async (req: AuthenticatedRequest, res: Response) => {
-    if (!req.user) throw new UnauthorizedException();
+    if (!req.user) throw unauthorized(ERROR_CODES.AUTH_REQUIRED);
     const bank = await this.disbursementService.getBankAccount(req.user.id);
     return ok(res, bank);
   };
@@ -272,7 +357,7 @@ export class AffiliateController {
   @ApiBody({ type: () => SetBankAccountDto })
   @ApiResponse({ status: 200, type: () => BankAccountDto })
   setBankAccount = async (req: AuthenticatedRequest, res: Response) => {
-    if (!req.user) throw new UnauthorizedException();
+    if (!req.user) throw unauthorized(ERROR_CODES.AUTH_REQUIRED);
     const { bankCode, bankAccountNumber, bankAccountName } = req.body as SetBankAccountDto;
     const bank = await this.disbursementService.setBankAccount(req.user.id, {
       bankCode,
@@ -288,7 +373,7 @@ export class AffiliateController {
   @ApiOperation({ summary: 'Get my KYC status' })
   @ApiResponse({ status: 200, type: () => KycDto })
   getKyc = async (req: AuthenticatedRequest, res: Response) => {
-    if (!req.user) throw new UnauthorizedException();
+    if (!req.user) throw unauthorized(ERROR_CODES.AUTH_REQUIRED);
     const kyc = await this.disbursementService.getKyc(req.user.id);
     return ok(res, kyc);
   };
@@ -298,7 +383,7 @@ export class AffiliateController {
   @ApiBody({ type: () => SubmitKycDto })
   @ApiResponse({ status: 200, type: () => KycDto })
   submitKyc = async (req: AuthenticatedRequest, res: Response) => {
-    if (!req.user) throw new UnauthorizedException();
+    if (!req.user) throw unauthorized(ERROR_CODES.AUTH_REQUIRED);
     const { idNumber, idCardUrl, selfieUrl } = req.body as SubmitKycDto;
     const kyc = await this.disbursementService.submitKyc(req.user.id, {
       idNumber,
@@ -314,7 +399,7 @@ export class AffiliateController {
   })
   @ApiResponse({ status: 200, type: () => KycTokenDto })
   createKycToken = async (req: AuthenticatedRequest, res: Response) => {
-    if (!req.user) throw new UnauthorizedException();
+    if (!req.user) throw unauthorized(ERROR_CODES.AUTH_REQUIRED);
     const session = await this.disbursementService.createDiditSession(req.user.id);
     return ok(res, session);
   };

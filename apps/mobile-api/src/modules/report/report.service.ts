@@ -1,5 +1,5 @@
 import { prisma } from '@bb/db';
-import { BadRequestException, NotFoundException } from '@bb/common/exceptions';
+import { badRequest, notFound, ERROR_CODES } from '@bb/common/exceptions';
 import { assertUuid } from '@bb/common/utils/uuid.util';
 
 export class ReportService {
@@ -53,18 +53,21 @@ export class ReportService {
     return byId?.id ?? null;
   }
 
-  async reportMember(reporterId: string, dto: {
-    targetMemberId: string;
-    categoryId: string;
-    networkId?: string;
-    reason?: string;
-  }) {
+  async reportMember(
+    reporterId: string,
+    dto: {
+      targetMemberId: string;
+      categoryId: string;
+      networkId?: string;
+      reason?: string;
+    },
+  ) {
     const targetId = await this.resolveMemberId(dto.targetMemberId);
-    if (!targetId) throw new NotFoundException('Target member not found');
-    if (targetId === reporterId) throw new BadRequestException('Cannot report yourself');
+    if (!targetId) throw notFound(ERROR_CODES.TARGET_MEMBER_NOT_FOUND);
+    if (targetId === reporterId) throw badRequest(ERROR_CODES.REPORT_SELF_FORBIDDEN);
 
     const categoryId = await this.resolveCategoryId(dto.categoryId);
-    if (!categoryId) throw new BadRequestException('Invalid category');
+    if (!categoryId) throw badRequest(ERROR_CODES.REPORT_CATEGORY_INVALID);
 
     const cat = await prisma.reportCategory.findUnique({
       where: { id: categoryId },
@@ -92,17 +95,20 @@ export class ReportService {
     };
   }
 
-  async reportPost(reporterId: string, dto: {
-    postId: string;
-    categoryId: string;
-    networkId?: string;
-    reason?: string;
-  }) {
+  async reportPost(
+    reporterId: string,
+    dto: {
+      postId: string;
+      categoryId: string;
+      networkId?: string;
+      reason?: string;
+    },
+  ) {
     const postId = await this.resolvePostId(dto.postId);
-    if (!postId) throw new NotFoundException('Post not found');
+    if (!postId) throw notFound(ERROR_CODES.POST_NOT_FOUND);
 
     const categoryId = await this.resolveCategoryId(dto.categoryId);
-    if (!categoryId) throw new BadRequestException('Invalid category');
+    if (!categoryId) throw badRequest(ERROR_CODES.REPORT_CATEGORY_INVALID);
 
     const created = await prisma.postReport.create({
       data: {

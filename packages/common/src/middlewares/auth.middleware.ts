@@ -1,5 +1,5 @@
 import type { Response, NextFunction, RequestHandler } from 'express';
-import { UnauthorizedException } from '@bb/common/exceptions';
+import { unauthorized, ERROR_CODES } from '@bb/common/exceptions';
 import { verifyAccessToken } from '@bb/common/utils/jwt.util';
 import type { AuthenticatedRequest } from '@bb/common/interfaces/authenticated-request';
 import { prisma } from '@bb/db';
@@ -7,14 +7,14 @@ import { REQUIRES_BEARER_AUTH } from '@bb/common/openapi/types';
 
 async function assertSessionActive(sid: string | undefined): Promise<void> {
   if (!sid) {
-    throw new UnauthorizedException('Session terminated — login again');
+    throw unauthorized(ERROR_CODES.SESSION_REVOKED);
   }
   const row = await prisma.refreshToken.findUnique({
     where: { id: sid },
     select: { revokedAt: true },
   });
   if (!row || row.revokedAt) {
-    throw new UnauthorizedException('Session terminated — login again');
+    throw unauthorized(ERROR_CODES.SESSION_REVOKED);
   }
 }
 
@@ -22,14 +22,14 @@ export const authGuard: RequestHandler = async (req, _res: Response, next: NextF
   try {
     const header = req.headers.authorization;
     if (!header || !header.toLowerCase().startsWith('bearer ')) {
-      throw new UnauthorizedException('Missing bearer token');
+      throw unauthorized(ERROR_CODES.BEARER_TOKEN_MISSING);
     }
     const token = header.slice(7).trim();
-    if (!token) throw new UnauthorizedException('Missing bearer token');
+    if (!token) throw unauthorized(ERROR_CODES.BEARER_TOKEN_MISSING);
 
     const payload = verifyAccessToken(token);
     const scope = payload.scope ?? 'member';
-    if (scope !== 'member') throw new UnauthorizedException('Member access token required');
+    if (scope !== 'member') throw unauthorized(ERROR_CODES.MEMBER_TOKEN_REQUIRED);
     await assertSessionActive(payload.sid);
     (req as AuthenticatedRequest).user = {
       id: payload.sub,
@@ -53,14 +53,14 @@ export const authGuardLenient: RequestHandler = (req, _res: Response, next: Next
   try {
     const header = req.headers.authorization;
     if (!header || !header.toLowerCase().startsWith('bearer ')) {
-      throw new UnauthorizedException('Missing bearer token');
+      throw unauthorized(ERROR_CODES.BEARER_TOKEN_MISSING);
     }
     const token = header.slice(7).trim();
-    if (!token) throw new UnauthorizedException('Missing bearer token');
+    if (!token) throw unauthorized(ERROR_CODES.BEARER_TOKEN_MISSING);
 
     const payload = verifyAccessToken(token);
     const scope = payload.scope ?? 'member';
-    if (scope !== 'member') throw new UnauthorizedException('Member access token required');
+    if (scope !== 'member') throw unauthorized(ERROR_CODES.MEMBER_TOKEN_REQUIRED);
     (req as AuthenticatedRequest).user = {
       id: payload.sub,
       email: payload.email,
@@ -100,10 +100,10 @@ export const anonOrMemberGuard: RequestHandler = async (req, _res, next) => {
   try {
     const header = req.headers.authorization;
     if (!header || !header.toLowerCase().startsWith('bearer ')) {
-      throw new UnauthorizedException('Missing bearer token');
+      throw unauthorized(ERROR_CODES.BEARER_TOKEN_MISSING);
     }
     const token = header.slice(7).trim();
-    if (!token) throw new UnauthorizedException('Missing bearer token');
+    if (!token) throw unauthorized(ERROR_CODES.BEARER_TOKEN_MISSING);
 
     const payload = verifyAccessToken(token);
     const scope = payload.scope ?? 'member';

@@ -3,14 +3,15 @@ import type { Request, Response } from 'express';
 import { MediaService } from './media.service';
 import { MEDIA_RESOLUTIONS, type MediaResolution } from './dto/media.dto';
 import { verifyMediaToken } from './media-token.util';
-import { BadRequestException, UnauthorizedException } from '@bb/common/exceptions';
-import type { AuthenticatedRequest } from '@bb/common/interfaces/authenticated-request';
 import {
-  ApiOperation,
-  ApiQuery,
-  ApiResponse,
-  ApiTags,
-} from '@bb/common/openapi/decorators';
+  badRequest,
+  unauthorized,
+  forbidden,
+  ERROR_CODES,
+  UnauthorizedException,
+} from '@bb/common/exceptions';
+import type { AuthenticatedRequest } from '@bb/common/interfaces/authenticated-request';
+import { ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@bb/common/openapi/decorators';
 import { env } from '@bb/common/config/env';
 import { logger } from '@bb/common/config/logger';
 
@@ -63,7 +64,7 @@ export class MediaController {
   stream = async (req: Request, res: Response): Promise<void> => {
     const token = typeof req.query.t === 'string' ? req.query.t : '';
     if (!token) {
-      throw new BadRequestException('Missing media token');
+      throw badRequest(ERROR_CODES.MEDIA_TOKEN_MISSING);
     }
 
     // Throws UnauthorizedException on a bad/expired/tampered token.
@@ -72,7 +73,7 @@ export class MediaController {
     if (!payload.isPreview) {
       const user = (req as AuthenticatedRequest).user;
       if (!user) {
-        throw new UnauthorizedException('Authentication required for this media');
+        throw unauthorized(ERROR_CODES.MEDIA_AUTH_REQUIRED);
       }
       await this.mediaService.assertEnrollment(payload.courseId, user.id);
     }
@@ -165,7 +166,7 @@ export class MediaController {
   download = async (req: Request, res: Response): Promise<void> => {
     const token = typeof req.query.t === 'string' ? req.query.t : '';
     if (!token) {
-      throw new BadRequestException('Missing media token');
+      throw badRequest(ERROR_CODES.MEDIA_TOKEN_MISSING);
     }
 
     const payload = verifyMediaToken(token);
@@ -173,7 +174,7 @@ export class MediaController {
     if (!payload.isPreview) {
       const user = (req as AuthenticatedRequest).user;
       if (!user) {
-        throw new UnauthorizedException('Authentication required for this media');
+        throw unauthorized(ERROR_CODES.MEDIA_AUTH_REQUIRED);
       }
       await this.mediaService.assertEnrollment(payload.courseId, user.id);
     }
@@ -195,8 +196,7 @@ export class MediaController {
     // (Android DownloadManager / iOS URLSession / wget). Browsers tend to ignore
     // it and use the Bunny response's headers, so this is a hint, not a hard
     // guarantee — but it lets FE control the saved filename when supported.
-    const filename =
-      this.sanitizeFilename(req.query.filename) ?? `media-${payload.guid}.mp4`;
+    const filename = this.sanitizeFilename(req.query.filename) ?? `media-${payload.guid}.mp4`;
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.redirect(302, this.mediaService.buildDownloadUrl(payload.guid, resolution));
   };
@@ -207,7 +207,7 @@ export class MediaController {
       return raw as MediaResolution;
     }
     if (typeof raw === 'string' && raw !== '') {
-      throw new BadRequestException('Invalid resolution — expected 360p | 480p | 720p');
+      throw badRequest(ERROR_CODES.MEDIA_RESOLUTION_INVALID);
     }
     return env.media.defaultResolution as MediaResolution;
   }
@@ -219,7 +219,10 @@ export class MediaController {
    */
   private sanitizeFilename(raw: unknown): string | null {
     if (typeof raw !== 'string') return null;
-    const cleaned = raw.replace(/[^a-zA-Z0-9._\- ]/g, '').slice(0, 100).trim();
+    const cleaned = raw
+      .replace(/[^a-zA-Z0-9._\- ]/g, '')
+      .slice(0, 100)
+      .trim();
     return cleaned.length > 0 ? cleaned : null;
   }
 }

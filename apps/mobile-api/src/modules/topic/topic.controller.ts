@@ -1,7 +1,7 @@
 import type { Response } from 'express';
 import { TopicService } from './topic.service';
 import { ok, okPaginated } from '@bb/common/utils/response.util';
-import { BadRequestException, UnauthorizedException } from '@bb/common/exceptions';
+import { badRequest, unauthorized, ERROR_CODES } from '@bb/common/exceptions';
 import { parsePagination } from '@bb/common/utils/pagination.util';
 import { serializeTopic } from './topic.serializer';
 import type { AuthenticatedRequest } from '@bb/common/interfaces/authenticated-request';
@@ -44,8 +44,7 @@ export class TopicController {
     const p = parsePagination(req.query as Record<string, unknown>);
     const keyword = (req.query.keyword as string) ?? undefined;
     // FE sends `code` (network code). `networkId` accepted as alias for backwards compat.
-    const networkInput =
-      (req.query.code as string) ?? (req.query.networkId as string) ?? undefined;
+    const networkInput = (req.query.code as string) ?? (req.query.networkId as string) ?? undefined;
     const rawIsSubscribe = req.query.isSubscribe as string | undefined;
     const isSubscribe =
       rawIsSubscribe === undefined
@@ -65,9 +64,9 @@ export class TopicController {
   @ApiBody({ type: () => TopicSubscribeBodyDto })
   @ApiResponse({ status: 200, type: () => TopicSubscribeResultDto })
   subscribe = async (req: AuthenticatedRequest, res: Response) => {
-    if (!req.user) throw new UnauthorizedException();
+    if (!req.user) throw unauthorized(ERROR_CODES.AUTH_REQUIRED);
     const topicId = (req.body?.topicId as string) ?? '';
-    if (!topicId) throw new BadRequestException('topicId required');
+    if (!topicId) throw badRequest(ERROR_CODES.TOPIC_ID_REQUIRED);
     const action = (req.body?.action as string) ?? 'subscribe';
     const result =
       action === 'unsubscribe'

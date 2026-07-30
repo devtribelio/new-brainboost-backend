@@ -1,5 +1,5 @@
 import { prisma } from '@bb/db';
-import { BadRequestException, NotFoundException } from '@bb/common/exceptions';
+import { badRequest, notFound, ERROR_CODES } from '@bb/common/exceptions';
 import type { PaginationParams } from '@bb/common/utils/pagination.util';
 import { assertUuid } from '@bb/common/utils/uuid.util';
 
@@ -79,7 +79,10 @@ export class TopicService {
   // — duplicated rather than cross-module import to keep services self-contained.
   private async resolveNetworkId(input: string): Promise<string | null> {
     if (!input) return null;
-    const byCode = await prisma.network.findUnique({ where: { code: input }, select: { id: true } });
+    const byCode = await prisma.network.findUnique({
+      where: { code: input },
+      select: { id: true },
+    });
     if (byCode) return byCode.id;
     const legacyId = Number.parseInt(input, 10);
     if (Number.isFinite(legacyId) && input === String(legacyId)) {
@@ -112,19 +115,19 @@ export class TopicService {
       select: { id: true, legacyId: true, isActive: true },
     });
     if (!member || !member.isActive) {
-      throw new BadRequestException('Member is not active');
+      throw badRequest(ERROR_CODES.MEMBER_INACTIVE);
     }
 
     const topic = await this.resolveTopicByAnyId(topicInput);
-    if (!topic) throw new NotFoundException('Topic not found');
-    if (!topic.isActive) throw new BadRequestException('Topic is not active');
+    if (!topic) throw notFound(ERROR_CODES.TOPIC_NOT_FOUND);
+    if (!topic.isActive) throw badRequest(ERROR_CODES.TOPIC_INACTIVE);
 
     if (topic.networkId) {
       const networkMember = await prisma.networkMember.findUnique({
         where: { networkId_memberId: { networkId: topic.networkId, memberId } },
       });
       if (!networkMember) {
-        throw new BadRequestException('Must join the parent network before subscribing to topic');
+        throw badRequest(ERROR_CODES.TOPIC_PARENT_NETWORK_REQUIRED);
       }
     }
 
@@ -175,7 +178,7 @@ export class TopicService {
       select: { id: true, legacyId: true },
     });
     const topic = await this.resolveTopicByAnyId(topicInput);
-    if (!topic) throw new NotFoundException('Topic not found');
+    if (!topic) throw notFound(ERROR_CODES.TOPIC_NOT_FOUND);
 
     await prisma.topicSubscription.deleteMany({ where: { memberId, topicId: topic.id } });
     await prisma.topicJoinRequest.updateMany({

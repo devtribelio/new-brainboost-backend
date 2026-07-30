@@ -27,7 +27,7 @@ describe('otpService phone OTP parity', () => {
     await otpService.issue({ target: PHONE, purpose: 'verify-phone', enforceResendGuard: true });
     await expect(
       otpService.issue({ target: PHONE, purpose: 'verify-phone', enforceResendGuard: true }),
-    ).rejects.toThrow(/already sent/i);
+    ).rejects.toMatchObject({ code: 'OTP_RESEND_TOO_SOON' });
   });
 
   it('resend is allowed again once the prior OTP is consumed', async () => {
@@ -48,6 +48,6 @@ describe('otpService phone OTP parity', () => {
     }
     await expect(
       otpService.issue({ target: PHONE, purpose: 'verify-phone', maxPerDay: 5 }),
-    ).rejects.toThrow(/maximum number of OTP requests/i);
+    ).rejects.toMatchObject({ code: 'OTP_DAILY_LIMIT_REACHED' });
   });
 });

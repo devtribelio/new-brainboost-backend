@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { env } from '@bb/common/config/env';
-import { UnauthorizedException } from '@bb/common/exceptions';
+import { unauthorized, ERROR_CODES, UnauthorizedException } from '@bb/common/exceptions';
 
 /**
  * Opaque media stream token.
@@ -66,7 +66,7 @@ export function signMediaToken(
 export function verifyMediaToken(token: string): MediaTokenPayload {
   const raw = Buffer.from(token ?? '', 'base64url');
   if (raw.length < IV_LEN + TAG_LEN + 1) {
-    throw new UnauthorizedException('Invalid media token');
+    throw unauthorized(ERROR_CODES.MEDIA_TOKEN_INVALID);
   }
   const iv = raw.subarray(0, IV_LEN);
   const tag = raw.subarray(IV_LEN, IV_LEN + TAG_LEN);
@@ -79,14 +79,14 @@ export function verifyMediaToken(token: string): MediaTokenPayload {
     const plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
     envelope = JSON.parse(plaintext.toString('utf8')) as MediaTokenEnvelope;
   } catch {
-    throw new UnauthorizedException('Invalid media token');
+    throw unauthorized(ERROR_CODES.MEDIA_TOKEN_INVALID);
   }
 
   if (typeof envelope.exp !== 'number' || envelope.exp * 1000 < Date.now()) {
-    throw new UnauthorizedException('Media token expired');
+    throw unauthorized(ERROR_CODES.MEDIA_TOKEN_EXPIRED);
   }
   if (typeof envelope.guid !== 'string' || typeof envelope.courseId !== 'string') {
-    throw new UnauthorizedException('Invalid media token');
+    throw unauthorized(ERROR_CODES.MEDIA_TOKEN_INVALID);
   }
   return {
     guid: envelope.guid,

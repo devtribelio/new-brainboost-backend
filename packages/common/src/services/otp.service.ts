@@ -1,7 +1,7 @@
 import bcrypt from 'bcryptjs';
 import { randomInt } from 'node:crypto';
 import { prisma } from '@bb/db';
-import { BadRequestException } from '@bb/common/exceptions';
+import { badRequest, ERROR_CODES } from '@bb/common/exceptions';
 import { logger } from '@bb/common/config/logger';
 import { testAccountConfig } from '@bb/common/config/env';
 import { enqueueComms } from './comms-outbox';
@@ -113,9 +113,11 @@ class OtpService {
         orderBy: { createdAt: 'desc' },
       });
       if (active) {
-        throw new BadRequestException(
-          `An OTP was already sent. Please retry after ${active.expiresAt.toISOString()}.`,
-        );
+        // Retry time goes in `details`, not the sentence: an ISO timestamp is not
+        // something a user should be shown.
+        throw badRequest(ERROR_CODES.OTP_RESEND_TOO_SOON, {
+          retryAfter: active.expiresAt.toISOString(),
+        });
       }
     }
 
@@ -131,9 +133,7 @@ class OtpService {
         },
       });
       if (issuedToday >= input.maxPerDay) {
-        throw new BadRequestException(
-          'You have reached the maximum number of OTP requests for today. Please try again tomorrow.',
-        );
+        throw badRequest(ERROR_CODES.OTP_DAILY_LIMIT_REACHED);
       }
     }
 
@@ -204,10 +204,10 @@ class OtpService {
       orderBy: { createdAt: 'desc' },
     });
 
-    if (!otp) throw new BadRequestException('OTP not found or already used');
-    if (otp.expiresAt < new Date()) throw new BadRequestException('OTP expired');
+    if (!otp) throw badRequest(ERROR_CODES.OTP_NOT_FOUND);
+    if (otp.expiresAt < new Date()) throw badRequest(ERROR_CODES.OTP_EXPIRED);
     if (otp.attempts >= MAX_OTP_ATTEMPTS) {
-      throw new BadRequestException('Too many incorrect attempts. Request a new code.');
+      throw badRequest(ERROR_CODES.OTP_LOCKED);
     }
 
     const matches = await bcrypt.compare(code, otp.code);
@@ -220,9 +220,9 @@ class OtpService {
       });
       if (locked) {
         logger.warn({ purpose, target }, 'OTP locked after too many incorrect attempts');
-        throw new BadRequestException('Too many incorrect attempts. Request a new code.');
+        throw badRequest(ERROR_CODES.OTP_LOCKED);
       }
-      throw new BadRequestException('Invalid OTP');
+      throw badRequest(ERROR_CODES.OTP_INVALID);
     }
 
     return { id: otp.id };

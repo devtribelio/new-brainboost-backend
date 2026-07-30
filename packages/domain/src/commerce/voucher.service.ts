@@ -1,6 +1,6 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '@bb/db';
-import { BadRequestException } from '@bb/common/exceptions';
+import { badRequest, ERROR_CODES } from '@bb/common/exceptions';
 
 export interface VoucherCheckResult {
   valid: boolean;
@@ -84,7 +84,7 @@ export class VoucherService {
       // Voucher no longer redeemable — roll back the claim so this order isn't left
       // with a slot it never paid for (invariant: a claim row ⇒ `used` was bumped).
       await prisma.voucherRedemption.delete({ where: { transactionId } }).catch(() => {});
-      throw new BadRequestException('Voucher exhausted or no longer redeemable');
+      throw badRequest(ERROR_CODES.VOUCHER_EXHAUSTED);
     }
   }
 }

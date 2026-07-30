@@ -1,5 +1,5 @@
 import { prisma } from '@bb/db';
-import { NotFoundException } from '@bb/common/exceptions';
+import { notFound, ERROR_CODES } from '@bb/common/exceptions';
 import { buildSystemConfig } from '@bb/common/services/system-config.service';
 import { env } from '@bb/common/config/env';
 import { DisbursementService } from '@bb/domain/affiliate/disbursement.service';
@@ -29,8 +29,8 @@ export class MemberService {
         },
       },
     });
-    if (!member) throw new NotFoundException('Member not found');
-    if (!member.isActive) throw new NotFoundException('Member is not active');
+    if (!member) throw notFound(ERROR_CODES.MEMBER_NOT_FOUND);
+    if (!member.isActive) throw notFound(ERROR_CODES.MEMBER_INACTIVE);
 
     // Re-KYC on dormant reactivation: this is the app-resume chokepoint (it already
     // bumps lastActiveAt). member.lastActiveAt still holds the PREVIOUS session's

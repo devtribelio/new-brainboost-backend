@@ -10,7 +10,7 @@ describe('quoteDisbursement (legacy payout rules)', () => {
   it('rejects balance below the minimum (15k)', () => {
     const q = quoteDisbursement(DISBURSEMENT_MIN_BALANCE - 1);
     expect(q.eligible).toBe(false);
-    expect(q.reason).toMatch(/Minimum balance/);
+    expect(q.reasonCode).toBe('DISBURSEMENT_BELOW_MIN_BALANCE');
   });
 
   it('rejects when net (balance - fee) does not exceed 10k — exactly at the floor', () => {
@@ -18,7 +18,7 @@ describe('quoteDisbursement (legacy payout rules)', () => {
     const q = quoteDisbursement(15_000);
     expect(q.eligible).toBe(false);
     expect(q.netAmount).toBe(10_000);
-    expect(q.reason).toMatch(/Net payout/);
+    expect(q.reasonCode).toBe('DISBURSEMENT_NET_TOO_SMALL');
   });
 
   it('accepts the first eligible amount (15,001 → net 10,001)', () => {
@@ -56,7 +56,7 @@ describe('quoteDisbursement (legacy payout rules)', () => {
     it('rejects an amount above the withdrawable balance', () => {
       const q = quoteDisbursement(20_000, 30_000);
       expect(q.eligible).toBe(false);
-      expect(q.reason).toMatch(/exceeds withdrawable balance/);
+      expect(q.reasonCode).toBe('DISBURSEMENT_AMOUNT_EXCEEDS_BALANCE');
     });
 
     it('allows withdrawing exactly the full balance', () => {
@@ -68,14 +68,14 @@ describe('quoteDisbursement (legacy payout rules)', () => {
     it('still enforces the min-balance rule on the requested amount', () => {
       const q = quoteDisbursement(100_000, DISBURSEMENT_MIN_BALANCE - 1);
       expect(q.eligible).toBe(false);
-      expect(q.reason).toMatch(/Minimum balance/);
+      expect(q.reasonCode).toBe('DISBURSEMENT_BELOW_MIN_BALANCE');
     });
 
     it('still enforces the min-net rule on the requested amount', () => {
       const q = quoteDisbursement(100_000, 15_000);
       expect(q.eligible).toBe(false);
       expect(q.netAmount).toBe(10_000);
-      expect(q.reason).toMatch(/Net payout/);
+      expect(q.reasonCode).toBe('DISBURSEMENT_NET_TOO_SMALL');
     });
 
     it('floors a fractional requested amount', () => {
@@ -98,7 +98,7 @@ describe('quoteDisbursement (legacy payout rules)', () => {
       const q = quoteDisbursement(17_000, undefined, DISBURSEMENT_MIN_BALANCE, 7_000);
       expect(q.eligible).toBe(false);
       expect(q.netAmount).toBe(10_000);
-      expect(q.reason).toMatch(/Net payout/);
+      expect(q.reasonCode).toBe('DISBURSEMENT_NET_TOO_SMALL');
     });
 
     it('omitting the fee keeps the constant fallback', () => {

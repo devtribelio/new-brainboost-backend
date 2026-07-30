@@ -1,5 +1,5 @@
 import type { Request, RequestHandler } from 'express';
-import { UnauthorizedException } from '@bb/common/exceptions';
+import { unauthorized, ERROR_CODES } from '@bb/common/exceptions';
 import { credentialService, type VerifiedCredential } from './credential.service';
 
 export interface CredentialedRequest extends Request {
@@ -17,7 +17,7 @@ export const credentialGuard: RequestHandler = (req, _res, next) => {
     .verify(key)
     .then((cred) => {
       if (!cred) {
-        next(new UnauthorizedException('Invalid ingestion credential'));
+        next(unauthorized(ERROR_CODES.INGEST_CREDENTIAL_INVALID));
         return;
       }
       (req as CredentialedRequest).credential = cred;

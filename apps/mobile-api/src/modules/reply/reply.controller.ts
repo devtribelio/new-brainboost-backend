@@ -1,7 +1,7 @@
 import type { Response } from 'express';
 import { ReplyService } from './reply.service';
 import { okPaginated } from '@bb/common/utils/response.util';
-import { BadRequestException } from '@bb/common/exceptions';
+import { badRequest, ERROR_CODES } from '@bb/common/exceptions';
 import { parsePagination } from '@bb/common/utils/pagination.util';
 import { serializeComment } from '@/modules/comment/comment.serializer';
 import type { AuthenticatedRequest } from '@bb/common/interfaces/authenticated-request';
@@ -19,11 +19,14 @@ export class ReplyController {
   @ApiResponse({ status: 200, type: () => CommentDto, isArray: true, envelope: 'paginated' })
   list = async (req: AuthenticatedRequest, res: Response) => {
     const parent = (req.query.commentId as string) ?? (req.query.replyId as string) ?? '';
-    if (!parent) throw new BadRequestException('commentId required');
+    if (!parent) throw badRequest(ERROR_CODES.COMMENT_ID_REQUIRED);
     const p = parsePagination(req.query as Record<string, unknown>);
     const { rows, total } = await this.replyService.listReplies(p, parent);
     const liked = req.user
-      ? await this.replyService.likedByMember(req.user.id, rows.map((r) => r.id))
+      ? await this.replyService.likedByMember(
+          req.user.id,
+          rows.map((r) => r.id),
+        )
       : new Set<string>();
     const data = rows.map((row) => serializeComment(row, liked.has(row.id)));
     return okPaginated(res, data, { page: p.page, perPage: p.perPage, total });

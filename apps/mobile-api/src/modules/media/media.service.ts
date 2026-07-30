@@ -1,4 +1,4 @@
-import { ForbiddenException } from '@bb/common/exceptions';
+import { forbidden, ERROR_CODES, ForbiddenException } from '@bb/common/exceptions';
 import { env } from '@bb/common/config/env';
 import { prisma } from '@bb/db';
 import type { MediaResolution } from './dto/media.dto';
@@ -22,7 +22,7 @@ export class MediaService {
       select: { id: true },
     });
     if (!enrollment) {
-      throw new ForbiddenException('Not enrolled in this course');
+      throw forbidden(ERROR_CODES.COURSE_NOT_ENROLLED);
     }
   }
 

@@ -18,7 +18,9 @@ describe('health', () => {
     expect(res.status).toBe(404);
     expect(res.body.success).toBe(false);
     expect(res.body.error.code).toBe('NOT_FOUND');
-    expect(res.body.error.message).toContain('Route not found');
+    // The requested route moved from the message into `details` — the message is
+    // user-facing copy and must not echo raw client input.
+    expect(res.body.error.details).toMatchObject({ method: 'GET', path: '/api/does-not-exist' });
     expect(res.body.data).toBeNull();
   });
 });

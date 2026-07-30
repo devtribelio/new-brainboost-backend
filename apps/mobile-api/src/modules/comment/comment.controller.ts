@@ -1,7 +1,7 @@
 import type { Response } from 'express';
 import { CommentService } from '@bb/domain/comment/comment.service';
 import { ok, okCreated, okPaginated } from '@bb/common/utils/response.util';
-import { BadRequestException, UnauthorizedException } from '@bb/common/exceptions';
+import { badRequest, unauthorized, ERROR_CODES } from '@bb/common/exceptions';
 import { parsePagination } from '@bb/common/utils/pagination.util';
 import { serializeComment } from './comment.serializer';
 import type { AuthenticatedRequest } from '@bb/common/interfaces/authenticated-request';
@@ -41,11 +41,14 @@ export class CommentController {
   })
   list = async (req: AuthenticatedRequest, res: Response) => {
     const postId = (req.query.postId as string) ?? '';
-    if (!postId) throw new BadRequestException('postId required');
+    if (!postId) throw badRequest(ERROR_CODES.POST_ID_REQUIRED);
     const p = parsePagination(req.query as Record<string, unknown>);
     const { rows, total } = await this.commentService.listForPost(p, postId);
     const liked = req.user
-      ? await this.commentService.likedByMember(req.user.id, rows.map((r) => r.id))
+      ? await this.commentService.likedByMember(
+          req.user.id,
+          rows.map((r) => r.id),
+        )
       : new Set<string>();
     const data = rows.map((row) => serializeComment(row, liked.has(row.id)));
     return okPaginated(res, data, { page: p.page, perPage: p.perPage, total });
@@ -56,7 +59,7 @@ export class CommentController {
   @ApiResponse({ status: 200, type: () => CommentDto })
   detail = async (req: AuthenticatedRequest, res: Response) => {
     const commentId = (req.query.commentId as string) ?? '';
-    if (!commentId) throw new BadRequestException('commentId required');
+    if (!commentId) throw badRequest(ERROR_CODES.COMMENT_ID_REQUIRED);
     const c = await this.commentService.detail(commentId);
     const liked = req.user
       ? await this.commentService.likedByMember(req.user.id, [c.id])
@@ -69,9 +72,9 @@ export class CommentController {
   @ApiBody({ type: () => CommentLikeBodyDto })
   @ApiResponse({ status: 200, type: () => CommentLikeToggleResultDto })
   like = async (req: AuthenticatedRequest, res: Response) => {
-    if (!req.user) throw new UnauthorizedException();
+    if (!req.user) throw unauthorized(ERROR_CODES.AUTH_REQUIRED);
     const commentId = (req.body?.commentId as string) ?? '';
-    if (!commentId) throw new BadRequestException('commentId required');
+    if (!commentId) throw badRequest(ERROR_CODES.COMMENT_ID_REQUIRED);
     const result = await this.commentService.toggleLike(req.user.id, commentId);
     // commentId = comment's legacyId int (null when unmigrated).
     return ok(res, {
@@ -86,7 +89,7 @@ export class CommentController {
   @ApiBody({ type: () => CommentCreateBodyDto })
   @ApiResponse({ status: 201, type: () => CommentDto })
   create = async (req: AuthenticatedRequest, res: Response) => {
-    if (!req.user) throw new UnauthorizedException();
+    if (!req.user) throw unauthorized(ERROR_CODES.AUTH_REQUIRED);
     const body = req.body ?? {};
     const c = await this.commentService.create(req.user.id, {
       postId: body.postId,
@@ -101,11 +104,11 @@ export class CommentController {
   @ApiBody({ type: () => CommentUpdateBodyDto })
   @ApiResponse({ status: 200, type: () => CommentDto })
   update = async (req: AuthenticatedRequest, res: Response) => {
-    if (!req.user) throw new UnauthorizedException();
+    if (!req.user) throw unauthorized(ERROR_CODES.AUTH_REQUIRED);
     const body = req.body ?? {};
     const commentId = body.commentId as string;
     const content = body.content as string;
-    if (!commentId || !content) throw new BadRequestException('commentId and content required');
+    if (!commentId || !content) throw badRequest(ERROR_CODES.COMMENT_CONTENT_REQUIRED);
     const c = await this.commentService.update(req.user.id, commentId, content);
     return ok(res, serializeComment(c));
   };
@@ -115,9 +118,9 @@ export class CommentController {
   @ApiBody({ type: () => CommentDeleteBodyDto })
   @ApiResponse({ status: 200, type: () => CommentDeleteResultDto })
   remove = async (req: AuthenticatedRequest, res: Response) => {
-    if (!req.user) throw new UnauthorizedException();
+    if (!req.user) throw unauthorized(ERROR_CODES.AUTH_REQUIRED);
     const commentId = (req.body?.commentId as string) ?? (req.query.commentId as string) ?? '';
-    if (!commentId) throw new BadRequestException('commentId required');
+    if (!commentId) throw badRequest(ERROR_CODES.COMMENT_ID_REQUIRED);
     await this.commentService.remove(req.user.id, commentId);
     return ok(res, { commentId, deleted: true });
   };

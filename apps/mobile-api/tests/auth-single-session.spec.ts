@@ -149,15 +149,13 @@ describe('auth single-session enforcement', () => {
 
     const res = await refresh(a.refresh_token);
     expect(res.status).toBe(401);
-    expect(res.body.error.message).toBe('session_revoked');
+    expect(res.body.error.code).toBe('SESSION_REVOKED');
   });
 
   it('refresh grant on a tampered/unknown token returns invalid_refresh_token', async () => {
     const fake = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ4Iiwidg9rZW5JZCI6InkifQ.invalidsig';
     const res = await refresh(fake);
     expect(res.status).toBe(401);
-    expect(['invalid_refresh_token', 'Invalid or expired refresh token']).toContain(
-      res.body.error.message,
-    );
+    expect(res.body.error.code).toBe('REFRESH_TOKEN_INVALID');
   });
 });

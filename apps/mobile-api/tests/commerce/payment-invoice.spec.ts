@@ -87,14 +87,21 @@ describe('PaymentService — Invoice dispatch', () => {
       },
     });
     const svc = new PaymentService(makeMockGateway());
-    await expect(svc.create(memberId, { transactionId: tx.id })).rejects.toThrow(/PAID/);
+    // The offending state moved from the message into `details` (the message is
+    // user-facing copy now), so assert both the code and the reported state.
+    await expect(svc.create(memberId, { transactionId: tx.id })).rejects.toMatchObject({
+      code: 'TRANSACTION_NOT_PENDING',
+      details: { status: 'PAID' },
+    });
   });
 
   it('rejects when not owner', async () => {
     const other = await createTestMember('pay-inv-other');
     const tx = await createPendingTransaction(memberId, productId, 100_000);
     const svc = new PaymentService(makeMockGateway());
-    await expect(svc.create(other.id, { transactionId: tx.id })).rejects.toThrow(/Not your transaction/);
+    await expect(svc.create(other.id, { transactionId: tx.id })).rejects.toMatchObject({
+      code: 'TRANSACTION_NOT_OWNED',
+    });
     await prisma.refreshToken.deleteMany({ where: { memberId: other.id } });
     await prisma.member.delete({ where: { id: other.id } });
   });

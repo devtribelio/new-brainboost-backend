@@ -10,10 +10,10 @@ import {
   verifyRefreshToken,
 } from '@bb/common/utils/jwt.util';
 import {
-  BadRequestException,
-  HttpException,
-  NotFoundException,
-  UnauthorizedException,
+  badRequest,
+  unauthorized,
+  notFound,
+  ERROR_CODES,
 } from '@bb/common/exceptions';
 import { assertUuid } from '@bb/common/utils/uuid.util';
 import { normalizePhonePair, otpPhoneTarget } from '@bb/common/utils/phone.util';
@@ -90,7 +90,7 @@ function mapDtoPurpose(
     case 'verify_email':
       return 'verify-email';
     default:
-      throw new BadRequestException(`Unknown OTP purpose: ${p}`);
+      throw badRequest(ERROR_CODES.OTP_PURPOSE_UNKNOWN, { purpose: p });
   }
 }
 
@@ -106,7 +106,7 @@ export class AuthService {
       case 'social':
         return this.loginWithSocial(dto);
       default:
-        throw new BadRequestException('Unsupported grant_type');
+        throw badRequest(ERROR_CODES.UNSUPPORTED_GRANT_TYPE);
     }
   }
 
@@ -114,15 +114,15 @@ export class AuthService {
     const expectedId = env.oauth.clientId;
     const expectedSecret = env.oauth.clientSecret;
     if (!expectedId || !expectedSecret) {
-      throw new BadRequestException('client_credentials grant is disabled');
+      throw badRequest(ERROR_CODES.CLIENT_CREDENTIALS_DISABLED);
     }
     if (!dto.client_id || !dto.client_secret) {
-      throw new BadRequestException('client_id and client_secret required');
+      throw badRequest(ERROR_CODES.CLIENT_CREDENTIALS_REQUIRED);
     }
     const ok =
       timingSafeStringEqual(dto.client_id, expectedId) &&
       timingSafeStringEqual(dto.client_secret, expectedSecret);
-    if (!ok) throw new UnauthorizedException('Invalid client credentials');
+    if (!ok) throw unauthorized(ERROR_CODES.INVALID_CLIENT_CREDENTIALS);
 
     return {
       access_token: signAnonAccessToken(dto.client_id),
@@ -158,12 +158,12 @@ export class AuthService {
     // the register, same precedence as before (email > phone > username).
     for (const row of conflicts) {
       if (isReusableUnverifiedMember(row)) continue;
-      if (row.email === dto.email) throw new BadRequestException('Email already registered');
+      if (row.email === dto.email) throw badRequest(ERROR_CODES.EMAIL_ALREADY_REGISTERED);
       if (dto.phone && row.phone === dto.phone) {
-        throw new BadRequestException('Phone already registered');
+        throw badRequest(ERROR_CODES.PHONE_ALREADY_REGISTERED);
       }
       if (dto.username && row.username === dto.username) {
-        throw new BadRequestException('Username already registered');
+        throw badRequest(ERROR_CODES.USERNAME_ALREADY_REGISTERED);
       }
     }
 
@@ -186,10 +186,10 @@ export class AuthService {
 
     if (dto.birthdate) {
       const dob = new Date(dto.birthdate);
-      if (Number.isNaN(dob.getTime())) throw new BadRequestException('Invalid birthdate');
+      if (Number.isNaN(dob.getTime())) throw badRequest(ERROR_CODES.BIRTHDATE_INVALID);
       const ageMs = Date.now() - dob.getTime();
       const ageYears = ageMs / (1000 * 60 * 60 * 24 * 365.25);
-      if (ageYears < 13) throw new BadRequestException('Member must be at least 13 years old');
+      if (ageYears < 13) throw badRequest(ERROR_CODES.AGE_BELOW_MINIMUM);
     }
 
     let inviterId: string | undefined;
@@ -252,11 +252,9 @@ export class AuthService {
 
     // Same canonical phone forms as registerByPhone (the DTO even documents
     // E.164 in `phone` — strip the duplicated dial code before storing).
-    const normalizedPhone = dto.phone
-      ? normalizePhonePair(dto.phone, dto.phoneCode ?? '')
-      : null;
+    const normalizedPhone = dto.phone ? normalizePhonePair(dto.phone, dto.phoneCode ?? '') : null;
     if (normalizedPhone && normalizedPhone.phone.length < 6) {
-      throw new BadRequestException('Invalid phone number');
+      throw badRequest(ERROR_CODES.PHONE_INVALID);
     }
 
     // Members are born inactive + unverified; the verify-email OTP step
@@ -418,7 +416,7 @@ export class AuthService {
 
   private async loginWithPassword(dto: LoginDto): Promise<TokenBundle> {
     if (!dto.username || !dto.password) {
-      throw new BadRequestException('username and password required for password grant');
+      throw badRequest(ERROR_CODES.CREDENTIALS_REQUIRED);
     }
 
     const rawUsername = dto.username.trim();
@@ -440,11 +438,11 @@ export class AuthService {
     });
 
     if (!member) {
-      throw new UnauthorizedException('Invalid credentials');
+      throw unauthorized(ERROR_CODES.INVALID_CREDENTIALS);
     }
 
     const matches = await this.verifyPassword(dto.password, member);
-    if (!matches) throw new UnauthorizedException('Invalid credentials');
+    if (!matches) throw unauthorized(ERROR_CODES.INVALID_CREDENTIALS);
 
     if (!member.isActive) {
       // Only after the password matched: reveal the unverified state so FE can
@@ -456,7 +454,7 @@ export class AuthService {
       //     email: member.email ?? '',
       //   });
       // }
-      throw new UnauthorizedException('Invalid credentials');
+      throw unauthorized(ERROR_CODES.INVALID_CREDENTIALS);
     }
 
     return this.issueTokenBundle(
@@ -515,12 +513,12 @@ export class AuthService {
   }
 
   private async loginWithRefreshToken(dto: LoginDto): Promise<TokenBundle> {
-    if (!dto.refresh_token) throw new BadRequestException('refresh_token required');
+    if (!dto.refresh_token) throw badRequest(ERROR_CODES.REFRESH_TOKEN_REQUIRED);
 
     const payload = verifyRefreshToken(dto.refresh_token);
     const stored = await prisma.refreshToken.findUnique({ where: { token: dto.refresh_token } });
     if (!stored) {
-      throw new UnauthorizedException('invalid_refresh_token');
+      throw unauthorized(ERROR_CODES.REFRESH_TOKEN_INVALID);
     }
     if (stored.revokedAt) {
       // NOTE: true RTR reuse-detection (revoke the whole session family when a
@@ -529,14 +527,14 @@ export class AuthService {
       // reasons (second login in the single-session bucket, logout, password
       // change). Without it, blanket family-revocation here logs legitimate
       // users out. Tracked as a follow-up (see docs/security-audit-followups.md).
-      throw new UnauthorizedException('session_revoked');
+      throw unauthorized(ERROR_CODES.SESSION_REVOKED);
     }
     if (stored.expiresAt < new Date()) {
-      throw new UnauthorizedException('refresh_token_expired');
+      throw unauthorized(ERROR_CODES.REFRESH_TOKEN_EXPIRED);
     }
 
     const member = await prisma.member.findUnique({ where: { id: payload.sub } });
-    if (!member || !member.isActive) throw new UnauthorizedException('Member not active');
+    if (!member || !member.isActive) throw unauthorized(ERROR_CODES.MEMBER_INACTIVE);
 
     // Rotate the specific row only — refresh must not affect other sessions in
     // the same bucket (web is multi-session) or in the other bucket. Bucket is
@@ -551,7 +549,7 @@ export class AuthService {
 
   private async loginWithSocial(dto: LoginDto): Promise<TokenBundle> {
     if (!dto.social_token) {
-      throw new BadRequestException('social_token required for social grant');
+      throw badRequest(ERROR_CODES.SOCIAL_TOKEN_REQUIRED);
     }
 
     const clientType = normalizeClientType(dto.client_type);
@@ -561,7 +559,7 @@ export class AuthService {
       // Google flow keeps its strict policy: a present-but-unverified email is
       // rejected rather than silently linked.
       if (!payload.emailVerified) {
-        throw new UnauthorizedException('google_email_not_verified');
+        throw unauthorized(ERROR_CODES.GOOGLE_EMAIL_NOT_VERIFIED);
       }
       return this.resolveOrCreateSocialMember({
         provider: 'google',
@@ -595,7 +593,7 @@ export class AuthService {
     }
 
     // facebook etc. not implemented.
-    throw new BadRequestException('Unsupported social provider');
+    throw badRequest(ERROR_CODES.SOCIAL_PROVIDER_UNSUPPORTED);
   }
 
   /**
@@ -629,7 +627,7 @@ export class AuthService {
     // Fast path: known provider sub → straight to issue.
     const bySub = await prisma.member.findUnique({ where: subWhere });
     if (bySub) {
-      if (!bySub.isActive) throw new UnauthorizedException('Member not active');
+      if (!bySub.isActive) throw unauthorized(ERROR_CODES.MEMBER_INACTIVE);
       // Heal legacy-migrated rows: legacy MariaDB has members with a social id
       // but is_email_verified=0 (pre-dates the unconditional set in
       // MemberLoginSocialMedia), and migration copies the flag as-is. The
@@ -656,9 +654,9 @@ export class AuthService {
       const byEmail = await prisma.member.findUnique({ where: { email } });
       if (byEmail) {
         if (!byEmail.isEmailVerified) {
-          throw new BadRequestException('email_in_use_unverified');
+          throw badRequest(ERROR_CODES.EMAIL_IN_USE_UNVERIFIED);
         }
-        if (!byEmail.isActive) throw new UnauthorizedException('Member not active');
+        if (!byEmail.isActive) throw unauthorized(ERROR_CODES.MEMBER_INACTIVE);
         const linked = await prisma.member.update({
           where: { id: byEmail.id },
           data: subData,
@@ -715,7 +713,7 @@ export class AuthService {
         if (email) {
           const retryEmail = await prisma.member.findUnique({ where: { email } });
           if (retryEmail) {
-            if (!retryEmail.isEmailVerified) throw new BadRequestException('email_in_use_unverified');
+            if (!retryEmail.isEmailVerified) throw badRequest(ERROR_CODES.EMAIL_IN_USE_UNVERIFIED);
             const linked = await prisma.member.update({
               where: { id: retryEmail.id },
               data: subData,
@@ -745,7 +743,9 @@ export class AuthService {
         (err: Error | null, user: GoogleIdTokenPayload | false, info?: { message?: string }) => {
           if (err) return reject(err);
           if (!user)
-            return reject(new UnauthorizedException(info?.message ?? 'invalid_google_id_token'));
+            return reject(
+              unauthorized(ERROR_CODES.GOOGLE_ID_TOKEN_INVALID, { reason: info?.message }),
+            );
           resolve(user);
         },
       );
@@ -823,9 +823,7 @@ export class AuthService {
           orderBy: { lastSeenAt: 'desc' },
         });
     if (!device) {
-      throw new NotFoundException(
-        'No device registered for this member — call /auth/devices first',
-      );
+      throw notFound(ERROR_CODES.DEVICE_NOT_REGISTERED);
     }
 
     // Same single-active-device rule as registerDevice: token rotation re-asserts
@@ -867,13 +865,13 @@ export class AuthService {
         channel: 'phone' as const,
       };
     }
-    throw new BadRequestException('email or phone required');
+    throw badRequest(ERROR_CODES.EMAIL_OR_PHONE_REQUIRED);
   }
 
   async requestForgotPassword(dto: RequestForgotPasswordDto) {
     const resolved = await this.resolveForgotPasswordMember(dto);
     if (!resolved || !resolved.member.isActive) {
-      throw new NotFoundException('Account not registered');
+      throw notFound(ERROR_CODES.ACCOUNT_NOT_REGISTERED);
     }
     const { member, target, channel } = resolved;
     // WA messages cost per send — cap + resend guard on both channels.
@@ -891,7 +889,7 @@ export class AuthService {
 
   async forgotPasswordVerification(dto: ForgotPasswordVerificationDto) {
     const resolved = await this.resolveForgotPasswordMember(dto);
-    if (!resolved) throw new NotFoundException('Account not registered');
+    if (!resolved) throw notFound(ERROR_CODES.ACCOUNT_NOT_REGISTERED);
     const { member, target, channel } = resolved;
 
     await otpService.consume(target, dto.code, 'forgot-password');
@@ -941,13 +939,13 @@ export class AuthService {
     // the same identity, and phoneCode must be uniform ('62' → '+62').
     const { phone, phoneCode } = normalizePhonePair(dto.phone, dto.phoneCode);
     if (phone.length < 6 || !phoneCode) {
-      throw new BadRequestException('Invalid phone number');
+      throw badRequest(ERROR_CODES.PHONE_INVALID);
     }
     const target = this.phoneTarget(phoneCode, phone);
 
     const existing = await prisma.member.findUnique({ where: { phone } });
     if (existing && !isReusableUnverifiedMember(existing)) {
-      throw new BadRequestException('Phone already registered');
+      throw badRequest(ERROR_CODES.PHONE_ALREADY_REGISTERED);
     }
 
     const passwordHash = await bcrypt.hash(dto.password, 10);
@@ -991,7 +989,7 @@ export class AuthService {
         // Concurrent register with the same phone: the loser of the race hits
         // the unique constraint — surface the same 400 as the up-front check.
         if (this.isUniqueViolation(err)) {
-          throw new BadRequestException('Phone already registered');
+          throw badRequest(ERROR_CODES.PHONE_ALREADY_REGISTERED);
         }
         throw err;
       }
@@ -1034,12 +1032,12 @@ export class AuthService {
 
   async requestVerificationPhone(dto: RequestVerificationPhoneDto) {
     const member = await this.resolveMemberByAnyId(dto.memberId);
-    if (!member) throw new NotFoundException('Member not found');
+    if (!member) throw notFound(ERROR_CODES.MEMBER_NOT_FOUND);
     if (!member.phone || !member.phoneCode) {
-      throw new BadRequestException('Member has no phone on file');
+      throw badRequest(ERROR_CODES.PHONE_NOT_ON_FILE);
     }
     if (member.isPhoneVerified) {
-      throw new BadRequestException('Phone already verified');
+      throw badRequest(ERROR_CODES.PHONE_ALREADY_VERIFIED);
     }
 
     const target = this.phoneTarget(member.phoneCode, member.phone);
@@ -1079,8 +1077,8 @@ export class AuthService {
     type: 'email' | 'phone',
   ) {
     if (type === 'email') {
-      if (!member.email) throw new BadRequestException('Member has no email on file');
-      if (member.isEmailVerified) throw new BadRequestException('Email already verified');
+      if (!member.email) throw badRequest(ERROR_CODES.EMAIL_NOT_ON_FILE);
+      if (member.isEmailVerified) throw badRequest(ERROR_CODES.EMAIL_ALREADY_VERIFIED);
       return {
         target: member.email,
         purpose: 'verify-email' as const,
@@ -1088,9 +1086,9 @@ export class AuthService {
       };
     }
     if (!member.phone || !member.phoneCode) {
-      throw new BadRequestException('Member has no phone on file');
+      throw badRequest(ERROR_CODES.PHONE_NOT_ON_FILE);
     }
-    if (member.isPhoneVerified) throw new BadRequestException('Phone already verified');
+    if (member.isPhoneVerified) throw badRequest(ERROR_CODES.PHONE_ALREADY_VERIFIED);
     return {
       target: this.phoneTarget(member.phoneCode, member.phone),
       purpose: 'verify-phone' as const,
@@ -1100,7 +1098,7 @@ export class AuthService {
 
   async requestVerify(memberId: string, type: 'email' | 'phone') {
     const member = await prisma.member.findUnique({ where: { id: memberId } });
-    if (!member) throw new NotFoundException('Member not found');
+    if (!member) throw notFound(ERROR_CODES.MEMBER_NOT_FOUND);
     const ch = this.verifyChannel(member, type);
 
     // Channel (email/WhatsApp) is routed by target shape inside issue().
@@ -1118,7 +1116,7 @@ export class AuthService {
 
   async verify(memberId: string, type: 'email' | 'phone', code: string) {
     const member = await prisma.member.findUnique({ where: { id: memberId } });
-    if (!member) throw new NotFoundException('Member not found');
+    if (!member) throw notFound(ERROR_CODES.MEMBER_NOT_FOUND);
     const ch = this.verifyChannel(member, type);
 
     await otpService.consume(ch.target, code, ch.purpose);
@@ -1133,9 +1131,9 @@ export class AuthService {
 
   async validateOtpPhone(dto: ValidateOtpPhoneDto) {
     const member = await this.resolveMemberByAnyId(dto.memberId);
-    if (!member) throw new NotFoundException('Member not found');
+    if (!member) throw notFound(ERROR_CODES.MEMBER_NOT_FOUND);
     if (!member.phone || !member.phoneCode) {
-      throw new BadRequestException('Member has no phone on file');
+      throw badRequest(ERROR_CODES.PHONE_NOT_ON_FILE);
     }
 
     const target = this.phoneTarget(member.phoneCode, member.phone);
@@ -1164,12 +1162,12 @@ export class AuthService {
 
   async requestVerificationEmail(dto: RequestVerificationEmailDto) {
     const member = await this.resolveMemberByAnyId(dto.memberId);
-    if (!member) throw new NotFoundException('Member not found');
+    if (!member) throw notFound(ERROR_CODES.MEMBER_NOT_FOUND);
     if (!member.email) {
-      throw new BadRequestException('Member has no email on file');
+      throw badRequest(ERROR_CODES.EMAIL_NOT_ON_FILE);
     }
     if (member.isEmailVerified) {
-      throw new BadRequestException('Email already verified');
+      throw badRequest(ERROR_CODES.EMAIL_ALREADY_VERIFIED);
     }
 
     const { expiresAt } = await otpService.issue({
@@ -1191,9 +1189,9 @@ export class AuthService {
 
   async validateOtpEmail(dto: ValidateOtpEmailDto) {
     const member = await this.resolveMemberByAnyId(dto.memberId);
-    if (!member) throw new NotFoundException('Member not found');
+    if (!member) throw notFound(ERROR_CODES.MEMBER_NOT_FOUND);
     if (!member.email) {
-      throw new BadRequestException('Member has no email on file');
+      throw badRequest(ERROR_CODES.EMAIL_NOT_ON_FILE);
     }
 
     await otpService.consume(member.email, dto.verifyCode, 'verify-email');

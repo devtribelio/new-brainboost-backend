@@ -8,13 +8,20 @@ export class AffiliatorProfileDto {
   @ApiProperty({ format: 'uuid' })
   memberId!: string;
 
-  @ApiProperty({ example: 'X7K9Q2', description: 'Personal affiliate code (6 chars). Auto-generated if missing.' })
+  @ApiProperty({
+    example: 'X7K9Q2',
+    description: 'Personal affiliate code (6 chars). Auto-generated if missing.',
+  })
   affiliateCode!: string;
 
   @ApiProperty({ enum: AFFILIATE_BASED_ENUM, example: 'PERFORMANCE' })
   affiliateBased!: string;
 
-  @ApiPropertyOptional({ nullable: true, format: 'uuid', description: 'Member who invited this affiliator.' })
+  @ApiPropertyOptional({
+    nullable: true,
+    format: 'uuid',
+    description: 'Member who invited this affiliator.',
+  })
   inviterId?: string | null;
 }
 
@@ -38,7 +45,11 @@ export class AffiliatorSummaryRecentEntryDto {
   @ApiProperty({ enum: COMMISSION_STATUS_ENUM, example: 'PENDING' })
   status!: string;
 
-  @ApiPropertyOptional({ nullable: true, example: 'DEEPLINK', description: 'Origin of the commission entry.' })
+  @ApiPropertyOptional({
+    nullable: true,
+    example: 'DEEPLINK',
+    description: 'Origin of the commission entry.',
+  })
   source?: string | null;
 
   @ApiProperty({ format: 'date-time', example: '2026-05-10T00:00:00.000Z' })
@@ -47,13 +58,21 @@ export class AffiliatorSummaryRecentEntryDto {
 
 /** `GET /affiliate/me/summary` — affiliator dashboard aggregate. */
 export class AffiliatorSummaryDto {
-  @ApiProperty({ type: 'integer', example: 7_500_000, description: 'Lifetime commission, excludes VOIDED + INACTIVE.' })
+  @ApiProperty({
+    type: 'integer',
+    example: 7_500_000,
+    description: 'Lifetime commission, excludes VOIDED + INACTIVE.',
+  })
   lifetimeAmount!: number;
 
   @ApiProperty({ type: 'integer', example: 2_000_000, description: 'Withdrawable balance.' })
   balance!: number;
 
-  @ApiProperty({ type: 'integer', example: 500_000, description: 'Pending — moves to balance 7 days after payment.' })
+  @ApiProperty({
+    type: 'integer',
+    example: 500_000,
+    description: 'Pending — moves to balance 7 days after payment.',
+  })
   pending!: number;
 
   @ApiProperty({ type: 'integer', example: 0 })
@@ -68,28 +87,42 @@ export class AffiliatorSummaryDto {
   @ApiProperty({ type: 'integer', example: 30, description: 'Current commission rate (%).' })
   currentRate!: number;
 
-  @ApiPropertyOptional({ nullable: true, example: 'SCHEMA_2', enum: ['SCHEMA_1', 'SCHEMA_2', 'SCHEMA_3'] })
+  @ApiPropertyOptional({
+    nullable: true,
+    example: 'SCHEMA_2',
+    enum: ['SCHEMA_1', 'SCHEMA_2', 'SCHEMA_3'],
+  })
   schemaType?: string | null;
 
   // --- Merged legacy commisionSummary fields (FE legacy CommisionModel — typos preserved) ---
   @ApiProperty({
     type: 'integer',
     example: 5_000_000,
-    description: 'Sum of PENDING + BALANCE commission amounts (incl INACTIVE). FE legacy `totalSales`.',
+    description:
+      'Sum of PENDING + BALANCE commission amounts (incl INACTIVE). FE legacy `totalSales`.',
   })
   totalCommision!: number;
 
   @ApiProperty({
     type: 'integer',
     example: 25_000_000,
-    description: 'Sum of productPrice across PENDING + BALANCE commissions (gross transaction sales).',
+    description:
+      'Sum of productPrice across PENDING + BALANCE commissions (gross transaction sales).',
   })
   totalTransactionSales!: number;
 
-  @ApiProperty({ type: 'integer', example: 5_000_000, description: 'Modern alias of `totalCommision`.' })
+  @ApiProperty({
+    type: 'integer',
+    example: 5_000_000,
+    description: 'Modern alias of `totalCommision`.',
+  })
   total!: number;
 
-  @ApiProperty({ type: 'integer', example: 12, description: 'Count of PENDING + BALANCE commission rows.' })
+  @ApiProperty({
+    type: 'integer',
+    example: 12,
+    description: 'Count of PENDING + BALANCE commission rows.',
+  })
   count!: number;
 
   @ApiProperty({
@@ -147,7 +180,11 @@ export class AffiliateCommissionDto {
   @ApiProperty({ format: 'uuid' })
   recipientId!: string;
 
-  @ApiPropertyOptional({ nullable: true, format: 'uuid', description: 'MemberAffiliator id (program membership).' })
+  @ApiPropertyOptional({
+    nullable: true,
+    format: 'uuid',
+    description: 'MemberAffiliator id (program membership).',
+  })
   affiliatorId?: string | null;
 
   @ApiPropertyOptional({ nullable: true, format: 'uuid' })
@@ -165,10 +202,18 @@ export class AffiliateCommissionDto {
   @ApiPropertyOptional({ nullable: true, format: 'uuid' })
   buyerMemberId?: string | null;
 
-  @ApiProperty({ type: 'integer', example: 1, description: 'Inviter-chain depth (GROWTH up to 4).' })
+  @ApiProperty({
+    type: 'integer',
+    example: 1,
+    description: 'Inviter-chain depth (GROWTH up to 4).',
+  })
   level!: number;
 
-  @ApiProperty({ enum: AFFILIATE_BASED_ENUM, example: 'PERFORMANCE', description: 'Recipient mode snapshot at commit time.' })
+  @ApiProperty({
+    enum: AFFILIATE_BASED_ENUM,
+    example: 'PERFORMANCE',
+    description: 'Recipient mode snapshot at commit time.',
+  })
   affiliateBased!: string;
 
   @ApiPropertyOptional({ nullable: true, enum: ['SCHEMA_1', 'SCHEMA_2', 'SCHEMA_3'] })
@@ -183,7 +228,11 @@ export class AffiliateCommissionDto {
   @ApiProperty({ type: 'integer', example: 30, description: 'Commission rate applied (%).' })
   commissionRate!: number;
 
-  @ApiProperty({ type: 'integer', example: 135_000, description: 'priceRecipient — computed payout.' })
+  @ApiProperty({
+    type: 'integer',
+    example: 135_000,
+    description: 'priceRecipient — computed payout.',
+  })
   amount!: number;
 
   @ApiProperty({ enum: COMMISSION_STATUS_ENUM, example: 'PENDING' })
@@ -201,13 +250,18 @@ export class AffiliateCommissionDto {
   @ApiPropertyOptional({ nullable: true })
   voidedReason?: string | null;
 
-  @ApiPropertyOptional({ nullable: true, enum: ['DEEPLINK', 'WEB', 'INSTALL_REFERRER'], description: 'Acquisition source of the visit that won attribution.' })
+  @ApiPropertyOptional({
+    nullable: true,
+    enum: ['DEEPLINK', 'WEB', 'INSTALL_REFERRER'],
+    description: 'Acquisition source of the visit that won attribution.',
+  })
   source?: string | null;
 
   @ApiPropertyOptional({
     nullable: true,
     example: 'xendit',
-    description: 'Payment channel of the sourcing transaction: xendit | revenuecat | scalev | lynkid | null (legacy/web).',
+    description:
+      'Payment channel of the sourcing transaction: xendit | revenuecat | scalev | lynkid | null (legacy/web).',
   })
   channel?: string | null;
 
@@ -223,10 +277,18 @@ export class AffiliateCommissionDto {
   @ApiPropertyOptional({ nullable: true, type: () => AffiliateCommissionProgramDto })
   program?: AffiliateCommissionProgramDto | null;
 
-  @ApiPropertyOptional({ nullable: true, type: () => AffiliateCommissionProductDto, description: 'Product the commission was earned on.' })
+  @ApiPropertyOptional({
+    nullable: true,
+    type: () => AffiliateCommissionProductDto,
+    description: 'Product the commission was earned on.',
+  })
   product?: AffiliateCommissionProductDto | null;
 
-  @ApiPropertyOptional({ nullable: true, type: () => AffiliateCommissionBuyerDto, description: 'Buyer whose purchase generated this commission.' })
+  @ApiPropertyOptional({
+    nullable: true,
+    type: () => AffiliateCommissionBuyerDto,
+    description: 'Buyer whose purchase generated this commission.',
+  })
   buyer?: AffiliateCommissionBuyerDto | null;
 }
 
@@ -256,7 +318,11 @@ export class AffiliateProgramDto {
   @ApiProperty({ format: 'date-time' })
   updatedAt!: string;
 
-  @ApiPropertyOptional({ nullable: true, type: 'object', description: 'Linked product, when the program targets one.' })
+  @ApiPropertyOptional({
+    nullable: true,
+    type: 'object',
+    description: 'Linked product, when the program targets one.',
+  })
   product?: Record<string, unknown> | null;
 }
 
@@ -319,7 +385,12 @@ export class AffiliateDisbursementDto {
   @ApiProperty({ enum: DISBURSEMENT_STATUS_ENUM, example: 'PENDING' })
   status!: string;
 
-  @ApiPropertyOptional({ nullable: true, enum: ['AUTO', 'MANUAL'], example: 'MANUAL', description: 'How this payout was routed.' })
+  @ApiPropertyOptional({
+    nullable: true,
+    enum: ['AUTO', 'MANUAL'],
+    example: 'MANUAL',
+    description: 'How this payout was routed.',
+  })
   mode?: string | null;
 
   @ApiPropertyOptional({ nullable: true, example: 'BCA' })
@@ -355,23 +426,45 @@ export class DisbursementSummaryDto {
   @ApiProperty({
     type: 'integer',
     example: 15_000,
-    description: 'Minimum withdrawable balance (IDR) to request a payout (app_settings disbursement.minBalance).',
+    description:
+      'Minimum withdrawable balance (IDR) to request a payout (app_settings disbursement.minBalance).',
   })
   minBalance!: number;
 
-  @ApiProperty({ example: true, description: 'True only if balance meets thresholds AND no pending payout exists.' })
+  @ApiProperty({
+    example: true,
+    description: 'True only if balance meets thresholds AND no pending payout exists.',
+  })
   eligible!: boolean;
 
-  @ApiPropertyOptional({ nullable: true, description: 'Why not eligible, when applicable.' })
+  @ApiPropertyOptional({
+    nullable: true,
+    description: 'Why not eligible, when applicable. Display copy (Bahasa Indonesia).',
+  })
   reason?: string | null;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    example: 'BANK_ACCOUNT_MISSING',
+    description:
+      'Machine-readable form of `reason` — an ERROR_CODES value. Branch on this, not on `reason`.',
+  })
+  reasonCode?: string | null;
 
   @ApiProperty({ type: 'integer', example: 5_000 })
   fee!: number;
 
-  @ApiProperty({ type: 'integer', example: 45_000, description: 'Projected net payout = balance - fee.' })
+  @ApiProperty({
+    type: 'integer',
+    example: 45_000,
+    description: 'Projected net payout = balance - fee.',
+  })
   netAmount!: number;
 
-  @ApiProperty({ enum: ['NONE', 'PENDING', 'APPROVED', 'REJECTED', 'EXPIRED'], example: 'APPROVED' })
+  @ApiProperty({
+    enum: ['NONE', 'PENDING', 'APPROVED', 'REJECTED', 'EXPIRED'],
+    example: 'APPROVED',
+  })
   kycStatus!: string;
 
   @ApiProperty({ example: true, description: 'True when bankCode + number + name are all set.' })
@@ -453,7 +546,8 @@ export class KycTokenDto {
 
   @ApiProperty({
     enum: ['NONE', 'PENDING', 'APPROVED', 'REJECTED', 'EXPIRED'],
-    description: 'kycStatus at session creation. The /api/webhook/didit callback updates it after review.',
+    description:
+      'kycStatus at session creation. The /api/webhook/didit callback updates it after review.',
   })
   kycStatus!: string;
 }
@@ -467,7 +561,10 @@ export class VisitLogResultDto {
   })
   status!: string;
 
-  @ApiPropertyOptional({ format: 'uuid', description: 'Set when status is `logged` or `duplicate`.' })
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description: 'Set when status is `logged` or `duplicate`.',
+  })
   visitId?: string;
 
   @ApiPropertyOptional({ description: 'Set when status is `invalid` or `error`.' })

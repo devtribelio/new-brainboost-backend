@@ -85,7 +85,7 @@ describe('auth social google grant', () => {
       social_token: 'tampered.token',
     });
     expect(res.status).toBe(401);
-    expect(res.body.error.code).toBe('UNAUTHORIZED');
+    expect(res.body.error.code).toBe('GOOGLE_ID_TOKEN_INVALID');
   });
 
   it('email_verified=false → 401', async () => {
@@ -100,7 +100,7 @@ describe('auth social google grant', () => {
       social_token: 'fake.id.token',
     });
     expect(res.status).toBe(401);
-    expect(res.body.error.message).toBe('google_email_not_verified');
+    expect(res.body.error.code).toBe('GOOGLE_EMAIL_NOT_VERIFIED');
   });
 
   it('new email creates member with isEmailVerified=true and passwordAlgo=social', async () => {
@@ -251,7 +251,7 @@ describe('auth social google grant', () => {
       social_token: 'fake.id.token',
     });
     expect(res.status).toBe(400);
-    expect(res.body.error.message).toBe('email_in_use_unverified');
+    expect(res.body.error.code).toBe('EMAIL_IN_USE_UNVERIFIED');
   });
 
   it('single-session: prior mobile session revoked after social login', async () => {
@@ -279,7 +279,7 @@ describe('auth social google grant', () => {
 
     const reuse = await tokenRequest({ grant_type: 'refresh_token', refresh_token: firstRefresh });
     expect(reuse.status).toBe(401);
-    expect(reuse.body.error.message).toBe('session_revoked');
+    expect(reuse.body.error.code).toBe('SESSION_REVOKED');
   });
 
   it('password grant on social-only account is rejected', async () => {

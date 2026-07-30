@@ -65,7 +65,7 @@ describe('API smoke (envelope { success, data, meta, error })', () => {
     const r = await request(app).get('/api/member/post/list?perPage=3');
     expect(r.status).toBe(401);
     expect(r.body.success).toBe(false);
-    expect(r.body.error.code).toBe('UNAUTHORIZED');
+    expect(r.body.error.code).toBe('BEARER_TOKEN_MISSING');
   });
 
   it('GET /api/member/post/list requires auth', async () => {
@@ -110,7 +110,7 @@ describe('API smoke (envelope { success, data, meta, error })', () => {
   it('GET /api/member/network/member requires auth (401 without token)', async () => {
     const r = await request(app).get('/api/member/network/member?page=1&perPage=20');
     expect(r.status).toBe(401);
-    expect(r.body.error.code).toBe('UNAUTHORIZED');
+    expect(r.body.error.code).toBe('BEARER_TOKEN_MISSING');
   });
 
   it('GET /api/member/network/tag requires auth (401 without token)', async () => {
@@ -118,7 +118,7 @@ describe('API smoke (envelope { success, data, meta, error })', () => {
       '/api/member/network/tag?page=1&perPage=50&keyword=&code=',
     );
     expect(r.status).toBe(401);
-    expect(r.body.error.code).toBe('UNAUTHORIZED');
+    expect(r.body.error.code).toBe('BEARER_TOKEN_MISSING');
   });
 
   it('GET /api/member/report/category', async () => {

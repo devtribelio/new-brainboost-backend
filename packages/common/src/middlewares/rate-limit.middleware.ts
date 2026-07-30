@@ -5,6 +5,7 @@ import type { IncrementResponse, Options, Store } from 'express-rate-limit';
 import { RedisStore, type RedisReply } from 'rate-limit-redis';
 import { Redis } from 'ioredis';
 import { fail } from '@bb/common/utils/response.util';
+import { ERROR_CODES, messageFor } from '@bb/common/exceptions';
 import { env } from '@bb/common/config/env';
 import { logger } from '@bb/common/config/logger';
 import { otpPhoneTarget } from '@bb/common/utils/phone.util';
@@ -44,13 +45,10 @@ export function clientIp(req: Pick<Request, 'headers' | 'ip'>): string {
 
 const WINDOW_MS = 15 * 60 * 1000; // 15 minutes
 
-const TOO_MANY_REQUESTS_MESSAGE =
-  'Too many requests — please wait a few minutes and try again.';
-
 // Shared 429 responder so every limiter speaks the same envelope as the rest
-// of the API (see error.middleware.ts `statusToCode` -> TOO_MANY_REQUESTS).
+// of the API, with copy from the same catalog as thrown errors.
 const tooManyRequestsHandler: RequestHandler = (_req, res) => {
-  fail(res, 429, 'TOO_MANY_REQUESTS', TOO_MANY_REQUESTS_MESSAGE);
+  fail(res, 429, ERROR_CODES.TOO_MANY_REQUESTS, messageFor(ERROR_CODES.TOO_MANY_REQUESTS));
 };
 
 // Disable throttling under the test runner: integration tests hammer these

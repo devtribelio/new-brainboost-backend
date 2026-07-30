@@ -1,8 +1,16 @@
+import { ERROR_CODES, type ErrorCode } from '@bb/common/exceptions';
 import { DISBURSEMENT_FEE, DISBURSEMENT_MIN_BALANCE, DISBURSEMENT_MIN_NET } from '../constants';
 
 export interface DisbursementQuote {
   eligible: boolean;
-  reason?: string;
+  /**
+   * Why the quote is ineligible, as an error code — NOT a sentence. Callers turn
+   * it into copy via `messageFor()` (display) or throw it (API error), so the
+   * wording lives in one place. The amounts the old English strings interpolated
+   * are already returned separately (`grossAmount`/`fee`/`netAmount`, plus
+   * `minBalance` from getSummary), so no number is lost.
+   */
+  reasonCode?: ErrorCode;
   grossAmount: number; // balance consumed by the payout
   fee: number; // flat platform fee
   netAmount: number; // paid to the member = gross - fee
@@ -30,13 +38,14 @@ export function quoteDisbursement(
   fee: number = DISBURSEMENT_FEE,
 ): DisbursementQuote {
   const available = Math.max(0, Math.floor(balance));
-  const grossAmount = requestedAmount === undefined ? available : Math.max(0, Math.floor(requestedAmount));
+  const grossAmount =
+    requestedAmount === undefined ? available : Math.max(0, Math.floor(requestedAmount));
   const netAmount = grossAmount - fee;
 
   if (requestedAmount !== undefined && grossAmount > available) {
     return {
       eligible: false,
-      reason: `Amount exceeds withdrawable balance (${available})`,
+      reasonCode: ERROR_CODES.DISBURSEMENT_AMOUNT_EXCEEDS_BALANCE,
       grossAmount,
       fee,
       netAmount,
@@ -45,7 +54,7 @@ export function quoteDisbursement(
   if (grossAmount < minBalance) {
     return {
       eligible: false,
-      reason: `Minimum balance to withdraw is ${minBalance}`,
+      reasonCode: ERROR_CODES.DISBURSEMENT_BELOW_MIN_BALANCE,
       grossAmount,
       fee,
       netAmount,
@@ -54,7 +63,7 @@ export function quoteDisbursement(
   if (netAmount <= DISBURSEMENT_MIN_NET) {
     return {
       eligible: false,
-      reason: `Net payout must exceed ${DISBURSEMENT_MIN_NET}`,
+      reasonCode: ERROR_CODES.DISBURSEMENT_NET_TOO_SMALL,
       grossAmount,
       fee,
       netAmount,
