@@ -331,6 +331,27 @@ describe('requestLogger', () => {
       expect(JSON.stringify(line)).not.toContain('secret');
     });
 
+    it('bounds a scalar (non-object) body instead of logging it whole', async () => {
+      // Reachable path: express.json runs with `strict: true`, so a bare JSON
+      // string is rejected 400 and never reaches a handler — but the access line
+      // for that 400 still describes the body, and `rawJsonBody` parses the raw
+      // buffer with plain JSON.parse (no strict mode), so it DOES get a string.
+      // It has no keys, so it skipped the object path and used to be returned
+      // untruncated — one request could emit a multi-MB log line.
+      await request(app)
+        .post('/echo')
+        .set('X-Request-Id', 'trace-body-scalar')
+        .set('content-type', 'application/json')
+        .send(JSON.stringify('y'.repeat(5000)))
+        .expect(400);
+
+      const line = lines('http.response').find((l) => l.requestId === 'trace-body-scalar');
+      const body = line?.body as string;
+      expect(typeof body).toBe('string');
+      expect(body).toContain('[truncated');
+      expect(body.length).toBeLessThan(2200);
+    });
+
     it('omits the body key entirely for GET requests', async () => {
       await request(app).get('/ping').set('X-Request-Id', 'trace-body-get').expect(200);
 

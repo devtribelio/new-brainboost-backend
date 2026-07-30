@@ -58,7 +58,9 @@ const MAX_ARRAY = 50;
 export function scrubDeep(value: unknown, depth = 0): unknown {
   if (value === null || typeof value !== 'object') return value;
   if (depth >= MAX_DEPTH) return '[depth-limit]';
-  if (Buffer.isBuffer(value)) return `[buffer ${value.length}b]`;
+  // Static `Buffer.byteLength`, not `value.length` — see the note in
+  // request-logger.middleware.ts: no property read on request-derived data.
+  if (Buffer.isBuffer(value)) return `[buffer ${Buffer.byteLength(value)}b]`;
   if (value instanceof Date) return value.toISOString();
 
   if (Array.isArray(value)) {

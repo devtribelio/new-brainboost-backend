@@ -186,8 +186,15 @@ function describeBody(req: Request): unknown {
 
   const body = rawJsonBody(req) ?? (req.body as unknown);
   if (body === undefined || body === null) return isMultipart ? '[multipart]' : undefined;
-  if (Buffer.isBuffer(body)) return `[buffer ${body.length}b]`;
-  if (typeof body !== 'object') return body;
+  // `Buffer.byteLength(x)`, not `x.length`: reading `.length` off a value that
+  // flows from the request trips CodeQL's type-confusion rule
+  // (js/type-confusion-through-parameter-tampering), since a request value can
+  // arrive as an array. The static call carries the same meaning with no
+  // property read on user-controlled data.
+  if (Buffer.isBuffer(body)) return `[buffer ${Buffer.byteLength(body)}b]`;
+  // Scalar body (JSON `"text"` / number / boolean). Truncated like any other:
+  // an unbounded string body would otherwise produce a multi-MB log line.
+  if (typeof body !== 'object') return truncateScalar(body);
   if (Object.keys(body as object).length === 0) return isMultipart ? '[multipart]' : undefined;
 
   const scrubbed = scrubDeep(body);
@@ -221,6 +228,20 @@ function rawJsonBody(req: Request): unknown {
     // brace still contains the password.
     return `[unparseable json body ${raw.length}b]`;
   }
+}
+
+/**
+ * Bound a non-object body. The `typeof value === 'string'` narrowing is also what
+ * makes reading `.length` here safe by CodeQL's own recommendation for
+ * request-derived values: prove the runtime type before using string methods.
+ *
+ * Note a bare JSON string body (`"hunter2"`) is logged as-is — there is no key to
+ * match against the secret list. Body logging is off in production for exactly
+ * this class of reason.
+ */
+function truncateScalar(value: unknown): unknown {
+  if (typeof value !== 'string' || value.length <= BODY_MAX_CHARS) return value;
+  return `${value.slice(0, BODY_MAX_CHARS)}…[truncated ${value.length}b]`;
 }
 
 function safeStringify(value: unknown): string | undefined {
