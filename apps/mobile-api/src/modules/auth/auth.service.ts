@@ -640,28 +640,18 @@ export class AuthService {
           where: { id: bySub.id },
           data: { isEmailVerified: true },
         });
+        await this.preserveLegacyResyncGate(bySub);
       }
       return this.issueTokenBundle(bySub.id, bySub.email ?? '', clientType);
     }
 
-    // Link path: existing local account by email. Only allow if local account
-    // already passed email verification, otherwise an attacker could claim an
-    // unverified-registered email by signing in socially. Check verification
-    // BEFORE isActive: unverified register placeholders are also inactive, and
-    // email_in_use_unverified is the actionable error for them. Skipped entirely
-    // when the provider gave us no email (Apple repeat login).
+    // Link path: existing local account by email. Gated — see
+    // linkSocialToExistingMember. Skipped entirely when the provider gave us no
+    // email (Apple repeat login).
     if (email) {
       const byEmail = await prisma.member.findUnique({ where: { email } });
       if (byEmail) {
-        if (!byEmail.isEmailVerified) {
-          throw badRequest(ERROR_CODES.EMAIL_IN_USE_UNVERIFIED);
-        }
-        if (!byEmail.isActive) throw unauthorized(ERROR_CODES.MEMBER_INACTIVE);
-        const linked = await prisma.member.update({
-          where: { id: byEmail.id },
-          data: subData,
-        });
-        return this.issueTokenBundle(linked.id, linked.email ?? '', clientType);
+        return this.linkSocialToExistingMember(byEmail, subData, clientType);
       }
     }
 
@@ -713,17 +703,94 @@ export class AuthService {
         if (email) {
           const retryEmail = await prisma.member.findUnique({ where: { email } });
           if (retryEmail) {
-            if (!retryEmail.isEmailVerified) throw badRequest(ERROR_CODES.EMAIL_IN_USE_UNVERIFIED);
-            const linked = await prisma.member.update({
-              where: { id: retryEmail.id },
-              data: subData,
-            });
-            return this.issueTokenBundle(linked.id, linked.email ?? '', clientType);
+            return this.linkSocialToExistingMember(retryEmail, subData, clientType);
           }
         }
       }
       throw err;
     }
+  }
+
+  /**
+   * Attach a provider sub to an already-existing local account matched by email.
+   * Shared by the link path and the unique-violation retry path so the two can
+   * never diverge on the gate below.
+   *
+   * Gate — link is allowed when the row EITHER already passed email
+   * verification OR is legacy-migrated (`legacyId != null`):
+   *
+   *  - A new-flow row that never verified stays a 400. It may be a register
+   *    placeholder seeded by an attacker with a password they know; linking it
+   *    would hand the real email owner's account to that attacker, who keeps
+   *    password access forever (account pre-hijacking). Those users have a way
+   *    out via validateOtpEmail. Checked BEFORE isActive because register
+   *    placeholders are also inactive and email_in_use_unverified is the
+   *    actionable error for them.
+   *  - A legacy row is exempt because `is_email_verified=0` carries no
+   *    information there: legacy had no OTP gate at all (same reasoning as
+   *    isReusableUnverifiedMember) and the only writer of that column is
+   *    tribelio-admin's manual-create path. The provider attestation is the
+   *    first real proof of ownership the row has ever had, so we flip the flag
+   *    while linking. `legacyId` is unreachable from the API surface (only the
+   *    migrate/resync scripts write it), so this branch can't be forged.
+   *
+   * On the heal branch every live session is revoked first, so a credential
+   * planted on the row before the link can't ride along on the new identity.
+   */
+  private async linkSocialToExistingMember(
+    member: {
+      id: string;
+      email: string | null;
+      isEmailVerified: boolean;
+      isActive: boolean;
+      legacyId: number | null;
+    },
+    subData: { googleSub: string } | { appleSub: string },
+    clientType: ClientType,
+  ): Promise<TokenBundle> {
+    const healEmailVerified = !member.isEmailVerified;
+    if (healEmailVerified && member.legacyId === null) {
+      throw badRequest(ERROR_CODES.EMAIL_IN_USE_UNVERIFIED);
+    }
+    if (!member.isActive) throw unauthorized(ERROR_CODES.MEMBER_INACTIVE);
+
+    const linked = await prisma.member.update({
+      where: { id: member.id },
+      data: { ...subData, ...(healEmailVerified ? { isEmailVerified: true } : {}) },
+    });
+
+    if (healEmailVerified) {
+      await this.preserveLegacyResyncGate(member);
+      // First-ever link of a social identity onto a row that never proved its
+      // email. issueTokenBundle only clears the mobile bucket (web is
+      // multi-session), so drop everything explicitly.
+      await prisma.refreshToken.updateMany({
+        where: { memberId: member.id, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+    }
+
+    return this.issueTokenBundle(linked.id, linked.email ?? '', clientType);
+  }
+
+  /**
+   * Keep the legacy-resync touch-gate untripped after a verification heal.
+   *
+   * The members syncer treats `updatedAt > legacySyncedAt` as "the app owns this
+   * profile now" and permanently stops propagating legacy fullName/avatar/bio
+   * (apps/resync-worker/src/syncers/members.ts). Flipping isEmailVerified is a
+   * verification heal, not a profile claim, so re-level the two markers. Copying
+   * `updated_at` into `legacy_synced_at` — rather than passing our own Date —
+   * makes them bit-identical regardless of Prisma's @updatedAt clock.
+   *
+   * No-op for non-legacy rows: `legacy_synced_at` is meaningless there and the
+   * syncer never looks at them.
+   */
+  private async preserveLegacyResyncGate(member: { id: string; legacyId: number | null }) {
+    if (member.legacyId === null) return;
+    await prisma.$executeRaw`
+      UPDATE "members" SET "legacy_synced_at" = "updated_at" WHERE "id" = ${member.id}::uuid
+    `;
   }
 
   /**
