@@ -363,7 +363,10 @@ export class AuthService {
 
     // No tokens at register: the member is inactive until the verify-email OTP
     // is validated (validateOtpEmail). FE logs in afterwards.
-    const { expiresAt } = await otpService.issue({
+    // issueOrReuse, not issue: a re-register inside the cooldown overwrites the
+    // placeholder row above, so a 400 here would leave the client stranded on a
+    // write that already landed.
+    const { expiresAt } = await otpService.issueOrReuse({
       target: dto.email,
       purpose: 'verify-email',
       recipientName: member.fullName ?? undefined,
@@ -946,8 +949,6 @@ export class AuthService {
       target,
       purpose: 'forgot-password',
       recipientName: member.fullName ?? undefined,
-      maxPerDay: 5,
-      enforceResendGuard: true,
     });
     return channel === 'email'
       ? { email: target, requestId: id }
@@ -1064,29 +1065,14 @@ export class AuthService {
 
     await this.autoJoinCommunityNetworks(member.id);
 
-    // Reuse path within the OTP TTL: the previously sent code is still valid
-    // on the user's WhatsApp — return its expiry instead of tripping the
-    // resend guard (legacy errCode 2113) after the row was already updated.
-    if (existing) {
-      const activeOtp = await prisma.otpCode.findFirst({
-        where: { target, purpose: 'verify-phone', usedAt: null, expiresAt: { gt: new Date() } },
-        orderBy: { createdAt: 'desc' },
-      });
-      if (activeOtp) {
-        return {
-          member_id: member.legacyId ?? member.id,
-          phone: target,
-          expired_date: activeOtp.expiresAt.toISOString(),
-        };
-      }
-    }
-
-    const { expiresAt } = await otpService.issue({
+    // issueOrReuse: inside the cooldown the code already on the user's WhatsApp
+    // is returned as-is, rather than a 400 landing after the member row above
+    // was updated. (Was an inline lookup here scoped to the full OTP TTL; the
+    // cooldown is the right window now that resend no longer waits on expiry.)
+    const { expiresAt } = await otpService.issueOrReuse({
       target,
       purpose: 'verify-phone',
       recipientName: dto.name,
-      maxPerDay: 5,
-      enforceResendGuard: true,
     });
     logger.info({ memberId: member.id, target }, 'phone-register OTP issued (WhatsApp)');
 
@@ -1112,8 +1098,6 @@ export class AuthService {
       target,
       purpose: 'verify-phone',
       recipientName: member.fullName ?? undefined,
-      maxPerDay: 5,
-      enforceResendGuard: true,
     });
     logger.info(
       { memberId: member.id, channel: dto.channel ?? 'whatsapp', target },
@@ -1173,8 +1157,6 @@ export class AuthService {
       target: ch.target,
       purpose: ch.purpose,
       recipientName: member.fullName ?? undefined,
-      maxPerDay: 5,
-      enforceResendGuard: true,
     });
     logger.info({ memberId, type, target: ch.target }, 'post-login verify OTP issued');
 
