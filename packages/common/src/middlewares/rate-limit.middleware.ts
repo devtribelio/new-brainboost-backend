@@ -180,6 +180,8 @@ const byRegisterTarget = byIdentifier('register', (b) => {
   const code = str(b.phoneCode);
   return phone && code ? otpPhoneTarget(code, phone) : undefined;
 });
+// Pre-registration: the email the OTP will be mailed to.
+const byEmail = byIdentifier('email', (b) => str(b.email)?.toLowerCase());
 // Forgot-password: email, or a digits-normalized phone (no phoneCode field here).
 const byEmailOrPhone = byIdentifier('reset', (b) => {
   const email = str(b.email)?.toLowerCase();
@@ -188,11 +190,19 @@ const byEmailOrPhone = byIdentifier('reset', (b) => {
   return phone ? phone.replace(/[^0-9]/g, '') || undefined : undefined;
 });
 
+// Authenticated senders: the body carries no identifier because the OTP target
+// is derived server-side from the session, so key on the member itself.
+const byAuthUser = (req: Request): string => {
+  const user = (req as unknown as { user?: { id?: string } }).user;
+  return user?.id ?? `ip:${clientIp(req)}`;
+};
+
 /** Internal: identifier keyers exposed for unit tests. Not part of the public API. */
 export const _keyers = {
   byUsername,
   byMemberId,
   byTarget,
+  byEmail,
   byPhoneTarget,
   byRegisterTarget,
   byEmailOrPhone,
@@ -269,6 +279,20 @@ export const requestVerificationEmailRateLimiter: RequestHandler = makeRateLimit
   name: 'verify-request-email',
   limit: 10,
   keyGenerator: byMemberId,
+});
+// Pre-registration is UNAUTHENTICATED and mails whatever address is posted, so
+// without this it is an open relay for mailbombing a third party.
+export const preRegistrationRateLimiter: RequestHandler = makeRateLimiter({
+  name: 'pre-registration',
+  limit: 10,
+  keyGenerator: byEmail,
+});
+// Authenticated, but a stolen session should not be able to mailbomb the owner
+// with deletion notices — and the endpoint is a once-ever action per account.
+export const requestDeleteAccountRateLimiter: RequestHandler = makeRateLimiter({
+  name: 'delete-account-request',
+  limit: 5,
+  keyGenerator: byAuthUser,
 });
 
 // --- Account creation — keyed on the identity being registered --------------

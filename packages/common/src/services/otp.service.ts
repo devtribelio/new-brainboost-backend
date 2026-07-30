@@ -8,6 +8,45 @@ import { enqueueComms } from './comms-outbox';
 
 const MAX_OTP_ATTEMPTS = 5;
 
+/**
+ * Minimum gap between two sends of the same target+purpose.
+ *
+ * Deliberately DECOUPLED from `ttlSeconds`. The two answer different questions:
+ * TTL is "how long may this code be redeemed" (wants to be long enough that a
+ * WhatsApp/email actually arrives and gets read), cooldown is "how soon may we
+ * send again" (wants to be short so a user who never received the message is
+ * not stranded). The previous guard checked `expiresAt > now`, which fused them
+ * into one number and forced a 10-minute wait before a forgot-password resend.
+ */
+export const OTP_RESEND_COOLDOWN_SECONDS = 60;
+
+/**
+ * Default send cap per target+purpose, by delivery channel. WhatsApp (Qontak)
+ * is billed per message, email (SES) is effectively free — and email is the
+ * channel most likely to be delayed, so it gets the bigger budget.
+ */
+export const OTP_MAX_PER_DAY = { whatsapp: 5, email: 10 } as const;
+
+/**
+ * Window for the send cap. A ROLLING 24h, not a calendar day: the old
+ * `setHours(0,0,0,0)` boundary depended on the server's local timezone (a UTC
+ * container resets at 07:00 WIB) and let a burst of `maxPerDay` just before
+ * midnight be followed by another right after.
+ */
+const OTP_CAP_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Retry hint for a throttled send. The ISO timestamp is for logs/debugging; the
+ * seconds field is what a client needs to render a countdown. Neither goes in
+ * the user-facing sentence.
+ */
+function retryDetails(retryAt: Date, now: Date): Record<string, unknown> {
+  return {
+    retryAfter: retryAt.toISOString(),
+    retryAfterSeconds: Math.max(1, Math.ceil((retryAt.getTime() - now.getTime()) / 1000)),
+  };
+}
+
 export type OtpPurpose =
   | 'forgot-password'
   | 'delete-account'
@@ -26,16 +65,19 @@ export interface IssueOtpInput {
   /** WhatsApp recipient display name (phone targets only). */
   recipientName?: string;
   /**
-   * Max OTP requests allowed per target+purpose per calendar day. Mirrors
-   * legacy phone-OTP cap (TBApi MemberRequestVerificationPhone: 5/day).
-   * Omit to disable the daily cap.
+   * Max OTP requests allowed per target+purpose in a rolling 24h window.
+   * Defaults to the channel cap (`OTP_MAX_PER_DAY`) — both the cap and the
+   * cooldown are opt-OUT, because every caller that had to opt in forgot to:
+   * four of the eight send endpoints shipped with no throttle at all.
+   * Pass 0 to disable (tests only).
    */
   maxPerDay?: number;
   /**
-   * Reject the request while a still-valid (unused, unexpired) OTP exists for
-   * this target+purpose. Mirrors legacy resend guard (errCode 2113).
+   * Minimum seconds since the previous send for this target+purpose, measured
+   * from its `createdAt` — independent of `ttlSeconds`. Defaults to
+   * `OTP_RESEND_COOLDOWN_SECONDS`. Pass 0 to disable (tests only).
    */
-  enforceResendGuard?: boolean;
+  resendCooldownSeconds?: number;
 }
 
 // verify-phone is 2 min to match legacy (CCarbon::now()->addMinutes(2)).
@@ -101,39 +143,52 @@ class OtpService {
       };
     }
 
-    // Resend guard: a still-valid code must expire (or be consumed) first.
-    if (input.enforceResendGuard) {
-      const active = await prisma.otpCode.findFirst({
+    // Resend cooldown, measured from the last SEND — not from the previous
+    // code's expiry, and not skipped when that code was consumed: what is being
+    // throttled is the outbound message, so a code's redemption state is
+    // irrelevant. See OTP_RESEND_COOLDOWN_SECONDS.
+    const cooldownSeconds = input.resendCooldownSeconds ?? OTP_RESEND_COOLDOWN_SECONDS;
+    if (cooldownSeconds > 0) {
+      const cooldownMs = cooldownSeconds * 1000;
+      const last = await prisma.otpCode.findFirst({
         where: {
           target: input.target,
           purpose: input.purpose,
-          usedAt: null,
-          expiresAt: { gt: now },
+          createdAt: { gt: new Date(now.getTime() - cooldownMs) },
         },
         orderBy: { createdAt: 'desc' },
+        select: { createdAt: true },
       });
-      if (active) {
-        // Retry time goes in `details`, not the sentence: an ISO timestamp is not
-        // something a user should be shown.
-        throw badRequest(ERROR_CODES.OTP_RESEND_TOO_SOON, {
-          retryAfter: active.expiresAt.toISOString(),
-        });
+      if (last) {
+        throw badRequest(
+          ERROR_CODES.OTP_RESEND_TOO_SOON,
+          retryDetails(new Date(last.createdAt.getTime() + cooldownMs), now),
+        );
       }
     }
 
-    // Daily cap per target+purpose (calendar day).
-    if (input.maxPerDay !== undefined) {
-      const startOfDay = new Date(now);
-      startOfDay.setHours(0, 0, 0, 0);
-      const issuedToday = await prisma.otpCode.count({
-        where: {
-          target: input.target,
-          purpose: input.purpose,
-          createdAt: { gte: startOfDay },
-        },
-      });
-      if (issuedToday >= input.maxPerDay) {
-        throw badRequest(ERROR_CODES.OTP_DAILY_LIMIT_REACHED);
+    // Send cap per target+purpose over a rolling 24h window.
+    const maxPerDay =
+      input.maxPerDay ??
+      (isEmail(input.target) ? OTP_MAX_PER_DAY.email : OTP_MAX_PER_DAY.whatsapp);
+    if (maxPerDay > 0) {
+      const where = {
+        target: input.target,
+        purpose: input.purpose,
+        createdAt: { gte: new Date(now.getTime() - OTP_CAP_WINDOW_MS) },
+      };
+      const issued = await prisma.otpCode.count({ where });
+      if (issued >= maxPerDay) {
+        // The row that has to age out of the window before a slot frees up.
+        // `skip` handles a backlog left by rows issued before this cap existed.
+        const blocking = await prisma.otpCode.findFirst({
+          where,
+          orderBy: { createdAt: 'asc' },
+          skip: issued - maxPerDay,
+          select: { createdAt: true },
+        });
+        const freesAt = (blocking?.createdAt ?? now).getTime() + OTP_CAP_WINDOW_MS;
+        throw badRequest(ERROR_CODES.OTP_DAILY_LIMIT_REACHED, retryDetails(new Date(freesAt), now));
       }
     }
 
@@ -164,6 +219,18 @@ class OtpService {
     // outbox — no dual-write race). The comms-relay publishes to SQS; bb-comms
     // delivers (WhatsApp via Qontak / email via SES). See docs/adr/0002.
     const row = await prisma.$transaction(async (tx) => {
+      // Supersede every code still live for this target+purpose. Now that a
+      // resend no longer waits for the old code to expire, two live rows would
+      // otherwise be the norm — and `resolveAndMatch` only ever reads the
+      // newest, so the older row is unreachable for a legitimate user yet
+      // becomes reachable again the moment the newest is locked by
+      // MAX_OTP_ATTEMPTS, handing an attacker a fresh 5-guess budget.
+      // `usedAt` doubles as the superseded marker: there is no column for it,
+      // and both states mean exactly "no longer redeemable".
+      await tx.otpCode.updateMany({
+        where: { target: input.target, purpose: input.purpose, usedAt: null },
+        data: { usedAt: now },
+      });
       const created = await tx.otpCode.create({
         data: {
           target: input.target,
@@ -186,6 +253,38 @@ class OtpService {
     });
 
     return { id: row.id, code, expiresAt };
+  }
+
+  /**
+   * issue(), except that while the cooldown is running and the code sent then
+   * is still redeemable, this returns THAT code's expiry instead of throwing.
+   *
+   * For endpoints that mutate state before sending — both register paths
+   * overwrite an unverified placeholder row — throwing strands the client with
+   * a 400 even though the write landed, and the user already has a perfectly
+   * good code on their phone. Endpoints whose only job is to send (the
+   * requestVerification* / forgot-password family) keep using issue(), so the
+   * user is told to wait rather than silently handed a stale expiry.
+   */
+  async issueOrReuse(input: IssueOtpInput): Promise<{ expiresAt: Date; reused: boolean }> {
+    const cooldownSeconds = input.resendCooldownSeconds ?? OTP_RESEND_COOLDOWN_SECONDS;
+    if (cooldownSeconds > 0) {
+      const now = new Date();
+      const live = await prisma.otpCode.findFirst({
+        where: {
+          target: input.target,
+          purpose: input.purpose,
+          usedAt: null,
+          expiresAt: { gt: now },
+          createdAt: { gt: new Date(now.getTime() - cooldownSeconds * 1000) },
+        },
+        orderBy: { createdAt: 'desc' },
+        select: { expiresAt: true },
+      });
+      if (live) return { expiresAt: live.expiresAt, reused: true };
+    }
+    const { expiresAt } = await this.issue(input);
+    return { expiresAt, reused: false };
   }
 
   /**
@@ -212,6 +311,14 @@ class OtpService {
 
     const matches = await bcrypt.compare(code, otp.code);
     if (!matches) {
+      // Tell "you typed the PREVIOUS code" apart from "you typed a wrong code".
+      // With a 60s cooldown under a multi-minute TTL, a resend routinely races
+      // the first message: the user enters a code they legitimately received,
+      // just no longer the newest one. Charging an attempt would spend the live
+      // code's budget on that, and OTP_INVALID ("wrong code") would be a lie.
+      if (await this.matchesSupersededCode(target, purpose, code, otp.id)) {
+        throw badRequest(ERROR_CODES.OTP_EXPIRED);
+      }
       const attempts = otp.attempts + 1;
       const locked = attempts >= MAX_OTP_ATTEMPTS;
       await prisma.otpCode.update({
@@ -226,6 +333,30 @@ class OtpService {
     }
 
     return { id: otp.id };
+  }
+
+  /**
+   * True when `code` matches a recently retired row (superseded by a resend, or
+   * already consumed) rather than the live one. Bounded to the last 2 retired
+   * rows because each check is a bcrypt compare, and only ever runs on the
+   * failure path.
+   */
+  private async matchesSupersededCode(
+    target: string,
+    purpose: OtpPurpose,
+    code: string,
+    currentId: string,
+  ): Promise<boolean> {
+    const retired = await prisma.otpCode.findMany({
+      where: { target, purpose, usedAt: { not: null }, id: { not: currentId } },
+      orderBy: { createdAt: 'desc' },
+      take: 2,
+      select: { code: true },
+    });
+    for (const row of retired) {
+      if (await bcrypt.compare(code, row.code)) return true;
+    }
+    return false;
   }
 
   async verify(target: string, code: string, purpose: OtpPurpose): Promise<void> {
