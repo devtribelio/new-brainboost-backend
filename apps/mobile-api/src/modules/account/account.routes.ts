@@ -5,6 +5,10 @@ import { AccountService } from './account.service';
 import { authGuard, authGuardLenient } from '@bb/common/middlewares/auth.middleware';
 import { validateDto } from '@bb/common/middlewares/validation.middleware';
 import { bindRoute } from '@bb/common/openapi/route-binder';
+import {
+  preRegistrationRateLimiter,
+  requestDeleteAccountRateLimiter,
+} from '@bb/common/middlewares/rate-limit.middleware';
 import { PreRegistrationDto } from './dto/pre-registration.dto';
 import { LogoutDto } from './dto/logout.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
@@ -23,7 +27,7 @@ export function accountRoutes(): Router {
     method: 'post',
     path: '/account/preRegistration',
     handlerKey: 'preRegistration',
-    middlewares: [validateDto(PreRegistrationDto)],
+    middlewares: [preRegistrationRateLimiter, validateDto(PreRegistrationDto)],
   });
   bindRoute({
     router,
@@ -63,7 +67,7 @@ export function accountRoutes(): Router {
     method: 'post',
     path: '/account/requestDeleteAccount',
     handlerKey: 'requestDeleteAccount',
-    middlewares: [authGuard, validateDto(RequestDeleteAccountDto)],
+    middlewares: [authGuard, requestDeleteAccountRateLimiter, validateDto(RequestDeleteAccountDto)],
   });
   bindRoute({
     router,

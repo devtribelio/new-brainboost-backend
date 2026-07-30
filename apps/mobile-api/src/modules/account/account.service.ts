@@ -272,6 +272,10 @@ export class AccountService {
       target: this.deleteAccountOtpTarget(member),
       purpose: 'delete-account',
       recipientName: member.fullName ?? undefined,
+      // Below the email channel default: deleting an account is a once-ever
+      // action, so the email budget (10) buys nothing and a compromised session
+      // should not be able to spam the owner's inbox while it works.
+      maxPerDay: 5,
     });
     return { memberId };
   }

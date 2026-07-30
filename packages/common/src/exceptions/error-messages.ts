@@ -94,7 +94,7 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   OTP_INVALID: 'Kode verifikasi salah',
   OTP_LOCKED: 'Terlalu banyak percobaan salah, minta kode baru',
   OTP_RESEND_TOO_SOON: 'Kode verifikasi sudah dikirim, tunggu sebentar sebelum meminta lagi',
-  OTP_DAILY_LIMIT_REACHED: 'Batas permintaan kode hari ini sudah tercapai, coba lagi besok',
+  OTP_DAILY_LIMIT_REACHED: 'Batas permintaan kode sudah tercapai, coba lagi dalam 24 jam',
   OTP_PURPOSE_UNKNOWN: 'Permintaan kode verifikasi tidak valid',
 
   // --- profile ---------------------------------------------------------------
