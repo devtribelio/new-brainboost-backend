@@ -2,9 +2,9 @@ import express, { type Express } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
-import morgan from 'morgan';
 import cookieParser from 'cookie-parser';
 import { errorHandler, notFoundHandler } from '@bb/common/middlewares/error.middleware';
+import { requestLogger } from '@bb/common/middlewares/request-logger.middleware';
 import { registerModules } from '@/core/register-modules';
 import { mountSwagger } from '@bb/common/openapi/swagger.middleware';
 import { ok } from '@bb/common/utils/response.util';
@@ -31,6 +31,13 @@ export function buildApp(): Express {
     const hops = Number(env.trustProxy);
     app.set('trust proxy', Number.isNaN(hops) ? env.trustProxy : hops);
   }
+
+  // Access log + per-request context. FIRST in the chain (but after `trust
+  // proxy`, which it needs for the client IP) so that a rejected CORS preflight,
+  // a 429 or a malformed JSON body still produces a log line, and so every
+  // downstream log — middleware, controller, @bb/domain service, Prisma — is
+  // stamped with the same requestId. Replaces morgan.
+  app.use(requestLogger);
 
   // JSON API: keep helmet's strict default CSP. The only HTML surface is the
   // Swagger UI at /api/docs, which loosens its own CSP inside mountSwagger().
@@ -66,10 +73,6 @@ export function buildApp(): Express {
     }),
   );
   app.use(express.urlencoded({ extended: true }));
-
-  if (!env.isTest) {
-    app.use(morgan(env.isProduction ? 'combined' : 'dev'));
-  }
 
   // Uploads now live in S3 (public/* served via CDN) — no local static serving.
 

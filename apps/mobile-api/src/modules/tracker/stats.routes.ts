@@ -1,3 +1,4 @@
+import { traceService } from '@bb/common/utils/trace-service';
 import { Router } from 'express';
 import { StatsController } from './stats.controller';
 import { StatsService } from './stats.service';
@@ -6,7 +7,7 @@ import { bindRoute } from '@bb/common/openapi/route-binder';
 
 export function statsRoutes(): Router {
   const router = Router();
-  const ctrl = new StatsController(new StatsService());
+  const ctrl = new StatsController(traceService(new StatsService()));
 
   bindRoute({
     router,

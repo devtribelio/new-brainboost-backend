@@ -1,3 +1,4 @@
+import { traceService } from '@bb/common/utils/trace-service';
 import { Router } from 'express';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
@@ -33,7 +34,7 @@ import { bindRoute } from '@bb/common/openapi/route-binder';
 
 export function authRoutes(): Router {
   const router = Router();
-  const ctrl = new AuthController(new AuthService());
+  const ctrl = new AuthController(traceService(new AuthService()));
 
   bindRoute({
     router,

@@ -148,7 +148,7 @@ For deep symbol-level mapping see `docs/legacy-analysis.md`.
 - **Responses:** use `ok(res, data, meta?)` / `okCreated(res, data, meta?)` / `okPaginated(res, items, {page,perPage,total}, extraMeta?)` / `fail(res, status, code, message, details?)` from `src/common/utils/response.util.ts`. Standard envelope: `{ success: boolean, data, meta, error }`. Pagination metadata lives at `meta.pagination = { page, perPage, total, totalPages }`. See `docs/api-envelope.md` for the full spec.
 - **Exceptions:** throw `BadRequestException` / `UnauthorizedException` / `ForbiddenException` / `NotFoundException`. `errorHandler` middleware maps them to `{ success:false, error:{ code, message, details? } }`. Default error codes: `BAD_REQUEST`, `VALIDATION_ERROR`, `UNAUTHORIZED`, `FORBIDDEN`, `NOT_FOUND`, `INTERNAL_ERROR`.
 - **IDs:** UUID v7 (`@default(uuid(7)) @db.Uuid`) repo-wide. **`legacyId Int? @unique`** on every entity that maps to legacy — the mobile app still passes int IDs (see memory `[[project_rewrite_context]]`).
-- **Logger:** `pino` (`src/config/logger.ts`). Don't `console.log`.
+- **Logger:** `pino` (`packages/common/src/config/logger.ts`). Don't `console.log`. Just call `logger.*` with a flat object — **never thread a request id through a service**: an `AsyncLocalStorage` context (`config/request-context.ts`) plus pino's `mixin` stamps `requestId` / `route` / `userId` onto every line automatically. `requestLogger` (mounted first in `app.ts`, replaced `morgan`) opens that context and emits one `http.response` / `http.aborted` line per request with status + `durationMs`; `service.call` (`traceService()` wrapping every service in `*.routes.ts`) covers the service hop; `db.op` (Prisma `$use`) covers the DB hop — both at `debug`. Secrets are stripped by pino `redact` **and** by `scrubDeep()` for request bodies. Spec: `docs/logging.md`.
 - **Env:** `src/config/env.ts` uses `required('FOO')` — every env var has one declaration here.
 
 ### Naming conventions
@@ -255,6 +255,7 @@ Module status (one-line summary; details in `docs/rewrite-progress.md`):
 - [ ] chat / broadcast — drop or defer
 - [ ] certificate — drop or defer
 - [ ] cron / queue — drop (use Postgres LISTEN or external scheduler later)
+- [x] logging / request tracing — pino + `AsyncLocalStorage` correlation (`requestId` on every line, no service refactor), `requestLogger` access log replacing morgan, `route`/`handler` tagging via `bindRoute`, `userId` via auth guards, `service.call` spans via `traceService()` at the route boundary, Prisma → pino bridge (`db.op` correlated / `db.query` raw SQL), deep body/query redaction. Pending: log shipping + alerts (CloudWatch metric filters), worker-side context. See `docs/logging.md`
 - [x] legacy resync — incremental transition-period sync (7 syncers, watermark/lock/new-wins, on-demand new-member create+dedup, resilient legacy reconnect). Built + validated on bb_trial (errors=0). **Code in `apps/resync-worker/`** (throwaway; folded back in from the old standalone repo so it shares root `@prisma/client` + `@bb/common` → no drift). See `docs/legacy-resync-plan.md`
 
 Detailed per-module status, blockers, and outstanding parity items: `docs/rewrite-progress.md`.

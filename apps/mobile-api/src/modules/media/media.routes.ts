@@ -1,3 +1,4 @@
+import { traceService } from '@bb/common/utils/trace-service';
 import { Router } from 'express';
 import { MediaController } from './media.controller';
 import { MediaService } from './media.service';
@@ -18,7 +19,7 @@ import { bindRoute } from '@bb/common/openapi/route-binder';
  */
 export function mediaRoutes(): Router {
   const router = Router();
-  const ctrl = new MediaController(new MediaService());
+  const ctrl = new MediaController(traceService(new MediaService()));
 
   bindRoute({
     router,
