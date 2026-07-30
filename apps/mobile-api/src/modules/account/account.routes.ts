@@ -1,3 +1,4 @@
+import { traceService } from '@bb/common/utils/trace-service';
 import { Router } from 'express';
 import { AccountController } from './account.controller';
 import { AccountService } from './account.service';
@@ -14,7 +15,7 @@ import {
 
 export function accountRoutes(): Router {
   const router = Router();
-  const ctrl = new AccountController(new AccountService());
+  const ctrl = new AccountController(traceService(new AccountService()));
 
   bindRoute({
     router,

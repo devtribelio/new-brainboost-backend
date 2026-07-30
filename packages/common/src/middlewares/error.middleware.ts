@@ -4,6 +4,7 @@ import { ERROR_CODES, HttpException, messageFor, type ErrorCode } from '@bb/comm
 import { fail } from '@bb/common/utils/response.util';
 import { logger } from '@bb/common/config/logger';
 import { env } from '@bb/common/config/env';
+import { setRequestContext } from '@bb/common/config/request-context';
 
 interface MappedError {
   status: number;
@@ -79,12 +80,18 @@ export const errorHandler: ErrorRequestHandler = (
     : (mapped?.message ?? messageFor(ERROR_CODES.INTERNAL_ERROR));
   const code = isHttp ? err.code : (mapped?.code ?? statusToCode(status));
 
+  // Record the code on the request context so the single access-log line for
+  // this request says HOW it failed, not just that it returned 4xx/5xx.
+  setRequestContext({ errorCode: code });
+
   // Log full error for anything we didn't deliberately produce (HttpException)
   // or cleanly map. Mapped Prisma errors are expected client mistakes.
+  // Method/path/requestId/userId come from the pino mixin — no need to repeat
+  // them here (see config/request-context.ts).
   if (!isHttp && !mapped) {
-    logger.error({ err }, 'Unhandled error');
+    logger.error({ err, code }, 'Unhandled error');
   } else if (mapped) {
-    logger.warn({ err: (err as Error)?.message }, 'Mapped database error');
+    logger.warn({ err: (err as Error)?.message, code }, 'Mapped database error');
   }
 
   let details: unknown = isHttp ? err.details : undefined;

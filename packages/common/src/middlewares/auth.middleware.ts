@@ -4,6 +4,7 @@ import { verifyAccessToken } from '@bb/common/utils/jwt.util';
 import type { AuthenticatedRequest } from '@bb/common/interfaces/authenticated-request';
 import { prisma } from '@bb/db';
 import { REQUIRES_BEARER_AUTH } from '@bb/common/openapi/types';
+import { setRequestContext } from '@bb/common/config/request-context';
 
 async function assertSessionActive(sid: string | undefined): Promise<void> {
   if (!sid) {
@@ -37,6 +38,9 @@ export const authGuard: RequestHandler = async (req, _res: Response, next: NextF
       scope,
       sessionId: payload.sid,
     };
+    // Every log line for the rest of this request now carries `userId` — see
+    // config/request-context.ts. Email is deliberately NOT propagated (PII).
+    setRequestContext({ userId: payload.sub });
     next();
   } catch (err) {
     next(err);
@@ -67,6 +71,9 @@ export const authGuardLenient: RequestHandler = (req, _res: Response, next: Next
       scope,
       sessionId: payload.sid,
     };
+    // Every log line for the rest of this request now carries `userId` — see
+    // config/request-context.ts. Email is deliberately NOT propagated (PII).
+    setRequestContext({ userId: payload.sub });
     next();
   } catch (err) {
     next(err);
@@ -90,6 +97,9 @@ export const optionalAuthGuard: RequestHandler = async (req, _res, next) => {
       scope,
       sessionId: payload.sid,
     };
+    // Every log line for the rest of this request now carries `userId` — see
+    // config/request-context.ts. Email is deliberately NOT propagated (PII).
+    setRequestContext({ userId: payload.sub });
   } catch {
     // silently ignore invalid token in optional mode
   }
@@ -116,6 +126,9 @@ export const anonOrMemberGuard: RequestHandler = async (req, _res, next) => {
       scope,
       sessionId: payload.sid,
     };
+    // Every log line for the rest of this request now carries `userId` — see
+    // config/request-context.ts. Email is deliberately NOT propagated (PII).
+    setRequestContext({ userId: payload.sub });
     next();
   } catch (err) {
     next(err);

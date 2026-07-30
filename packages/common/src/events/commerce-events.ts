@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events';
+import { logger } from '@bb/common/config/logger';
 
 export interface CommercePaymentSuccessEvent {
   paymentId: string;
@@ -82,9 +83,11 @@ class TypedEmitter {
   ): void {
     this.bus.on(event, (payload: CommerceEventMap[K]) => {
       Promise.resolve(listener(payload)).catch((err) => {
-        // listeners must handle their own errors; log via parent logger if needed
-        // eslint-disable-next-line no-console
-        console.error(`[commerce-events] listener for ${event} threw`, err);
+        // Via `logger`, NOT console: emit() is synchronous, so a listener that
+        // fires during a request still runs in that request's async context —
+        // going through pino is what attaches `requestId` / `route` to the
+        // failure. console.error would drop it (and skip redaction).
+        logger.error({ err, event }, 'commerce-events listener threw');
       });
     });
   }

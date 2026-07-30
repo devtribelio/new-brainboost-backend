@@ -9,27 +9,11 @@ import { ERROR_CODES, messageFor } from '@bb/common/exceptions';
 import { env } from '@bb/common/config/env';
 import { logger } from '@bb/common/config/logger';
 import { otpPhoneTarget } from '@bb/common/utils/phone.util';
+import { clientIp } from '@bb/common/utils/client-ip.util';
 
-// Real client IP for rate-limit keying.
-//
-// The deployed chain is Cloudflare -> nginx (proxy_pass 127.0.0.1) -> Node, i.e.
-// TWO proxy hops, but the app runs with TRUST_PROXY=1 (trusts nginx only). Express
-// therefore resolves `req.ip` to the ROTATING Cloudflare edge IP, not the visitor,
-// so per-IP buckets scatter across CF's edge fleet and the limiter never fills
-// (verified: 60 login attempts, zero 429s). Cloudflare always sets CF-Connecting-IP
-// to the real client and strips any client-supplied copy, so it is the reliable key
-// regardless of hop count. Fall back to req.ip for non-CF traffic (dev, LAN, health).
-//
-// SECURITY NOTE: CF-Connecting-IP is only trustworthy while traffic is forced
-// through Cloudflare. The origin (nginx on 0.0.0.0:80/443) MUST be firewalled to
-// Cloudflare's published IP ranges, otherwise an attacker reaching the origin
-// directly can forge this header. See docs/security-audit-followups.md.
-export function clientIp(req: Pick<Request, 'headers' | 'ip'>): string {
-  const cf = req.headers['cf-connecting-ip'];
-  if (typeof cf === 'string' && cf.trim() !== '') return cf.trim();
-  if (Array.isArray(cf) && cf[0]) return cf[0].trim();
-  return req.ip ?? 'anonymous';
-}
+// Re-exported for back-compat: `clientIp` moved to utils/client-ip.util.ts so
+// the request logger can reuse it without pulling in this module's side effects.
+export { clientIp };
 
 // Brute-force / abuse throttling for unauthenticated, credential-facing
 // endpoints (oauth token, register, forgot-password, OTP).
