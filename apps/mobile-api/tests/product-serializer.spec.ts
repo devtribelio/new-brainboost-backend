@@ -185,6 +185,18 @@ function buildProduct(): Parameters<typeof serializeCourseDetailLegacy>[0] {
           ],
         },
       ],
+      bonuses: [
+        {
+          id: '01890000-0000-7000-8000-0000000000bb',
+          title: 'Workbook',
+          fileName: 'wb.pdf',
+          fileKey: 'private/course-bonus/SECRETKEY.pdf',
+          sizeBytes: 1234,
+          mimeType: 'application/pdf',
+          downloadable: true,
+          createdAt: new Date('2026-07-01T10:00:00.000Z'),
+        },
+      ],
     },
   } as Parameters<typeof serializeCourseDetailLegacy>[0];
 }
@@ -205,6 +217,26 @@ describe('serializeCourseDetailLegacy — Bunny identifier scrubbing', () => {
     expect(deepIncludes(out, 'directplayurl')).toBe(false);
     expect(deepIncludes(out, 'collectionid')).toBe(false);
     expect(deepIncludes(out, 'originalhash')).toBe(false);
+  });
+
+  it('embeds bonuses[] and never leaks the private fileKey', () => {
+    const out = serializeCourseDetailLegacy(buildProduct(), reviewAggregate) as Record<
+      string,
+      unknown
+    >;
+    const bonuses = out.bonuses as Record<string, unknown>[];
+    expect(bonuses).toHaveLength(1);
+    expect(bonuses[0]).toMatchObject({
+      bonusId: '01890000-0000-7000-8000-0000000000bb',
+      title: 'Workbook',
+      fileName: 'wb.pdf',
+      sizeBytes: 1234,
+      mimeType: 'application/pdf',
+      downloadable: true,
+      createdAt: '2026-07-01T10:00:00.000Z',
+    });
+    expect('fileKey' in bonuses[0]).toBe(false);
+    expect(JSON.stringify(out)).not.toContain('SECRETKEY');
   });
 
   it('replaces the audio slide Bunny object with data.audio.streamUrl, keeping title/description', () => {

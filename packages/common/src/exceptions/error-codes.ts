@@ -177,6 +177,10 @@ export const ERROR_CODES = {
   MEDIA_RESOLUTION_INVALID: 'MEDIA_RESOLUTION_INVALID',
   COURSE_NOT_ENROLLED: 'COURSE_NOT_ENROLLED',
 
+  // --- bonus -----------------------------------------------------------------
+  BONUS_NOT_FOUND: 'BONUS_NOT_FOUND',
+  BONUS_ID_INVALID: 'BONUS_ID_INVALID',
+
   // --- upload ----------------------------------------------------------------
   UPLOAD_FILE_MISSING: 'UPLOAD_FILE_MISSING',
   UPLOAD_EXTENSION_NOT_ALLOWED: 'UPLOAD_EXTENSION_NOT_ALLOWED',

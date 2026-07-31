@@ -249,6 +249,10 @@ export class ProductService {
                 orderBy: { order: 'asc' },
                 include: { lessons: { orderBy: { order: 'asc' } } },
               },
+              bonuses: {
+                where: { isActive: true },
+                orderBy: { sortOrder: 'asc' },
+              },
             },
           },
         },
@@ -263,6 +267,10 @@ export class ProductService {
               sections: {
                 orderBy: { order: 'asc' },
                 include: { lessons: { orderBy: { order: 'asc' } } },
+              },
+              bonuses: {
+                where: { isActive: true },
+                orderBy: { sortOrder: 'asc' },
               },
             },
           },
@@ -284,6 +292,10 @@ export class ProductService {
               sections: {
                 orderBy: { order: 'asc' },
                 include: { lessons: { orderBy: { order: 'asc' } } },
+              },
+              bonuses: {
+                where: { isActive: true },
+                orderBy: { sortOrder: 'asc' },
               },
             },
           },
