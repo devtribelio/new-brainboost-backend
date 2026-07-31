@@ -151,6 +151,13 @@ interface RawSlide {
   type?: unknown;
   name?: unknown;
   duration?: unknown;
+  /**
+   * Slide-level presentation flag: surface this slide in the course's bonus
+   * section instead of (only) inline in the lesson player. Purely a placement
+   * hint — it does NOT change access, a bonus slide is gated exactly like any
+   * other slide in its lesson.
+   */
+  bonus?: unknown;
   data?: {
     title?: unknown;
     description?: unknown;
@@ -267,7 +274,7 @@ function resolveDurationSec(slide: RawSlide, d: NonNullable<RawSlide['data']>): 
 }
 
 /**
- * Scrub a single slide into the lean FE-contract shape `{ id, type, data }`.
+ * Scrub a single slide into the lean FE-contract shape `{ id, type, bonus, data }`.
  * No Bunny `guid`/`videoLibraryId`/iframe HTML leaks. Handles both the raw legacy
  * blob and the normalized lean storage shape. Non-media slides keep their `data`.
  *
@@ -278,6 +285,10 @@ function scrubSlide(slide: RawSlide, courseId: string, isPreview: boolean): RawS
   const type = typeof slide.type === 'string' ? slide.type : '';
   const d = slide.data ?? {};
   const guid = resolveGuid(d);
+  // Emitted on every slide type, not just documents: a bonus may eventually be
+  // an audio or video slide too (BB-118 is titled "bonus multi-tipe"). Absent
+  // on every slide authored so far, which reads as `false`.
+  const bonus = slide.bonus === true;
 
   if (type === 'AudioTemplate') {
     const audio: Record<string, unknown> = {};
@@ -288,6 +299,7 @@ function scrubSlide(slide: RawSlide, courseId: string, isPreview: boolean): RawS
     return {
       id: slide.id,
       type: slide.type,
+      bonus,
       duration: resolveDurationSec(slide, d),
       data: { title: d.title, description: d.description, audio },
     };
@@ -307,7 +319,13 @@ function scrubSlide(slide: RawSlide, courseId: string, isPreview: boolean): RawS
       newData.url = d.url;
       newData.platform = (d.platform as string | undefined) ?? 'mp4';
     }
-    return { id: slide.id, type: slide.type, duration: resolveDurationSec(slide, d), data: newData };
+    return {
+      id: slide.id,
+      type: slide.type,
+      bonus,
+      duration: resolveDurationSec(slide, d),
+      data: newData,
+    };
   }
 
   if (type === 'DocumentTemplate') {
@@ -334,12 +352,12 @@ function scrubSlide(slide: RawSlide, courseId: string, isPreview: boolean): RawS
       newData.url = d.url;
       logger.warn({ courseId, slideId: slide.id }, 'product: ungated DocumentTemplate url');
     }
-    return { id: slide.id, type: slide.type, data: newData };
+    return { id: slide.id, type: slide.type, bonus, data: newData };
   }
 
   // TextTemplate / GreetingTemplate / ThankYouTemplate / ... — ignored by the
   // player; keep id/type/data, drop the slide-level wrapper noise.
-  return { id: slide.id, type: slide.type, data: slide.data };
+  return { id: slide.id, type: slide.type, bonus, data: slide.data };
 }
 
 // A single regex pass over `<[^>]+>` is bypassable (e.g. `<scr<script>ipt>`

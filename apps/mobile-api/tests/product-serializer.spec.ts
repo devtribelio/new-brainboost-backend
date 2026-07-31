@@ -148,6 +148,7 @@ const docSlide = {
   id: 'slide-doc-1',
   type: 'DocumentTemplate',
   name: 'Workbook',
+  bonus: true,
   duration: 0,
   data: {
     title: 'Workbook',
@@ -298,6 +299,9 @@ describe('serializeCourseDetailLegacy — Bunny identifier scrubbing', () => {
     // The key is a bare uuid, so the original name has to travel separately.
     expect(data.fileName).toBe('workbook-pekan-1.pdf');
     expect(data.sizeBytes).toBe(2310442);
+    // `bonus` sits beside `type`, not inside `data`.
+    expect(doc.bonus).toBe(true);
+    expect(data.bonus).toBeUndefined();
     expect(data.fileUrl).toMatch(/^\/api\/member\/media\/document\?t=/);
     expect(data.fileKey).toBeUndefined();
     // The private key must not appear anywhere in the response, under any name.
@@ -334,6 +338,18 @@ describe('serializeCourseDetailLegacy — Bunny identifier scrubbing', () => {
     // so FE never has to branch on their existence.
     expect(data.fileName).toBeNull();
     expect(data.sizeBytes).toBeNull();
+  });
+
+  it('emits bonus=false on every slide that does not opt in, whatever its type', () => {
+    const out = serializeCourseDetailLegacy(buildProduct(), reviewAggregate) as Record<
+      string,
+      unknown
+    >;
+    // Audio, external video, structured video, and the pre-gate document — none
+    // carry the flag, and a missing flag must read as false, never undefined.
+    for (const id of ['slide-audio-1', 'slide-video-1', 'slide-video-obj', 'slide-doc-legacy']) {
+      expect(findSlide(out, id).bonus).toBe(false);
+    }
   });
 
   it('never reports a zero size for a document with no size recorded', () => {
