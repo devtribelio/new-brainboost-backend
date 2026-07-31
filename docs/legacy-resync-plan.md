@@ -60,6 +60,25 @@ All 7 syncers implemented and validated end-to-end:
   kyc decisions, inviter chain (winner-scoped), program memberships, received commissions
   (incl. non-BB rows that count toward lifetime tier) and given likes for JUST the new
   ids. Surfaced as the `backfill` entry in run stats; triggers a recount when it wrote.
+- **Community auto-join (implemented 2026-07-31):** BrainBoost has exactly two community
+  networks (`networks.purpose` = `timeline` + `education`) and EVERY member belongs to
+  both — mandatory, not derived from legacy `network_member` (same rule as the one-shot
+  `scripts/migrate-network-members.ts`). The app enforces it at registration
+  (`AuthService.autoJoinCommunityNetworks`), but a member created by `ensureMember` never
+  passes through that path, so until now resync-materialised members had NO `NetworkMember`
+  row: `/network` (my networks) empty, notification fan-out skips them, and every write
+  path (post / comment / like) 403s `NETWORK_MEMBERSHIP_REQUIRED` — only feed *reads* kept
+  working, because both networks are public. `network-join.ts::joinCommunityNetworks` now
+  runs as the last step of the new-member backfill: `createMany({ skipDuplicates })` against
+  `@@unique([networkId, memberId])` (an adopted app placeholder that already joined is a
+  no-op), `joinedAt = member.createdAt`, then `count_member += inserted`.
+  **Existing stock** (members resync created before this): re-run the idempotent
+  `pnpm tsx scripts/migrate-network-members.ts` — it cross-joins every `legacyId != null`
+  member × both networks and recomputes `count_member`.
+- **networks.count_member in recount (2026-07-31):** `recountCounters` now also rebuilds
+  `networks.count_member` from `network_members` (reset-then-aggregate, same shape as the
+  post/comment counters), so the column self-heals after any out-of-app write — the
+  auto-join above, a manual SQL backfill, or the one-shot migrate script.
 - **Lock heartbeat (implemented):** the run refreshes the `__lock__` stamp after each
   syncer, so a run longer than the TTL (4-5h first run vs 2h default) can't be taken over
   mid-write; a lost heartbeat aborts the remaining syncers instead of double-writing.
