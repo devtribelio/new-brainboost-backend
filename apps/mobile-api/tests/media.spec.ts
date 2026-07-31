@@ -3,7 +3,7 @@ import { Readable } from 'node:stream';
 import request from 'supertest';
 import { buildApp } from '../src/app';
 import { prisma } from '@bb/db';
-import { signMediaToken } from '../src/modules/media/media-token.util';
+import { signMediaToken, signDocumentToken } from '../src/modules/media/media-token.util';
 import * as bcrypt from 'bcryptjs';
 
 /**
@@ -342,6 +342,76 @@ describe('GET /api/member/media/download', () => {
 
   it('missing token → 400', async () => {
     const res = await request(app).get('/api/member/media/download').redirects(0);
+    expect(res.status).toBe(400);
+  });
+});
+
+describe('GET /api/member/media/document', () => {
+  const docKey = () => `private/lesson-doc/${courseId}/workbook.pdf`;
+
+  it('enrolled member → 302 to a presigned S3 URL for the token key', async () => {
+    const access = await loginToken(enrolledEmail);
+    const token = signDocumentToken({ key: docKey(), courseId, isPreview: false });
+    const res = await request(app)
+      .get('/api/member/media/document')
+      .query({ t: token })
+      .set('Authorization', `Bearer ${access}`)
+      .redirects(0);
+
+    expect(res.status).toBe(302);
+    const location = res.headers.location as string;
+    expect(location).toContain('workbook.pdf');
+    expect(location).toContain('X-Amz-Signature');
+  });
+
+  it('preview document streams without a login', async () => {
+    const token = signDocumentToken({ key: docKey(), courseId, isPreview: true });
+    const res = await request(app)
+      .get('/api/member/media/document')
+      .query({ t: token })
+      .redirects(0);
+
+    expect(res.status).toBe(302);
+  });
+
+  it('non-preview document without a login → 401', async () => {
+    const token = signDocumentToken({ key: docKey(), courseId, isPreview: false });
+    const res = await request(app)
+      .get('/api/member/media/document')
+      .query({ t: token })
+      .redirects(0);
+
+    expect(res.status).toBe(401);
+  });
+
+  it('member not enrolled in the course → 403', async () => {
+    const access = await loginToken(strangerEmail);
+    const token = signDocumentToken({ key: docKey(), courseId, isPreview: false });
+    const res = await request(app)
+      .get('/api/member/media/document')
+      .query({ t: token })
+      .set('Authorization', `Bearer ${access}`)
+      .redirects(0);
+
+    expect(res.status).toBe(403);
+  });
+
+  // A media token must not be spendable here — it would let a Bunny guid be
+  // reinterpreted as an S3 key.
+  it('a media token → 401', async () => {
+    const access = await loginToken(enrolledEmail);
+    const token = signMediaToken({ guid: 'guid-not-a-doc', courseId, isPreview: false });
+    const res = await request(app)
+      .get('/api/member/media/document')
+      .query({ t: token })
+      .set('Authorization', `Bearer ${access}`)
+      .redirects(0);
+
+    expect(res.status).toBe(401);
+  });
+
+  it('missing token → 400', async () => {
+    const res = await request(app).get('/api/member/media/document').redirects(0);
     expect(res.status).toBe(400);
   });
 });

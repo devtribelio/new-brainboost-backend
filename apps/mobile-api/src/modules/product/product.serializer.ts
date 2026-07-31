@@ -1,5 +1,6 @@
 import type { Product } from '@prisma/client';
-import { signMediaToken } from '@/modules/media/media-token.util';
+import { signMediaToken, signDocumentToken } from '@/modules/media/media-token.util';
+import { logger } from '@bb/common/config/logger';
 import { serializeBonusItem } from '@/modules/bonus/bonus.dto';
 import { env } from '@bb/common/config/env';
 
@@ -150,6 +151,13 @@ interface RawSlide {
   type?: unknown;
   name?: unknown;
   duration?: unknown;
+  /**
+   * Slide-level presentation flag: surface this slide in the course's bonus
+   * section instead of (only) inline in the lesson player. Purely a placement
+   * hint — it does NOT change access, a bonus slide is gated exactly like any
+   * other slide in its lesson.
+   */
+  bonus?: unknown;
   data?: {
     title?: unknown;
     description?: unknown;
@@ -163,6 +171,14 @@ interface RawSlide {
     video?: Record<string, unknown>;
     /** Iframe-HTML shape — VideoTemplate Bunny embed wrapped in `data.url`. */
     url?: unknown;
+    /** DocumentTemplate — S3 key under `private/`. Server-only, never emitted. */
+    fileKey?: unknown;
+    /** DocumentTemplate — original upload name; the key itself is a bare uuid. */
+    fileName?: unknown;
+    /** DocumentTemplate — byte size, for the FE download-progress UI. */
+    sizeBytes?: unknown;
+    /** DocumentTemplate — false = view-only, the learner may not keep the file. */
+    downloadable?: unknown;
     /** Injected by `scrubSlide` for VideoTemplate — opaque media-proxy URL. */
     streamUrl?: unknown;
     /** Injected by `scrubSlide` for AudioTemplate / VideoTemplate — long-lived MP4 download URL. */
@@ -203,6 +219,25 @@ function buildDownloadUrl(guid: string, courseId: string, isPreview: boolean): s
 }
 
 /**
+ * Coerce a JSONB value to a positive int, or null. `null`/`''` must not become
+ * `0` — a document of "0 bytes" reads as a broken upload, "unknown" does not.
+ */
+function positiveIntOrNull(raw: unknown): number | null {
+  if (raw === null || raw === undefined || raw === '') return null;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? Math.trunc(n) : null;
+}
+
+/**
+ * Build the opaque document URL that replaces the private S3 key of a
+ * `DocumentTemplate` slide. The endpoint re-checks enrollment and 302s to a
+ * short-lived presigned GET, so the key itself never reaches the client.
+ */
+function buildDocumentUrl(key: string, courseId: string, isPreview: boolean): string {
+  return `/api/member/media/document?t=${signDocumentToken({ key, courseId, isPreview })}`;
+}
+
+/**
  * Scrub a single raw slide so no Bunny identifiers leak to the client.
  *
  * - AudioTemplate: replaces the whole `data.audio` Bunny object with `{ streamUrl, duration }`.
@@ -239,7 +274,7 @@ function resolveDurationSec(slide: RawSlide, d: NonNullable<RawSlide['data']>): 
 }
 
 /**
- * Scrub a single slide into the lean FE-contract shape `{ id, type, data }`.
+ * Scrub a single slide into the lean FE-contract shape `{ id, type, bonus, data }`.
  * No Bunny `guid`/`videoLibraryId`/iframe HTML leaks. Handles both the raw legacy
  * blob and the normalized lean storage shape. Non-media slides keep their `data`.
  *
@@ -250,6 +285,10 @@ function scrubSlide(slide: RawSlide, courseId: string, isPreview: boolean): RawS
   const type = typeof slide.type === 'string' ? slide.type : '';
   const d = slide.data ?? {};
   const guid = resolveGuid(d);
+  // Emitted on every slide type, not just documents: a bonus may eventually be
+  // an audio or video slide too (BB-118 is titled "bonus multi-tipe"). Absent
+  // on every slide authored so far, which reads as `false`.
+  const bonus = slide.bonus === true;
 
   if (type === 'AudioTemplate') {
     const audio: Record<string, unknown> = {};
@@ -260,6 +299,7 @@ function scrubSlide(slide: RawSlide, courseId: string, isPreview: boolean): RawS
     return {
       id: slide.id,
       type: slide.type,
+      bonus,
       duration: resolveDurationSec(slide, d),
       data: { title: d.title, description: d.description, audio },
     };
@@ -279,12 +319,45 @@ function scrubSlide(slide: RawSlide, courseId: string, isPreview: boolean): RawS
       newData.url = d.url;
       newData.platform = (d.platform as string | undefined) ?? 'mp4';
     }
-    return { id: slide.id, type: slide.type, duration: resolveDurationSec(slide, d), data: newData };
+    return {
+      id: slide.id,
+      type: slide.type,
+      bonus,
+      duration: resolveDurationSec(slide, d),
+      data: newData,
+    };
   }
 
-  // TextTemplate / GreetingTemplate / ThankYouTemplate / DocumentTemplate / ... —
-  // ignored by the player; keep id/type/data, drop the slide-level wrapper noise.
-  return { id: slide.id, type: slide.type, data: slide.data };
+  if (type === 'DocumentTemplate') {
+    // Built field-by-field, never spread: `data.fileKey` is a private S3 key and
+    // must not survive into the response.
+    const newData: Record<string, unknown> = {
+      title: d.title,
+      description: d.description,
+      // Slides authored before this flag existed have no value, and those
+      // documents were downloadable — a missing value reads as `true`.
+      downloadable: d.downloadable !== false,
+      // Always present (null when unknown) so FE reads one stable shape. The
+      // stored key is a bare uuid, so without `fileName` there is nothing to
+      // show the learner or to name the saved file.
+      fileName: typeof d.fileName === 'string' && d.fileName !== '' ? d.fileName : null,
+      sizeBytes: positiveIntOrNull(d.sizeBytes),
+    };
+    if (typeof d.fileKey === 'string' && d.fileKey !== '') {
+      newData.fileUrl = buildDocumentUrl(d.fileKey, courseId, isPreview);
+    } else if (typeof d.url === 'string' && d.url !== '') {
+      // Pre-gate content: the document sits on a permanent public URL. Passed
+      // through so existing slides keep working, and logged so the leftovers are
+      // visible until the backfill moves them behind the gate.
+      newData.url = d.url;
+      logger.warn({ courseId, slideId: slide.id }, 'product: ungated DocumentTemplate url');
+    }
+    return { id: slide.id, type: slide.type, bonus, data: newData };
+  }
+
+  // TextTemplate / GreetingTemplate / ThankYouTemplate / ... — ignored by the
+  // player; keep id/type/data, drop the slide-level wrapper noise.
+  return { id: slide.id, type: slide.type, bonus, data: slide.data };
 }
 
 // A single regex pass over `<[^>]+>` is bypassable (e.g. `<scr<script>ipt>`
