@@ -166,6 +166,10 @@ interface RawSlide {
     url?: unknown;
     /** DocumentTemplate — S3 key under `private/`. Server-only, never emitted. */
     fileKey?: unknown;
+    /** DocumentTemplate — original upload name; the key itself is a bare uuid. */
+    fileName?: unknown;
+    /** DocumentTemplate — byte size, for the FE download-progress UI. */
+    sizeBytes?: unknown;
     /** DocumentTemplate — false = view-only, the learner may not keep the file. */
     downloadable?: unknown;
     /** Injected by `scrubSlide` for VideoTemplate — opaque media-proxy URL. */
@@ -205,6 +209,16 @@ function buildStreamUrl(guid: string, courseId: string, isPreview: boolean): str
 function buildDownloadUrl(guid: string, courseId: string, isPreview: boolean): string {
   const token = signMediaToken({ guid, courseId, isPreview }, env.media.downloadTtlSeconds);
   return `/api/member/media/download?t=${token}`;
+}
+
+/**
+ * Coerce a JSONB value to a positive int, or null. `null`/`''` must not become
+ * `0` — a document of "0 bytes" reads as a broken upload, "unknown" does not.
+ */
+function positiveIntOrNull(raw: unknown): number | null {
+  if (raw === null || raw === undefined || raw === '') return null;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? Math.trunc(n) : null;
 }
 
 /**
@@ -305,6 +319,11 @@ function scrubSlide(slide: RawSlide, courseId: string, isPreview: boolean): RawS
       // Slides authored before this flag existed have no value, and those
       // documents were downloadable — a missing value reads as `true`.
       downloadable: d.downloadable !== false,
+      // Always present (null when unknown) so FE reads one stable shape. The
+      // stored key is a bare uuid, so without `fileName` there is nothing to
+      // show the learner or to name the saved file.
+      fileName: typeof d.fileName === 'string' && d.fileName !== '' ? d.fileName : null,
+      sizeBytes: positiveIntOrNull(d.sizeBytes),
     };
     if (typeof d.fileKey === 'string' && d.fileKey !== '') {
       newData.fileUrl = buildDocumentUrl(d.fileKey, courseId, isPreview);

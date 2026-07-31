@@ -153,6 +153,8 @@ const docSlide = {
     title: 'Workbook',
     description: 'Latihan pekan 1',
     fileKey: `private/lesson-doc/${COURSE_UUID}/SECRETDOCKEY.pdf`,
+    fileName: 'workbook-pekan-1.pdf',
+    sizeBytes: 2310442,
     downloadable: false,
   },
 };
@@ -293,6 +295,9 @@ describe('serializeCourseDetailLegacy — Bunny identifier scrubbing', () => {
     expect(data.description).toBe('Latihan pekan 1');
     // Explicit false must survive — it is what makes a document view-only.
     expect(data.downloadable).toBe(false);
+    // The key is a bare uuid, so the original name has to travel separately.
+    expect(data.fileName).toBe('workbook-pekan-1.pdf');
+    expect(data.sizeBytes).toBe(2310442);
     expect(data.fileUrl).toMatch(/^\/api\/member\/media\/document\?t=/);
     expect(data.fileKey).toBeUndefined();
     // The private key must not appear anywhere in the response, under any name.
@@ -325,6 +330,25 @@ describe('serializeCourseDetailLegacy — Bunny identifier scrubbing', () => {
     expect(data.fileUrl).toBeUndefined();
     // No flag on the slide — an old document was always keepable.
     expect(data.downloadable).toBe(true);
+    // Shape stays stable: an old slide knows neither, but the keys are present
+    // so FE never has to branch on their existence.
+    expect(data.fileName).toBeNull();
+    expect(data.sizeBytes).toBeNull();
+  });
+
+  it('never reports a zero size for a document with no size recorded', () => {
+    // Cloned, not mutated in place: the slide fixtures are shared module-level
+    // consts, so editing one would bleed into every other test in this file.
+    const product = structuredClone(buildProduct());
+    const slides = (
+      product.course!.sections[0].lessons[1] as unknown as {
+        slidesData: Array<{ id: string; data: Record<string, unknown> }>;
+      }
+    ).slidesData;
+    slides.find((s) => s.id === 'slide-doc-1')!.data.sizeBytes = null;
+
+    const out = serializeCourseDetailLegacy(product, reviewAggregate) as Record<string, unknown>;
+    expect((findSlide(out, 'slide-doc-1').data as Record<string, unknown>).sizeBytes).toBeNull();
   });
 
   it('replaces the audio slide Bunny object with data.audio.streamUrl, keeping title/description', () => {

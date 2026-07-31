@@ -146,9 +146,10 @@ export class CourseLessonItemDto {
     description:
       'Lean slide objects `{ id, type, data }`. Media slides expose an opaque `data.streamUrl` ' +
       '(audio under `data.audio.streamUrl`) pointing at the media proxy — Bunny `guid`/`videoLibraryId`/' +
-      'iframe HTML are scrubbed. `DocumentTemplate` exposes an opaque `data.fileUrl` — the private ' +
-      'S3 key is never emitted; legacy slides authored before the gate existed still carry a plain ' +
-      'public `data.url` instead. Other slide types keep their `data`. Empty array when null.',
+      'iframe HTML are scrubbed. `DocumentTemplate` exposes an opaque `data.fileUrl` plus ' +
+      '`data.fileName`/`data.sizeBytes` (both null when unknown) — the private S3 key is never ' +
+      'emitted; legacy slides authored before the gate existed still carry a plain public ' +
+      '`data.url` instead. Other slide types keep their `data`. Empty array when null.',
     example: [
       {
         id: 'ABC123XYZ',
@@ -182,6 +183,8 @@ export class CourseLessonItemDto {
           title: 'Workbook',
           description: '<p>Latihan pekan 1</p>',
           downloadable: true,
+          fileName: 'workbook-pekan-1.pdf',
+          sizeBytes: 2_310_442,
           fileUrl: '/api/member/media/document?t=<opaque-token>',
         },
       },
