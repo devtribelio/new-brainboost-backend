@@ -1,5 +1,6 @@
 import type { Product } from '@prisma/client';
-import { signMediaToken } from '@/modules/media/media-token.util';
+import { signMediaToken, signDocumentToken } from '@/modules/media/media-token.util';
+import { logger } from '@bb/common/config/logger';
 import { serializeBonusItem } from '@/modules/bonus/bonus.dto';
 import { env } from '@bb/common/config/env';
 
@@ -163,6 +164,10 @@ interface RawSlide {
     video?: Record<string, unknown>;
     /** Iframe-HTML shape — VideoTemplate Bunny embed wrapped in `data.url`. */
     url?: unknown;
+    /** DocumentTemplate — S3 key under `private/`. Server-only, never emitted. */
+    fileKey?: unknown;
+    /** DocumentTemplate — false = view-only, the learner may not keep the file. */
+    downloadable?: unknown;
     /** Injected by `scrubSlide` for VideoTemplate — opaque media-proxy URL. */
     streamUrl?: unknown;
     /** Injected by `scrubSlide` for AudioTemplate / VideoTemplate — long-lived MP4 download URL. */
@@ -200,6 +205,15 @@ function buildStreamUrl(guid: string, courseId: string, isPreview: boolean): str
 function buildDownloadUrl(guid: string, courseId: string, isPreview: boolean): string {
   const token = signMediaToken({ guid, courseId, isPreview }, env.media.downloadTtlSeconds);
   return `/api/member/media/download?t=${token}`;
+}
+
+/**
+ * Build the opaque document URL that replaces the private S3 key of a
+ * `DocumentTemplate` slide. The endpoint re-checks enrollment and 302s to a
+ * short-lived presigned GET, so the key itself never reaches the client.
+ */
+function buildDocumentUrl(key: string, courseId: string, isPreview: boolean): string {
+  return `/api/member/media/document?t=${signDocumentToken({ key, courseId, isPreview })}`;
 }
 
 /**
@@ -282,8 +296,30 @@ function scrubSlide(slide: RawSlide, courseId: string, isPreview: boolean): RawS
     return { id: slide.id, type: slide.type, duration: resolveDurationSec(slide, d), data: newData };
   }
 
-  // TextTemplate / GreetingTemplate / ThankYouTemplate / DocumentTemplate / ... —
-  // ignored by the player; keep id/type/data, drop the slide-level wrapper noise.
+  if (type === 'DocumentTemplate') {
+    // Built field-by-field, never spread: `data.fileKey` is a private S3 key and
+    // must not survive into the response.
+    const newData: Record<string, unknown> = {
+      title: d.title,
+      description: d.description,
+      // Slides authored before this flag existed have no value, and those
+      // documents were downloadable — a missing value reads as `true`.
+      downloadable: d.downloadable !== false,
+    };
+    if (typeof d.fileKey === 'string' && d.fileKey !== '') {
+      newData.fileUrl = buildDocumentUrl(d.fileKey, courseId, isPreview);
+    } else if (typeof d.url === 'string' && d.url !== '') {
+      // Pre-gate content: the document sits on a permanent public URL. Passed
+      // through so existing slides keep working, and logged so the leftovers are
+      // visible until the backfill moves them behind the gate.
+      newData.url = d.url;
+      logger.warn({ courseId, slideId: slide.id }, 'product: ungated DocumentTemplate url');
+    }
+    return { id: slide.id, type: slide.type, data: newData };
+  }
+
+  // TextTemplate / GreetingTemplate / ThankYouTemplate / ... — ignored by the
+  // player; keep id/type/data, drop the slide-level wrapper noise.
   return { id: slide.id, type: slide.type, data: slide.data };
 }
 

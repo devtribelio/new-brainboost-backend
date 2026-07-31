@@ -2,7 +2,7 @@ import { Readable } from 'node:stream';
 import type { Request, Response } from 'express';
 import { MediaService } from './media.service';
 import { MEDIA_RESOLUTIONS, type MediaResolution } from './dto/media.dto';
-import { verifyMediaToken } from './media-token.util';
+import { verifyMediaToken, verifyDocumentToken } from './media-token.util';
 import {
   badRequest,
   unauthorized,
@@ -199,6 +199,60 @@ export class MediaController {
     const filename = this.sanitizeFilename(req.query.filename) ?? `media-${payload.guid}.mp4`;
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.redirect(302, this.mediaService.buildDownloadUrl(payload.guid, resolution));
+  };
+
+  @ApiOperation({
+    summary: 'Get a presigned URL for a lesson document (DocumentTemplate slide)',
+    description:
+      'Decrypts the opaque document token, gates access (enrollment for non-preview), ' +
+      'and 302-redirects to a short-lived presigned GET for the private S3 object. ' +
+      'The S3 key is carried inside the token and never reaches the client. ' +
+      'Rate-limited per member.',
+  })
+  @ApiQuery({ name: 't', type: 'string', required: true, description: 'Opaque document token.' })
+  @ApiQuery({
+    name: 'filename',
+    type: 'string',
+    required: false,
+    description: 'Preferred saved filename (Content-Disposition hint).',
+  })
+  @ApiResponse({
+    status: 302,
+    description: 'Redirect to a presigned S3 URL',
+    envelope: 'none',
+  })
+  @ApiResponse({ status: 400, description: 'Missing document token' })
+  @ApiResponse({ status: 401, description: 'Invalid/expired token, or auth required' })
+  @ApiResponse({ status: 403, description: 'Not enrolled in the course' })
+  @ApiResponse({ status: 429, description: 'Rate limit exceeded' })
+  document = async (req: Request, res: Response): Promise<void> => {
+    const token = typeof req.query.t === 'string' ? req.query.t : '';
+    if (!token) {
+      throw badRequest(ERROR_CODES.MEDIA_TOKEN_MISSING);
+    }
+
+    // Rejects a media (video) token — the two kinds are not interchangeable.
+    const payload = verifyDocumentToken(token);
+
+    if (!payload.isPreview) {
+      const user = (req as AuthenticatedRequest).user;
+      if (!user) {
+        throw unauthorized(ERROR_CODES.MEDIA_AUTH_REQUIRED);
+      }
+      await this.mediaService.assertEnrollment(payload.courseId, user.id);
+    }
+
+    const user = (req as AuthenticatedRequest).user;
+    logger.info(
+      { memberId: user?.id ?? null, courseId: payload.courseId, isPreview: payload.isPreview },
+      'media: document requested',
+    );
+
+    const filename = this.sanitizeFilename(req.query.filename);
+    if (filename) {
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    }
+    res.redirect(302, await this.mediaService.buildDocumentUrl(payload.key));
   };
 
   /** Validate the `res` query param; fall back to the configured default. */

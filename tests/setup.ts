@@ -12,6 +12,10 @@ process.env.OAUTH_CLIENT_SECRET = process.env.OAUTH_CLIENT_SECRET || 'test-secre
 process.env.DATABASE_URL =
   process.env.DATABASE_URL ||
   'postgresql://postgres:root@localhost:5433/bb?schema=public';
+// Presigning is pure local HMAC — dummy creds keep it offline but let it run,
+// instead of falling through to the AWS credential-provider chain.
+process.env.S3_ACCESS_KEY_ID = process.env.S3_ACCESS_KEY_ID || 'test-s3-key';
+process.env.S3_SECRET_ACCESS_KEY = process.env.S3_SECRET_ACCESS_KEY || 'test-s3-secret';
 process.env.XENDIT_CALLBACK_TOKEN = process.env.XENDIT_CALLBACK_TOKEN || 'test-xendit-token';
 process.env.XENDIT_SECRET_KEY = process.env.XENDIT_SECRET_KEY || 'xnd_test_dummy';
 process.env.REVENUECAT_WEBHOOK_AUTH = process.env.REVENUECAT_WEBHOOK_AUTH || 'test-rc-auth';

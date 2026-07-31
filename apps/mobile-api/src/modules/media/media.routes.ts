@@ -42,5 +42,17 @@ export function mediaRoutes(): Router {
     middlewares: [optionalAuthGuard, mediaDownloadRateLimiter],
   });
 
+  // Lesson documents (DocumentTemplate slides) — same gating and rate limit as
+  // download, but the asset is a private S3 object rather than a Bunny video, so
+  // it 302s to a presigned GET instead of a signed Bunny URL.
+  bindRoute({
+    router,
+    controller: ctrl,
+    method: 'get',
+    path: '/media/document',
+    handlerKey: 'document',
+    middlewares: [optionalAuthGuard, mediaDownloadRateLimiter],
+  });
+
   return router;
 }

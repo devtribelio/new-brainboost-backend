@@ -1,6 +1,7 @@
 import { forbidden, ERROR_CODES, ForbiddenException } from '@bb/common/exceptions';
 import { env } from '@bb/common/config/env';
 import { prisma } from '@bb/db';
+import { S3StorageService, s3StorageService } from '@bb/common/services/s3-storage.service';
 import type { MediaResolution } from './dto/media.dto';
 import { signBunnyHlsUrl, signBunnyMp4Url } from './bunny-sign.util';
 
@@ -12,6 +13,8 @@ import { signBunnyHlsUrl, signBunnyMp4Url } from './bunny-sign.util';
  * media lives here; the controller stays thin.
  */
 export class MediaService {
+  constructor(private readonly storage: S3StorageService = s3StorageService) {}
+
   /**
    * Throw `ForbiddenException` unless `memberId` is enrolled in `courseId`.
    * Used to gate non-preview media — preview media skips this entirely.
@@ -66,5 +69,14 @@ export class MediaService {
    */
   buildDownloadUrl(guid: string, res: MediaResolution): string {
     return signBunnyMp4Url(guid, res);
+  }
+
+  /**
+   * Presign a `private/*` lesson document for a single short-lived read. Unlike
+   * the Bunny helpers above this hits S3, so it is async. The key comes from a
+   * decrypted document token — it is never client-supplied.
+   */
+  async buildDocumentUrl(key: string): Promise<string> {
+    return this.storage.getPresignedGetUrl(key, env.s3.presignExpires);
   }
 }
