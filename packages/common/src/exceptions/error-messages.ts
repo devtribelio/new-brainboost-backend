@@ -161,6 +161,10 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   MEDIA_RESOLUTION_INVALID: 'Kualitas video tidak tersedia',
   COURSE_NOT_ENROLLED: 'Belum terdaftar di kelas ini',
 
+  // --- bonus -----------------------------------------------------------------
+  BONUS_NOT_FOUND: 'Bonus tidak ditemukan',
+  BONUS_ID_INVALID: 'Bonus tidak dipilih',
+
   // --- upload ----------------------------------------------------------------
   UPLOAD_FILE_MISSING: 'Tidak ada berkas yang diunggah',
   UPLOAD_EXTENSION_NOT_ALLOWED: 'Tipe berkas tidak didukung',

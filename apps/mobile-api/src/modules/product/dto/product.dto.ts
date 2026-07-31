@@ -1,4 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@bb/common/openapi/decorators';
+import { CourseBonusItemDto } from '@/modules/bonus/bonus.dto';
 
 /**
  * Wire shape for `serializeProduct()` — GET /member/product/list.
@@ -312,6 +313,13 @@ export class CourseDetailDto {
 
   @ApiProperty({ type: 'array', itemType: () => CourseSectionDto })
   lessonsData!: CourseSectionDto[];
+
+  @ApiProperty({
+    type: 'array',
+    itemType: () => CourseBonusItemDto,
+    description: 'Bonus attachments (PDF workbooks etc.); empty when the course has none',
+  })
+  bonuses!: CourseBonusItemDto[];
 
   @ApiProperty({ type: () => RatingSummaryDto })
   ratingSummary!: RatingSummaryDto;
