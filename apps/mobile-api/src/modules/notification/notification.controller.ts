@@ -15,6 +15,8 @@ import {
 } from '@bb/common/openapi/decorators';
 import {
   NotificationDto,
+  NotificationMuteDto,
+  NotificationMuteResultDto,
   NotificationSeenDto,
   NotificationSeenResultDto,
 } from './dto/notification.dto';
@@ -98,7 +100,13 @@ export class NotificationController {
 
   // Scope validation lives in NotificationService (assertMuteScope) so mute and
   // unmute cannot drift apart — they used to disagree on which scopes are legal.
-  @ApiOperation({ summary: 'Mute notifications for a post, topic, or network' })
+  @ApiOperation({
+    summary: 'Mute notifications for a post, topic, or network',
+    description:
+      'Silences every notification originating from that object. Muting a topic also covers comments/replies/tags/likes on posts inside it. Idempotent — muting twice is a no-op.',
+  })
+  @ApiBody({ type: () => NotificationMuteDto })
+  @ApiResponse({ status: 200, type: () => NotificationMuteResultDto })
   mute = async (req: AuthenticatedRequest, res: Response) => {
     if (!req.user) throw unauthorized(ERROR_CODES.AUTH_REQUIRED);
     const body = (req.body ?? {}) as Record<string, unknown>;
@@ -108,7 +116,12 @@ export class NotificationController {
     return ok(res, await this.notificationService.mute(req.user.id, scope, refId));
   };
 
-  @ApiOperation({ summary: 'Unmute notifications for a post, topic, or network' })
+  @ApiOperation({
+    summary: 'Unmute notifications for a post, topic, or network',
+    description: 'Reverses /mute with the same scope + refId. Unmuting what was never muted is a no-op.',
+  })
+  @ApiBody({ type: () => NotificationMuteDto })
+  @ApiResponse({ status: 200, type: () => NotificationMuteResultDto })
   unmute = async (req: AuthenticatedRequest, res: Response) => {
     if (!req.user) throw unauthorized(ERROR_CODES.AUTH_REQUIRED);
     const body = (req.body ?? {}) as Record<string, unknown>;

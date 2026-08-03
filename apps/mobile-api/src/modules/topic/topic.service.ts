@@ -2,6 +2,7 @@ import { prisma } from '@bb/db';
 import { badRequest, notFound, ERROR_CODES } from '@bb/common/exceptions';
 import type { PaginationParams } from '@bb/common/utils/pagination.util';
 import { assertUuid } from '@bb/common/utils/uuid.util';
+import { MuteScope } from '@bb/domain/notification/mute-scope';
 
 interface TopicListQuery {
   keyword?: string;
@@ -58,20 +59,38 @@ export class TopicService {
       return { rows, total };
     }
 
+    const topicIds = rows.map((r) => r.id);
+    // Mute is independent of subscription — a member may mute a topic they never
+    // subscribed to — so this runs on every authed path, including the one where
+    // the isSubscribe filter already pins the subscription state.
+    const muted = await this.mutedTopicIds(q.memberId, topicIds);
+
     // Filter already pins the subscription state of every row.
     if (q.isSubscribe !== undefined) {
-      const decorated = rows.map((r) => Object.assign(r, { isSubscribed: q.isSubscribe }));
+      const decorated = rows.map((r) =>
+        Object.assign(r, { isSubscribed: q.isSubscribe, isMute: muted.has(r.id) }),
+      );
       return { rows: decorated, total };
     }
 
-    const topicIds = rows.map((r) => r.id);
     const subs = await prisma.topicSubscription.findMany({
       where: { memberId: q.memberId, topicId: { in: topicIds } },
       select: { topicId: true },
     });
     const subscribed = new Set(subs.map((s) => s.topicId));
-    const decorated = rows.map((r) => Object.assign(r, { isSubscribed: subscribed.has(r.id) }));
+    const decorated = rows.map((r) =>
+      Object.assign(r, { isSubscribed: subscribed.has(r.id), isMute: muted.has(r.id) }),
+    );
     return { rows: decorated, total };
+  }
+
+  // notification_mutes is keyed (memberId, scope, refId) with refId = topic UUID.
+  private async mutedTopicIds(memberId: string, topicIds: string[]): Promise<Set<string>> {
+    const rows = await prisma.notificationMute.findMany({
+      where: { memberId, scope: MuteScope.Topic, refId: { in: topicIds } },
+      select: { refId: true },
+    });
+    return new Set(rows.map((r) => r.refId));
   }
 
   // FE sends `code` (8-char alphanumeric from /info). Backend accepts code,
