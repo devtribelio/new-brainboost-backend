@@ -60,9 +60,6 @@ export function registerCommentNotificationListener(): void {
       if (notMuted.length === 0) return;
 
       const excerpt = e.content.slice(0, 200);
-      const network = post.networkId
-        ? await prisma.network.findUnique({ where: { id: post.networkId }, select: { name: true } })
-        : null;
 
       for (const memberId of notMuted) {
         const label = targets.get(memberId)!;
@@ -71,9 +68,7 @@ export function registerCommentNotificationListener(): void {
             ? `${actor.fullName} menandai kamu di ${isReply ? 'balasan' : 'komentar'}`
             : label === ActionLabel.NewReply
               ? `${actor.fullName} membalas komentarmu`
-              : network
-                ? `${actor.fullName} mengomentari postinganmu di ${network.name}`
-                : `${actor.fullName} mengomentari postinganmu`;
+              : `${actor.fullName} mengomentari postinganmu`;
 
         await producer.createForMember({
           memberId,
