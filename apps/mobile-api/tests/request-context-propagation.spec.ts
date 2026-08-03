@@ -61,6 +61,7 @@ describe('request context propagation', () => {
       notificationEvents.emit('post.published', {
         postId: 'p1',
         authorId: 'a1',
+        topicId: null,
         networkId: null,
         excerpt: 'x',
       });
@@ -81,6 +82,7 @@ describe('request context propagation', () => {
       notificationEvents.emit('post.published', {
         postId: 'p2',
         authorId: 'a2',
+        topicId: null,
         networkId: null,
         excerpt: 'y',
       });

@@ -278,6 +278,7 @@ export class PostService {
     notificationEvents.emit('post.published', {
       postId: post.id,
       authorId: post.authorId,
+      topicId: post.topicId,
       networkId: post.networkId,
       excerpt: post.excerpt ?? '',
     });

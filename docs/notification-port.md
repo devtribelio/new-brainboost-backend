@@ -107,7 +107,7 @@ Setelah row tertulis: `setImmediate(() => fcm.dispatch(memberId, ...))` — tida
 
 | Event modul | Emit di | Listener | Action label |
 |---|---|---|---|
-| post publish | `post.service.ts` setelah `prisma.post.create` (status published) | post.listener | `newPost` |
+| post publish | `post.service.ts` setelah `prisma.post.create` (status published) | **topic.listener** | `newPost` → semua subscriber `topic_subscriptions`, kecuali author. No-op kalau `topicId` null. Fan-out di-slice 200/chunk (subscriber tidak terbatas, beda dari network team). Post di network tanpa topic **belum** punya fan-out. |
 | comment create (non-reply) | `comment.service.ts` create | comment.listener | `newComment`, `tag` (jika mentioned) |
 | reply create | `reply.service.ts` create | comment.listener | `newReply`, `tag` |
 | post-like create | `post.service.ts:169` like create | post.listener | `newLike` |
@@ -117,6 +117,24 @@ Setelah row tertulis: `setImmediate(() => fcm.dispatch(memberId, ...))` — tida
 | commerce paid | `commerceEvents.on('commerce.payment.success')` (existing emit di `payment.service.ts:155`) | commerce.listener | `paymentSuccess` (buyer); `commissionEarned` (per affiliator) |
 
 Idempotensi: dedupeKey unik. Re-emit (webhook redelivery, retries) silent-skip.
+
+### Mute (diperbaiki 2026-08-03)
+
+Scope valid: **`post` | `topic` | `network`** — satu sumber di `notification/mute-scope.ts`
+(`MuteScope`, `assertMuteScope`, `resolveMuteRefId`), dipakai `mute()` **dan** `unmute()`.
+Sebelumnya: `unmute` tidak memvalidasi scope sama sekali (typo = no-op yang terlihat sukses),
+`mute` melempar `Error` polos → 500 bukan 400, dan controller menduplikasi daftar scope.
+
+`notification_mutes.ref_id` bertipe `@db.Uuid` tapi FE mengirim legacyId int seperti di
+endpoint lain → `resolveMuteRefId` menerjemahkan int→UUID (404 kalau tidak ketemu,
+400 kalau bukan int maupun UUID). Tanpa ini int mentah sampai ke Prisma → P2023 → 500.
+
+`filterNotMuted` dulu hanya dipanggil `comment.created`. Sekarang dipasang juga di
+`post.liked`, `comment.liked` (resolve scope lewat post induk komentar), dan ketiga
+handler network. **Commerce sengaja tidak** — `paymentSuccess`/`commissionEarned`
+transaksional, mute post/topic/network tidak boleh meredamnya.
+
+Untuk `newPost` scope `post` tidak dipakai: post-nya baru lahir, mustahil sudah di-mute.
 
 ---
 

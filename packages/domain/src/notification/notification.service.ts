@@ -1,5 +1,6 @@
 import { prisma } from '@bb/db';
 import type { PaginationParams } from '@bb/common/utils/pagination.util';
+import { assertMuteScope, resolveMuteRefId } from './mute-scope';
 
 export type NotificationGroup = 'general' | 'creator' | 'all';
 export type ReadStatus = 'all' | 'read' | 'unread';
@@ -81,21 +82,24 @@ export class NotificationService {
   }
 
   async mute(memberId: string, scope: string, refId: string) {
-    if (scope !== 'post' && scope !== 'network') {
-      throw new Error('scope must be post or network');
-    }
+    assertMuteScope(scope);
+    const resolvedRefId = await resolveMuteRefId(scope, refId);
     await prisma.notificationMute.upsert({
-      where: { memberId_scope_refId: { memberId, scope, refId } },
-      create: { memberId, scope, refId },
+      where: { memberId_scope_refId: { memberId, scope, refId: resolvedRefId } },
+      create: { memberId, scope, refId: resolvedRefId },
       update: {},
     });
-    return { scope, refId, muted: true };
+    return { scope, refId: resolvedRefId, muted: true };
   }
 
   async unmute(memberId: string, scope: string, refId: string) {
+    // Validated the same way as mute — an unknown scope used to silently no-op
+    // here, so a typo'd unmute looked successful while the mute stayed live.
+    assertMuteScope(scope);
+    const resolvedRefId = await resolveMuteRefId(scope, refId);
     await prisma.notificationMute.deleteMany({
-      where: { memberId, scope, refId },
+      where: { memberId, scope, refId: resolvedRefId },
     });
-    return { scope, refId, muted: false };
+    return { scope, refId: resolvedRefId, muted: false };
   }
 }

@@ -12,6 +12,20 @@ export class RecipientResolver {
     return this.filterEnabled(rows.map((r) => r.memberId));
   }
 
+  // Raw (unfiltered) subscriber ids. Unlike resolveForNetwork this deliberately
+  // skips filterEnabled: a topic fan-out is unbounded, so the caller slices the
+  // list and filters per chunk instead of loading every member row at once.
+  async subscriberIdsForTopic(topicId: string, excludeMemberId?: string): Promise<string[]> {
+    const rows = await prisma.topicSubscription.findMany({
+      where: {
+        topicId,
+        ...(excludeMemberId ? { memberId: { not: excludeMemberId } } : {}),
+      },
+      select: { memberId: true },
+    });
+    return rows.map((r) => r.memberId);
+  }
+
   async resolveSingle(memberId: string): Promise<string | null> {
     const m = await prisma.member.findUnique({
       where: { id: memberId },

@@ -3,6 +3,7 @@ import { logger } from '@bb/common/config/logger';
 import { notificationEvents } from '@bb/common/events/notification-events';
 import { NotificationProducer } from '../notification.producer';
 import { RecipientResolver } from '../recipient.resolver';
+import { MuteScope } from '../mute-scope';
 import { ActionLabel, NotifGroup } from '../action-labels';
 
 const producer = new NotificationProducer();
@@ -13,7 +14,12 @@ async function teamMemberIds(networkId: string, exclude?: string): Promise<strin
     where: { networkId, ...(exclude ? { memberId: { not: exclude } } : {}) },
     select: { memberId: true },
   });
-  return resolver.filterEnabled(rows.map((r) => r.memberId));
+  const enabled = await resolver.filterEnabled(rows.map((r) => r.memberId));
+  return notMutedForNetwork(enabled, networkId);
+}
+
+function notMutedForNetwork(memberIds: string[], networkId: string): Promise<string[]> {
+  return resolver.filterNotMuted(memberIds, [{ scope: MuteScope.Network, refId: networkId }]);
 }
 
 export function registerNetworkNotificationListener(): void {
@@ -54,6 +60,9 @@ export function registerNetworkNotificationListener(): void {
         prisma.member.findUnique({ where: { id: e.approverId }, select: { fullName: true } }),
       ]);
       if (!network || !approver) return;
+
+      const notMuted = await notMutedForNetwork([e.memberId], e.networkId);
+      if (notMuted.length === 0) return;
 
       await producer.createForMember({
         memberId: e.memberId,

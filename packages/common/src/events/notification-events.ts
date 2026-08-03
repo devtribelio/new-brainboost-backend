@@ -4,6 +4,7 @@ import { logger } from '@bb/common/config/logger';
 export interface PostPublishedEvent {
   postId: string;
   authorId: string;
+  topicId: string | null;
   networkId: string | null;
   excerpt: string;
 }
