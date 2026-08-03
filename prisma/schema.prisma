@@ -1292,6 +1292,24 @@ model AppSetting {
   @@map("app_settings")
 }
 
+/// Force/soft update config for the mobile app, ONE ROW PER PLATFORM. Drives
+/// `GET /api/app/version-check` — replaces the app's Supabase `mobile_version_config`
+/// and its store-listing scrape, so this table is the sole source of the update verdict.
+/// Verdict: version < forceBelow -> force, else version < latestVersion -> soft, else none.
+/// Missing row = "none" (fail-safe). Edited by ops via SQL / backoffice-bb; cached ~60s.
+model AppVersionConfig {
+  platform      String   @id // "android" | "ios"
+  latestVersion String   @map("latest_version") // semver; soft-update threshold + informational
+  forceBelow    String?  @map("force_below") // semver; null = force disabled. Keep <= latestVersion
+  storeUrl      String?  @map("store_url") // optional override; app v1 uses its native store redirect
+  softMessage   String?  @map("soft_message") // dialog body for the soft verdict; null = app default copy
+  forceMessage  String?  @map("force_message") // dialog body for the force verdict; null = app default copy
+  updatedAt     DateTime @updatedAt @map("updated_at")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@map("app_version_configs")
+}
+
 /// Auth + per-channel capability toggles for 3rd-party ingestion (IAP/Scalev/Lynk.id) via
 /// POST /ingest/purchase. Key is stored hashed. Toggles are plain booleans (easy manual edit).
 model ThirdPartyCredential {
