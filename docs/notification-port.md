@@ -150,6 +150,43 @@ Query single round-trip per resolve (Prisma `findMany select: {memberId}` + `whe
 
 ---
 
+## 7b. Push fatigue — unopened push limit (2026-08-03)
+
+Member yang tidak kunjung membuka app berhenti diberi push setelah N kali. **Yang ditahan
+hanya pengiriman FCM** — baris `notifications` tetap ditulis, jadi begitu app dibuka
+daftarnya lengkap. Gerbangnya di `NotificationProducer.claimPushSlot`, dipanggil dari
+`dispatchPush` (satu-satunya jalur push).
+
+- **Counter:** `members.unopened_push_count` (Int, default 0, migrasi
+  `20260803150000_add_unopened_push_count`). Per member, bukan per device — aturan
+  single-active-device di `registerDevice` sudah memastikan hanya satu device
+  memegang `fcmToken`.
+- **Ambang:** `app_settings` key `notification.unopenedPushLimit`
+  (`SETTING_KEYS.notificationUnopenedPushLimit`), fallback `UNOPENED_PUSH_LIMIT_DEFAULT`=**0**.
+  **`0` = gerbang mati tapi counter tetap jalan** — ini mode rilis awalnya, supaya
+  distribusi nyatanya bisa diukur dari log (`unopenedPushCount` ikut di baris
+  `[notification] push firing`) sebelum dinyalakan. Naikkan ke `3` lewat DB, efektif
+  ≤30 detik (`CACHE_TTL_MS`), tanpa deploy — sekaligus tombol darurat.
+- **Reset (dua titik):** ① `MemberService.findById({touchActivity:true})` ← `/member/info`,
+  menumpang `UPDATE` yang sudah menulis `lastActiveAt`; ② `NotificationService.markSeen`
+  saat ada baris yang benar-benar berubah — bukti seorang manusia sedang melihat app.
+- **Menembus batas tanpa menaikkan counter:** `paymentSuccess`, `paymentPending`,
+  `paymentRefunded`, `subscriptionRenewed`, `commissionEarned` (`PUSH_LIMIT_EXEMPT`).
+  Alasan sama dengan commerce yang dikecualikan dari mute.
+- **Konkurensi:** `update({ data: { increment: 1 } })` mengembalikan nilai pasca-increment,
+  jadi dua notifikasi bersamaan tidak bisa sama-sama melihat hitungan yang sama.
+  Read-then-write akan meloloskan keduanya.
+- **Fail open:** kalau pengecekan budget error, push tetap dikirim.
+
+**ASUMSI YANG BELUM DIVERIFIKASI:** reset utama bergantung pada FE memanggil
+`/member/info` setiap app dibuka **termasuk saat resume dari background**, bukan hanya
+cold start. Kalau ternyata hanya cold start, member yang rajin buka app dari background
+tidak pernah reset dan push-nya mati setelah N kali. Itulah kenapa nilainya dirilis `0`.
+Tanyakan ke tim FE sebelum dinaikkan; kalau jawabannya cold-start-saja, tambahkan
+panggilan saat resume atau endpoint ping ringan.
+
+---
+
 ## 8. Fase + acceptance
 
 | Fase | Deliverable | Acceptance |

@@ -57,6 +57,12 @@ const SETTINGS: Array<{ key: string; value: string; description: string }> = [
       'Minimum withdrawable balance (IDR) required before a member may request KYC. 0 = gate off.',
   },
   {
+    key: 'notification.unopenedPushLimit',
+    value: '0',
+    description:
+      'Max push sent to a member while they stay out of the app; further push is suppressed (the in-app notification row is still written). Resets when the member opens the app. 0 = gate off (counter still tracked). Ship value is 0 — raise to 3 only after confirming the app calls /member/info on resume, not just cold start.',
+  },
+  {
     key: 'sales.alertEmail',
     value: '',
     description:

@@ -78,6 +78,15 @@ export class NotificationService {
       where,
       data: { seenAt: now, readAt: now },
     });
+
+    // Secondary re-arm for the unopened-push budget. /member/info is the primary
+    // one, but it only fires if the app actually calls it on resume — marking a
+    // notification read is proof a human is looking at the app right now.
+    if (result.count > 0) {
+      await prisma.member
+        .update({ where: { id: memberId }, data: { unopenedPushCount: 0 } })
+        .catch(() => undefined);
+    }
     return result;
   }
 

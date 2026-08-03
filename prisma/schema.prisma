@@ -44,6 +44,11 @@ model Member {
   latitude             Float?
   longitude            Float?
   notificationsEnabled Boolean   @default(true) @map("notifications_enabled")
+  /// Push sent since the member last opened the app; reset to 0 on app resume
+  /// (/member/info touchActivity) and on /notification/seen. Once it passes
+  /// `notification.unopenedPushLimit` (app_settings) further push is suppressed —
+  /// the notification ROW is still written, only FCM delivery is skipped.
+  unopenedPushCount    Int       @default(0) @map("unopened_push_count")
 
   // --- Affiliate payout: default bank account stored on the profile (manual KYC flow) ---
   bankCode          String? @map("bank_code")
