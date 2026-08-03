@@ -1,6 +1,7 @@
 /* eslint-disable no-console */
 /**
- * Recount the denormalised social counters on posts + comments from the actual rows.
+ * Recount the denormalised social counters on posts + comments (and networks.count_member)
+ * from the actual rows.
  *
  *   pnpm resync:recount            # standalone one-shot
  *
@@ -10,6 +11,10 @@
  * SORTS the feed by count_like, so they must be rebuilt. Matches the app's exact semantics
  * (comment.service.ts): posts.count_comment = top-level comments, posts.count_replies =
  * replies, is_deleted=false. Set-based (one aggregate scan per source), idempotent.
+ *
+ * networks.count_member is in the same boat: the community auto-join (network-join.ts)
+ * and any manual SQL backfill write network_members outside the app's increment path.
+ * Recomputing it here makes the column self-healing rather than drift-prone.
  */
 import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';
@@ -52,6 +57,13 @@ const STATEMENTS: [string, string][] = [
        FROM (SELECT "comment_id", count(*) AS n FROM "comment_likes" GROUP BY "comment_id") a
       WHERE a."comment_id" = c.id`,
   ],
+  ['networks: reset', `UPDATE "networks" SET "count_member" = 0`],
+  [
+    'networks: member',
+    `UPDATE "networks" n SET "count_member" = a.n
+       FROM (SELECT "network_id", count(*) AS n FROM "network_members" GROUP BY "network_id") a
+      WHERE a."network_id" = n.id`,
+  ],
 ];
 
 /** Recompute all five post/comment counters. Reusable from the CLI and the worker run. */
@@ -63,14 +75,17 @@ export async function recountCounters(prisma: PrismaClient, log: (msg: string) =
     },
     { timeout: 600_000 },
   );
-  log(`recount: post/comment counters rebuilt in ${((Date.now() - started) / 1000).toFixed(1)}s`);
+  log(
+    `recount: post/comment counters + networks.count_member rebuilt in ` +
+      `${((Date.now() - started) / 1000).toFixed(1)}s`,
+  );
 }
 
 async function main() {
   const prisma = new PrismaClient({ log: ['warn', 'error'] });
   const log = (m: string) => console.log(`[${new Date().toISOString().slice(11, 19)}] [resync:recount] ${m}`);
   try {
-    log('recomputing denormalised post/comment counters…');
+    log('recomputing denormalised post/comment counters + networks.count_member…');
     await recountCounters(prisma, log);
     log('DONE');
   } finally {
