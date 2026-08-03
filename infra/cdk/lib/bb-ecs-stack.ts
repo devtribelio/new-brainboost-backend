@@ -51,6 +51,12 @@ export class BbEcsStack extends cdk.Stack {
       JWT_ACCESS_SECRET: sm('JWT_ACCESS_SECRET'),
       JWT_REFRESH_SECRET: sm('JWT_REFRESH_SECRET'),
       ADMIN_JWT_SECRET: sm('ADMIN_JWT_SECRET'),
+      // TTL token — di Secrets Manager biar bisa diubah tanpa edit kode (cukup ganti
+      // value di secret + force-new-deployment). INTERIM: access dipanjangkan ke 7d
+      // untuk menekan keluhan "sesi berakhir" selagi grace-window dikerjakan; aman krn
+      // revocation tetap dicek ke DB tiap request. Default env.ts kalau key tak ada: 15m / 30d.
+      JWT_ACCESS_EXPIRES_IN: sm('JWT_ACCESS_EXPIRES_IN'),
+      JWT_REFRESH_EXPIRES_IN: sm('JWT_REFRESH_EXPIRES_IN'),
       S3_ACCESS_KEY_ID: sm('S3_ACCESS_KEY_ID'),
       S3_SECRET_ACCESS_KEY: sm('S3_SECRET_ACCESS_KEY'),
       S3_BUCKET: sm('S3_BUCKET'),
