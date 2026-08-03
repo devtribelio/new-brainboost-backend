@@ -57,6 +57,7 @@
     "backfill:affiliate-program-product": "tsx scripts/backfill-affiliate-program-product.ts",
     "normalize:slides-data": "tsx scripts/normalize-slides-data.ts",
     "seed:settings": "tsx prisma/seed-settings.ts",
+    "seed:app-version": "tsx prisma/seed-app-version.ts",
     "issue:credential": "tsx scripts/issue-credential.ts",
     "seed:revenuecat-iap": "tsx scripts/seed-revenuecat-iap.ts",
     "seed:test-account": "tsx scripts/seed-test-account.ts",
