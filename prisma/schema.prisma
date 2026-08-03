@@ -172,6 +172,15 @@ model RefreshToken {
   revokedAt  DateTime? @map("revoked_at")
   createdAt  DateTime  @default(now()) @map("created_at")
 
+  /// Lineage pointer to the row that replaced this one on refresh rotation.
+  /// Set ONLY by rotation — logout / password change / single-session kick all
+  /// revoke without a successor. That asymmetry is what makes the refresh grace
+  /// window safe: a revoked row is eligible for grace only when this is filled,
+  /// so deliberate revocation still kicks instantly. Deliberately a plain
+  /// scalar, no FK: rotation writes this pointer in the same transaction that
+  /// gates the race, BEFORE the child row exists.
+  supersededById String? @unique @map("superseded_by_id") @db.Uuid
+
   member Member @relation(fields: [memberId], references: [id], onDelete: Cascade)
 
   @@index([memberId])

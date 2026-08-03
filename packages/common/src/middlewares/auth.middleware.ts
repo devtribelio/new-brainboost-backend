@@ -3,6 +3,7 @@ import { unauthorized, ERROR_CODES } from '@bb/common/exceptions';
 import { verifyAccessToken } from '@bb/common/utils/jwt.util';
 import type { AuthenticatedRequest } from '@bb/common/interfaces/authenticated-request';
 import { prisma } from '@bb/db';
+import { env } from '@bb/common/config/env';
 import { REQUIRES_BEARER_AUTH } from '@bb/common/openapi/types';
 import { setRequestContext } from '@bb/common/config/request-context';
 
@@ -12,11 +13,28 @@ async function assertSessionActive(sid: string | undefined): Promise<void> {
   }
   const row = await prisma.refreshToken.findUnique({
     where: { id: sid },
-    select: { revokedAt: true },
+    select: { revokedAt: true, supersededById: true },
   });
-  if (!row || row.revokedAt) {
+  if (!row) {
     throw unauthorized(ERROR_CODES.SESSION_REVOKED);
   }
+  if (!row.revokedAt) return;
+
+  // Rotation tail: a refresh that just succeeded revoked this `sid`, but
+  // requests already in flight still carry the pre-rotation access token — and
+  // its JWT is nowhere near expiry. Rejecting them is the "session ended out of
+  // nowhere" bug, so a row retired BY ROTATION keeps answering for a short
+  // grace window.
+  //
+  // `supersededById` is the whole safety argument: logout, password change and
+  // the single-session kick revoke WITHOUT a successor, so they never reach
+  // this branch and keep kicking instantly. Grace attaches only to the one
+  // benign cause.
+  const graceMs = env.jwt.refreshGraceSeconds * 1000;
+  const withinGrace = Date.now() - row.revokedAt.getTime() <= graceMs;
+  if (row.supersededById && withinGrace) return;
+
+  throw unauthorized(ERROR_CODES.SESSION_REVOKED);
 }
 
 export const authGuard: RequestHandler = async (req, _res: Response, next: NextFunction) => {

@@ -2,6 +2,7 @@ import bcrypt from 'bcryptjs';
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import passport from 'passport';
 import { prisma } from '@bb/db';
+import type { RefreshToken } from '@prisma/client';
 import { env } from '@bb/common/config/env';
 import {
   signAccessToken,
@@ -66,6 +67,25 @@ function timingSafeStringEqual(a: string, b: string): boolean {
 }
 
 type ClientType = 'mobile' | 'web';
+
+type RefreshTokenRow = Pick<
+  RefreshToken,
+  'id' | 'memberId' | 'token' | 'expiresAt' | 'revokedAt' | 'supersededById'
+>;
+
+/**
+ * Internal control-flow signal: a concurrent refresh already rotated this row.
+ * Never surfaces to the client — the caller converts it into a grace replay.
+ */
+class RotationLostError extends Error {}
+
+/**
+ * How far forward the grace replay will walk the `supersededById` chain. A
+ * client one or two generations behind is normal when the winner refreshes
+ * again while this caller retries; anything deeper is a bug or corrupt data, so
+ * the walk is bounded rather than unbounded.
+ */
+const MAX_SUPERSESSION_HOPS = 5;
 
 /**
  * Resolve session bucket. `web` only when explicitly signaled; everything else
@@ -523,14 +543,13 @@ export class AuthService {
     if (!stored) {
       throw unauthorized(ERROR_CODES.REFRESH_TOKEN_INVALID);
     }
+
+    // Grace/supersession is checked BEFORE expiry on purpose: a row rotated
+    // just before its own 30-day expiry would otherwise come back as
+    // REFRESH_TOKEN_EXPIRED during the window in which it is legitimately
+    // replayable, which is the same false logout by another name.
     if (stored.revokedAt) {
-      // NOTE: true RTR reuse-detection (revoke the whole session family when a
-      // rotated token is replayed) needs a lineage column (e.g. supersededById)
-      // to distinguish a rotation-reuse ATTACK from a token revoked for benign
-      // reasons (second login in the single-session bucket, logout, password
-      // change). Without it, blanket family-revocation here logs legitimate
-      // users out. Tracked as a follow-up (see docs/security-audit-followups.md).
-      throw unauthorized(ERROR_CODES.SESSION_REVOKED);
+      return this.replayWithinGrace(stored);
     }
     if (stored.expiresAt < new Date()) {
       throw unauthorized(ERROR_CODES.REFRESH_TOKEN_EXPIRED);
@@ -542,12 +561,85 @@ export class AuthService {
     // Rotate the specific row only — refresh must not affect other sessions in
     // the same bucket (web is multi-session) or in the other bucket. Bucket is
     // inherited from the existing row so a stolen refresh can't switch bucket.
-    return this.rotateRefreshToken(
-      stored.id,
-      member.id,
-      member.email ?? '',
-      normalizeClientType(stored.clientType),
+    try {
+      return await this.rotateRefreshToken(
+        stored.id,
+        member.id,
+        member.email ?? '',
+        normalizeClientType(stored.clientType),
+      );
+    } catch (err) {
+      if (!(err instanceof RotationLostError)) throw err;
+      // A concurrent refresh carrying the same token won the gate. Re-read the
+      // row — only now is its `supersededById` guaranteed visible, because the
+      // gate made us block on the winner's row lock until it committed. Reading
+      // it any earlier is the trap: we would see a null pointer and 401 the
+      // very request this whole change exists to save.
+      const rotated = await prisma.refreshToken.findUnique({ where: { id: stored.id } });
+      if (!rotated) throw unauthorized(ERROR_CODES.SESSION_REVOKED);
+      return this.replayWithinGrace(rotated);
+    }
+  }
+
+  /**
+   * Branch 2/3 of the refresh contract: the caller's row is revoked. If it was
+   * retired BY ROTATION and that happened within the grace window, hand back the
+   * successor's pair — the same pair the winning caller got — instead of ending
+   * the session. No new row is created, so replaying N times is idempotent.
+   *
+   * A row revoked for any other reason (logout, password change, single-session
+   * kick) carries no `supersededById` and falls straight through to 401, which
+   * is what keeps deliberate revocation instant.
+   */
+  private async replayWithinGrace(revoked: RefreshTokenRow): Promise<TokenBundle> {
+    const graceMs = env.jwt.refreshGraceSeconds * 1000;
+    const now = Date.now();
+
+    let cursor = revoked;
+    for (let hop = 0; hop < MAX_SUPERSESSION_HOPS; hop += 1) {
+      if (!cursor.supersededById || !cursor.revokedAt) break;
+      if (now - cursor.revokedAt.getTime() > graceMs) break;
+
+      const child = await prisma.refreshToken.findUnique({
+        where: { id: cursor.supersededById },
+      });
+      if (!child) break;
+      if (!child.revokedAt) return this.replayFrom(child, revoked.id);
+
+      // The successor has itself been rotated already — the winner refreshed
+      // twice while this caller was retrying. Keep walking forward so a client
+      // stuck one or two generations behind still lands on the live session.
+      cursor = child;
+    }
+
+    logger.info(
+      { event: 'auth.refresh.session_revoked', tokenId: revoked.id },
+      'refresh rejected: session revoked',
     );
+    throw unauthorized(ERROR_CODES.SESSION_REVOKED);
+  }
+
+  /** Mint a fresh access token for an existing live session row. */
+  private async replayFrom(child: RefreshTokenRow, replayedFrom: string): Promise<TokenBundle> {
+    if (child.expiresAt < new Date()) throw unauthorized(ERROR_CODES.SESSION_REVOKED);
+
+    const member = await prisma.member.findUnique({ where: { id: child.memberId } });
+    // Deliberately SESSION_REVOKED, not MEMBER_INACTIVE: a revoked row for a
+    // deactivated member answers SESSION_REVOKED today, and grace must not
+    // change which code the client sees on any path that already 401s.
+    if (!member || !member.isActive) throw unauthorized(ERROR_CODES.SESSION_REVOKED);
+
+    logger.info(
+      { event: 'auth.refresh.grace_replay', tokenId: child.id, replayedFrom },
+      'refresh replayed within grace window',
+    );
+
+    return {
+      access_token: signAccessToken({ sub: member.id, email: member.email ?? '', sid: child.id }),
+      refresh_token: child.token,
+      token_type: 'Bearer',
+      expires_in: parseExpiresInToSeconds(env.jwt.accessExpiresIn),
+    };
   }
 
   private async loginWithSocial(dto: LoginDto): Promise<TokenBundle> {
@@ -1301,6 +1393,9 @@ export class AuthService {
    * Per-row rotation on refresh_token grant: revoke the caller's row, mint a
    * new row in the same bucket. Does not touch sibling sessions — mobile
    * kicking is the responsibility of password-grant login, not refresh.
+   *
+   * Throws {@link RotationLostError} when a concurrent refresh carrying the same
+   * token got there first; the caller replays that winner's pair instead.
    */
   private async rotateRefreshToken(
     oldTokenId: string,
@@ -1315,15 +1410,26 @@ export class AuthService {
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + 30);
 
-    await prisma.$transaction([
-      prisma.refreshToken.update({
-        where: { id: oldTokenId },
-        data: { revokedAt: new Date() },
-      }),
-      prisma.refreshToken.create({
+    await prisma.$transaction(async (tx) => {
+      // Conditional update as the race gate. Two parallel refreshes both saw
+      // the row un-revoked a moment ago; the second one blocks here on the
+      // winner's row lock, and under READ COMMITTED re-evaluates the predicate
+      // once that commits — so it matches 0 rows rather than minting a second
+      // child. Doing this inside the transaction is what makes losing free: the
+      // child insert below never happens, so no orphan session row survives.
+      const gate = await tx.refreshToken.updateMany({
+        where: { id: oldTokenId, revokedAt: null },
+        data: { revokedAt: new Date(), supersededById: tokenId },
+      });
+      if (gate.count === 0) throw new RotationLostError();
+
+      // The pointer above was written before this row existed — that ordering
+      // is only legal because `supersededById` is a plain scalar. Adding a real
+      // FK later means restructuring the gate, not just the schema.
+      await tx.refreshToken.create({
         data: { id: tokenId, memberId, token: refreshToken, expiresAt, clientType },
-      }),
-    ]);
+      });
+    });
 
     return {
       access_token: accessToken,

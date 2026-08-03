@@ -45,6 +45,19 @@ describe('auth single-session enforcement', () => {
       .send({ grant_type: 'refresh_token', refresh_token: refreshToken });
   }
 
+  /**
+   * Backdate a rotated row's `revoked_at` so it falls outside the refresh grace
+   * window. Rotation is no longer instantly terminal — within the window the
+   * parent replays to its successor (covered in auth-refresh-grace.spec.ts) —
+   * so the assertions below have to age the row to reach the terminal state.
+   */
+  async function ageOutOfGrace(refreshToken: string) {
+    await prisma.refreshToken.update({
+      where: { token: refreshToken },
+      data: { revokedAt: new Date(Date.now() - 10 * 60 * 1000) },
+    });
+  }
+
   it('second password login revokes refresh token from first login', async () => {
     const a = await loginPassword();
     const b = await loginPassword();
@@ -58,18 +71,20 @@ describe('auth single-session enforcement', () => {
     expect(useB.body.data.refresh_token).toBeTruthy();
   });
 
-  it('refresh-token grant rotates: prior refresh token becomes unusable after rotation', async () => {
+  it('refresh-token grant rotates: prior refresh token becomes unusable once out of grace', async () => {
     const a = await loginPassword();
     const rotated = await refresh(a.refresh_token);
     expect(rotated.status).toBe(200);
     const c = rotated.body.data as { refresh_token: string };
 
+    await ageOutOfGrace(a.refresh_token);
     const reuseA = await refresh(a.refresh_token);
     expect(reuseA.status).toBe(401);
 
     const useC = await refresh(c.refresh_token);
     expect(useC.status).toBe(200);
 
+    await ageOutOfGrace(c.refresh_token);
     const reuseC = await refresh(c.refresh_token);
     expect(reuseC.status).toBe(401);
   });
@@ -108,12 +123,13 @@ describe('auth single-session enforcement', () => {
     expect(meB.status).toBe(200);
   });
 
-  it('refresh-token rotation also kills the prior access token', async () => {
+  it('refresh-token rotation also kills the prior access token once out of grace', async () => {
     const a = await loginPassword();
     const rotated = await refresh(a.refresh_token);
     expect(rotated.status).toBe(200);
     const c = rotated.body.data as { access_token: string };
 
+    await ageOutOfGrace(a.refresh_token);
     const meA = await request(app)
       .get('/api/member/account/profile/info')
       .set('Authorization', `Bearer ${a.access_token}`);
