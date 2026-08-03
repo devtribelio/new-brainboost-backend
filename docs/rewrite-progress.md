@@ -24,8 +24,17 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` parity met for current s
   login on placeholder → generic 401 (403 discriminator written, disabled); `/auth/register` returns
   `{member_id, email, expired_date}` instead of tokens; new pre-login pair
   `requestVerificationEmail` / `validateOtpEmail`. See `docs/register-verification-flow.md`.
+- Refresh grace window + supersession lineage (2026-08-03): `refresh_tokens.superseded_by_id`
+  makes rotation non-terminal for `REFRESH_GRACE_SECONDS` (60s), so parallel refresh, a lost
+  refresh response, and the rotation tail no longer log users out. Rotation is gated by a
+  conditional update inside a transaction; `assertSessionActive` honours the same window.
+  Only ever turns a 401 into a 200 — no client release needed. See `docs/refresh-token-grace.md`.
 - Outstanding: parity tests against legacy social-login provider tokens; cleanup cron
   for stale unverified placeholders (optional — rows are reusable, no dead-end).
+- Outstanding (separate tickets): silent social re-auth still kicks the live mobile session
+  (`loginWithSocial` → `issueTokenBundle`) — needs a mobile fix or a `device_id` on
+  `refresh_tokens`; RTR reuse-detection (lineage is now in place for it); revert
+  `JWT_ACCESS_EXPIRES_IN` 7d → 15m once grace is verified in prod.
 
 ### account — `src/modules/account/`
 - Profile info/update, change-password, logout, pre-registration, delete-account, payment token, affiliate-connect.

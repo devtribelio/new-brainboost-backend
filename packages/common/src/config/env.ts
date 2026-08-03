@@ -34,6 +34,14 @@ export const env = {
     accessExpiresIn: optional('JWT_ACCESS_EXPIRES_IN', '15m'),
     refreshExpiresIn: optional('JWT_REFRESH_EXPIRES_IN', '30d'),
     anonExpiresIn: optional('JWT_ANON_EXPIRES_IN', '1h'),
+    // Grace window for a refresh token that was retired BY ROTATION: within it,
+    // replaying the parent returns the child's pair instead of 401 (idempotent
+    // refresh), and an access token whose `sid` was just superseded still
+    // passes authGuard. Only rows carrying `supersededById` are eligible, so
+    // logout / password change / single-session kick stay instant. 60s covers a
+    // lost refresh response on a flaky ID mobile network. Boot-time, like every
+    // other value here — change it via the secret + force-new-deployment.
+    refreshGraceSeconds: Number.parseInt(optional('REFRESH_GRACE_SECONDS', '60'), 10),
   },
   oauth: {
     clientId: optional('OAUTH_CLIENT_ID', ''),
