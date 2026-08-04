@@ -65,7 +65,7 @@ describe('post.published → topic subscriber fan-out', () => {
     await prisma.$disconnect();
   });
 
-  it('notifies subscribers, but not the author, the opted-out, or the muted', async () => {
+  it('notifies subscribers, but not the author or the opted-out', async () => {
     const postId = randomUUID();
     notificationEvents.emit('post.published', {
       postId,
@@ -79,12 +79,23 @@ describe('post.published → topic subscriber fan-out', () => {
     const rows = await prisma.notification.findMany({
       where: { memberId: { in: memberIds }, type: 'newPost' },
     });
-    expect(rows.map((r) => r.memberId)).toEqual([subscriberId]);
+    expect(rows.map((r) => r.memberId).sort()).toEqual([subscriberId, mutedId].sort());
 
-    const row = rows[0]!;
+    const row = rows.find((r) => r.memberId === subscriberId)!;
     expect(row.dedupeKey).toBe(`newPost:${postId}:${subscriberId}`);
     expect(row.body).toBe('isi postingan');
     expect(row.payload).toMatchObject({ refTable: 'post', refId: postId, topicId, actorId: authorId });
+  });
+
+  // Mute silences the push, not the record. A member who muted a busy topic
+  // still finds what happened in their history when they open the app; only
+  // their phone stays quiet. Dropping the row here is the bug this guards.
+  it('still writes a row for a member who muted the topic, unread like any other', async () => {
+    const rows = await prisma.notification.findMany({
+      where: { memberId: mutedId, type: 'newPost' },
+    });
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.every((r) => r.readAt === null)).toBe(true);
   });
 
   it('is idempotent — a re-emitted event creates no second row', async () => {

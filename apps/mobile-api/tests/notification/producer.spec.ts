@@ -3,9 +3,23 @@ import * as bcrypt from 'bcryptjs';
 import { prisma } from '@bb/db';
 import { NotificationProducer } from '@bb/domain/notification/notification.producer';
 import { ActionLabel } from '@bb/domain/notification/action-labels';
+import { MuteScope } from '@bb/domain/notification/mute-scope';
+import { fcmService } from '@bb/domain/notification/fcm.service';
 
 function uid(): string {
   return Math.random().toString(36).slice(2, 12);
+}
+
+function wait(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+async function unopenedPushCount(memberId: string): Promise<number> {
+  const m = await prisma.member.findUniqueOrThrow({
+    where: { id: memberId },
+    select: { unopenedPushCount: true },
+  });
+  return m.unopenedPushCount;
 }
 
 describe('NotificationProducer', () => {
@@ -30,6 +44,7 @@ describe('NotificationProducer', () => {
 
   afterAll(async () => {
     await prisma.notification.deleteMany({ where: { memberId: { in: [memberId, disabledId] } } });
+    await prisma.notificationMute.deleteMany({ where: { memberId: { in: [memberId, disabledId] } } });
     await prisma.member.deleteMany({ where: { id: { in: [memberId, disabledId] } } });
     await prisma.$disconnect();
   });
@@ -65,6 +80,50 @@ describe('NotificationProducer', () => {
     const rows = await prisma.notification.findMany({ where: { dedupeKey: key } });
     expect(rows).toHaveLength(1);
     expect(rows[0]!.title).toBe('first');
+  });
+
+  // A mute takes away the push, not the record — and it must not spend the
+  // member's unopened-push budget either, or muting one topic would slowly
+  // silence the ones they still want.
+  describe('muteScopes', () => {
+    const topicRefId = '00000000-0000-0000-0000-0000000000aa';
+
+    it('still writes the row, unread, and leaves the push budget untouched', async () => {
+      await prisma.notificationMute.create({
+        data: { memberId, scope: MuteScope.Topic, refId: topicRefId },
+      });
+      const before = await unopenedPushCount(memberId);
+
+      const row = await producer.createForMember({
+        memberId,
+        type: ActionLabel.NewPost,
+        title: 'muted topic',
+        dedupeKey: `test-muted-${uid()}`,
+        muteScopes: [{ scope: MuteScope.Topic, refId: topicRefId }],
+      });
+      await wait(150);
+
+      expect(row).not.toBeNull();
+      expect(row?.readAt).toBeNull();
+      expect(await unopenedPushCount(memberId)).toBe(before);
+    });
+
+    it.skipIf(!fcmService.isEnabled())(
+      'charges the budget when the scope is not muted',
+      async () => {
+        const before = await unopenedPushCount(memberId);
+        await producer.createForMember({
+          memberId,
+          type: ActionLabel.NewPost,
+          title: 'other topic',
+          dedupeKey: `test-unmuted-${uid()}`,
+          muteScopes: [{ scope: MuteScope.Topic, refId: '00000000-0000-0000-0000-0000000000bb' }],
+        });
+        await wait(150);
+
+        expect(await unopenedPushCount(memberId)).toBe(before + 1);
+      },
+    );
   });
 
   it('skips when member has notificationsEnabled=false', async () => {

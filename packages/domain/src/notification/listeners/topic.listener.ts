@@ -36,15 +36,16 @@ export function registerTopicNotificationListener(): void {
       if (e.networkId) muteScopes.push({ scope: MuteScope.Network, refId: e.networkId });
 
       let created = 0;
+      let pushMuted = 0;
       for (let i = 0; i < subscriberIds.length; i += FANOUT_CHUNK_SIZE) {
         const chunk = subscriberIds.slice(i, i + FANOUT_CHUNK_SIZE);
+        // A muted subscriber still gets a row (createForMany only withholds
+        // their push), so they stay in the batch — unlike an opted-out one.
         const enabled = await resolver.filterEnabled(chunk);
         if (enabled.length === 0) continue;
-        const notMuted = await resolver.filterNotMuted(enabled, muteScopes);
-        if (notMuted.length === 0) continue;
 
         const result = await producer.createForMany(
-          notMuted,
+          enabled,
           {
             type: ActionLabel.NewPost,
             notifGroup: NotifGroup.General,
@@ -57,14 +58,16 @@ export function registerTopicNotificationListener(): void {
               topicId,
               actorId: e.authorId,
             },
+            muteScopes,
           },
           `newPost:${e.postId}`,
         );
         created += result.created;
+        pushMuted += result.pushMuted;
       }
 
       logger.info(
-        { postId: e.postId, topicId, subscribers: subscriberIds.length, created },
+        { postId: e.postId, topicId, subscribers: subscriberIds.length, created, pushMuted },
         '[notification] topic fan-out done',
       );
     } catch (err) {

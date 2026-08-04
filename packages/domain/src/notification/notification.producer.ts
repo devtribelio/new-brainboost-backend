@@ -3,6 +3,8 @@ import { logger } from '@bb/common/config/logger';
 import { settingsService, SETTING_KEYS } from '@bb/common/services/settings.service';
 import { ActionLabel, type NotifGroup } from './action-labels';
 import { fcmService } from './fcm.service';
+import { RecipientResolver } from './recipient.resolver';
+import type { MuteScope } from './mute-scope';
 
 /** app_settings fallback. 0 = gate off (the counter is still tracked). */
 export const UNOPENED_PUSH_LIMIT_DEFAULT = 0;
@@ -28,10 +30,31 @@ export interface CreateNotificationInput {
   payload?: Record<string, unknown>;
   url?: string;
   dedupeKey?: string;
+  /**
+   * Objects this notification originates from — the post/topic/network a member
+   * may have muted. A hit silences the PUSH only: the row is written either way,
+   * unread like any other, so muting a busy topic costs the member their phone
+   * buzzing, not the history of what happened while they were away.
+   *
+   * Pass the scopes here rather than filtering recipients upstream. Listeners
+   * that dropped muted members used to delete the notification outright.
+   */
+  muteScopes?: Array<{ scope: MuteScope; refId: string }>;
 }
 
 export class NotificationProducer {
+  private readonly resolver = new RecipientResolver();
+
   async createForMember(input: CreateNotificationInput) {
+    const pushMuted = input.muteScopes?.length
+      ? (await this.resolver.mutedMemberIds([input.memberId], input.muteScopes)).has(input.memberId)
+      : false;
+    return this.create(input, pushMuted);
+  }
+
+  // `pushMuted` is resolved by the caller so a fan-out pays one mute query for
+  // the whole batch instead of one per member.
+  private async create(input: CreateNotificationInput, pushMuted: boolean) {
     const member = await prisma.member.findUnique({
       where: { id: input.memberId },
       select: { notificationsEnabled: true, isActive: true },
@@ -70,7 +93,7 @@ export class NotificationProducer {
         { notificationId: row.id, memberId: input.memberId, type: input.type, networkId: input.networkId ?? undefined },
         '[notification] created',
       );
-      this.dispatchPush(input, row.id);
+      this.dispatchPush(input, row.id, pushMuted);
       return row;
     } catch (err) {
       const code = (err as { code?: string }).code;
@@ -83,19 +106,26 @@ export class NotificationProducer {
   }
 
   async createForMany(memberIds: string[], base: Omit<CreateNotificationInput, 'memberId' | 'dedupeKey'>, dedupePrefix?: string) {
+    const muted = base.muteScopes?.length
+      ? await this.resolver.mutedMemberIds(memberIds, base.muteScopes)
+      : new Set<string>();
+
     const results = await Promise.allSettled(
       memberIds.map((memberId) =>
-        this.createForMember({
-          ...base,
-          memberId,
-          dedupeKey: dedupePrefix ? `${dedupePrefix}:${memberId}` : undefined,
-        }),
+        this.create(
+          {
+            ...base,
+            memberId,
+            dedupeKey: dedupePrefix ? `${dedupePrefix}:${memberId}` : undefined,
+          },
+          muted.has(memberId),
+        ),
       ),
     );
     const created = results.filter((r) => r.status === 'fulfilled' && r.value !== null).length;
     const failed = results.filter((r) => r.status === 'rejected').length;
     if (failed > 0) logger.warn({ failed, total: memberIds.length }, '[notification] some creates failed');
-    return { created, failed, total: memberIds.length };
+    return { created, failed, pushMuted: muted.size, total: memberIds.length };
   }
 
   /**
@@ -129,7 +159,17 @@ export class NotificationProducer {
     return { allowed: limit <= 0 || count <= limit, count };
   }
 
-  private dispatchPush(input: CreateNotificationInput, notificationId: string): void {
+  private dispatchPush(input: CreateNotificationInput, notificationId: string, pushMuted: boolean): void {
+    // Checked before claimPushSlot on purpose: a push the member asked not to
+    // receive must not spend their unopened-push budget, or muting one busy
+    // topic would silence the topics they still care about.
+    if (pushMuted) {
+      logger.info(
+        { notificationId, memberId: input.memberId, type: input.type },
+        '[notification] push skipped — member muted this scope',
+      );
+      return;
+    }
     if (!fcmService.isEnabled()) {
       logger.debug({ notificationId }, '[notification] push skipped — fcm disabled');
       return;

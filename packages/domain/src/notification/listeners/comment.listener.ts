@@ -51,17 +51,15 @@ export function registerCommentNotificationListener(): void {
       if (targets.size === 0) return;
       const enabled = await resolver.filterEnabled([...targets.keys()]);
       if (enabled.length === 0) return;
-      const muteScopes: Array<{ scope: string; refId: string }> = [
+      const muteScopes: Array<{ scope: MuteScope; refId: string }> = [
         { scope: MuteScope.Post, refId: e.postId },
       ];
       if (post.topicId) muteScopes.push({ scope: MuteScope.Topic, refId: post.topicId });
       if (post.networkId) muteScopes.push({ scope: MuteScope.Network, refId: post.networkId });
-      const notMuted = await resolver.filterNotMuted(enabled, muteScopes);
-      if (notMuted.length === 0) return;
 
       const excerpt = e.content.slice(0, 200);
 
-      for (const memberId of notMuted) {
+      for (const memberId of enabled) {
         const label = targets.get(memberId)!;
         const title =
           label === ActionLabel.Tag
@@ -85,6 +83,7 @@ export function registerCommentNotificationListener(): void {
             actorId: e.authorId,
           },
           dedupeKey: `${label}:${e.commentId}:${memberId}`,
+          muteScopes,
         });
       }
     } catch (err) {
@@ -115,9 +114,6 @@ export function registerCommentNotificationListener(): void {
       if (comment.post.topicId) muteScopes.push({ scope: MuteScope.Topic, refId: comment.post.topicId });
       if (comment.post.networkId)
         muteScopes.push({ scope: MuteScope.Network, refId: comment.post.networkId });
-      const notMuted = await resolver.filterNotMuted([e.commentAuthorId], muteScopes);
-      if (notMuted.length === 0) return;
-
       await producer.createForMember({
         memberId: e.commentAuthorId,
         type: ActionLabel.NewLike,
@@ -125,6 +121,7 @@ export function registerCommentNotificationListener(): void {
         title: `${actor.fullName} menyukai komentarmu`,
         payload: { refTable: 'comment', refId: e.commentId, actorId: e.actorId },
         dedupeKey: `newLike:comment:${e.commentId}:${e.actorId}`,
+        muteScopes,
       });
     } catch (err) {
       logger.error({ err, commentId: e.commentId }, '[notification] comment.liked listener failed');

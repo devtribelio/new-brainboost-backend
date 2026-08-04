@@ -44,8 +44,16 @@ export class RecipientResolver {
     return rows.map((r) => r.id);
   }
 
-  async filterNotMuted(memberIds: string[], scopes: Array<{ scope: string; refId: string }>): Promise<string[]> {
-    if (memberIds.length === 0 || scopes.length === 0) return memberIds;
+  // Which of these members silenced at least one of the scopes. Deliberately
+  // NOT a "filterNotMuted" that drops them from the recipient list: a mute
+  // silences the push only — the notification row is still written, so the
+  // member finds it in their history when they open the app. The producer is
+  // the sole consumer; listeners must not use this to skip recipients.
+  async mutedMemberIds(
+    memberIds: string[],
+    scopes: Array<{ scope: string; refId: string }>,
+  ): Promise<Set<string>> {
+    if (memberIds.length === 0 || scopes.length === 0) return new Set();
     const muted = await prisma.notificationMute.findMany({
       where: {
         memberId: { in: memberIds },
@@ -53,7 +61,6 @@ export class RecipientResolver {
       },
       select: { memberId: true },
     });
-    const mutedSet = new Set(muted.map((m) => m.memberId));
-    return memberIds.filter((id) => !mutedSet.has(id));
+    return new Set(muted.map((m) => m.memberId));
   }
 }

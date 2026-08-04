@@ -118,7 +118,23 @@ Setelah row tertulis: `setImmediate(() => fcm.dispatch(memberId, ...))` — tida
 
 Idempotensi: dedupeKey unik. Re-emit (webhook redelivery, retries) silent-skip.
 
-### Mute (diperbaiki 2026-08-03)
+### Mute (diperbaiki 2026-08-03, semantik diubah 2026-08-04)
+
+**Mute meredam push saja, bukan barisnya.** Sejak 2026-08-04 penerima yang me-mute tetap
+dapat baris `notifications` (unread, ikut `meta.unread`); yang dilewati hanya
+`dispatchPush`. Sebelumnya listener membuang mereka dari daftar penerima sehingga
+riwayatnya hilang permanen dan unmute tidak bisa mengembalikannya.
+
+Mekanismenya: listener **tidak lagi memfilter penerima**, tapi meneruskan
+`muteScopes: Array<{scope, refId}>` ke `CreateNotificationInput`. Producer yang menerjemahkan
+itu jadi `pushMuted` lewat `RecipientResolver.mutedMemberIds` — `createForMany` menanyakannya
+**sekali untuk satu batch** lalu meneruskan boolean per member ke `create()`, jadi fan-out
+topic tidak berubah dari 1 query jadi N. `filterNotMuted` dihapus supaya listener baru tidak
+tanpa sengaja mengulang pola lama (`mutedMemberIds` mengembalikan Set, bukan daftar tersaring).
+
+Cek `pushMuted` sengaja **sebelum** `claimPushSlot`: push yang memang tidak diminta tidak
+boleh memotong jatah unopened-push, kalau tidak me-mute satu topic ramai perlahan
+membungkam topic lain yang masih diikuti.
 
 Scope valid: **`post` | `topic` | `network`** — satu sumber di `notification/mute-scope.ts`
 (`MuteScope`, `assertMuteScope`, `resolveMuteRefId`), dipakai `mute()` **dan** `unmute()`.
@@ -129,10 +145,11 @@ Sebelumnya: `unmute` tidak memvalidasi scope sama sekali (typo = no-op yang terl
 endpoint lain → `resolveMuteRefId` menerjemahkan int→UUID (404 kalau tidak ketemu,
 400 kalau bukan int maupun UUID). Tanpa ini int mentah sampai ke Prisma → P2023 → 500.
 
-`filterNotMuted` dulu hanya dipanggil `comment.created`. Sekarang dipasang juga di
-`post.liked`, `comment.liked` (resolve scope lewat post induk komentar), dan ketiga
-handler network. **Commerce sengaja tidak** — `paymentSuccess`/`commissionEarned`
-transaksional, mute post/topic/network tidak boleh meredamnya.
+Cek mute dulu hanya jalan di `comment.created`. Sekarang `muteScopes` diteruskan juga oleh
+`post.liked`, `comment.liked` (resolve scope lewat post induk komentar), fan-out
+`post.published`, dan ketiga handler network. **Commerce sengaja tidak** —
+`paymentSuccess`/`commissionEarned` transaksional, mute post/topic/network tidak boleh
+meredamnya (sejalan dengan `PUSH_LIMIT_EXEMPT`).
 
 Untuk `newPost` scope `post` tidak dipakai: post-nya baru lahir, mustahil sudah di-mute.
 
@@ -212,8 +229,8 @@ cold-start-only juga berarti `lastActiveAt` sendiri tidak akurat untuk keperluan
 | 2 | post/comment/reply/like listener + mentions | publish post di network N → semua member N (kecuali author) dapat row; comment di post P → author P + mentioned dapat row; tag pakai action `tag` |
 | 3 | network join-request/approve/memberJoin | request → admin notif; approve → requester + creator notif |
 | 4 | FCM v1 service + push dispatch | row tertulis + FCM dipanggil dengan `{title, body, data:{type, refId}}`; invalid token cleanup |
-| 5 (opt) | NotificationMute table + endpoint | mute post → no row dibuat untuk muted member |
-| QA | Tests integration | producer dedupe; resolver exclude muted; commerce → row |
+| 5 (opt) | NotificationMute table + endpoint | mute post → row tetap dibuat, push-nya yang dilewati (lihat §Mute) |
+| QA | Tests integration | producer dedupe; muted member tetap dapat row tanpa memotong push budget; commerce → row |
 
 ---
 

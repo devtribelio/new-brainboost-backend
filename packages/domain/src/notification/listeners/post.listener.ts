@@ -2,12 +2,10 @@ import { prisma } from '@bb/db';
 import { logger } from '@bb/common/config/logger';
 import { notificationEvents } from '@bb/common/events/notification-events';
 import { NotificationProducer } from '../notification.producer';
-import { RecipientResolver } from '../recipient.resolver';
 import { MuteScope } from '../mute-scope';
 import { ActionLabel, NotifGroup } from '../action-labels';
 
 const producer = new NotificationProducer();
-const resolver = new RecipientResolver();
 
 export function registerPostNotificationListener(): void {
   notificationEvents.on('post.liked', async (e) => {
@@ -30,9 +28,6 @@ export function registerPostNotificationListener(): void {
       ];
       if (post.topicId) muteScopes.push({ scope: MuteScope.Topic, refId: post.topicId });
       if (post.networkId) muteScopes.push({ scope: MuteScope.Network, refId: post.networkId });
-      const notMuted = await resolver.filterNotMuted([e.postAuthorId], muteScopes);
-      if (notMuted.length === 0) return;
-
       await producer.createForMember({
         memberId: e.postAuthorId,
         type: ActionLabel.NewLike,
@@ -40,6 +35,7 @@ export function registerPostNotificationListener(): void {
         title: `${actor.fullName} menyukai postinganmu`,
         payload: { refTable: 'post', refId: e.postId, actorId: e.actorId },
         dedupeKey: `newLike:post:${e.postId}:${e.actorId}`,
+        muteScopes,
       });
     } catch (err) {
       logger.error({ err, postId: e.postId }, '[notification] post.liked listener failed');
