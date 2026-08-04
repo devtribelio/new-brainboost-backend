@@ -1,6 +1,7 @@
 import { prisma } from '@bb/db';
 import { logger } from '@bb/common/config/logger';
 import { badRequest, ERROR_CODES } from '@bb/common/exceptions';
+import { isUuid } from '@bb/common/utils/uuid.util';
 import { commerceEvents } from '@bb/common/events/commerce-events';
 import { generateOrderCode } from '@bb/domain/commerce/utils/generate-order-code';
 import { attributionService } from '@bb/domain/affiliate/attribution.service';
@@ -289,7 +290,11 @@ export class PurchaseIngestService {
   }
 
   private async resolveMember(ref: NormalizedPurchase['memberRef']): Promise<string | null> {
-    if (ref?.byId) {
+    // `isUuid` guard is what makes the `byEmail` fallback reachable at all:
+    // `members.id` is `@db.Uuid`, so handing Prisma a non-UUID string (e.g.
+    // RevenueCat's `$RCAnonymousID:…` app_user_id) throws P2023 → 500 → the
+    // provider retries forever and the email branch below never runs.
+    if (isUuid(ref?.byId)) {
       const m = await prisma.member.findUnique({ where: { id: ref.byId }, select: { id: true } });
       if (m) return m.id;
     }
@@ -304,7 +309,9 @@ export class PurchaseIngestService {
   }
 
   private async resolveProduct(ref: NormalizedPurchase['productRef']): Promise<string | null> {
-    if (ref?.byId) {
+    // Same P2023 guard as resolveMember — a non-UUID `byId` must fall through to
+    // the SKU lookup, not 500.
+    if (isUuid(ref?.byId)) {
       const p = await prisma.product.findUnique({ where: { id: ref.byId }, select: { id: true } });
       if (p) return p.id;
     }

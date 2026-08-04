@@ -46,13 +46,15 @@ async function waitFor<T>(fn: () => Promise<T>, timeoutMs = 2000): Promise<T> {
 describe('RevenueCat webhook', () => {
   const app = buildApp();
   let memberId = '';
+  let memberEmail = '';
   let productId = '';
   let courseId = '';
   let credentialId = '';
 
   beforeAll(async () => {
+    memberEmail = `rc-${Date.now()}@test.local`;
     const member = await prisma.member.create({
-      data: { email: `rc-${Date.now()}@test.local`, passwordHash: 'x', fullName: 'RC Tester' },
+      data: { email: memberEmail, passwordHash: 'x', fullName: 'RC Tester' },
     });
     memberId = member.id;
 
@@ -193,6 +195,82 @@ describe('RevenueCat webhook', () => {
       where: { provider: 'revenuecat', providerEventId: txId },
     });
     expect(count).toBe(1);
+  });
+
+  // --- app_user_id is not always a member UUID -------------------------------
+  // A purchase made before `Purchases.logIn()` arrives keyed on RC's anonymous
+  // id. Passing that straight to a `@db.Uuid` column throws Prisma P2023 → 500,
+  // so RC retries forever and the buyer never gets access.
+  const ANON = '$RCAnonymousID:1384062dfb284e6883fafe704b2bb252';
+
+  it('anonymous app_user_id + $email attribute → resolves member via email', async () => {
+    const txId = uid();
+    const r = await request(app)
+      .post(ROUTE)
+      .set('authorization', AUTH)
+      .send(
+        rcEvent({
+          app_user_id: ANON,
+          aliases: [ANON],
+          transaction_id: txId,
+          subscriber_attributes: {
+            $email: { value: memberEmail, updated_at_ms: 1_754_300_000_000 },
+            $attConsentStatus: { value: 'notDetermined', updated_at_ms: 1_754_200_000_000 },
+          },
+        }),
+      );
+
+    expect(r.status).toBe(200);
+    expect(r.body.status).toBe('committed');
+
+    const tx = await prisma.commerceTransaction.findUnique({
+      where: { provider_providerEventId: { provider: 'revenuecat', providerEventId: txId } },
+    });
+    expect(tx?.memberId).toBe(memberId);
+  });
+
+  it('$email is matched case-insensitively', async () => {
+    const txId = uid();
+    const r = await request(app)
+      .post(ROUTE)
+      .set('authorization', AUTH)
+      .send(
+        rcEvent({
+          app_user_id: ANON,
+          transaction_id: txId,
+          subscriber_attributes: { $email: { value: memberEmail.toUpperCase() } },
+        }),
+      );
+
+    expect(r.body.status).toBe('committed');
+    const tx = await prisma.commerceTransaction.findUnique({
+      where: { provider_providerEventId: { provider: 'revenuecat', providerEventId: txId } },
+    });
+    expect(tx?.memberId).toBe(memberId);
+  });
+
+  it('anonymous app_user_id but member UUID in aliases → resolves via alias', async () => {
+    const txId = uid();
+    const r = await request(app)
+      .post(ROUTE)
+      .set('authorization', AUTH)
+      .send(rcEvent({ app_user_id: ANON, aliases: [ANON, memberId], transaction_id: txId }));
+
+    expect(r.body.status).toBe('committed');
+    const tx = await prisma.commerceTransaction.findUnique({
+      where: { provider_providerEventId: { provider: 'revenuecat', providerEventId: txId } },
+    });
+    expect(tx?.memberId).toBe(memberId);
+  });
+
+  it('anonymous app_user_id with no email → member_not_found (200, never a 500)', async () => {
+    const r = await request(app)
+      .post(ROUTE)
+      .set('authorization', AUTH)
+      .send(rcEvent({ app_user_id: ANON, aliases: [ANON] }));
+
+    expect(r.status).toBe(200);
+    expect(r.body.status).toBe('member_not_found');
   });
 
   it('unknown product_id → product_not_found (no transaction)', async () => {
