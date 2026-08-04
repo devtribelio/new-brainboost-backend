@@ -118,6 +118,32 @@ Setelah row tertulis: `setImmediate(() => fcm.dispatch(memberId, ...))` — tida
 
 Idempotensi: dedupeKey unik. Re-emit (webhook redelivery, retries) silent-skip.
 
+### Title/body selalu plain text (2026-08-04)
+
+`title` dan `body` dinormalisasi `toPlainText()` (`@bb/common/utils/plain-text.util`) di
+`NotificationProducer.create()` — satu titik cegat, sebelum baris ditulis **dan** sebelum
+`dispatchPush`, jadi baris tersimpan dan payload FCM selalu sama dan selalu plain.
+
+Kenapa perlu: body `newPost` berasal dari `post.excerpt`, dan excerpt itu
+`content.slice(0, 200)` dari HTML editor mentah — push sampai ke lock screen sebagai
+harfiah `<p>p adu</p>`. Android/iOS merender `body` apa adanya, tidak ada sanitizer di
+sisi client. Title pun bukan tanpa risiko: isinya interpolasi `fullName` yang
+user-controlled.
+
+`toPlainText` beda tugas dari `sanitizeContent` (comment.service): yang itu menjaga apa
+yang **disimpan** (tag dibuang tanpa batas kata, entity dibiarkan) karena client
+me-render ulang isinya; yang ini untuk **ditampilkan**, jadi batas blok jadi spasi,
+entity di-decode, whitespace dirapatkan. Output dijamin tidak mengandung `<`/`>` sama
+sekali — entity di-decode dulu, bracket hasil decode diganti spasi sesudahnya, sehingga
+`&lt;script&gt;` tidak bisa balik jadi markup.
+
+Post-nya sendiri **tidak** diubah: `post.excerpt` tetap HTML karena ikut terekspos di
+`postContentData.excerpt` dan dirender feed. Perbaikan ditaruh di batas notifikasi saja.
+
+Baris lama tidak ikut terbersihkan (saat perubahan ini: 45 dari 139 baris `body`
+mengandung `<`). Kalau perlu, backfill sekali jalan pakai `toPlainText` — tidak ada
+migrasi otomatis.
+
 ### Mute (diperbaiki 2026-08-03, semantik diubah 2026-08-04)
 
 **Mute meredam push saja, bukan barisnya.** Sejak 2026-08-04 penerima yang me-mute tetap

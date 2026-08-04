@@ -1,6 +1,7 @@
 import { prisma } from '@bb/db';
 import { logger } from '@bb/common/config/logger';
 import { settingsService, SETTING_KEYS } from '@bb/common/services/settings.service';
+import { toPlainText } from '@bb/common/utils/plain-text.util';
 import { ActionLabel, type NotifGroup } from './action-labels';
 import { fcmService } from './fcm.service';
 import { RecipientResolver } from './recipient.resolver';
@@ -61,6 +62,17 @@ export class NotificationProducer {
     });
     if (!member || !member.isActive || !member.notificationsEnabled) return null;
 
+    // Normalised here, at the one place every notification passes through, rather
+    // than in each listener — a listener that forgot would ship `<p>p adu</p>` to
+    // the lock screen. Post bodies come from `post.excerpt`, a raw slice of editor
+    // HTML; titles interpolate member names, which are user-controlled too.
+    // An empty result means the source was markup-only — store nothing, not ''.
+    const display: CreateNotificationInput = {
+      ...input,
+      title: toPlainText(input.title),
+      body: input.body ? toPlainText(input.body) || undefined : undefined,
+    };
+
     // Pre-check dedupe so the common duplicate-event path doesn't hit the unique
     // constraint — that would make Prisma log a `prisma:error` for an expected skip.
     // The catch below still backstops the concurrent-insert race.
@@ -80,8 +92,8 @@ export class NotificationProducer {
         data: {
           memberId: input.memberId,
           type: input.type,
-          title: input.title,
-          body: input.body,
+          title: display.title,
+          body: display.body,
           networkId: input.networkId ?? null,
           notifGroup: input.notifGroup,
           payload: input.payload ? (input.payload as object) : undefined,
@@ -93,7 +105,7 @@ export class NotificationProducer {
         { notificationId: row.id, memberId: input.memberId, type: input.type, networkId: input.networkId ?? undefined },
         '[notification] created',
       );
-      this.dispatchPush(input, row.id, pushMuted);
+      this.dispatchPush(display, row.id, pushMuted);
       return row;
     } catch (err) {
       const code = (err as { code?: string }).code;

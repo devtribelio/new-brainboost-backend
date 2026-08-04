@@ -82,6 +82,34 @@ describe('NotificationProducer', () => {
     expect(rows[0]!.title).toBe('first');
   });
 
+  // Post bodies are built from `post.excerpt`, a raw slice of editor HTML, so
+  // the lock screen used to read "<p>p adu</p>". Normalising in the producer is
+  // what keeps a future listener from reintroducing it.
+  it('stores the body as plain text when the source is editor HTML', async () => {
+    const row = await producer.createForMember({
+      memberId,
+      type: ActionLabel.NewPost,
+      title: '<b>Parker</b> memposting di Bela Diri',
+      body: '<p>p adu</p><p>lawan&nbsp;&amp; kawan</p>',
+      dedupeKey: `test-html-${uid()}`,
+    });
+
+    expect(row?.title).toBe('Parker memposting di Bela Diri');
+    expect(row?.body).toBe('p adu lawan & kawan');
+  });
+
+  it('stores no body at all when the source was markup only', async () => {
+    const row = await producer.createForMember({
+      memberId,
+      type: ActionLabel.NewPost,
+      title: 'kosong',
+      body: '<p></p><br>',
+      dedupeKey: `test-html-empty-${uid()}`,
+    });
+
+    expect(row?.body).toBeNull();
+  });
+
   // A mute takes away the push, not the record — and it must not spend the
   // member's unopened-push budget either, or muting one topic would slowly
   // silence the ones they still want.
