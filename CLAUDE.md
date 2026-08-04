@@ -288,6 +288,7 @@ Detailed per-module status, blockers, and outstanding parity items: `docs/rewrit
 - Run tests: `pnpm test`
 - Prisma migrate: `pnpm prisma:migrate`
 - Seed admin: `pnpm seed:admin`
+- Trigger topic digest manually (QA): `pnpm digest:run [--member=<uuid|email>] [--send]` — dry-run by default; forces past `digestEnabled` + the hour gate. A real run stamps `last_topic_digest_at`, consuming that night's scheduled digest.
 - Migrate from legacy DB: `pnpm migrate:legacy` (script at `scripts/migrate-from-legacy.ts`)
 - Swagger UI: `http://localhost:<port>/api/docs`
 - New repo jcodemunch ID: `devtribelio/new-brainboost-backend`

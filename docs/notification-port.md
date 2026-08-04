@@ -268,7 +268,21 @@ Job `packages/domain/src/jobs/topic-digest.ts`, kontrak FE:
 - **Pemicu = tick `bb-cron` per jam**; job-nya sendiri yang memutuskan apakah jam
   sekarang = `notification.digestHour`. Itulah yang membuat jam kirim bisa diubah dari
   `app_settings` tanpa deploy dan tanpa menyentuh PM2. `notification.digestEnabled`
-  ships `false`.
+  ships `false`. `topicDigest` harus ada di argv lane hourly (`ecosystem.config.js`
+  **dan** CDK `Cron`) — nama yang tidak disebut di argv tidak pernah jalan, tanpa error.
+- **`digestHour` adalah jam bulat 0–23.** `wibHour()` mengembalikan integer, jadi nilai
+  seperti `14.5` diterima `getNumber` (finite) tapi tidak akan pernah cocok → digest
+  diam selamanya tanpa error. Granularitas menit butuh dua perubahan sekaligus: tick
+  cron dipercepat dan setting disimpan sebagai menit-dalam-hari + pencocokan jendela.
+- **Trigger manual (QA): `pnpm digest:run`** (`scripts/run-topic-digest.ts`) — memanggil
+  job yang sama dengan `{ force: true }`, jadi mengabaikan `digestEnabled` + gerbang jam,
+  tapi TIDAK mengabaikan aturan per-member (tidak ada unread / semua topic di-mute →
+  tetap tidak dapat apa-apa). **Default dry-run**: mencetak apa yang akan dikirim tanpa
+  mengirim dan tanpa menyentuh watermark. Kirim betulan harus eksplisit `--send`, dan
+  `--member=<uuid|email>` mempersempit sapuan ke satu akun — cara aman menguji di
+  produksi, sekaligus membatasi watermark yang terbakar ke akun itu saja. Bahayanya
+  memang di watermark: run betulan menstempel `last_topic_digest_at`, jadi digest
+  terjadwal malam itu tidak punya sisa untuk dilaporkan.
 - **Jam dibaca WIB** dengan offset tetap +7 (tidak ada DST), konsisten dengan
   penanganan waktu di resync worker.
 - **Watermark `members.last_topic_digest_at`** — hanya baris yang lebih baru dari ini

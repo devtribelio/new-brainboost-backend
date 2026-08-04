@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { prisma } from '@bb/db';
 import { logger } from '@bb/common/config/logger';
 import { settingsService, SETTING_KEYS } from '@bb/common/services/settings.service';
@@ -36,6 +37,29 @@ export interface TopicDigestResult {
   candidates: number;
   pushed: number;
   silentAllMuted: number;
+  /** Present on a dry run: what WOULD have been sent, without sending it. */
+  preview?: DigestPush[];
+}
+
+export interface TopicDigestOptions {
+  /**
+   * Run regardless of `notification.digestEnabled` and the configured hour.
+   * For the manual trigger only — a digest is otherwise unverifiable outside
+   * its one scheduled hour of the day, with the setting shipping `false`.
+   */
+  force?: boolean;
+  /**
+   * Build the plan and return it, but send nothing and stamp nothing. Leaves
+   * `lastTopicDigestAt` untouched, so a preview cannot eat the real run's
+   * watermark — which is the whole hazard of testing this job for real.
+   */
+  dryRun?: boolean;
+  /**
+   * Restrict the whole sweep to one member. For the manual trigger: it makes a
+   * real send testable on production without pushing to everybody, and confines
+   * the watermark it burns to that one account.
+   */
+  memberId?: string;
 }
 
 export interface DigestPush {
@@ -76,9 +100,14 @@ export function joinTopicNames(names: string[]): string {
  * payload per member. Split out so the shape of a digest is testable without FCM
  * credentials — the send itself is a no-op when FCM is disabled.
  */
-export async function collectDigests(): Promise<DigestPlan> {
+export async function collectDigests(memberId?: string): Promise<DigestPlan> {
   // One pass over every member's unread topic posts. Prisma's groupBy cannot join,
   // and the per-member watermark lives on `members`, so this is raw by necessity.
+  // `memberId` narrows the sweep to one account (manual trigger); the tagged
+  // template still parameterises it, so it is not string-interpolated SQL.
+  const memberFilter = memberId
+    ? Prisma.sql`AND n.member_id = ${memberId}::uuid`
+    : Prisma.empty;
   const rows = await prisma.$queryRaw<UnreadRow[]>`
     SELECT n.member_id, n.topic_id, COUNT(*) AS unread
     FROM notifications n
@@ -89,6 +118,7 @@ export async function collectDigests(): Promise<DigestPlan> {
       AND m.is_active
       AND m.notifications_enabled
       AND (m.last_topic_digest_at IS NULL OR n.created_at > m.last_topic_digest_at)
+      ${memberFilter}
     GROUP BY n.member_id, n.topic_id
   `;
   if (rows.length === 0) return { candidates: [], pushes: [], silentAllMuted: 0 };
@@ -163,18 +193,37 @@ export async function collectDigests(): Promise<DigestPlan> {
   return { candidates: memberIds, pushes, silentAllMuted };
 }
 
-export async function topicDigest(now: Date = new Date()): Promise<TopicDigestResult> {
+export async function topicDigest(
+  now: Date = new Date(),
+  opts: TopicDigestOptions = {},
+): Promise<TopicDigestResult> {
   const empty: TopicDigestResult = { candidates: 0, pushed: 0, silentAllMuted: 0 };
 
-  const [enabled, hour] = await Promise.all([
-    settingsService.getBoolean(SETTING_KEYS.notificationDigestEnabled, false),
-    settingsService.getNumber(SETTING_KEYS.notificationDigestHour, DIGEST_HOUR_DEFAULT),
-  ]);
-  if (!enabled) return { ...empty, skipped: 'disabled' };
-  if (wibHour(now) !== hour) return { ...empty, skipped: 'wrong-hour' };
+  // The scheduled path takes both gates; the manual trigger (`force`) skips them,
+  // otherwise the job would be unverifiable outside its one hour a day.
+  if (!opts.force) {
+    const [enabled, hour] = await Promise.all([
+      settingsService.getBoolean(SETTING_KEYS.notificationDigestEnabled, false),
+      settingsService.getNumber(SETTING_KEYS.notificationDigestHour, DIGEST_HOUR_DEFAULT),
+    ]);
+    if (!enabled) return { ...empty, skipped: 'disabled' };
+    if (wibHour(now) !== hour) return { ...empty, skipped: 'wrong-hour' };
+  }
 
-  const plan = await collectDigests();
+  const plan = await collectDigests(opts.memberId);
   if (plan.candidates.length === 0) return empty;
+
+  // Return the plan without sending or stamping. Stamping is the destructive
+  // half: it would mark these posts as reported and the real run that night
+  // would find nothing left to say.
+  if (opts.dryRun) {
+    return {
+      candidates: plan.candidates.length,
+      pushed: 0,
+      silentAllMuted: plan.silentAllMuted,
+      preview: plan.pushes,
+    };
+  }
 
   const producer = new NotificationProducer();
   let pushed = 0;
@@ -196,7 +245,14 @@ export async function topicDigest(now: Date = new Date()): Promise<TopicDigestRe
   });
 
   logger.info(
-    { candidates: plan.candidates.length, pushed, silentAllMuted: plan.silentAllMuted, hour },
+    {
+      candidates: plan.candidates.length,
+      pushed,
+      silentAllMuted: plan.silentAllMuted,
+      hour: wibHour(now),
+      forced: opts.force ?? false,
+      memberId: opts.memberId,
+    },
     '[topic-digest] sweep done',
   );
   return { candidates: plan.candidates.length, pushed, silentAllMuted: plan.silentAllMuted };

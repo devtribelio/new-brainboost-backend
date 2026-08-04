@@ -265,6 +265,67 @@ describe('topicDigest', () => {
       expect(digestFor(second, memberId)).toBeUndefined();
     });
 
+    // Options exist only for the manual trigger (`pnpm digest:run`), which has to
+    // work outside the one scheduled hour with the setting shipping `false`.
+    describe('manual trigger options', () => {
+      it('force runs while disabled and outside the hour', async () => {
+        await settingsService.set(SETTING_KEYS.notificationDigestEnabled, 'false');
+        SettingsService.clearCache();
+        await addUnread(memberId, topicA, 3);
+
+        // 08:00 WIB, digest hour is 21 — both gates would normally stop this.
+        const result = await topicDigest(new Date('2026-08-04T01:00:00.000Z'), { force: true });
+        expect(result.skipped).toBeUndefined();
+        expect(result.candidates).toBeGreaterThanOrEqual(1);
+      });
+
+      // The stamp is the destructive half: it marks these posts as reported, so a
+      // preview that moved it would silently rob the night's real digest.
+      it('dry run previews without sending or moving the watermark', async () => {
+        await addUnread(memberId, topicA, 3);
+
+        const result = await topicDigest(new Date('2026-08-04T01:00:00.000Z'), {
+          force: true,
+          dryRun: true,
+        });
+        expect(result.pushed).toBe(0);
+        expect(result.preview?.some((p) => p.memberId === memberId)).toBe(true);
+
+        const m = await prisma.member.findUnique({
+          where: { id: memberId },
+          select: { lastTopicDigestAt: true },
+        });
+        expect(m!.lastTopicDigestAt).toBeNull();
+      });
+
+      it('memberId confines the sweep to that one member', async () => {
+        await addUnread(memberId, topicA, 3);
+        await addUnread(otherMemberId, topicB, 2);
+
+        const result = await topicDigest(new Date('2026-08-04T01:00:00.000Z'), {
+          force: true,
+          dryRun: true,
+          memberId,
+        });
+        expect(result.candidates).toBe(1);
+        expect(result.preview?.map((p) => p.memberId)).toEqual([memberId]);
+      });
+
+      it('a scoped real run leaves the other member unstamped', async () => {
+        await addUnread(memberId, topicA, 3);
+        await addUnread(otherMemberId, topicB, 2);
+
+        await topicDigest(new Date('2026-08-04T01:00:00.000Z'), { force: true, memberId });
+
+        const rows = await prisma.member.findMany({
+          where: { id: { in: memberIds } },
+          select: { id: true, lastTopicDigestAt: true },
+        });
+        expect(rows.find((r) => r.id === memberId)!.lastTopicDigestAt).not.toBeNull();
+        expect(rows.find((r) => r.id === otherMemberId)!.lastTopicDigestAt).toBeNull();
+      });
+    });
+
     it('leaves the unopened-push budget alone', async () => {
       await settingsService.set(SETTING_KEYS.notificationDigestEnabled, 'true');
       await settingsService.set(SETTING_KEYS.notificationDigestHour, '21');
