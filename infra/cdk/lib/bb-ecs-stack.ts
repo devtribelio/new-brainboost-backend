@@ -111,6 +111,19 @@ export class BbEcsStack extends cdk.Stack {
       SQS_REGION: this.region,
       API_DOCS_ENABLED: 'false',
       TRUST_PROXY: '1', // di belakang ALB (1 hop) → req.ip = X-Forwarded-For, rate-limit akurat
+      // === Logging (docs/logging.md) ===
+      // Semua LOG_* di-set eksplisit, bukan ngandelin default env.ts: saat insiden
+      // kita ganti nilai di sini + redeploy, tanpa perlu inget default-nya apa.
+      LOG_LEVEL: 'info',            // 'debug' nambah db.op, 'trace' nambah db.query
+      LOG_HTTP: 'true',             // satu baris http.response per request
+      LOG_HTTP_INCOMING: 'true',    // + http.request pas request masuk — request yang
+                                    //   hang/crash nggak pernah nyampe baris response
+      LOG_HTTP_BODY: 'true',        // body (deep-redacted + truncated) di baris response
+      LOG_SLOW_REQUEST_MS: '1000',  // di atas ini → warn + slow:true
+      // Prefix match. /health = health check ALB (targetGroup di bawah), /api/docs
+      // mati di prod (API_DOCS_ENABLED=false) tapi tetap di-skip biar aman.
+      LOG_IGNORE_PATHS: '/health,/api/docs',
+      LOG_PRISMA: 'true',           // efektif cuma kalau LOG_LEVEL=debug (db.op level debug)
     };
 
     // === ECR images ===
