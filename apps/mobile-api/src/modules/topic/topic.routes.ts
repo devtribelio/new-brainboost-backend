@@ -20,6 +20,14 @@ export function topicRoutes(): Router {
   bindRoute({
     router,
     controller: ctrl,
+    method: 'get',
+    path: '/topic/detail',
+    handlerKey: 'detail',
+    middlewares: [optionalAuthGuard],
+  });
+  bindRoute({
+    router,
+    controller: ctrl,
     method: 'post',
     path: '/topic/subscribe',
     handlerKey: 'subscribe',

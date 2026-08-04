@@ -50,6 +50,9 @@ export class MemberService {
         where: { id },
         data: {
           lastActiveAt: new Date(),
+          // Member is back in the app → the unopened-push budget re-arms. Rides on
+          // the UPDATE that is already happening, so it costs nothing extra.
+          ...(opts.touchActivity ? { unopenedPushCount: 0 } : {}),
           ...(opts.latitude !== undefined ? { latitude: opts.latitude } : {}),
           ...(opts.longitude !== undefined ? { longitude: opts.longitude } : {}),
         },

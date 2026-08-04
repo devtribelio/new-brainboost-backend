@@ -6,6 +6,7 @@ import { prisma } from '@bb/db';
 import { env } from '@bb/common/config/env';
 import { REQUIRES_BEARER_AUTH } from '@bb/common/openapi/types';
 import { setRequestContext } from '@bb/common/config/request-context';
+import { resetUnopenedPushCount } from '@bb/common/utils/member-activity.util';
 
 async function assertSessionActive(sid: string | undefined): Promise<void> {
   if (!sid) {
@@ -59,6 +60,8 @@ export const authGuard: RequestHandler = async (req, _res: Response, next: NextF
     // Every log line for the rest of this request now carries `userId` — see
     // config/request-context.ts. Email is deliberately NOT propagated (PII).
     setRequestContext({ userId: payload.sub });
+    // Presence signal for the unopened-push budget. Throttled + fire-and-forget.
+    resetUnopenedPushCount(payload.sub);
     next();
   } catch (err) {
     next(err);
@@ -70,6 +73,10 @@ export const authGuard: RequestHandler = async (req, _res: Response, next: NextF
  * that must remain callable after the member's session was revoked (e.g. logout
  * cleanup: FCM deregister, refresh-row revocation, local-state confirmation).
  * Still requires valid JWT signature and member scope.
+ *
+ * Deliberately does NOT re-arm the unopened-push budget: these endpoints run as
+ * the member LEAVES (or has already lost) the session, which is the opposite of
+ * the presence signal the budget is looking for.
  */
 export const authGuardLenient: RequestHandler = (req, _res: Response, next: NextFunction) => {
   try {
@@ -118,6 +125,7 @@ export const optionalAuthGuard: RequestHandler = async (req, _res, next) => {
     // Every log line for the rest of this request now carries `userId` — see
     // config/request-context.ts. Email is deliberately NOT propagated (PII).
     setRequestContext({ userId: payload.sub });
+    if (scope === 'member') resetUnopenedPushCount(payload.sub);
   } catch {
     // silently ignore invalid token in optional mode
   }
@@ -147,6 +155,7 @@ export const anonOrMemberGuard: RequestHandler = async (req, _res, next) => {
     // Every log line for the rest of this request now carries `userId` — see
     // config/request-context.ts. Email is deliberately NOT propagated (PII).
     setRequestContext({ userId: payload.sub });
+    if (scope === 'member') resetUnopenedPushCount(payload.sub);
     next();
   } catch (err) {
     next(err);

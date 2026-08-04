@@ -59,6 +59,26 @@ export class TopicController {
     return okPaginated(res, rows.map(serializeTopic), { page: p.page, perPage: p.perPage, total });
   };
 
+  @ApiOperation({
+    summary: 'Get one topic by id',
+    description:
+      'Hydrates the topic screen after a push deep link (topicDigest). Accepts the topic UUID or its legacyId int. `isSubscribeTopic` / `isMute` are resolved for the authenticated caller and are false when anonymous. 404 when the topic is unknown or inactive.',
+  })
+  @ApiQuery({
+    name: 'topicId',
+    type: 'string',
+    required: true,
+    example: 'topic-uuid-1234',
+    description: 'Topic UUID or legacyId int.',
+  })
+  @ApiResponse({ status: 200, type: () => TopicDto })
+  detail = async (req: AuthenticatedRequest, res: Response) => {
+    const topicId = (req.query.topicId as string) ?? '';
+    if (!topicId) throw badRequest(ERROR_CODES.TOPIC_ID_REQUIRED);
+    const topic = await this.topicService.detail(topicId, req.user?.id);
+    return ok(res, serializeTopic(topic));
+  };
+
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Subscribe / unsubscribe to a topic' })
   @ApiBody({ type: () => TopicSubscribeBodyDto })

@@ -80,7 +80,10 @@ Verdict: **BELUM ready** — kode/migration/Dockerfile siap, tapi infra (DB, bro
 - [ ] register → login (OTP terkirim lewat SQS→bb-comms) → katalog tampil
 - [ ] checkout → bayar (Xendit sandbox) → webhook → `CourseEnrollment` ter-grant → konten kebuka
 - [ ] comms-relay: outbox PENDING→SENT (SendMessage ke SQS), bb-comms consume & kirim
-- [ ] cron sekali jalan: `affiliatePendingToBalance` + `expirePendingPayments` tidak dobel
+- [ ] cron sekali jalan: `affiliatePendingToBalance` + `expirePendingPayments` + `topicDigest` tidak dobel
+- [ ] argv lane hourly memuat SEMUA job yang harus jalan — job yang terdaftar di
+      `jobs-runner.ts` tapi tidak disebut di argv tidak akan pernah jalan, tanpa error
+      (`ecosystem.config.js` `bb-cron` dan CDK `Cron` harus sama)
 
 ## 4. Estimasi & catatan
 - Effort provisioning (ikut runbook, manual CLI): **~2–3 minggu**. Murni kerjaan ops/infra — bisa didelegasi.

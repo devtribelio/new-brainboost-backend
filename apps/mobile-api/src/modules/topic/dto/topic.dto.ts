@@ -37,6 +37,14 @@ export class TopicDto {
   @ApiProperty({ type: 'boolean', example: false })
   isSubscribeTopic!: boolean;
 
+  @ApiProperty({
+    type: 'boolean',
+    example: false,
+    description:
+      'Whether the authed member muted this topic (POST /notification/mute with scope=topic). Always false for anonymous callers.',
+  })
+  isMute!: boolean;
+
   @ApiProperty({ format: 'uuid', example: 'topic-uuid-1234' })
   id!: string;
 

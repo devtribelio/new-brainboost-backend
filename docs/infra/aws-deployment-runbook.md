@@ -218,7 +218,7 @@ Lalu jalankan **role read-only reporting** (§5) sebagai superuser.
 - `backoffice-api`, `admin-ejs`: desired 1.
 - `comms-relay`: **desired 1, NO autoscale**.
 - `bb-comms`: desired 1, autoscale by SQS queue depth (`ApproximateNumberOfMessagesVisible`).
-- `cron`: **bukan service** — **EventBridge Scheduler** RunTask cron `0 * * * *`, image mobile-api command `jobs-runner.js`.
+- `cron`: **bukan service** — **EventBridge Scheduler** RunTask cron `0 * * * *`, image mobile-api command `jobs-runner.js affiliatePendingToBalance expirePendingPayments topicDigest`. Argv itu filter: job yang terdaftar di `jobs-runner.ts` tapi tidak disebut di sini tidak akan pernah jalan, tanpa error.
 
 ✅ Semua task RUNNING & healthy; ALB target healthy.
 
