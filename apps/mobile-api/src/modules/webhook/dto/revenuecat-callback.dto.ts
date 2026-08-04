@@ -1,5 +1,6 @@
 import { Type } from 'class-transformer';
 import {
+  IsArray,
   IsDefined,
   IsNotEmpty,
   IsNumber,
@@ -31,10 +32,34 @@ export class RevenueCatEventDto {
   @IsNotEmpty()
   id!: string;
 
-  @ApiPropertyOptional({ example: '0192f3a0-member-uuid' })
+  @ApiPropertyOptional({
+    example: '0192f3a0-member-uuid',
+    description:
+      'Member UUID set by Purchases.logIn(). NOT guaranteed to be a UUID — a purchase made before login carries `$RCAnonymousID:…` instead.',
+  })
   @IsOptional()
   @IsString()
   app_user_id?: string;
+
+  @ApiPropertyOptional({
+    example: '$RCAnonymousID:1384062dfb284e6883fafe704b2bb252',
+    description: 'The id the customer was first seen under. Usually the anonymous id.',
+  })
+  @IsOptional()
+  @IsString()
+  original_app_user_id?: string;
+
+  @ApiPropertyOptional({
+    type: 'array',
+    itemType: 'string',
+    example: ['$RCAnonymousID:1384062dfb284e6883fafe704b2bb252', '0192f3a0-member-uuid'],
+    description:
+      'Every id aliased to this RC customer. Scanned for a member UUID when app_user_id is anonymous.',
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  aliases?: string[];
 
   @ApiPropertyOptional({ example: 'com.brainboost.ios.bbmm_lifetime' })
   @IsOptional()

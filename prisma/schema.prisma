@@ -44,6 +44,15 @@ model Member {
   latitude             Float?
   longitude            Float?
   notificationsEnabled Boolean   @default(true) @map("notifications_enabled")
+  /// Push sent since the member last opened the app; reset to 0 on app resume
+  /// (/member/info touchActivity) and on /notification/seen. Once it passes
+  /// `notification.unopenedPushLimit` (app_settings) further push is suppressed —
+  /// the notification ROW is still written, only FCM delivery is skipped.
+  unopenedPushCount    Int       @default(0) @map("unopened_push_count")
+  /// Watermark for the nightly topic digest: only unread `newPost` rows created
+  /// after this are counted, so a member is never told twice about the same post.
+  /// null = never digested (counts everything unread).
+  lastTopicDigestAt    DateTime? @map("last_topic_digest_at")
 
   // --- Affiliate payout: default bank account stored on the profile (manual KYC flow) ---
   bankCode          String? @map("bank_code")
@@ -171,6 +180,15 @@ model RefreshToken {
   expiresAt  DateTime  @map("expires_at")
   revokedAt  DateTime? @map("revoked_at")
   createdAt  DateTime  @default(now()) @map("created_at")
+
+  /// Lineage pointer to the row that replaced this one on refresh rotation.
+  /// Set ONLY by rotation — logout / password change / single-session kick all
+  /// revoke without a successor. That asymmetry is what makes the refresh grace
+  /// window safe: a revoked row is eligible for grace only when this is filled,
+  /// so deliberate revocation still kicks instantly. Deliberately a plain
+  /// scalar, no FK: rotation writes this pointer in the same transaction that
+  /// gates the race, BEFORE the child row exists.
+  supersededById String? @unique @map("superseded_by_id") @db.Uuid
 
   member Member @relation(fields: [memberId], references: [id], onDelete: Cascade)
 
@@ -393,8 +411,35 @@ model Course {
   product     Product            @relation(fields: [productId], references: [id], onDelete: Cascade)
   sections    CourseSection[]
   enrollments CourseEnrollment[]
+  bonuses     CourseBonus[]
 
   @@map("courses")
+}
+
+// Bonus attachments (PDF workbooks etc.) shown on the course detail screen.
+// NEW feature (no legacy counterpart → intentionally no `legacyId`). Files live
+// under the S3 `private/` prefix; `fileKey` is server-only and never leaves the
+// backend — clients get an opaque `bonusId` and mint a short-lived presigned URL
+// via POST /member/course/bonus/:bonusId/access-url. Upload/ingestion is done by
+// backoffice-bb (raw SQL INSERT + S3 write); this backend owns the read/gate side.
+model CourseBonus {
+  id           String   @id @default(uuid(7)) @db.Uuid
+  courseId     String   @map("course_id") @db.Uuid
+  title        String
+  fileName     String   @map("file_name") // original name — shown to user + Content-Disposition
+  fileKey      String   @map("file_key") // S3 key under private/ — NEVER exposed to the client
+  sizeBytes    Int      @map("size_bytes") // FE needs it for the >20MB progress UI
+  mimeType     String   @default("application/pdf") @map("mime_type")
+  downloadable Boolean  @default(true) // false = view-only in-app
+  sortOrder    Int      @default(0) @map("sort_order") // display order within a course
+  isActive     Boolean  @default(true) @map("is_active") // soft-hide without deleting the S3 object
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@index([courseId, sortOrder])
+  @@map("course_bonuses")
 }
 
 model CourseEnrollment {
@@ -819,6 +864,10 @@ model Notification {
   id         String    @id @default(uuid(7)) @db.Uuid
   memberId   String    @map("member_id") @db.Uuid
   networkId  String?   @map("network_id") @db.Uuid
+  /// Topic this notification originates from. Denormalised out of `payload` so the
+  /// nightly digest can group unread rows per topic with an indexed query instead
+  /// of digging through JSON. Only `newPost` sets it today.
+  topicId    String?   @map("topic_id") @db.Uuid
   type       String
   notifGroup String?   @map("notif_group")
   title      String
@@ -836,6 +885,8 @@ model Notification {
   @@index([memberId, readAt])
   @@index([memberId, networkId])
   @@index([memberId, seenAt])
+  // Digest sweep: unread rows of one type, grouped per member+topic.
+  @@index([type, readAt, topicId])
   @@map("notifications")
 }
 
@@ -1263,6 +1314,24 @@ model AppSetting {
   createdAt   DateTime @default(now()) @map("created_at")
 
   @@map("app_settings")
+}
+
+/// Force/soft update config for the mobile app, ONE ROW PER PLATFORM. Drives
+/// `GET /api/app/version-check` — replaces the app's Supabase `mobile_version_config`
+/// and its store-listing scrape, so this table is the sole source of the update verdict.
+/// Verdict: version < forceBelow -> force, else version < latestVersion -> soft, else none.
+/// Missing row = "none" (fail-safe). Edited by ops via SQL / backoffice-bb; cached ~60s.
+model AppVersionConfig {
+  platform      String   @id // "android" | "ios"
+  latestVersion String   @map("latest_version") // semver; soft-update threshold + informational
+  forceBelow    String?  @map("force_below") // semver; null = force disabled. Keep <= latestVersion
+  storeUrl      String?  @map("store_url") // optional override; app v1 uses its native store redirect
+  softMessage   String?  @map("soft_message") // dialog body for the soft verdict; null = app default copy
+  forceMessage  String?  @map("force_message") // dialog body for the force verdict; null = app default copy
+  updatedAt     DateTime @updatedAt @map("updated_at")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@map("app_version_configs")
 }
 
 /// Auth + per-channel capability toggles for 3rd-party ingestion (IAP/Scalev/Lynk.id) via

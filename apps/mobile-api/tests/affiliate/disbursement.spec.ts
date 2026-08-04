@@ -96,7 +96,9 @@ describe('DisbursementService', () => {
     expect(await svc.getWithdrawableBalance(memberId)).toBe(0);
 
     // A second request must be blocked while one is PENDING.
-    await expect(svc.requestDisbursement(memberId)).rejects.toThrow(/pending withdrawal/i);
+    await expect(svc.requestDisbursement(memberId)).rejects.toMatchObject({
+      code: 'DISBURSEMENT_ALREADY_PENDING',
+    });
   });
 
   it('markFailed releases the held balance back to withdrawable', async () => {

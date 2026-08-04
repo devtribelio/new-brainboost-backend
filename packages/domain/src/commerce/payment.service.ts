@@ -1,7 +1,7 @@
 import { prisma } from '@bb/db';
 import { logger } from '@bb/common/config/logger';
 import { env } from '@bb/common/config/env';
-import { BadRequestException, ForbiddenException, NotFoundException } from '@bb/common/exceptions';
+import { badRequest, forbidden, notFound, ERROR_CODES } from '@bb/common/exceptions';
 import { commerceEvents } from '@bb/common/events/commerce-events';
 import { xenditGateway, type XenditGateway } from '@bb/common/services/xendit-gateway';
 import { generateExternalId } from '@bb/common/services/xendit-signature';
@@ -44,11 +44,12 @@ export class PaymentService {
     const tx = await prisma.commerceTransaction.findUnique({
       where: { id: dto.transactionId },
     });
-    if (!tx) throw new NotFoundException('Transaction not found');
-    if (tx.memberId !== memberId) throw new ForbiddenException('Not your transaction');
-    if (tx.status !== 'PENDING') throw new BadRequestException(`Transaction is ${tx.status}`);
+    if (!tx) throw notFound(ERROR_CODES.TRANSACTION_NOT_FOUND);
+    if (tx.memberId !== memberId) throw forbidden(ERROR_CODES.TRANSACTION_NOT_OWNED);
+    if (tx.status !== 'PENDING')
+      throw badRequest(ERROR_CODES.TRANSACTION_NOT_PENDING, { status: tx.status });
     if (tx.expiredAt && tx.expiredAt <= new Date()) {
-      throw new BadRequestException('Transaction expired');
+      throw badRequest(ERROR_CODES.TRANSACTION_EXPIRED);
     }
 
     if (tx.amount === 0) {
@@ -124,7 +125,10 @@ export class PaymentService {
       await prisma.commercePayment
         .update({ where: { id: payment.id }, data: { status: 'FAILED', activeSlotTxId: null } })
         .catch((err) =>
-          logger.error({ err, paymentId: payment.id }, '[commerce] failed to release slot after Xendit error'),
+          logger.error(
+            { err, paymentId: payment.id },
+            '[commerce] failed to release slot after Xendit error',
+          ),
         );
       throw e;
     }
@@ -192,7 +196,7 @@ export class PaymentService {
           data: { status: 'PAID', paidAt: new Date() },
         });
         if (settled.count === 0) {
-          throw new BadRequestException('Transaction is no longer pending');
+          throw badRequest(ERROR_CODES.TRANSACTION_NOT_PENDING);
         }
         return p;
       });
@@ -235,7 +239,7 @@ export class PaymentService {
     });
     if (!existing) {
       // Slot was freed between the conflict and this read (rare). Surface as retryable.
-      throw new BadRequestException('Payment is being processed, please retry');
+      throw badRequest(ERROR_CODES.PAYMENT_IN_PROGRESS);
     }
     return {
       paymentId: existing.id,
@@ -260,8 +264,8 @@ export class PaymentService {
         payments: { orderBy: { createdAt: 'desc' }, take: 1 },
       },
     });
-    if (!tx) throw new NotFoundException('Transaction not found');
-    if (tx.memberId !== memberId) throw new ForbiddenException('Not your transaction');
+    if (!tx) throw notFound(ERROR_CODES.TRANSACTION_NOT_FOUND);
+    if (tx.memberId !== memberId) throw forbidden(ERROR_CODES.TRANSACTION_NOT_OWNED);
     const latest = tx.payments[0];
     return {
       transactionId: tx.id,
@@ -330,10 +334,10 @@ export class PaymentService {
         payments: { where: { status: 'PENDING', xenditId: { not: null } } },
       },
     });
-    if (!tx) throw new NotFoundException('Transaction not found');
-    if (tx.memberId !== memberId) throw new ForbiddenException('Not your transaction');
+    if (!tx) throw notFound(ERROR_CODES.TRANSACTION_NOT_FOUND);
+    if (tx.memberId !== memberId) throw forbidden(ERROR_CODES.TRANSACTION_NOT_OWNED);
     if (tx.status !== 'PENDING') {
-      throw new BadRequestException(`Cannot cancel transaction in ${tx.status} state`);
+      throw badRequest(ERROR_CODES.TRANSACTION_NOT_CANCELABLE, { status: tx.status });
     }
     for (const pending of tx.payments) {
       if (pending.xenditId) {

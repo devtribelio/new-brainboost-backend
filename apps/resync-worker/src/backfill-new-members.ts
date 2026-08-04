@@ -15,12 +15,16 @@
  * All lookups are IN-list scoped to just the new legacy ids (typically 0–tens per tick)
  * with since=epoch, and every write path is the same idempotent helper the syncers use.
  * Enrollments/posts/reviews need no backfill — those rows DRIVE member creation.
+ *
+ * This pass ALSO auto-joins them to the two community networks (see network-join.ts) —
+ * not a legacy backfill but the same "the app would have done it at registration" gap.
  */
 import type { RowDataPacket } from 'mysql2/promise';
 import { resyncConfig } from './config';
 import { applyKycDecisions } from './syncers/kyc';
 import { syncInvitersScoped, syncAffiliatorsScoped } from './syncers/tree';
 import { applyCommissionRow, buildCommissionMaps, COMMISSION_COLS } from './syncers/commissions';
+import { joinCommunityNetworks } from './network-join';
 import { emptyStats, type RunCtx, type Stats } from './types';
 import { runConcurrent, toDate } from './util';
 
@@ -114,5 +118,7 @@ export async function backfillNewMembers(ctx: RunCtx, newIds: number[]): Promise
   await syncAffiliatorsScoped(scoped, EPOCH, stats, wide);
   await backfillCommissions(ctx, wide, stats);
   await backfillLikes(ctx, wide, stats);
+  // winner-scoped: a redirect loser resolves to a winner that's already joined
+  await joinCommunityNetworks(ctx, newIds, stats);
   return stats;
 }

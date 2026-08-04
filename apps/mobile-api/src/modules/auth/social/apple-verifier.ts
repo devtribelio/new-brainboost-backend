@@ -1,6 +1,6 @@
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 import { env } from '@bb/common/config/env';
-import { BadRequestException, UnauthorizedException } from '@bb/common/exceptions';
+import { badRequest, unauthorized, ERROR_CODES } from '@bb/common/exceptions';
 
 export interface AppleIdentityPayload {
   sub: string;
@@ -15,7 +15,7 @@ const APPLE_JWKS = createRemoteJWKSet(new URL('https://appleid.apple.com/auth/ke
 
 export async function verifyAppleIdentityToken(idToken: string): Promise<AppleIdentityPayload> {
   if (env.apple.audiences.length === 0) {
-    throw new BadRequestException('Apple sign-in not configured');
+    throw badRequest(ERROR_CODES.SOCIAL_SIGNIN_NOT_CONFIGURED);
   }
 
   let payload;
@@ -26,11 +26,11 @@ export async function verifyAppleIdentityToken(idToken: string): Promise<AppleId
       algorithms: ['RS256'],
     }));
   } catch {
-    throw new UnauthorizedException('invalid_apple_id_token');
+    throw unauthorized(ERROR_CODES.APPLE_ID_TOKEN_INVALID);
   }
 
   if (!payload.sub) {
-    throw new UnauthorizedException('invalid_apple_id_token');
+    throw unauthorized(ERROR_CODES.APPLE_ID_TOKEN_INVALID);
   }
 
   // Apple emits `email_verified` (and `is_private_email`) as either a JSON

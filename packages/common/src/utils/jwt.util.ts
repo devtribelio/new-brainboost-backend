@@ -1,6 +1,6 @@
 import jwt, { type SignOptions, type VerifyOptions } from 'jsonwebtoken';
 import { env } from '@bb/common/config/env';
-import { UnauthorizedException } from '@bb/common/exceptions';
+import { unauthorized, ERROR_CODES } from '@bb/common/exceptions';
 
 /** Pinned signing/verification algorithm — guards against alg-confusion (alg:none / RS256→HS256). */
 const ALGORITHM = 'HS256' as const;
@@ -49,7 +49,7 @@ export function verifyAccessToken(token: string): AccessTokenPayload {
   try {
     return jwt.verify(token, env.jwt.accessSecret, opts) as AccessTokenPayload;
   } catch {
-    throw new UnauthorizedException('Invalid or expired access token');
+    throw unauthorized(ERROR_CODES.ACCESS_TOKEN_INVALID);
   }
 }
 
@@ -58,6 +58,6 @@ export function verifyRefreshToken(token: string): RefreshTokenPayload {
   try {
     return jwt.verify(token, env.jwt.refreshSecret, opts) as RefreshTokenPayload;
   } catch {
-    throw new UnauthorizedException('Invalid or expired refresh token');
+    throw unauthorized(ERROR_CODES.REFRESH_TOKEN_INVALID);
   }
 }

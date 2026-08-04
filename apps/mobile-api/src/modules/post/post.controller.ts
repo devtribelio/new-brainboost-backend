@@ -2,7 +2,7 @@ import type { Response } from 'express';
 import { PostService } from '@bb/domain/post/post.service';
 import { ReportService } from '@/modules/report/report.service';
 import { ok, okCreated, okPaginated } from '@bb/common/utils/response.util';
-import { BadRequestException, UnauthorizedException } from '@bb/common/exceptions';
+import { badRequest, unauthorized, ERROR_CODES } from '@bb/common/exceptions';
 import { parsePagination } from '@bb/common/utils/pagination.util';
 import { serializePost } from './post.serializer';
 import type { AuthenticatedRequest } from '@bb/common/interfaces/authenticated-request';
@@ -91,7 +91,7 @@ export class PostController {
   })
   @ApiResponse({ status: 200, type: () => PostDto, isArray: true, envelope: 'paginated' })
   list = async (req: AuthenticatedRequest, res: Response) => {
-    if (!req.user) throw new UnauthorizedException();
+    if (!req.user) throw unauthorized(ERROR_CODES.AUTH_REQUIRED);
     const p = parsePagination(req.query as Record<string, unknown>);
     const q = req.query as Record<string, string | undefined>;
     const { rows, total } = await this.postService.list(p, {
@@ -124,11 +124,16 @@ export class PostController {
     description: 'legacyId or uuid',
   })
   @ApiResponse({ status: 200, type: () => PostDto })
-  @ApiResponse({ status: 404, description: 'Not found', type: () => ErrorEnvelopeDto, envelope: 'none' })
+  @ApiResponse({
+    status: 404,
+    description: 'Not found',
+    type: () => ErrorEnvelopeDto,
+    envelope: 'none',
+  })
   detail = async (req: AuthenticatedRequest, res: Response) => {
-    if (!req.user) throw new UnauthorizedException();
+    if (!req.user) throw unauthorized(ERROR_CODES.AUTH_REQUIRED);
     const postId = (req.query.postId as string) ?? '';
-    if (!postId) throw new BadRequestException('postId required');
+    if (!postId) throw badRequest(ERROR_CODES.POST_ID_REQUIRED);
     const post = await this.postService.detail(postId, req.user.id);
     const liked = await this.postService.likedByMember(req.user.id, [post.id]);
     return ok(res, serializePost(post, liked.has(post.id)));
@@ -139,9 +144,9 @@ export class PostController {
   @ApiBody({ type: () => PostLikeBodyDto })
   @ApiResponse({ status: 200, type: () => PostLikeToggleResultDto })
   like = async (req: AuthenticatedRequest, res: Response) => {
-    if (!req.user) throw new UnauthorizedException();
+    if (!req.user) throw unauthorized(ERROR_CODES.AUTH_REQUIRED);
     const postId = (req.body?.postId as string) ?? '';
-    if (!postId) throw new BadRequestException('postId required');
+    if (!postId) throw badRequest(ERROR_CODES.POST_ID_REQUIRED);
     const result = await this.postService.toggleLike(req.user.id, postId);
     // commentId always null for post-like (FE LikeModel parity).
     return ok(res, { isLiked: result.isLiked, commentId: null, countLike: result.countLike });
@@ -152,7 +157,7 @@ export class PostController {
   @ApiBody({ type: () => PostCreateBodyDto })
   @ApiResponse({ status: 201, type: () => PostDto })
   upsert = async (req: AuthenticatedRequest, res: Response) => {
-    if (!req.user) throw new UnauthorizedException();
+    if (!req.user) throw unauthorized(ERROR_CODES.AUTH_REQUIRED);
     const body = req.body ?? {};
     const post = await this.postService.create(req.user.id, {
       content: body.content ?? '',
@@ -172,9 +177,9 @@ export class PostController {
   @ApiBody({ type: () => PostDeleteBodyDto })
   @ApiResponse({ status: 200, type: () => PostDeleteResultDto })
   remove = async (req: AuthenticatedRequest, res: Response) => {
-    if (!req.user) throw new UnauthorizedException();
+    if (!req.user) throw unauthorized(ERROR_CODES.AUTH_REQUIRED);
     const postId = (req.body?.postId as string) ?? (req.query.postId as string) ?? '';
-    if (!postId) throw new BadRequestException('postId required');
+    if (!postId) throw badRequest(ERROR_CODES.POST_ID_REQUIRED);
     await this.postService.remove(req.user.id, postId);
     return ok(res, { postId, deleted: true });
   };
@@ -184,12 +189,12 @@ export class PostController {
   @ApiBody({ type: () => PostReportBodyDto })
   @ApiResponse({ status: 201, type: () => ReportResultDto })
   report = async (req: AuthenticatedRequest, res: Response) => {
-    if (!req.user) throw new UnauthorizedException();
+    if (!req.user) throw unauthorized(ERROR_CODES.AUTH_REQUIRED);
     const body = req.body ?? {};
     const postId = body.postId as string;
     const categoryId = (body.categoryId ?? body.reportCategoryId) as string;
     if (!postId || !categoryId) {
-      throw new BadRequestException('postId and categoryId required');
+      throw badRequest(ERROR_CODES.POST_CATEGORY_REQUIRED);
     }
     const r = await this.reportService.reportPost(req.user.id, {
       postId,

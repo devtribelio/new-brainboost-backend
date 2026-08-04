@@ -111,6 +111,19 @@ export class BbEcsStack extends cdk.Stack {
       SQS_REGION: this.region,
       API_DOCS_ENABLED: 'false',
       TRUST_PROXY: '1', // di belakang ALB (1 hop) → req.ip = X-Forwarded-For, rate-limit akurat
+      // === Logging (docs/logging.md) ===
+      // Semua LOG_* di-set eksplisit, bukan ngandelin default env.ts: saat insiden
+      // kita ganti nilai di sini + redeploy, tanpa perlu inget default-nya apa.
+      LOG_LEVEL: 'info',            // 'debug' nambah db.op, 'trace' nambah db.query
+      LOG_HTTP: 'true',             // satu baris http.response per request
+      LOG_HTTP_INCOMING: 'true',    // + http.request pas request masuk — request yang
+                                    //   hang/crash nggak pernah nyampe baris response
+      LOG_HTTP_BODY: 'true',        // body (deep-redacted + truncated) di baris response
+      LOG_SLOW_REQUEST_MS: '1000',  // di atas ini → warn + slow:true
+      // Prefix match. /health = health check ALB (targetGroup di bawah), /api/docs
+      // mati di prod (API_DOCS_ENABLED=false) tapi tetap di-skip biar aman.
+      LOG_IGNORE_PATHS: '/health,/api/docs',
+      LOG_PRISMA: 'true',           // efektif cuma kalau LOG_LEVEL=debug (db.op level debug)
     };
 
     // === ECR images ===
@@ -273,7 +286,11 @@ export class BbEcsStack extends cdk.Stack {
     // Dua lane, binary sama (dist/jobs-runner.js), argv = filter nama job (lihat
     // apps/mobile-api/src/jobs-runner.ts — nama salah = exit 1, bukan diem-diem no-op).
     // Task def eksplisit biar bisa set ARM64 + taskRole.
-    //  - Cron (hourly): affiliate PENDING->BALANCE + expire stale payments.
+    // Mendaftarkan job di jobs-runner.ts BELUM cukup — nama yang tidak ada di argv
+    // lane mana pun tidak akan pernah jalan, tanpa error. Jaga daftar ini sinkron
+    // dengan lane PM2 di ecosystem.config.js.
+    //  - Cron (hourly): affiliate PENDING->BALANCE + expire stale payments +
+    //    topic digest (aman tiap jam: no-op kecuali jam WIB == notification.digestHour).
     //  - CronDisburse (tiap 5 mnt): sweep payout yang sudah di-approve backoffice ke
     //    Xendit, biar approval MANUAL nggak nunggu sampai jam berikutnya. Idempotent —
     //    cuma ambil row PENDING dengan approvedAt terisi, overlap antar lane aman.
@@ -295,7 +312,11 @@ export class BbEcsStack extends cdk.Stack {
       subnetSelection: { subnetType: ec2.SubnetType.PUBLIC },
       securityGroups: [appSg],
       scheduledFargateTaskDefinitionOptions: {
-        taskDefinition: makeCronLane('Cron', 'cron', ['affiliatePendingToBalance', 'expirePendingPayments']),
+        taskDefinition: makeCronLane('Cron', 'cron', [
+          'affiliatePendingToBalance',
+          'expirePendingPayments',
+          'topicDigest',
+        ]),
       },
     });
     new ecsPatterns.ScheduledFargateTask(this, 'CronDisburse', {

@@ -1,10 +1,14 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '@bb/db';
-import { BadRequestException, ForbiddenException, NotFoundException } from '@bb/common/exceptions';
+import { badRequest, forbidden, notFound, ERROR_CODES } from '@bb/common/exceptions';
 import type { PaginationParams } from '@bb/common/utils/pagination.util';
 import { notificationEvents } from '@bb/common/events/notification-events';
 import { assertUuid } from '@bb/common/utils/uuid.util';
-import { PUBLISHED_STATUS, PUBLISHED_STATUS_FILTER, isPublished } from '@bb/common/utils/post-status.util';
+import {
+  PUBLISHED_STATUS,
+  PUBLISHED_STATUS_FILTER,
+  isPublished,
+} from '@bb/common/utils/post-status.util';
 
 interface PostListQuery {
   keyword?: string;
@@ -123,9 +127,9 @@ export class PostService {
 
   async detail(id: string, viewerId?: string) {
     const post = await this.resolveByAnyId(id);
-    if (!post || post.isDeleted) throw new NotFoundException('Post not found');
+    if (!post || post.isDeleted) throw notFound(ERROR_CODES.POST_NOT_FOUND);
     if (!isPublished(post.publishStatus) && post.authorId !== viewerId) {
-      throw new ForbiddenException('Post is not published');
+      throw forbidden(ERROR_CODES.POST_NOT_PUBLISHED);
     }
     if (post.networkId && viewerId) {
       await this.assertNetworkVisible(post.networkId, viewerId);
@@ -135,7 +139,7 @@ export class PostService {
         select: { isPublic: true, isActive: true },
       });
       if (!net?.isActive || !net?.isPublic) {
-        throw new ForbiddenException('Network not visible');
+        throw forbidden(ERROR_CODES.NETWORK_NOT_VISIBLE);
       }
     }
     await prisma.post.update({
@@ -159,7 +163,7 @@ export class PostService {
     postId: string,
   ): Promise<{ isLiked: boolean; countLike: number }> {
     const post = await this.resolveByAnyId(postId);
-    if (!post) throw new NotFoundException('Post not found');
+    if (!post) throw notFound(ERROR_CODES.POST_NOT_FOUND);
     if (post.networkId) await this.assertNetworkAccess(post.networkId, memberId);
 
     const result = await prisma.$transaction(async (tx) => {
@@ -208,20 +212,20 @@ export class PostService {
 
   async create(memberId: string, dto: PostCreateDto) {
     const member = await prisma.member.findUnique({ where: { id: memberId } });
-    if (!member) throw new NotFoundException('Member not found');
-    if (!member.isActive) throw new ForbiddenException('Member is not active');
-    if (member.isMuted) throw new ForbiddenException('Member is muted from posting');
+    if (!member) throw notFound(ERROR_CODES.MEMBER_NOT_FOUND);
+    if (!member.isActive) throw forbidden(ERROR_CODES.MEMBER_INACTIVE);
+    if (member.isMuted) throw forbidden(ERROR_CODES.MEMBER_MUTED);
 
     const content = dto.content?.trim() ?? '';
     const imageUrls = dto.imageUrls ?? [];
     if (!content && imageUrls.length === 0 && !dto.videoUrl) {
-      throw new BadRequestException('Post must have content, image, or video');
+      throw badRequest(ERROR_CODES.POST_EMPTY);
     }
     if (content.length > MAX_CONTENT_CHARS) {
-      throw new BadRequestException(`Content exceeds ${MAX_CONTENT_CHARS} characters`);
+      throw badRequest(ERROR_CODES.POST_CONTENT_TOO_LONG, { max: MAX_CONTENT_CHARS });
     }
     if (imageUrls.length > MAX_IMAGE_COUNT) {
-      throw new BadRequestException(`Maximum ${MAX_IMAGE_COUNT} images per post`);
+      throw badRequest(ERROR_CODES.POST_TOO_MANY_IMAGES, { max: MAX_IMAGE_COUNT });
     }
 
     if (dto.networkId) {
@@ -230,15 +234,15 @@ export class PostService {
 
     if (dto.topicId) {
       const topic = await prisma.topic.findUnique({ where: { id: dto.topicId } });
-      if (!topic || !topic.isActive) throw new BadRequestException('Topic not available');
+      if (!topic || !topic.isActive) throw badRequest(ERROR_CODES.TOPIC_INACTIVE);
       if (topic.networkId && topic.networkId !== dto.networkId) {
-        throw new BadRequestException('Topic does not belong to specified network');
+        throw badRequest(ERROR_CODES.TOPIC_NETWORK_MISMATCH);
       }
       if (topic.type === 'PRIVATE') {
         const sub = await prisma.topicSubscription.findUnique({
           where: { memberId_topicId: { memberId, topicId: topic.id } },
         });
-        if (!sub) throw new ForbiddenException('Must subscribe to private topic before posting');
+        if (!sub) throw forbidden(ERROR_CODES.TOPIC_SUBSCRIPTION_REQUIRED);
       }
     }
 
@@ -252,7 +256,7 @@ export class PostService {
       },
       select: { id: true },
     });
-    if (dup) throw new BadRequestException('Duplicate post within 10-minute window');
+    if (dup) throw badRequest(ERROR_CODES.POST_DUPLICATE);
 
     const post = await prisma.post.create({
       data: {
@@ -274,6 +278,7 @@ export class PostService {
     notificationEvents.emit('post.published', {
       postId: post.id,
       authorId: post.authorId,
+      topicId: post.topicId,
       networkId: post.networkId,
       excerpt: post.excerpt ?? '',
     });
@@ -282,7 +287,7 @@ export class PostService {
 
   async setCurated(postId: string, isCurated: boolean) {
     const post = await this.resolveByAnyId(postId);
-    if (!post) throw new NotFoundException('Post not found');
+    if (!post) throw notFound(ERROR_CODES.POST_NOT_FOUND);
     return prisma.post.update({
       where: { id: post.id },
       data: { isCurated },
@@ -292,14 +297,14 @@ export class PostService {
 
   async remove(memberId: string, postId: string) {
     const post = await this.resolveByAnyId(postId);
-    if (!post) throw new NotFoundException('Post not found');
+    if (!post) throw notFound(ERROR_CODES.POST_NOT_FOUND);
 
     let allowed = post.authorId === memberId;
     if (!allowed && post.networkId) {
       const isTeam = await this.isNetworkTeam(post.networkId, memberId);
       if (isTeam) allowed = true;
     }
-    if (!allowed) throw new ForbiddenException('Not allowed to delete this post');
+    if (!allowed) throw forbidden(ERROR_CODES.POST_DELETE_FORBIDDEN);
 
     await prisma.post.update({
       where: { id: post.id },
@@ -329,13 +334,13 @@ export class PostService {
       where: { id: networkId },
       select: { id: true, isPublic: true, isActive: true },
     });
-    if (!net) throw new NotFoundException('Network not found');
-    if (!net.isActive) throw new ForbiddenException('Network is not active');
+    if (!net) throw notFound(ERROR_CODES.NETWORK_NOT_FOUND);
+    if (!net.isActive) throw forbidden(ERROR_CODES.NETWORK_INACTIVE);
     if (net.isPublic) return;
     const joined = await prisma.networkMember.findUnique({
       where: { networkId_memberId: { networkId, memberId } },
     });
-    if (!joined) throw new ForbiddenException('Network not visible to viewer');
+    if (!joined) throw forbidden(ERROR_CODES.NETWORK_NOT_VISIBLE);
   }
 
   // Asserts the caller is a NetworkMember of the tribe and is not muted there.
@@ -346,8 +351,8 @@ export class PostService {
       where: { networkId_memberId: { networkId, memberId } },
       select: { isMuted: true },
     });
-    if (!m) throw new ForbiddenException('Must be a member of the network');
-    if (m.isMuted) throw new ForbiddenException('Muted in this network');
+    if (!m) throw forbidden(ERROR_CODES.NETWORK_MEMBERSHIP_REQUIRED);
+    if (m.isMuted) throw forbidden(ERROR_CODES.NETWORK_MEMBER_MUTED);
   }
 
   private async assertNetworkPostable(networkId: string, memberId: string) {
@@ -355,17 +360,17 @@ export class PostService {
       where: { id: networkId },
       select: { isActive: true },
     });
-    if (!net?.isActive) throw new BadRequestException('Network is not active');
+    if (!net?.isActive) throw badRequest(ERROR_CODES.NETWORK_INACTIVE);
     const joined = await prisma.networkMember.findUnique({
       where: { networkId_memberId: { networkId, memberId } },
       select: { isMuted: true },
     });
-    if (!joined) throw new ForbiddenException('Must be a member of the network to post');
-    if (joined.isMuted) throw new ForbiddenException('Muted in this network');
+    if (!joined) throw forbidden(ERROR_CODES.NETWORK_MEMBERSHIP_REQUIRED);
+    if (joined.isMuted) throw forbidden(ERROR_CODES.NETWORK_MEMBER_MUTED);
     const banned = await prisma.networkBannedMember.findUnique({
       where: { networkId_memberId: { networkId, memberId } },
     });
-    if (banned) throw new ForbiddenException('Member is banned from this network');
+    if (banned) throw forbidden(ERROR_CODES.NETWORK_MEMBER_BANNED);
   }
 
   private async isNetworkTeam(networkId: string, memberId: string): Promise<boolean> {

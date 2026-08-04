@@ -2,6 +2,7 @@ import { prisma } from '@bb/db';
 import { logger } from '@bb/common/config/logger';
 import { notificationEvents } from '@bb/common/events/notification-events';
 import { NotificationProducer } from '../notification.producer';
+import { MuteScope } from '../mute-scope';
 import { ActionLabel, NotifGroup } from '../action-labels';
 
 const producer = new NotificationProducer();
@@ -10,12 +11,23 @@ export function registerPostNotificationListener(): void {
   notificationEvents.on('post.liked', async (e) => {
     try {
       if (e.actorId === e.postAuthorId) return;
-      const actor = await prisma.member.findUnique({
-        where: { id: e.actorId },
-        select: { fullName: true },
-      });
-      if (!actor) return;
+      const [actor, post] = await Promise.all([
+        prisma.member.findUnique({
+          where: { id: e.actorId },
+          select: { fullName: true },
+        }),
+        prisma.post.findUnique({
+          where: { id: e.postId },
+          select: { topicId: true, networkId: true },
+        }),
+      ]);
+      if (!actor || !post) return;
 
+      const muteScopes: Array<{ scope: MuteScope; refId: string }> = [
+        { scope: MuteScope.Post, refId: e.postId },
+      ];
+      if (post.topicId) muteScopes.push({ scope: MuteScope.Topic, refId: post.topicId });
+      if (post.networkId) muteScopes.push({ scope: MuteScope.Network, refId: post.networkId });
       await producer.createForMember({
         memberId: e.postAuthorId,
         type: ActionLabel.NewLike,
@@ -23,6 +35,7 @@ export function registerPostNotificationListener(): void {
         title: `${actor.fullName} menyukai postinganmu`,
         payload: { refTable: 'post', refId: e.postId, actorId: e.actorId },
         dedupeKey: `newLike:post:${e.postId}:${e.actorId}`,
+        muteScopes,
       });
     } catch (err) {
       logger.error({ err, postId: e.postId }, '[notification] post.liked listener failed');

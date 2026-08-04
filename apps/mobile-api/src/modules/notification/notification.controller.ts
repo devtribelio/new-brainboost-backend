@@ -1,7 +1,7 @@
 import type { Response } from 'express';
 import { NotificationService } from '@bb/domain/notification/notification.service';
 import { ok, okPaginated } from '@bb/common/utils/response.util';
-import { BadRequestException, UnauthorizedException } from '@bb/common/exceptions';
+import { badRequest, unauthorized, ERROR_CODES } from '@bb/common/exceptions';
 import { parsePagination } from '@bb/common/utils/pagination.util';
 import { serializeNotification } from './notification.serializer';
 import type { AuthenticatedRequest } from '@bb/common/interfaces/authenticated-request';
@@ -15,6 +15,8 @@ import {
 } from '@bb/common/openapi/decorators';
 import {
   NotificationDto,
+  NotificationMuteDto,
+  NotificationMuteResultDto,
   NotificationSeenDto,
   NotificationSeenResultDto,
 } from './dto/notification.dto';
@@ -50,7 +52,7 @@ export class NotificationController {
   })
   @ApiResponse({ status: 200, type: () => NotificationDto, isArray: true, envelope: 'paginated' })
   list = async (req: AuthenticatedRequest, res: Response) => {
-    if (!req.user) throw new UnauthorizedException();
+    if (!req.user) throw unauthorized(ERROR_CODES.AUTH_REQUIRED);
     // FE NotificationQueryRequest defaults perPage to 50.
     const p = parsePagination(req.query as Record<string, unknown>, { perPage: 50 });
     const group = req.query.group as 'general' | 'creator' | 'all' | undefined;
@@ -80,9 +82,10 @@ export class NotificationController {
   @ApiBody({ type: () => NotificationSeenDto })
   @ApiResponse({ status: 200, type: () => NotificationSeenResultDto })
   seen = async (req: AuthenticatedRequest, res: Response) => {
-    if (!req.user) throw new UnauthorizedException();
+    if (!req.user) throw unauthorized(ERROR_CODES.AUTH_REQUIRED);
     const body = (req.body ?? {}) as Record<string, unknown>;
-    const notificationId = typeof body.notificationId === 'string' ? body.notificationId : undefined;
+    const notificationId =
+      typeof body.notificationId === 'string' ? body.notificationId : undefined;
     const notificationIds = Array.isArray(body.notificationIds)
       ? (body.notificationIds as string[])
       : undefined;
@@ -95,26 +98,36 @@ export class NotificationController {
     return ok(res, { updated: result.count });
   };
 
-  @ApiOperation({ summary: 'Mute notifications for a post or network' })
+  // Scope validation lives in NotificationService (assertMuteScope) so mute and
+  // unmute cannot drift apart — they used to disagree on which scopes are legal.
+  @ApiOperation({
+    summary: 'Mute notifications for a post, topic, or network',
+    description:
+      'Silences every notification originating from that object. Muting a topic also covers comments/replies/tags/likes on posts inside it. Idempotent — muting twice is a no-op.',
+  })
+  @ApiBody({ type: () => NotificationMuteDto })
+  @ApiResponse({ status: 200, type: () => NotificationMuteResultDto })
   mute = async (req: AuthenticatedRequest, res: Response) => {
-    if (!req.user) throw new UnauthorizedException();
+    if (!req.user) throw unauthorized(ERROR_CODES.AUTH_REQUIRED);
     const body = (req.body ?? {}) as Record<string, unknown>;
     const scope = typeof body.scope === 'string' ? body.scope : '';
     const refId = typeof body.refId === 'string' ? body.refId : '';
-    if (!scope || !refId) throw new BadRequestException('scope and refId required');
-    if (scope !== 'post' && scope !== 'network') {
-      throw new BadRequestException('scope must be post or network');
-    }
+    if (!scope || !refId) throw badRequest(ERROR_CODES.NOTIFICATION_SCOPE_REQUIRED);
     return ok(res, await this.notificationService.mute(req.user.id, scope, refId));
   };
 
-  @ApiOperation({ summary: 'Unmute notifications for a post or network' })
+  @ApiOperation({
+    summary: 'Unmute notifications for a post, topic, or network',
+    description: 'Reverses /mute with the same scope + refId. Unmuting what was never muted is a no-op.',
+  })
+  @ApiBody({ type: () => NotificationMuteDto })
+  @ApiResponse({ status: 200, type: () => NotificationMuteResultDto })
   unmute = async (req: AuthenticatedRequest, res: Response) => {
-    if (!req.user) throw new UnauthorizedException();
+    if (!req.user) throw unauthorized(ERROR_CODES.AUTH_REQUIRED);
     const body = (req.body ?? {}) as Record<string, unknown>;
     const scope = typeof body.scope === 'string' ? body.scope : '';
     const refId = typeof body.refId === 'string' ? body.refId : '';
-    if (!scope || !refId) throw new BadRequestException('scope and refId required');
+    if (!scope || !refId) throw badRequest(ERROR_CODES.NOTIFICATION_SCOPE_REQUIRED);
     return ok(res, await this.notificationService.unmute(req.user.id, scope, refId));
   };
 }

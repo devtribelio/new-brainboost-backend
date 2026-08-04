@@ -1,3 +1,4 @@
+import { traceService } from '@bb/common/utils/trace-service';
 import { Router } from 'express';
 import { CommentController } from './comment.controller';
 import { CommentService } from '@bb/domain/comment/comment.service';
@@ -6,7 +7,7 @@ import { bindRoute } from '@bb/common/openapi/route-binder';
 
 export function commentRoutes(): Router {
   const router = Router();
-  const ctrl = new CommentController(new CommentService());
+  const ctrl = new CommentController(traceService(new CommentService()));
 
   bindRoute({ router, controller: ctrl, method: 'get', path: '/comment/list', handlerKey: 'list', middlewares: [optionalAuthGuard] });
   bindRoute({ router, controller: ctrl, method: 'get', path: '/comment/detail', handlerKey: 'detail', middlewares: [optionalAuthGuard] });

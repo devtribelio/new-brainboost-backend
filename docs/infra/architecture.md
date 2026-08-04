@@ -19,7 +19,7 @@ comms broker (migrated from RabbitMQ — PR #82). Region locked to **ap-southeas
 | bb-backoffice-api | stateless HTTP, internal | ⚪ fixed 1 (opt. 2 for HA) | Fargate service behind ALB (path `/api/backoffice/*`) |
 | bb-admin-ejs | stateless HTTP, internal | ⚪ fixed 1 | Fargate service (internal/ALB `/admin/*`) |
 | **bb-comms-relay** | outbox → SQS (SendMessage) | 🔴 **SINGLETON — never scale** (PENDING→SENT flip not concurrency-safe) | Fargate service `desiredCount=1` |
-| **bb-cron** | hourly money jobs (PENDING→BALANCE, expire-payments) | 🔴 **SINGLETON** (double-run = double money) | EventBridge Scheduled → Fargate task (or `desiredCount=1`) |
+| **bb-cron** | hourly jobs (PENDING→BALANCE, expire-payments, topic digest) | 🔴 **SINGLETON** (double-run = double money) | EventBridge Scheduled → Fargate task (or `desiredCount=1`) |
 | Comms broker | queue (managed) | ❌ no autoscale | **Amazon SQS** — 2 Standard queues (`urgent`, `normal`) + DLQ |
 | **PostgreSQL** | DB (stateful) | ❌ no autoscale | **RDS Multi-AZ + 1 read replica** |
 | External SaaS | Xendit, RevenueCat, BunnyCDN, S3, Sumsub, FCM, SES, Qontak, Google/Apple | n/a | vendor-managed |

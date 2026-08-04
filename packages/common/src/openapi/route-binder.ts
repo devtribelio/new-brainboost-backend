@@ -1,5 +1,6 @@
-import type { Router, RequestHandler } from 'express';
+import type { Request, Response, NextFunction, Router, RequestHandler } from 'express';
 import { asyncHandler } from '@bb/common/utils/async-handler';
+import { tagRoute } from '@bb/common/middlewares/request-logger.middleware';
 import { registerRoute } from './registry';
 import { REQUIRES_BEARER_AUTH, type HttpMethod } from './types';
 
@@ -29,7 +30,17 @@ export function bindRoute(opts: BindOptions): void {
   }
   const wrapped = asyncHandler(handlerFn.bind(opts.controller) as any);
   const middlewares = opts.middlewares ?? [];
-  const handlers = [...middlewares, wrapped];
+  // Stamp the matched route + handler onto the request-logging context, so every
+  // log line the request produces (guards, service layer, Prisma) carries the
+  // route pattern instead of just the raw path. Goes FIRST in the stack: Express
+  // fills `req.route` when the layer matches, before running any of its
+  // handlers, so a guard that rejects with 401 is still attributed to its route.
+  const handlerName = `${opts.controller.constructor.name}.${opts.handlerKey}`;
+  const tag: RequestHandler = (req: Request, _res: Response, next: NextFunction) => {
+    tagRoute(req, handlerName);
+    next();
+  };
+  const handlers = [tag, ...middlewares, wrapped];
   opts.router[opts.method](opts.path, ...handlers);
 
   const bearerAuth = middlewares.some(

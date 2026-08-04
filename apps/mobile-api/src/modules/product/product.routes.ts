@@ -1,3 +1,4 @@
+import { traceService } from '@bb/common/utils/trace-service';
 import { Router } from 'express';
 import { ProductController } from './product.controller';
 import { ProductService } from './product.service';
@@ -9,7 +10,7 @@ import { ListProductsQueryDto } from './dto/list-query.dto';
 
 export function productRoutes(): Router {
   const router = Router();
-  const ctrl = new ProductController(new ProductService(), new AffiliatorService());
+  const ctrl = new ProductController(traceService(new ProductService()), traceService(new AffiliatorService()));
 
   bindRoute({
     router,

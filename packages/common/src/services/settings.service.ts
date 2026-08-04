@@ -25,6 +25,9 @@ export const SETTING_KEYS = {
   disbursementFee: 'disbursement.fee',
   disbursementMinBalance: 'disbursement.minBalance',
   kycMinBalance: 'kyc.minBalance',
+  notificationUnopenedPushLimit: 'notification.unopenedPushLimit',
+  notificationDigestEnabled: 'notification.digestEnabled',
+  notificationDigestHour: 'notification.digestHour',
   salesAlertEmail: 'sales.alertEmail',
 } as const;
 

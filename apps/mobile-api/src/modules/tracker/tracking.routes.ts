@@ -1,3 +1,4 @@
+import { traceService } from '@bb/common/utils/trace-service';
 import { Router } from 'express';
 import { TrackingController } from './tracking.controller';
 import { TrackingService } from './tracking.service';
@@ -8,7 +9,7 @@ import { TrackSessionDto } from './dto/track-session.dto';
 
 export function trackingRoutes(): Router {
   const router = Router();
-  const ctrl = new TrackingController(new TrackingService());
+  const ctrl = new TrackingController(traceService(new TrackingService()));
 
   bindRoute({
     router,

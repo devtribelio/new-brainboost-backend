@@ -48,8 +48,7 @@ Postgres via the kernel.
 
 `NormalizedPurchase` mapping:
 
-- `memberRef.byId = event.app_user_id` (the new `Member.id` UUID set by the iOS
-  SDK), fallback `byEmail = subscriber_attributes.$email`.
+- `memberRef` — see **Member resolution** below.
 - `productRef.bySku = event.product_id` → resolved against `Product.iosProductId`.
 - `grossAmount = event.price_in_purchased_currency` (local IDR, **not** `event.price`
   which is USD).
@@ -57,6 +56,39 @@ Postgres via the kernel.
   `CANCELLATION` carries the same `transaction_id`, not the purchase's `event.id`).
   REFUND uses its own `event.id` as `providerEventId` and
   `refundOfProviderEventId = transaction_id`.
+
+## Member resolution (`app_user_id` is not always a UUID)
+
+`app_user_id` only carries `Member.id` once the app has called
+`Purchases.logIn()`. A purchase completed before that — or after a
+reinstall/logout — arrives as RC's anonymous id instead:
+
+```json
+{ "app_user_id": "$RCAnonymousID:1384062dfb284e6883fafe704b2bb252",
+  "aliases": ["$RCAnonymousID:1384062dfb284e6883fafe704b2bb252"] }
+```
+
+`RevenueCatWebhookHandler.memberRef()` resolves in this order:
+
+1. **first UUID** among `app_user_id` → `original_app_user_id` → `aliases`
+   (RC backfills `aliases` with the real id when the SDK aliases an anonymous
+   customer later, so the id is often still recoverable);
+2. else `subscriber_attributes.$email.value` → `memberRef.byEmail`, matched
+   case-insensitively against `members.email`.
+
+Anonymous ids are **dropped**, never passed through as `byId`. This is the
+whole point of the guard: `members.id` is `@db.Uuid`, so
+`findUnique({ where: { id: '$RCAnonymousID:…' } })` throws Prisma **P2023**,
+which `errorHandler` maps to **400** — RC then exhausts its retries and the
+event is lost for good (member paid, no access), and the `$email` fallback in
+`resolveMember` never runs because the throw happens first. `isUuid()` guards
+both `resolveMember` and `resolveProduct` in `purchaseIngestService` so every
+ingest channel is covered, not just RC.
+
+When nothing resolves, the ingest returns `member_not_found` and the handler
+logs at **warn** (`[revenuecat] ingested`, with `appUserId` + `memberRef`) —
+the response is still 200, so this log line is the only alertable signal that a
+paid purchase went ungranted.
 
 ## Burst handling (IAP-restore flood)
 

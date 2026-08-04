@@ -1,6 +1,6 @@
 import { OAuth2Client } from 'google-auth-library';
 import { env } from '@bb/common/config/env';
-import { BadRequestException, UnauthorizedException } from '@bb/common/exceptions';
+import { badRequest, unauthorized, ERROR_CODES } from '@bb/common/exceptions';
 
 export interface GoogleIdTokenPayload {
   sub: string;
@@ -13,7 +13,7 @@ const client = new OAuth2Client();
 
 export async function verifyGoogleIdToken(idToken: string): Promise<GoogleIdTokenPayload> {
   if (env.google.audiences.length === 0) {
-    throw new BadRequestException('Google sign-in not configured');
+    throw badRequest(ERROR_CODES.SOCIAL_SIGNIN_NOT_CONFIGURED);
   }
 
   let ticket;
@@ -23,12 +23,12 @@ export async function verifyGoogleIdToken(idToken: string): Promise<GoogleIdToke
       audience: env.google.audiences,
     });
   } catch {
-    throw new UnauthorizedException('invalid_google_id_token');
+    throw unauthorized(ERROR_CODES.GOOGLE_ID_TOKEN_INVALID);
   }
 
   const payload = ticket.getPayload();
   if (!payload || !payload.sub || !payload.email) {
-    throw new UnauthorizedException('invalid_google_id_token');
+    throw unauthorized(ERROR_CODES.GOOGLE_ID_TOKEN_INVALID);
   }
 
   return {

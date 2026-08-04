@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest';
 import request from 'supertest';
+import { randomUUID } from 'node:crypto';
 
 const { verifyIdTokenMock } = vi.hoisted(() => ({ verifyIdTokenMock: vi.fn() }));
 vi.mock('google-auth-library', () => ({
@@ -85,7 +86,7 @@ describe('auth social google grant', () => {
       social_token: 'tampered.token',
     });
     expect(res.status).toBe(401);
-    expect(res.body.error.code).toBe('UNAUTHORIZED');
+    expect(res.body.error.code).toBe('GOOGLE_ID_TOKEN_INVALID');
   });
 
   it('email_verified=false → 401', async () => {
@@ -100,7 +101,7 @@ describe('auth social google grant', () => {
       social_token: 'fake.id.token',
     });
     expect(res.status).toBe(401);
-    expect(res.body.error.message).toBe('google_email_not_verified');
+    expect(res.body.error.code).toBe('GOOGLE_EMAIL_NOT_VERIFIED');
   });
 
   it('new email creates member with isEmailVerified=true and passwordAlgo=social', async () => {
@@ -251,7 +252,152 @@ describe('auth social google grant', () => {
       social_token: 'fake.id.token',
     });
     expect(res.status).toBe(400);
-    expect(res.body.error.message).toBe('email_in_use_unverified');
+    expect(res.body.error.code).toBe('EMAIL_IN_USE_UNVERIFIED');
+  });
+
+  // --- legacy-migrated rows: unverified email is missing data, not an unproven
+  // claim (legacy had no OTP gate), so the link path heals instead of blocking.
+  describe('link path on legacy-migrated rows (isEmailVerified=false)', () => {
+    function legacyId(): number {
+      return 900_000_000 + Math.floor(Math.random() * 9_000_000);
+    }
+
+    async function createLegacyRow(
+      email: string,
+      overrides: { isActive?: boolean; legacyId?: number | null } = {},
+    ) {
+      return prisma.member.create({
+        data: {
+          email,
+          legacyId: overrides.legacyId === undefined ? legacyId() : overrides.legacyId,
+          fullName: 'Legacy Member',
+          passwordHash: '$2b$10$notarealbcrypthashbutlongenoughxxxxxxxxxxxxxxxxxxxxxxx',
+          passwordAlgo: 'legacy',
+          isActive: overrides.isActive ?? true,
+          isEmailVerified: false,
+        },
+      });
+    }
+
+    it('legacy row + no googleSub → links sub AND flips isEmailVerified', async () => {
+      const email = trackedEmail('legacy-link');
+      await createLegacyRow(email);
+
+      const sub = `gs-${Date.now()}-legacy-link`;
+      setGoogleResponse({ sub, email, email_verified: true, name: 'Legacy Member' });
+      const res = await tokenRequest({
+        grant_type: 'social',
+        provider: 'google',
+        social_token: 'fake.id.token',
+      });
+
+      expect(res.status).toBe(200);
+      const linked = await prisma.member.findUnique({ where: { email } });
+      expect(linked!.googleSub).toBe(sub);
+      expect(linked!.isEmailVerified).toBe(true);
+      expect(await prisma.member.count({ where: { email } })).toBe(1);
+    });
+
+    it('non-legacy ACTIVE unverified row → still 400 (gate is legacyId, not isActive)', async () => {
+      const email = trackedEmail('active-unverified');
+      await createLegacyRow(email, { legacyId: null });
+
+      setGoogleResponse({
+        sub: `gs-${Date.now()}-active-unv`,
+        email,
+        email_verified: true,
+        name: 'Attacker',
+      });
+      const res = await tokenRequest({
+        grant_type: 'social',
+        provider: 'google',
+        social_token: 'fake.id.token',
+      });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error.code).toBe('EMAIL_IN_USE_UNVERIFIED');
+      const untouched = await prisma.member.findUnique({ where: { email } });
+      expect(untouched!.googleSub).toBeNull();
+      expect(untouched!.isEmailVerified).toBe(false);
+    });
+
+    it('legacy row that is inactive → 401 member_inactive, not a link', async () => {
+      const email = trackedEmail('legacy-inactive');
+      await createLegacyRow(email, { isActive: false });
+
+      setGoogleResponse({
+        sub: `gs-${Date.now()}-legacy-inact`,
+        email,
+        email_verified: true,
+        name: 'Legacy Member',
+      });
+      const res = await tokenRequest({
+        grant_type: 'social',
+        provider: 'google',
+        social_token: 'fake.id.token',
+      });
+
+      expect(res.status).toBe(401);
+      expect(res.body.error.code).toBe('MEMBER_INACTIVE');
+      const untouched = await prisma.member.findUnique({ where: { email } });
+      expect(untouched!.googleSub).toBeNull();
+      expect(untouched!.isEmailVerified).toBe(false);
+    });
+
+    it('heal-link revokes pre-existing web sessions (multi-session bucket)', async () => {
+      const email = trackedEmail('legacy-revoke');
+      const member = await createLegacyRow(email);
+      const plantedId = randomUUID();
+      await prisma.refreshToken.create({
+        data: {
+          id: plantedId,
+          memberId: member.id,
+          token: `planted-${plantedId}`,
+          expiresAt: new Date(Date.now() + 30 * 24 * 3600 * 1000),
+          clientType: 'web',
+        },
+      });
+
+      setGoogleResponse({
+        sub: `gs-${Date.now()}-legacy-revoke`,
+        email,
+        email_verified: true,
+        name: 'Legacy Member',
+      });
+      const res = await tokenRequest({
+        grant_type: 'social',
+        provider: 'google',
+        social_token: 'fake.id.token',
+        client_type: 'web',
+      });
+      expect(res.status).toBe(200);
+
+      const planted = await prisma.refreshToken.findUnique({ where: { id: plantedId } });
+      expect(planted!.revokedAt).not.toBeNull();
+    });
+
+    it('heal-link leaves the resync touch-gate untripped (legacySyncedAt == updatedAt)', async () => {
+      const email = trackedEmail('legacy-gate');
+      await createLegacyRow(email);
+
+      setGoogleResponse({
+        sub: `gs-${Date.now()}-legacy-gate`,
+        email,
+        email_verified: true,
+        name: 'Legacy Member',
+      });
+      const res = await tokenRequest({
+        grant_type: 'social',
+        provider: 'google',
+        social_token: 'fake.id.token',
+      });
+      expect(res.status).toBe(200);
+
+      const healed = await prisma.member.findUnique({ where: { email } });
+      expect(healed!.legacySyncedAt).not.toBeNull();
+      // The syncer's gate is `updatedAt > legacySyncedAt` → must be false.
+      expect(healed!.updatedAt.getTime()).toBe(healed!.legacySyncedAt!.getTime());
+    });
   });
 
   it('single-session: prior mobile session revoked after social login', async () => {
@@ -279,7 +425,7 @@ describe('auth social google grant', () => {
 
     const reuse = await tokenRequest({ grant_type: 'refresh_token', refresh_token: firstRefresh });
     expect(reuse.status).toBe(401);
-    expect(reuse.body.error.message).toBe('session_revoked');
+    expect(reuse.body.error.code).toBe('SESSION_REVOKED');
   });
 
   it('password grant on social-only account is rejected', async () => {

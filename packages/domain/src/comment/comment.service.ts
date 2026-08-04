@@ -1,6 +1,6 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '@bb/db';
-import { BadRequestException, ForbiddenException, NotFoundException } from '@bb/common/exceptions';
+import { badRequest, forbidden, notFound, ERROR_CODES } from '@bb/common/exceptions';
 import type { PaginationParams } from '@bb/common/utils/pagination.util';
 import { notificationEvents } from '@bb/common/events/notification-events';
 import { assertUuid } from '@bb/common/utils/uuid.util';
@@ -107,7 +107,7 @@ export class CommentService {
 
   async detail(id: string) {
     const c = await this.resolveCommentByAnyId(id);
-    if (!c || c.isDeleted) throw new NotFoundException('Comment not found');
+    if (!c || c.isDeleted) throw notFound(ERROR_CODES.COMMENT_NOT_FOUND);
     return c;
   }
 
@@ -125,7 +125,7 @@ export class CommentService {
     commentInput: string,
   ): Promise<{ isLiked: boolean; commentLegacyId: number | null; countLike: number }> {
     const c = await this.resolveCommentByAnyId(commentInput);
-    if (!c) throw new NotFoundException('Comment not found');
+    if (!c) throw notFound(ERROR_CODES.COMMENT_NOT_FOUND);
     if (c.post?.networkId) await this.assertNetworkAccess(c.post.networkId, memberId);
 
     const result = await prisma.$transaction(async (tx) => {
@@ -171,49 +171,52 @@ export class CommentService {
     return { isLiked: result.isLiked, commentLegacyId: c.legacyId, countLike: result.countLike };
   }
 
-  async create(memberId: string, dto: {
-    postId: string;
-    content: string;
-    parentId?: string;
-  }) {
+  async create(
+    memberId: string,
+    dto: {
+      postId: string;
+      content: string;
+      parentId?: string;
+    },
+  ) {
     const member = await prisma.member.findUnique({ where: { id: memberId } });
-    if (!member) throw new NotFoundException('Member not found');
-    if (!member.isActive) throw new ForbiddenException('Member is not active');
-    if (member.isMuted) throw new ForbiddenException('Member is muted');
+    if (!member) throw notFound(ERROR_CODES.MEMBER_NOT_FOUND);
+    if (!member.isActive) throw forbidden(ERROR_CODES.MEMBER_INACTIVE);
+    if (member.isMuted) throw forbidden(ERROR_CODES.MEMBER_MUTED);
 
     const sanitized = sanitizeContent(dto.content ?? '');
     if (!sanitized) {
-      throw new BadRequestException('Comment must have content');
+      throw badRequest(ERROR_CODES.COMMENT_EMPTY);
     }
     if (sanitized.length > MAX_CONTENT_CHARS) {
-      throw new BadRequestException(`Content exceeds ${MAX_CONTENT_CHARS} characters`);
+      throw badRequest(ERROR_CODES.COMMENT_CONTENT_TOO_LONG, { max: MAX_CONTENT_CHARS });
     }
 
     const postId = await this.resolvePostId(dto.postId);
-    if (!postId) throw new NotFoundException('Post not found');
+    if (!postId) throw notFound(ERROR_CODES.POST_NOT_FOUND);
 
     const post = await prisma.post.findUnique({
       where: { id: postId },
       select: { isDeleted: true, publishStatus: true, networkId: true },
     });
-    if (!post || post.isDeleted) throw new NotFoundException('Post not found');
+    if (!post || post.isDeleted) throw notFound(ERROR_CODES.POST_NOT_FOUND);
     if (!isPublished(post.publishStatus)) {
-      throw new BadRequestException('Cannot comment on unpublished post');
+      throw badRequest(ERROR_CODES.COMMENT_ON_UNPUBLISHED_POST);
     }
     if (post.networkId) {
       await this.assertNetworkAccess(post.networkId, memberId);
       const banned = await prisma.networkBannedMember.findUnique({
         where: { networkId_memberId: { networkId: post.networkId, memberId } },
       });
-      if (banned) throw new ForbiddenException('Member is banned from network');
+      if (banned) throw forbidden(ERROR_CODES.NETWORK_MEMBER_BANNED);
     }
 
     let parentId: string | null = null;
     if (dto.parentId) {
       const parent = await this.resolveCommentByAnyId(dto.parentId);
-      if (!parent || parent.isDeleted) throw new NotFoundException('Parent comment not found');
+      if (!parent || parent.isDeleted) throw notFound(ERROR_CODES.PARENT_COMMENT_NOT_FOUND);
       if (parent.postId !== postId) {
-        throw new BadRequestException('Parent comment belongs to a different post');
+        throw badRequest(ERROR_CODES.PARENT_COMMENT_POST_MISMATCH);
       }
       parentId = parent.id;
     }
@@ -257,16 +260,16 @@ export class CommentService {
 
   async update(memberId: string, commentInput: string, content: string) {
     const c = await this.resolveCommentByAnyId(commentInput);
-    if (!c) throw new NotFoundException('Comment not found');
-    if (c.isDeleted) throw new NotFoundException('Comment was deleted');
-    if (c.authorId !== memberId) throw new ForbiddenException('Not the author');
+    if (!c) throw notFound(ERROR_CODES.COMMENT_NOT_FOUND);
+    if (c.isDeleted) throw notFound(ERROR_CODES.COMMENT_DELETED);
+    if (c.authorId !== memberId) throw forbidden(ERROR_CODES.COMMENT_NOT_AUTHOR);
 
     const sanitized = sanitizeContent(content ?? '');
     if (!sanitized) {
-      throw new BadRequestException('Comment must have content');
+      throw badRequest(ERROR_CODES.COMMENT_EMPTY);
     }
     if (sanitized.length > MAX_CONTENT_CHARS) {
-      throw new BadRequestException(`Content exceeds ${MAX_CONTENT_CHARS} characters`);
+      throw badRequest(ERROR_CODES.COMMENT_CONTENT_TOO_LONG, { max: MAX_CONTENT_CHARS });
     }
 
     return prisma.comment.update({
@@ -278,7 +281,7 @@ export class CommentService {
 
   async setCurated(commentInput: string, isCurated: boolean) {
     const c = await this.resolveCommentByAnyId(commentInput);
-    if (!c) throw new NotFoundException('Comment not found');
+    if (!c) throw notFound(ERROR_CODES.COMMENT_NOT_FOUND);
     return prisma.comment.update({
       where: { id: c.id },
       data: { isCurated },
@@ -288,7 +291,7 @@ export class CommentService {
 
   async remove(memberId: string, commentInput: string) {
     const c = await this.resolveCommentByAnyId(commentInput);
-    if (!c) throw new NotFoundException('Comment not found');
+    if (!c) throw notFound(ERROR_CODES.COMMENT_NOT_FOUND);
 
     let allowed = c.authorId === memberId;
     if (!allowed) {
@@ -304,7 +307,7 @@ export class CommentService {
         if (team) allowed = true;
       }
     }
-    if (!allowed) throw new ForbiddenException('Not allowed to delete this comment');
+    if (!allowed) throw forbidden(ERROR_CODES.COMMENT_DELETE_FORBIDDEN);
 
     await prisma.$transaction(async (tx) => {
       await tx.comment.update({
@@ -352,7 +355,7 @@ export class CommentService {
       where: { networkId_memberId: { networkId, memberId } },
       select: { isMuted: true },
     });
-    if (!m) throw new ForbiddenException('Must be a member of the network');
-    if (m.isMuted) throw new ForbiddenException('Muted in this network');
+    if (!m) throw forbidden(ERROR_CODES.NETWORK_MEMBERSHIP_REQUIRED);
+    if (m.isMuted) throw forbidden(ERROR_CODES.NETWORK_MEMBER_MUTED);
   }
 }

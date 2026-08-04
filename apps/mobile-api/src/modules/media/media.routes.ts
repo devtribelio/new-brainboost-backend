@@ -1,3 +1,4 @@
+import { traceService } from '@bb/common/utils/trace-service';
 import { Router } from 'express';
 import { MediaController } from './media.controller';
 import { MediaService } from './media.service';
@@ -18,7 +19,7 @@ import { bindRoute } from '@bb/common/openapi/route-binder';
  */
 export function mediaRoutes(): Router {
   const router = Router();
-  const ctrl = new MediaController(new MediaService());
+  const ctrl = new MediaController(traceService(new MediaService()));
 
   bindRoute({
     router,
@@ -38,6 +39,18 @@ export function mediaRoutes(): Router {
     method: 'get',
     path: '/media/download',
     handlerKey: 'download',
+    middlewares: [optionalAuthGuard, mediaDownloadRateLimiter],
+  });
+
+  // Lesson documents (DocumentTemplate slides) — same gating and rate limit as
+  // download, but the asset is a private S3 object rather than a Bunny video, so
+  // it 302s to a presigned GET instead of a signed Bunny URL.
+  bindRoute({
+    router,
+    controller: ctrl,
+    method: 'get',
+    path: '/media/document',
+    handlerKey: 'document',
     middlewares: [optionalAuthGuard, mediaDownloadRateLimiter],
   });
 

@@ -1,14 +1,9 @@
 import type { Response } from 'express';
 import { CommissionService } from './commission.service';
 import { ok } from '@bb/common/utils/response.util';
-import { UnauthorizedException } from '@bb/common/exceptions';
+import { unauthorized, ERROR_CODES } from '@bb/common/exceptions';
 import type { AuthenticatedRequest } from '@bb/common/interfaces/authenticated-request';
-import {
-  ApiBearerAuth,
-  ApiOperation,
-  ApiResponse,
-  ApiTags,
-} from '@bb/common/openapi/decorators';
+import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@bb/common/openapi/decorators';
 import { CommissionSummaryDto } from './dto/commission.dto';
 
 @ApiTags('Commission')
@@ -19,7 +14,7 @@ export class CommissionController {
   @ApiOperation({ summary: 'Aggregated commission summary + recent entries' })
   @ApiResponse({ status: 200, type: () => CommissionSummaryDto })
   summary = async (req: AuthenticatedRequest, res: Response) => {
-    if (!req.user) throw new UnauthorizedException();
+    if (!req.user) throw unauthorized(ERROR_CODES.AUTH_REQUIRED);
     return ok(res, await this.commissionService.summary(req.user.id));
   };
 }

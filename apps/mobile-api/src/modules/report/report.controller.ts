@@ -1,7 +1,7 @@
 import type { Request, Response } from 'express';
 import { ReportService } from './report.service';
 import { ok, okCreated } from '@bb/common/utils/response.util';
-import { BadRequestException, UnauthorizedException } from '@bb/common/exceptions';
+import { badRequest, unauthorized, ERROR_CODES } from '@bb/common/exceptions';
 import type { AuthenticatedRequest } from '@bb/common/interfaces/authenticated-request';
 import {
   ApiBearerAuth,
@@ -37,12 +37,12 @@ export class ReportController {
   @ApiBody({ type: () => ReportMemberRequestDto })
   @ApiResponse({ status: 201, type: () => ReportResultDto })
   memberReport = async (req: AuthenticatedRequest, res: Response) => {
-    if (!req.user) throw new UnauthorizedException();
+    if (!req.user) throw unauthorized(ERROR_CODES.AUTH_REQUIRED);
     const body = req.body ?? {};
     const targetMemberId = (body.memberId ?? body.targetId ?? body.targetMemberId) as string;
     const categoryId = (body.categoryId ?? body.reportCategoryId) as string;
     if (!targetMemberId || !categoryId) {
-      throw new BadRequestException('memberId and categoryId required');
+      throw badRequest(ERROR_CODES.REPORT_PARAMS_REQUIRED);
     }
     const r = await this.reportService.reportMember(req.user.id, {
       targetMemberId,
@@ -57,12 +57,12 @@ export class ReportController {
   @ApiOperation({ summary: 'Report a post' })
   @ApiResponse({ status: 201, type: () => ReportResultDto })
   postReport = async (req: AuthenticatedRequest, res: Response) => {
-    if (!req.user) throw new UnauthorizedException();
+    if (!req.user) throw unauthorized(ERROR_CODES.AUTH_REQUIRED);
     const body = req.body ?? {};
     const postId = body.postId as string;
     const categoryId = (body.categoryId ?? body.reportCategoryId) as string;
     if (!postId || !categoryId) {
-      throw new BadRequestException('postId and categoryId required');
+      throw badRequest(ERROR_CODES.REPORT_PARAMS_REQUIRED);
     }
     const r = await this.reportService.reportPost(req.user.id, {
       postId,

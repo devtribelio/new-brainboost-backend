@@ -1,6 +1,7 @@
 import { prisma } from '@bb/db';
 import { logger } from '@bb/common/config/logger';
-import { BadRequestException } from '@bb/common/exceptions';
+import { badRequest, ERROR_CODES } from '@bb/common/exceptions';
+import { isUuid } from '@bb/common/utils/uuid.util';
 import { commerceEvents } from '@bb/common/events/commerce-events';
 import { generateOrderCode } from '@bb/domain/commerce/utils/generate-order-code';
 import { attributionService } from '@bb/domain/affiliate/attribution.service';
@@ -60,9 +61,9 @@ export interface IngestResult {
 
 export class PurchaseIngestService {
   async ingest(input: NormalizedPurchase, cred: VerifiedCredential): Promise<IngestResult> {
-    if (!input.providerEventId) throw new BadRequestException('providerEventId is required');
+    if (!input.providerEventId) throw badRequest(ERROR_CODES.INGEST_EVENT_ID_REQUIRED);
     if (input.type !== 'PURCHASE' && input.type !== 'REFUND') {
-      throw new BadRequestException('type must be PURCHASE or REFUND');
+      throw badRequest(ERROR_CODES.INGEST_TYPE_INVALID);
     }
 
     if (input.type === 'REFUND') return this.handleRefund(input, cred);
@@ -74,7 +75,9 @@ export class PurchaseIngestService {
 
     // Idempotency: one transaction per (provider, providerEventId).
     const existing = await prisma.commerceTransaction.findUnique({
-      where: { provider_providerEventId: { provider: cred.name, providerEventId: input.providerEventId } },
+      where: {
+        provider_providerEventId: { provider: cred.name, providerEventId: input.providerEventId },
+      },
       select: { id: true },
     });
     if (existing) return { status: 'duplicate', transactionId: existing.id };
@@ -84,9 +87,8 @@ export class PurchaseIngestService {
     // `acceptedAmount` = net settlement (after store cut + tax). When the
     // adapter didn't compute it, mirror `gross` so reporting stays non-null and
     // identical to legacy behavior.
-    const accepted = input.netAmount != null
-      ? Math.max(0, Math.min(gross, Math.round(input.netAmount)))
-      : gross;
+    const accepted =
+      input.netAmount != null ? Math.max(0, Math.min(gross, Math.round(input.netAmount))) : gross;
 
     // RevenueCat can deliver a burst of events in the same instant (IAP restore
     // flood). The order code is count-derived → concurrent inserts collide on
@@ -150,7 +152,12 @@ export class PurchaseIngestService {
 
         // Genuine idempotency duplicate (provider, providerEventId already used)?
         const dup = await prisma.commerceTransaction.findUnique({
-          where: { provider_providerEventId: { provider: cred.name, providerEventId: input.providerEventId } },
+          where: {
+            provider_providerEventId: {
+              provider: cred.name,
+              providerEventId: input.providerEventId,
+            },
+          },
           select: { id: true },
         });
         if (dup) return { status: 'duplicate', transactionId: dup.id };
@@ -188,7 +195,11 @@ export class PurchaseIngestService {
     // Affiliate override only resolved when this settle is the commission-bearing one.
     // Pass productId so per-product attribution (B-5) prefers a visit for THIS product.
     const overrideAffiliatorMemberId = affiliateEligible
-      ? await attributionService.resolveOverrideAffiliatorMemberId(memberId, input.affiliatorCode, productId)
+      ? await attributionService.resolveOverrideAffiliatorMemberId(
+          memberId,
+          input.affiliatorCode,
+          productId,
+        )
       : null;
 
     commerceEvents.emit('commerce.payment.success', {
@@ -214,13 +225,18 @@ export class PurchaseIngestService {
     return { status: 'committed', transactionId: txId, paymentId };
   }
 
-  private async handleRefund(input: NormalizedPurchase, cred: VerifiedCredential): Promise<IngestResult> {
+  private async handleRefund(
+    input: NormalizedPurchase,
+    cred: VerifiedCredential,
+  ): Promise<IngestResult> {
     if (!cred.canIngestRefund) return { status: 'refund_not_permitted' };
     const originalEventId = input.refundOfProviderEventId;
-    if (!originalEventId) throw new BadRequestException('refundOfProviderEventId required for REFUND');
+    if (!originalEventId) throw badRequest(ERROR_CODES.INGEST_REFUND_REFERENCE_REQUIRED);
 
     const tx = await prisma.commerceTransaction.findUnique({
-      where: { provider_providerEventId: { provider: cred.name, providerEventId: originalEventId } },
+      where: {
+        provider_providerEventId: { provider: cred.name, providerEventId: originalEventId },
+      },
       select: {
         id: true,
         memberId: true,
@@ -234,7 +250,11 @@ export class PurchaseIngestService {
     const paymentIds = tx.payments.map((p) => p.id);
     const res = await prisma.affiliateCommission.updateMany({
       where: { paymentId: { in: paymentIds }, status: { not: COMMISSION_STATUS.VOIDED } },
-      data: { status: COMMISSION_STATUS.VOIDED, voidedAt: new Date(), voidedReason: `refund:${input.providerEventId}` },
+      data: {
+        status: COMMISSION_STATUS.VOIDED,
+        voidedAt: new Date(),
+        voidedReason: `refund:${input.providerEventId}`,
+      },
     });
     await prisma.commerceTransaction.update({ where: { id: tx.id }, data: { status: 'REFUNDED' } });
 
@@ -270,7 +290,11 @@ export class PurchaseIngestService {
   }
 
   private async resolveMember(ref: NormalizedPurchase['memberRef']): Promise<string | null> {
-    if (ref?.byId) {
+    // `isUuid` guard is what makes the `byEmail` fallback reachable at all:
+    // `members.id` is `@db.Uuid`, so handing Prisma a non-UUID string (e.g.
+    // RevenueCat's `$RCAnonymousID:…` app_user_id) throws P2023 → 500 → the
+    // provider retries forever and the email branch below never runs.
+    if (isUuid(ref?.byId)) {
       const m = await prisma.member.findUnique({ where: { id: ref.byId }, select: { id: true } });
       if (m) return m.id;
     }
@@ -285,12 +309,17 @@ export class PurchaseIngestService {
   }
 
   private async resolveProduct(ref: NormalizedPurchase['productRef']): Promise<string | null> {
-    if (ref?.byId) {
+    // Same P2023 guard as resolveMember — a non-UUID `byId` must fall through to
+    // the SKU lookup, not 500.
+    if (isUuid(ref?.byId)) {
       const p = await prisma.product.findUnique({ where: { id: ref.byId }, select: { id: true } });
       if (p) return p.id;
     }
     if (ref?.bySku) {
-      const p = await prisma.product.findUnique({ where: { iosProductId: ref.bySku }, select: { id: true } });
+      const p = await prisma.product.findUnique({
+        where: { iosProductId: ref.bySku },
+        select: { id: true },
+      });
       if (p) return p.id;
     }
     return null;

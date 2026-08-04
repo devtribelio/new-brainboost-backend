@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type { Product } from '@prisma/client';
 import { serializeCourseDetailLegacy } from '@/modules/product/product.serializer';
-import { verifyMediaToken } from '@/modules/media/media-token.util';
+import { verifyMediaToken, verifyDocumentToken } from '@/modules/media/media-token.util';
 
 /**
  * The product `course/detail` response must never leak Bunny identifiers
@@ -41,6 +41,19 @@ function collectStreamUrls(value: unknown, acc: string[] = []): string[] {
     }
   }
   return acc;
+}
+
+/** Find a serialized slide by its id across every section/lesson. */
+function findSlide(out: Record<string, unknown>, slideId: string): Record<string, unknown> {
+  const sections = out.lessonsData as Array<Record<string, unknown>>;
+  for (const section of sections) {
+    for (const lesson of section.courseLessonData as Array<Record<string, unknown>>) {
+      for (const slide of lesson.slidesData as Array<Record<string, unknown>>) {
+        if (slide.id === slideId) return slide;
+      }
+    }
+  }
+  throw new Error(`slide not found: ${slideId}`);
 }
 
 function tokenFromStreamUrl(url: string): string {
@@ -129,6 +142,38 @@ const videoObjectSlide = {
   },
 };
 
+// Gated document — the PDF lives under the private prefix and the slide only
+// holds its S3 key, which must be swapped for an opaque token.
+const docSlide = {
+  id: 'slide-doc-1',
+  type: 'DocumentTemplate',
+  name: 'Workbook',
+  bonus: true,
+  duration: 0,
+  data: {
+    title: 'Workbook',
+    description: 'Latihan pekan 1',
+    fileKey: `private/lesson-doc/${COURSE_UUID}/SECRETDOCKEY.pdf`,
+    fileName: 'workbook-pekan-1.pdf',
+    sizeBytes: 2310442,
+    downloadable: false,
+  },
+};
+
+// Pre-gate document authored by the old slide editor: a permanent public URL,
+// no key. Passed through unchanged until the backfill moves it behind the gate.
+const legacyDocSlide = {
+  id: 'slide-doc-legacy',
+  type: 'DocumentTemplate',
+  name: 'Silabus',
+  duration: 0,
+  data: {
+    title: 'Silabus',
+    description: null,
+    url: 'https://cdn.example.com/public/documents/abc.pdf',
+  },
+};
+
 function buildProduct(): Parameters<typeof serializeCourseDetailLegacy>[0] {
   const base = {
     id: '01890000-0000-7000-8000-0000000000aa',
@@ -180,9 +225,21 @@ function buildProduct(): Parameters<typeof serializeCourseDetailLegacy>[0] {
               lessonStatus: 'PUBLISH',
               isPreview: false,
               duration: 900,
-              slidesData: [videoSlide, youtubeSlide, videoObjectSlide],
+              slidesData: [videoSlide, youtubeSlide, videoObjectSlide, docSlide, legacyDocSlide],
             },
           ],
+        },
+      ],
+      bonuses: [
+        {
+          id: '01890000-0000-7000-8000-0000000000bb',
+          title: 'Workbook',
+          fileName: 'wb.pdf',
+          fileKey: 'private/course-bonus/SECRETKEY.pdf',
+          sizeBytes: 1234,
+          mimeType: 'application/pdf',
+          downloadable: true,
+          createdAt: new Date('2026-07-01T10:00:00.000Z'),
         },
       ],
     },
@@ -205,6 +262,109 @@ describe('serializeCourseDetailLegacy — Bunny identifier scrubbing', () => {
     expect(deepIncludes(out, 'directplayurl')).toBe(false);
     expect(deepIncludes(out, 'collectionid')).toBe(false);
     expect(deepIncludes(out, 'originalhash')).toBe(false);
+  });
+
+  it('embeds bonuses[] and never leaks the private fileKey', () => {
+    const out = serializeCourseDetailLegacy(buildProduct(), reviewAggregate) as Record<
+      string,
+      unknown
+    >;
+    const bonuses = out.bonuses as Record<string, unknown>[];
+    expect(bonuses).toHaveLength(1);
+    expect(bonuses[0]).toMatchObject({
+      bonusId: '01890000-0000-7000-8000-0000000000bb',
+      title: 'Workbook',
+      fileName: 'wb.pdf',
+      sizeBytes: 1234,
+      mimeType: 'application/pdf',
+      downloadable: true,
+      createdAt: '2026-07-01T10:00:00.000Z',
+    });
+    expect('fileKey' in bonuses[0]).toBe(false);
+    expect(JSON.stringify(out)).not.toContain('SECRETKEY');
+  });
+
+  it('swaps a DocumentTemplate fileKey for an opaque document url', () => {
+    const out = serializeCourseDetailLegacy(buildProduct(), reviewAggregate) as Record<
+      string,
+      unknown
+    >;
+    const doc = findSlide(out, 'slide-doc-1');
+    const data = doc.data as Record<string, unknown>;
+
+    expect(data.title).toBe('Workbook');
+    expect(data.description).toBe('Latihan pekan 1');
+    // Explicit false must survive — it is what makes a document view-only.
+    expect(data.downloadable).toBe(false);
+    // The key is a bare uuid, so the original name has to travel separately.
+    expect(data.fileName).toBe('workbook-pekan-1.pdf');
+    expect(data.sizeBytes).toBe(2310442);
+    // `bonus` sits beside `type`, not inside `data`.
+    expect(doc.bonus).toBe(true);
+    expect(data.bonus).toBeUndefined();
+    expect(data.fileUrl).toMatch(/^\/api\/member\/media\/document\?t=/);
+    expect(data.fileKey).toBeUndefined();
+    // The private key must not appear anywhere in the response, under any name.
+    expect(JSON.stringify(out)).not.toContain('SECRETDOCKEY');
+    expect(JSON.stringify(out)).not.toContain('private/');
+  });
+
+  it('bakes courseId + the lesson isPreview into the document token', () => {
+    const out = serializeCourseDetailLegacy(buildProduct(), reviewAggregate) as Record<
+      string,
+      unknown
+    >;
+    const data = findSlide(out, 'slide-doc-1').data as Record<string, unknown>;
+    const decoded = verifyDocumentToken(tokenFromStreamUrl(String(data.fileUrl)));
+
+    expect(decoded.key).toBe(`private/lesson-doc/${COURSE_UUID}/SECRETDOCKEY.pdf`);
+    expect(decoded.courseId).toBe(COURSE_UUID);
+    // Lesson B is not a preview lesson, so the document stays enrollment-gated.
+    expect(decoded.isPreview).toBe(false);
+  });
+
+  it('passes a pre-gate DocumentTemplate url through unchanged', () => {
+    const out = serializeCourseDetailLegacy(buildProduct(), reviewAggregate) as Record<
+      string,
+      unknown
+    >;
+    const data = findSlide(out, 'slide-doc-legacy').data as Record<string, unknown>;
+
+    expect(data.url).toBe('https://cdn.example.com/public/documents/abc.pdf');
+    expect(data.fileUrl).toBeUndefined();
+    // No flag on the slide — an old document was always keepable.
+    expect(data.downloadable).toBe(true);
+    // Shape stays stable: an old slide knows neither, but the keys are present
+    // so FE never has to branch on their existence.
+    expect(data.fileName).toBeNull();
+    expect(data.sizeBytes).toBeNull();
+  });
+
+  it('emits bonus=false on every slide that does not opt in, whatever its type', () => {
+    const out = serializeCourseDetailLegacy(buildProduct(), reviewAggregate) as Record<
+      string,
+      unknown
+    >;
+    // Audio, external video, structured video, and the pre-gate document — none
+    // carry the flag, and a missing flag must read as false, never undefined.
+    for (const id of ['slide-audio-1', 'slide-video-1', 'slide-video-obj', 'slide-doc-legacy']) {
+      expect(findSlide(out, id).bonus).toBe(false);
+    }
+  });
+
+  it('never reports a zero size for a document with no size recorded', () => {
+    // Cloned, not mutated in place: the slide fixtures are shared module-level
+    // consts, so editing one would bleed into every other test in this file.
+    const product = structuredClone(buildProduct());
+    const slides = (
+      product.course!.sections[0].lessons[1] as unknown as {
+        slidesData: Array<{ id: string; data: Record<string, unknown> }>;
+      }
+    ).slidesData;
+    slides.find((s) => s.id === 'slide-doc-1')!.data.sizeBytes = null;
+
+    const out = serializeCourseDetailLegacy(product, reviewAggregate) as Record<string, unknown>;
+    expect((findSlide(out, 'slide-doc-1').data as Record<string, unknown>).sizeBytes).toBeNull();
   });
 
   it('replaces the audio slide Bunny object with data.audio.streamUrl, keeping title/description', () => {
@@ -346,8 +506,14 @@ describe('serializeCourseDetailLegacy — Bunny identifier scrubbing', () => {
     expect(audio.duration).toBe(120);
 
     // Lesson B: bunny video (600s), external youtube (300s), structured video (35s).
+    // Its document slides carry no duration — only media slides do.
     const bSlides = lessons[1].slidesData as Array<Record<string, unknown>>;
-    expect(bSlides.map((s) => s.duration)).toEqual([600, 300, 35]);
+    expect(bSlides.filter((s) => s.type === 'VideoTemplate').map((s) => s.duration)).toEqual([
+      600, 300, 35,
+    ]);
+    expect(
+      bSlides.filter((s) => s.type === 'DocumentTemplate').every((s) => s.duration === undefined),
+    ).toBe(true);
   });
 
   it('mints media tokens carrying the right guid / courseId / isPreview', () => {

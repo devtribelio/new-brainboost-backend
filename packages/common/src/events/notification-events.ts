@@ -1,8 +1,10 @@
 import { EventEmitter } from 'node:events';
+import { logger } from '@bb/common/config/logger';
 
 export interface PostPublishedEvent {
   postId: string;
   authorId: string;
+  topicId: string | null;
   networkId: string | null;
   excerpt: string;
 }
@@ -68,8 +70,9 @@ class TypedEmitter {
   ): void {
     this.bus.on(event, (payload: NotificationEventMap[K]) => {
       Promise.resolve(listener(payload)).catch((err) => {
-        // eslint-disable-next-line no-console
-        console.error(`[notification-events] listener for ${event} threw`, err);
+        // See commerce-events: `logger` (not console) is what keeps the request
+        // context — emit() is synchronous, so the listener inherits it.
+        logger.error({ err, event }, 'notification-events listener threw');
       });
     });
   }

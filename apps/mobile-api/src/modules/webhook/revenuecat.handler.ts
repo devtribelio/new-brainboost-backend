@@ -1,5 +1,6 @@
 import { logger } from '@bb/common/config/logger';
 import { env } from '@bb/common/config/env';
+import { isUuid } from '@bb/common/utils/uuid.util';
 import {
   purchaseIngestService,
   type NormalizedPurchase,
@@ -103,8 +104,17 @@ export class RevenueCatWebhookHandler {
       : this.toRefund(event);
 
     const result = await purchaseIngestService.ingest(normalized, cred);
-    logger.info(
-      { eventType: event.type, eventId: event.id, status: result.status },
+    // member_not_found means a real purchase got no access — surface it at warn
+    // so it is alertable, since the response is still a 200 (RC must not retry).
+    const level = result.status === 'member_not_found' ? 'warn' : 'info';
+    logger[level](
+      {
+        eventType: event.type,
+        eventId: event.id,
+        status: result.status,
+        appUserId: event.app_user_id,
+        memberRef: normalized.memberRef,
+      },
       '[revenuecat] ingested',
     );
     return {
@@ -130,7 +140,7 @@ export class RevenueCatWebhookHandler {
       // double-pay. Falls back to the event/txn id when absent.
       attributionKey: event.original_transaction_id ?? event.transaction_id ?? event.id,
       type: 'PURCHASE',
-      memberRef: { byId: event.app_user_id, byEmail: this.emailAttr(event) },
+      memberRef: this.memberRef(event),
       productRef: { bySku: event.product_id },
       // Affiliate attribution is VISIT-driven (B-3): the customer-global RC
       // `affiliate_code` subscriber attribute is sticky (never expires) and would
@@ -158,7 +168,7 @@ export class RevenueCatWebhookHandler {
     return {
       providerEventId: event.id, // the refund event's own id
       type: 'REFUND',
-      memberRef: { byId: event.app_user_id, byEmail: this.emailAttr(event) },
+      memberRef: this.memberRef(event),
       productRef: { bySku: event.product_id },
       grossAmount: 0,
       // The refunded purchase was keyed on its transaction_id.
@@ -167,8 +177,36 @@ export class RevenueCatWebhookHandler {
     };
   }
 
+  /**
+   * Resolve who bought. `app_user_id` is only a `Member.id` once the app has
+   * called `Purchases.logIn()` — a purchase completed before that (or after a
+   * reinstall/logout) arrives as `$RCAnonymousID:<hex>`, and RC only ever puts
+   * the real id in `aliases` if the SDK aliased it later. So:
+   *
+   *   1. first UUID among app_user_id → original_app_user_id → aliases
+   *   2. else the `$email` subscriber attribute (set by the app at login)
+   *
+   * Both go into `memberRef`; ingest tries id then email. Anonymous ids are
+   * dropped rather than passed through — `members.id` is `@db.Uuid`, so sending
+   * one to Prisma throws P2023 (500 → RC retries forever) instead of missing.
+   */
+  private memberRef(event: RevenueCatEventDto): { byId?: string; byEmail?: string } {
+    const byId = [event.app_user_id, event.original_app_user_id, ...(event.aliases ?? [])].find(
+      (candidate) => isUuid(candidate),
+    );
+    const byEmail = this.emailAttr(event);
+
+    if (!byId) {
+      logger.warn(
+        { eventId: event.id, appUserId: event.app_user_id, hasEmail: Boolean(byEmail) },
+        '[revenuecat] app_user_id is not a member UUID — falling back to $email',
+      );
+    }
+    return { byId, byEmail };
+  }
+
   /** Best-effort email from RC subscriber attributes (`$email`). */
   private emailAttr(event: RevenueCatEventDto): string | undefined {
-    return event.subscriber_attributes?.['$email']?.value || undefined;
+    return event.subscriber_attributes?.['$email']?.value?.trim() || undefined;
   }
 }

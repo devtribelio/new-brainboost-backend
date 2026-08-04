@@ -1,7 +1,7 @@
 import type { Response } from 'express';
 import { TrackingService } from './tracking.service';
 import { ok } from '@bb/common/utils/response.util';
-import { UnauthorizedException } from '@bb/common/exceptions';
+import { unauthorized, ERROR_CODES } from '@bb/common/exceptions';
 import type { AuthenticatedRequest } from '@bb/common/interfaces/authenticated-request';
 import {
   ApiBearerAuth,
@@ -29,12 +29,8 @@ export class TrackingController {
   @ApiBody({ type: () => TrackSessionDto })
   @ApiResponse({ status: 200, type: () => GenericOkDto })
   session = async (req: AuthenticatedRequest, res: Response) => {
-    if (!req.user) throw new UnauthorizedException();
-    await this.trackingService.record(
-      req.user.id,
-      req.body as TrackSessionDto,
-      platformFrom(req),
-    );
+    if (!req.user) throw unauthorized(ERROR_CODES.AUTH_REQUIRED);
+    await this.trackingService.record(req.user.id, req.body as TrackSessionDto, platformFrom(req));
     return ok(res, { ok: true });
   };
 }

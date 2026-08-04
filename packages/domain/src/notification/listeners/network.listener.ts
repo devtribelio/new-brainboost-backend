@@ -3,6 +3,7 @@ import { logger } from '@bb/common/config/logger';
 import { notificationEvents } from '@bb/common/events/notification-events';
 import { NotificationProducer } from '../notification.producer';
 import { RecipientResolver } from '../recipient.resolver';
+import { MuteScope } from '../mute-scope';
 import { ActionLabel, NotifGroup } from '../action-labels';
 
 const producer = new NotificationProducer();
@@ -13,7 +14,13 @@ async function teamMemberIds(networkId: string, exclude?: string): Promise<strin
     where: { networkId, ...(exclude ? { memberId: { not: exclude } } : {}) },
     select: { memberId: true },
   });
+  // Muted members are NOT dropped here — the producer withholds their push and
+  // still writes the row.
   return resolver.filterEnabled(rows.map((r) => r.memberId));
+}
+
+function networkMuteScopes(networkId: string): Array<{ scope: MuteScope; refId: string }> {
+  return [{ scope: MuteScope.Network, refId: networkId }];
 }
 
 export function registerNetworkNotificationListener(): void {
@@ -39,6 +46,7 @@ export function registerNetworkNotificationListener(): void {
             networkId: e.networkId,
             memberId: e.memberId,
           },
+          muteScopes: networkMuteScopes(e.networkId),
         },
         `requestJoin:${e.requestId}`,
       );
@@ -69,6 +77,7 @@ export function registerNetworkNotificationListener(): void {
           approverId: e.approverId,
         },
         dedupeKey: `approveJoin:${e.requestId}`,
+        muteScopes: networkMuteScopes(e.networkId),
       });
     } catch (err) {
       logger.error({ err, requestId: e.requestId }, '[notification] network.approved listener failed');
@@ -97,6 +106,7 @@ export function registerNetworkNotificationListener(): void {
             networkId: e.networkId,
             memberId: e.memberId,
           },
+          muteScopes: networkMuteScopes(e.networkId),
         },
         `memberJoin:${e.networkId}:${e.memberId}`,
       );

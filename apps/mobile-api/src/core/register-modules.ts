@@ -3,6 +3,7 @@ import type { AppModule } from '@bb/common/core/module.interface';
 import { logger } from '@bb/common/config/logger';
 import { withModulePrefix } from '@bb/common/openapi/registry';
 
+import { AppVersionModule } from '@/modules/app-version/app-version.module';
 import { AuthModule } from '@/modules/auth/auth.module';
 import { AccountModule } from '@/modules/account/account.module';
 import { MemberModule } from '@/modules/member/member.module';
@@ -12,6 +13,7 @@ import { UploadModule } from '@/modules/upload/upload.module';
 import { BannerModule } from '@/modules/banner/banner.module';
 import { ProductModule } from '@/modules/product/product.module';
 import { MediaModule } from '@/modules/media/media.module';
+import { BonusModule } from '@/modules/bonus/bonus.module';
 import { CommissionModule } from '@/modules/commission/commission.module';
 import { AffiliateModule } from '@/modules/affiliate/affiliate.module';
 import { TopicModule } from '@/modules/topic/topic.module';
@@ -28,6 +30,7 @@ import { TrackingModule } from '@/modules/tracker/tracking.module';
 import { StatsModule } from '@/modules/tracker/stats.module';
 
 const modules: AppModule[] = [
+  AppVersionModule,
   AuthModule,
   AccountModule,
   MemberModule,
@@ -37,6 +40,7 @@ const modules: AppModule[] = [
   BannerModule,
   ProductModule,
   MediaModule,
+  BonusModule,
   CommissionModule,
   AffiliateModule,
   CommerceModule,

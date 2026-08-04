@@ -1,3 +1,4 @@
+import { traceService } from '@bb/common/utils/trace-service';
 import { Router } from 'express';
 import multer from 'multer';
 import { UploadController } from './upload.controller';
@@ -27,7 +28,7 @@ const upload = multer({
 
 export function uploadRoutes(): Router {
   const router = Router();
-  const ctrl = new UploadController(new UploadService());
+  const ctrl = new UploadController(traceService(new UploadService()));
 
   bindRoute({
     router,
