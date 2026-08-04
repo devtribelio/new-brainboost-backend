@@ -273,7 +273,11 @@ export class BbEcsStack extends cdk.Stack {
     // Dua lane, binary sama (dist/jobs-runner.js), argv = filter nama job (lihat
     // apps/mobile-api/src/jobs-runner.ts — nama salah = exit 1, bukan diem-diem no-op).
     // Task def eksplisit biar bisa set ARM64 + taskRole.
-    //  - Cron (hourly): affiliate PENDING->BALANCE + expire stale payments.
+    // Mendaftarkan job di jobs-runner.ts BELUM cukup — nama yang tidak ada di argv
+    // lane mana pun tidak akan pernah jalan, tanpa error. Jaga daftar ini sinkron
+    // dengan lane PM2 di ecosystem.config.js.
+    //  - Cron (hourly): affiliate PENDING->BALANCE + expire stale payments +
+    //    topic digest (aman tiap jam: no-op kecuali jam WIB == notification.digestHour).
     //  - CronDisburse (tiap 5 mnt): sweep payout yang sudah di-approve backoffice ke
     //    Xendit, biar approval MANUAL nggak nunggu sampai jam berikutnya. Idempotent —
     //    cuma ambil row PENDING dengan approvedAt terisi, overlap antar lane aman.
@@ -295,7 +299,11 @@ export class BbEcsStack extends cdk.Stack {
       subnetSelection: { subnetType: ec2.SubnetType.PUBLIC },
       securityGroups: [appSg],
       scheduledFargateTaskDefinitionOptions: {
-        taskDefinition: makeCronLane('Cron', 'cron', ['affiliatePendingToBalance', 'expirePendingPayments']),
+        taskDefinition: makeCronLane('Cron', 'cron', [
+          'affiliatePendingToBalance',
+          'expirePendingPayments',
+          'topicDigest',
+        ]),
       },
     });
     new ecsPatterns.ScheduledFargateTask(this, 'CronDisburse', {
