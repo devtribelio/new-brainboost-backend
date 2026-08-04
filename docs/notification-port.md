@@ -167,9 +167,19 @@ daftarnya lengkap. Gerbangnya di `NotificationProducer.claimPushSlot`, dipanggil
   distribusi nyatanya bisa diukur dari log (`unopenedPushCount` ikut di baris
   `[notification] push firing`) sebelum dinyalakan. Naikkan ke `3` lewat DB, efektif
   ≤30 detik (`CACHE_TTL_MS`), tanpa deploy — sekaligus tombol darurat.
-- **Reset (dua titik):** ① `MemberService.findById({touchActivity:true})` ← `/member/info`,
-  menumpang `UPDATE` yang sudah menulis `lastActiveAt`; ② `NotificationService.markSeen`
-  saat ada baris yang benar-benar berubah — bukti seorang manusia sedang melihat app.
+- **Reset (re-arm) — SETIAP request ber-auth member.** `resetUnopenedPushCount`
+  (`packages/common/src/utils/member-activity.util.ts`) dipanggil dari `authGuard`,
+  `optionalAuthGuard` + `anonOrMemberGuard` (hanya saat scope `member`). Throttle
+  in-process 60 detik, `updateMany` bersyarat (`unopenedPushCount > 0`) supaya member
+  yang sudah 0 tidak menulis apa pun, fire-and-forget. Dua titik lama tetap ada:
+  `MemberService.findById({touchActivity:true})` ← `/member/info` dan
+  `NotificationService.markSeen`.
+  **Jangan pernah menambahkan `lastActiveAt` ke hook ini** — pemicu re-KYC dormant
+  (`member.service.ts`) justru butuh kolom itu MASIH menyimpan stempel sesi
+  sebelumnya saat `/member/info` jalan; itulah ukuran lama menganggurnya. Menyegarkan
+  per request akan membuat jaraknya nol dan mematikan re-KYC dormant tanpa error.
+  `authGuardLenient` sengaja TIDAK ikut: endpoint-nya dipakai saat member justru
+  meninggalkan sesi (logout cleanup).
 - **Menembus batas tanpa menaikkan counter:** `paymentSuccess`, `paymentPending`,
   `paymentRefunded`, `subscriptionRenewed`, `commissionEarned` (`PUSH_LIMIT_EXEMPT`).
   Alasan sama dengan commerce yang dikecualikan dari mute.
@@ -178,12 +188,19 @@ daftarnya lengkap. Gerbangnya di `NotificationProducer.claimPushSlot`, dipanggil
   Read-then-write akan meloloskan keduanya.
 - **Fail open:** kalau pengecekan budget error, push tetap dikirim.
 
-**ASUMSI YANG BELUM DIVERIFIKASI:** reset utama bergantung pada FE memanggil
-`/member/info` setiap app dibuka **termasuk saat resume dari background**, bukan hanya
-cold start. Kalau ternyata hanya cold start, member yang rajin buka app dari background
-tidak pernah reset dan push-nya mati setelah N kali. Itulah kenapa nilainya dirilis `0`.
-Tanyakan ke tim FE sebelum dinaikkan; kalau jawabannya cold-start-saja, tambahkan
-panggilan saat resume atau endpoint ping ringan.
+**Kenapa reset diperlebar (2026-08-04).** Versi pertama hanya mereset di `/member/info`.
+Tim FE mengonfirmasi endpoint itu **hanya dipanggil saat cold start**, tidak saat app
+kembali dari background — jadi member yang rajin mengangkat app dari background tidak
+pernah reset dan akan bungkam permanen setelah N push, persis kebalikan dari tujuan
+fiturnya. `lastActiveAt` tidak bisa dipakai sebagai penyelamat karena ditulis oleh
+endpoint yang sama, jadi sama basinya. Karena itu sinyal kehadiran diambil dari request
+apa pun yang ber-auth — tidak perlu rilis klien. Ini sekaligus menutup kasus member yang
+sedang DI DALAM app lalu menerima >N notifikasi: dia pasti sedang memanggil API, jadi
+counter-nya ikut ter-reset.
+
+**Masih terbuka:** sinyal foreground eksplisit dari FE tetap lebih baik, dan
+cold-start-only juga berarti `lastActiveAt` sendiri tidak akurat untuk keperluan lain
+(mis. ukuran dormansi re-KYC lebih longgar dari kenyataan). Butuh rilis klien.
 
 ---
 
