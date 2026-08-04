@@ -63,6 +63,18 @@ const SETTINGS: Array<{ key: string; value: string; description: string }> = [
       'Max push sent to a member while they stay out of the app; further push is suppressed (the in-app notification row is still written). Resets when the member opens the app. 0 = gate off (counter still tracked). Ship value is 0 — raise to 3 only after confirming the app calls /member/info on resume, not just cold start.',
   },
   {
+    key: 'notification.digestEnabled',
+    value: 'false',
+    description:
+      "Nightly topic digest: one push per member summarising the topic posts they have not read. 'true' to enable. Ships disabled.",
+  },
+  {
+    key: 'notification.digestHour',
+    value: '21',
+    description:
+      'Hour of day (0-23, Asia/Jakarta) the topic digest is sent. The job runs on the hourly cron tick and only acts on this hour, so changing this value moves the send time with no redeploy.',
+  },
+  {
     key: 'sales.alertEmail',
     value: '',
     description:

@@ -84,6 +84,8 @@ describe('post.published → topic subscriber fan-out', () => {
     const row = rows.find((r) => r.memberId === subscriberId)!;
     expect(row.dedupeKey).toBe(`newPost:${postId}:${subscriberId}`);
     expect(row.body).toBe('isi postingan');
+    // The nightly digest groups on this column, not on payload JSON.
+    expect(row.topicId).toBe(topicId);
     expect(row.payload).toMatchObject({ refTable: 'post', refId: postId, topicId, actorId: authorId });
   });
 

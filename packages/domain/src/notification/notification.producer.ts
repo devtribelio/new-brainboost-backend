@@ -27,6 +27,8 @@ export interface CreateNotificationInput {
   title: string;
   body?: string;
   networkId?: string | null;
+  /** Denormalised so the nightly digest can group unread rows without reading `payload`. */
+  topicId?: string | null;
   notifGroup?: NotifGroup;
   payload?: Record<string, unknown>;
   url?: string;
@@ -95,6 +97,7 @@ export class NotificationProducer {
           title: display.title,
           body: display.body,
           networkId: input.networkId ?? null,
+          topicId: input.topicId ?? null,
           notifGroup: input.notifGroup,
           payload: input.payload ? (input.payload as object) : undefined,
           url: input.url,
@@ -169,6 +172,38 @@ export class NotificationProducer {
 
     const count = member.unopenedPushCount;
     return { allowed: limit <= 0 || count <= limit, count };
+  }
+
+  /**
+   * Push with NO notification row and NO budget charge — the digest's only path out.
+   *
+   * No row because the digest summarises rows that already exist; writing another
+   * would duplicate the member's own history. Exempt from the unopened-push budget
+   * on purpose: by digest time a member who ignored the app all day is already past
+   * the limit, and the digest is exactly the message that member most needs. It is
+   * capped at one per member per day by the job's own schedule, not by the budget.
+   *
+   * Awaited (not `setImmediate`) — a scheduled job must not exit before its sends land.
+   */
+  async sendPushOnly(
+    memberId: string,
+    payload: { title: string; body?: string; data: Record<string, string> },
+  ): Promise<boolean> {
+    if (!fcmService.isEnabled()) {
+      logger.debug({ memberId }, '[notification] digest push skipped — fcm disabled');
+      return false;
+    }
+    try {
+      await fcmService.sendToMember(memberId, {
+        title: toPlainText(payload.title),
+        body: payload.body ? toPlainText(payload.body) || undefined : undefined,
+        data: payload.data,
+      });
+      return true;
+    } catch (err) {
+      logger.warn({ err, memberId }, '[notification] digest push failed');
+      return false;
+    }
   }
 
   private dispatchPush(input: CreateNotificationInput, notificationId: string, pushMuted: boolean): void {

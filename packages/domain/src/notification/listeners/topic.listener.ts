@@ -50,6 +50,7 @@ export function registerTopicNotificationListener(): void {
             type: ActionLabel.NewPost,
             notifGroup: NotifGroup.General,
             networkId: e.networkId,
+            topicId,
             title: `${author.fullName} memposting di ${topic.name}`,
             body: e.excerpt,
             payload: {

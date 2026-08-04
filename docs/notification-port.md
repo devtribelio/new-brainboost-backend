@@ -247,6 +247,73 @@ cold-start-only juga berarti `lastActiveAt` sendiri tidak akurat untuk keperluan
 
 ---
 
+## 7c. Digest topic harian (2026-08-04)
+
+Satu push per member per malam yang merangkum post topic yang **belum dia baca**.
+Job `packages/domain/src/jobs/topic-digest.ts`, kontrak FE:
+`docs/fcm-targeted-push-contract.md` (Addendum 2026-08-03).
+
+- **Berdampingan dengan push instan `newPost`, bukan menggantikannya.** Push per post
+  tetap jalan dan tetap tunduk pada budget §7b. Digest adalah lapisan kedua untuk
+  member yang melewatkannya.
+- **Menghitung baris `newPost` yang masih `read_at IS NULL`**, bukan `count(post)`.
+  Konsekuensinya: member yang sudah membaca semuanya **tidak dapat digest sama sekali**
+  — tanpa aturan khusus — dan angkanya jujur ("9 post baru" = 9 yang belum dilihat).
+  Basis post mentah akan memberi tahu orang tentang post yang sudah dia baca.
+- **Tidak menulis baris notifikasi.** Baris per post sudah ada; digest cuma merangkumnya.
+- **Kebal budget §7b dan tidak menaikkan counter** (`NotificationProducer.sendPushOnly`).
+  Disengaja: jam 21:00 member yang seharian mengabaikan app pasti sudah lewat limit,
+  padahal justru dia yang paling butuh rangkumannya. Batasnya dijaga oleh jadwal
+  (sekali sehari), bukan oleh budget.
+- **Pemicu = tick `bb-cron` per jam**; job-nya sendiri yang memutuskan apakah jam
+  sekarang = `notification.digestHour`. Itulah yang membuat jam kirim bisa diubah dari
+  `app_settings` tanpa deploy dan tanpa menyentuh PM2. `notification.digestEnabled`
+  ships `false`.
+- **Jam dibaca WIB** dengan offset tetap +7 (tidak ada DST), konsisten dengan
+  penanganan waktu di resync worker.
+- **Watermark `members.last_topic_digest_at`** — hanya baris yang lebih baru dari ini
+  yang dihitung, jadi post yang sama tidak pernah dilaporkan dua malam berturut-turut.
+  **Semua member yang dievaluasi distempel**, termasuk yang semua topicnya di-mute;
+  tanpa itu baris mereka ikut terhitung tiap malam selamanya.
+- **Mute dibuang SEBELUM menghitung** (#8), jadi total tidak pernah mengiklankan post
+  dari topic yang diminta diam. Semua topic ter-mute → tidak ada push malam itu.
+- **`notifications.topic_id`** (migrasi `20260804120000_add_topic_digest`) —
+  didenormalisasi keluar dari `payload` supaya pengelompokan per topic pakai query
+  terindeks, bukan scan JSON. Hanya `newPost` yang mengisinya. Baris lama tetap NULL:
+  itu riwayat yang sudah terkirim, bukan bahan digest.
+- **Bentuk push** (semua nilai `data` string, #13):
+
+  | Topic aktif | title | body | routing |
+  |---|---|---|---|
+  | 1 | nama topic | `Ada 9 post baru di Mindset` | `refTable: topic` + `refId` |
+  | 2+ | `Tribe` | `Ada 27 post baru di Mindset, Bisnis, dan 1 topik lain` | `type: tribeDigest` |
+
+  Nama topic diurutkan dari yang paling banyak aktivitasnya.
+
+- **`topicDigest` / `tribeDigest` BEKU sejak dipakai** (#3). App merutekan berdasarkan
+  nilai itu, jadi rename = deep link putus di semua build yang sudah beredar. Tambah
+  nilai baru, jangan pernah mengganti nama.
+
+**Risiko yang diketahui dan diterima:** karena kebal budget, member yang berbulan-bulan
+tidak membuka app tetap menerima satu push tiap malam. Itu pelan tapi permanen, dan pola
+seperti itu yang biasanya berujung notifikasi dimatikan dari setelan OS. Rem khusus
+digest (mis. berhenti setelah N malam tanpa member kembali) belum dibuat — scaffolding-nya
+sama dengan §7b kalau nanti diperlukan.
+
+**Deep link topic:** `GET /api/member/topic/detail?topicId=` (#5) sudah ada — menerima UUID
+atau legacyId, `optionalAuthGuard`, 404 kalau topic tidak ada atau `isActive=false` (itu
+yang membedakan "topic hilang" dari "request salah bentuk", alasan opsi A dipilih di
+kontrak). `countPost` di endpoint ini **dihitung sungguhan** (published, non-deleted) —
+beda dari `/topic/list` yang masih selalu `0`, karena satu count untuk satu topic murah
+sedangkan satu per baris tidak.
+
+**Belum dikerjakan dari kontrak:** kontrak menulis
+mute sebagai `action: "mute"` di endpoint subscribe + field `isMuteNotification`;
+implementasi di sini `POST /notification/mute { scope, refId }` + `isMute` di
+`GET /topic/list`. Fungsinya sama, **namanya beda — FE perlu diberi tahu.**
+
+---
+
 ## 8. Fase + acceptance
 
 | Fase | Deliverable | Acceptance |

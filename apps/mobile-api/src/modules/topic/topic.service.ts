@@ -2,6 +2,7 @@ import { prisma } from '@bb/db';
 import { badRequest, notFound, ERROR_CODES } from '@bb/common/exceptions';
 import type { PaginationParams } from '@bb/common/utils/pagination.util';
 import { assertUuid } from '@bb/common/utils/uuid.util';
+import { PUBLISHED_STATUS_FILTER } from '@bb/common/utils/post-status.util';
 import { MuteScope } from '@bb/domain/notification/mute-scope';
 
 interface TopicListQuery {
@@ -82,6 +83,40 @@ export class TopicService {
       Object.assign(r, { isSubscribed: subscribed.has(r.id), isMute: muted.has(r.id) }),
     );
     return { rows: decorated, total };
+  }
+
+  /**
+   * One topic by legacyId or UUID, decorated for the authenticated caller.
+   *
+   * Exists for push deep links: a `topicDigest` tap on a cold start has only the
+   * topicId, and `list` cannot fetch one topic (it is keyed on network code, and a
+   * missing topic would come back as an empty array — indistinguishable from a bad
+   * network code). 404 here says exactly one thing. See
+   * docs/fcm-targeted-push-contract.md #5.
+   */
+  async detail(topicInput: string, memberId?: string) {
+    const topic = await this.resolveTopicByAnyId(topicInput);
+    if (!topic || !topic.isActive) throw notFound(ERROR_CODES.TOPIC_NOT_FOUND);
+
+    // countPost is real here, unlike `list` where it stays 0 — one count for one
+    // topic is cheap, one per row is not. The topic screen header needs the number.
+    const countPost = await prisma.post.count({
+      where: { topicId: topic.id, isDeleted: false, publishStatus: PUBLISHED_STATUS_FILTER },
+    });
+    if (!memberId) return Object.assign(topic, { countPost });
+
+    const [subscription, muted] = await Promise.all([
+      prisma.topicSubscription.findUnique({
+        where: { memberId_topicId: { memberId, topicId: topic.id } },
+        select: { id: true },
+      }),
+      this.mutedTopicIds(memberId, [topic.id]),
+    ]);
+    return Object.assign(topic, {
+      countPost,
+      isSubscribed: subscription !== null,
+      isMute: muted.has(topic.id),
+    });
   }
 
   // notification_mutes is keyed (memberId, scope, refId) with refId = topic UUID.
