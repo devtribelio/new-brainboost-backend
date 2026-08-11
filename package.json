@@ -83,7 +83,7 @@
     "google-auth-library": "^10.6.2",
     "helmet": "^8.0.0",
     "jsonwebtoken": "^9.0.2",
-    "nanoid": "^5.1.11",
+    "nanoid": "^5.1.16",
     "passport": "^0.7.0",
     "passport-strategy": "^1.0.0",
     "pino": "^9.5.0",
