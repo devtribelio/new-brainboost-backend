@@ -415,3 +415,17 @@ describe('GET /api/member/media/document', () => {
     expect(res.status).toBe(400);
   });
 });
+
+describe('GET /api/member/media/hls (proxy mode)', () => {
+  // Signed HLS is meaningless against a library without Token Authentication:
+  // the URL would only work for a client that sends a Referer, which native
+  // players do not. The endpoint refuses rather than handing out a URL that
+  // 403s halfway through a download.
+  it('is unavailable while MEDIA_MODE=proxy → 404', async () => {
+    const token = signMediaToken({ guid: 'guid-hls-proxy', courseId, isPreview: true });
+    const res = await request(app).get('/api/member/media/hls').query({ t: token });
+
+    expect(res.status).toBe(404);
+    expect(res.body.error.code).toBe('MEDIA_HLS_UNAVAILABLE');
+  });
+});

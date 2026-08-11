@@ -164,3 +164,82 @@ describe('GET /api/member/media/stream (signed mode / Model C)', () => {
     expect(res.status).toBe(401);
   });
 });
+
+describe('GET /api/member/media/hls (signed mode / Model C)', () => {
+  it('preview token → 200 with a signed playlist URL, expiry and guid', async () => {
+    const token = signMediaToken({ guid: 'guid-hls-preview', courseId, isPreview: true });
+    const res = await request(app).get('/api/member/media/hls').query({ t: token });
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+
+    const { url, expiresAt, guid } = res.body.data;
+    expect(guid).toBe('guid-hls-preview');
+    expect(url).toContain('vz-test-c.b-cdn.net');
+    expect(url).toContain('/bcdn_token=HS256-');
+    expect(url).toContain('token_path=%2Fguid-hls-preview%2F');
+    expect(url.endsWith('/guid-hls-preview/playlist.m3u8')).toBe(true);
+
+    // The advertised expiry must be the one actually signed into the URL —
+    // the app schedules its download against this number.
+    expect(url).toContain(`&expires=${expiresAt}`);
+  });
+
+  it('download=true mints a longer-lived URL than the streaming default', async () => {
+    const token = signMediaToken({ guid: 'guid-hls-ttl', courseId, isPreview: true });
+
+    const stream = await request(app).get('/api/member/media/hls').query({ t: token });
+    const download = await request(app)
+      .get('/api/member/media/hls')
+      .query({ t: token, download: 'true' });
+
+    expect(stream.status).toBe(200);
+    expect(download.status).toBe(200);
+    expect(download.body.data.expiresAt).toBeGreaterThan(stream.body.data.expiresAt);
+  });
+
+  it('non-preview token, authed and enrolled → 200', async () => {
+    const access = await loginToken(enrolledEmail);
+    const token = signMediaToken({ guid: 'guid-hls-gated', courseId, isPreview: false });
+    const res = await request(app)
+      .get('/api/member/media/hls')
+      .query({ t: token })
+      .set('Authorization', `Bearer ${access}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.url).toContain('/guid-hls-gated/playlist.m3u8');
+  });
+
+  it('non-preview token, authed but not enrolled → 403', async () => {
+    const access = await loginToken(strangerEmail);
+    const token = signMediaToken({ guid: 'guid-hls-gated', courseId, isPreview: false });
+    const res = await request(app)
+      .get('/api/member/media/hls')
+      .query({ t: token })
+      .set('Authorization', `Bearer ${access}`);
+
+    expect(res.status).toBe(403);
+    expect(res.body.success).toBe(false);
+  });
+
+  it('non-preview token without auth → 401', async () => {
+    const token = signMediaToken({ guid: 'guid-hls-gated', courseId, isPreview: false });
+    const res = await request(app).get('/api/member/media/hls').query({ t: token });
+
+    expect(res.status).toBe(401);
+  });
+
+  it('malformed token → 401', async () => {
+    const res = await request(app)
+      .get('/api/member/media/hls')
+      .query({ t: 'totally-bogus-token' });
+
+    expect(res.status).toBe(401);
+  });
+
+  it('missing token → 400', async () => {
+    const res = await request(app).get('/api/member/media/hls');
+
+    expect(res.status).toBe(400);
+  });
+});
