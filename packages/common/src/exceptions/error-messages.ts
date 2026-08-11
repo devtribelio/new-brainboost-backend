@@ -159,6 +159,7 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   MEDIA_TOKEN_EXPIRED: 'Akses media sudah kedaluwarsa, muat ulang halaman',
   MEDIA_AUTH_REQUIRED: 'Silakan masuk untuk mengakses media ini',
   MEDIA_RESOLUTION_INVALID: 'Kualitas video tidak tersedia',
+  MEDIA_HLS_UNAVAILABLE: 'Unduhan offline belum tersedia, coba lagi nanti',
   COURSE_NOT_ENROLLED: 'Belum terdaftar di kelas ini',
 
   // --- bonus -----------------------------------------------------------------
