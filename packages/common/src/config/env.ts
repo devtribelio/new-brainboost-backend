@@ -202,6 +202,21 @@ export const env = {
     // (triggersAffiliate / canIngestRefund). Must match the seeded credential.
     providerName: optional('REVENUECAT_PROVIDER_NAME', 'revenuecat'),
   },
+  fx: {
+    // USD→IDR lookup for foreign-storefront IAP. Both providers are keyless; the
+    // primary is ECB reference data (published once per business day, so calling
+    // more than daily gains nothing), the fallback a commercial aggregator.
+    // Timeout is deliberately short: this sits in the RevenueCat webhook path and
+    // a slow rate lookup must degrade to the next chain layer, never stall the 200.
+    primaryUrl: optional('FX_PRIMARY_URL', 'https://api.frankfurter.dev/v1'),
+    fallbackUrl: optional('FX_FALLBACK_URL', 'https://open.er-api.com/v6/latest/USD'),
+    timeoutMs: Number.parseInt(optional('FX_TIMEOUT_MS', '3000'), 10),
+    // How stale a rate derived from our own IDR RevenueCat events may be before it
+    // is refused. Observed worst gap between IDR purchases is ~2 days.
+    derivedMaxAgeDays: Number.parseInt(optional('FX_DERIVED_MAX_AGE_DAYS', '7'), 10),
+    // Last-resort static rate, also the value promoted by `fx.usdIdrPinned`.
+    staticUsdIdr: Number.parseInt(optional('FX_STATIC_USD_IDR', '17800'), 10),
+  },
   commerce: {
     transactionExpiryHours: Number.parseInt(
       optional('COMMERCE_TRANSACTION_EXPIRY_HOURS', '24'),

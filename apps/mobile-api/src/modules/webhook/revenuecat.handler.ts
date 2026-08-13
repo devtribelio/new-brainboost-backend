@@ -88,6 +88,18 @@ export class RevenueCatWebhookHandler {
       return { handled: false, status: 'skipped' };
     }
 
+    // Sandbox events carry `price: 0`, so ingesting one in production records a real
+    // enrollment against a free "sale" — and with amounts at zero it looks like an
+    // ordinary row, not an error. Refused explicitly rather than left to the amount
+    // math. 200 so RC stops retrying: a sandbox event will never become valid here.
+    if (env.isProduction && event.environment?.toUpperCase() === 'SANDBOX') {
+      logger.warn(
+        { eventId: event.id, eventType: event.type, appUserId: event.app_user_id },
+        '[revenuecat] sandbox event received in production — not ingested',
+      );
+      return { handled: false, status: 'sandbox_skipped' };
+    }
+
     const cred = await credentialService.verifyByName(env.revenuecat.providerName);
     if (!cred) {
       // Misconfiguration: the credential row is missing/inactive. Log loudly and
@@ -128,6 +140,9 @@ export class RevenueCatWebhookHandler {
 
   private toPurchase(event: RevenueCatEventDto): NormalizedPurchase {
     const gross = event.price_in_purchased_currency ?? 0;
+    const occurredAt = event.event_timestamp_ms
+      ? new Date(event.event_timestamp_ms).toISOString()
+      : undefined;
     return {
       // Key on the store transaction id so a later CANCELLATION (which carries the
       // same transaction_id, not the purchase's event id) can link back to it.
@@ -149,7 +164,10 @@ export class RevenueCatWebhookHandler {
       // `AffiliateVisit` (logged by the app on the affiliate link), scoped to the
       // purchased product (B-5: ingest passes productId) → buyer inviter.
       affiliatorCode: undefined,
-      // Use local currency (IDR), NOT event.price which is in USD.
+      // `grossAmount` is in `currency`, NOT necessarily IDR: `price_in_purchased_currency`
+      // follows the buyer's storefront, so an AU purchase arrives as 39.99 (AUD). Ingest
+      // normalises to IDR using `amountUsd` — passing the local figure through untouched
+      // is what recorded A$39.99 as Rp40 and paid a Rp5 commission on it.
       grossAmount: gross,
       netAmount: computeNetAmount(
         gross,
@@ -158,8 +176,11 @@ export class RevenueCatWebhookHandler {
         event.tax_percentage,
       ),
       currency: event.currency,
+      // RevenueCat's own USD conversion of the same purchase — the single bridge that
+      // lets one USD/IDR rate serve every storefront.
+      amountUsd: event.price,
       isRenewal: event.type === 'RENEWAL',
-      occurredAt: undefined,
+      occurredAt,
       raw: event,
     };
   }
