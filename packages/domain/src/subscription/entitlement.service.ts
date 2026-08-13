@@ -1,6 +1,6 @@
 import type { CourseEnrollment, MemberSubscription, SubscriptionPlan } from '@prisma/client';
 import { prisma } from '@bb/db';
-import { ForbiddenException } from '@bb/common/exceptions';
+import { forbidden, ERROR_CODES } from '@bb/common/exceptions';
 
 export type ActiveSubscription = MemberSubscription & { plan: SubscriptionPlan };
 
@@ -59,7 +59,9 @@ export class EntitlementService {
     if (enrollment && this.isEnrollmentValid(enrollment)) return;
 
     const sub = await this.getActiveSubscriptionForMember(memberId);
-    if (!sub) throw new ForbiddenException('Not enrolled in this course');
+    // Coded, not free-form: the media/bonus gates both answer COURSE_NOT_ENROLLED,
+    // and the client branches on `error.code`.
+    if (!sub) throw forbidden(ERROR_CODES.COURSE_NOT_ENROLLED);
 
     await prisma.courseEnrollment.upsert({
       where: { memberId_courseId: { memberId, courseId } },

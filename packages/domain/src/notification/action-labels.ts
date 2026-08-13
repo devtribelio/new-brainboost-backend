@@ -1,5 +1,10 @@
 export const ActionLabel = {
   NewPost: 'newPost',
+  // FROZEN once shipped: the mobile app routes on these two values, so an old
+  // build keeps sending taps here forever. Rename = broken deep link. Add a new
+  // value instead. See docs/fcm-targeted-push-contract.md #3.
+  TopicDigest: 'topicDigest',
+  TribeDigest: 'tribeDigest',
   NewComment: 'newComment',
   NewReply: 'newReply',
   NewLike: 'newLike',

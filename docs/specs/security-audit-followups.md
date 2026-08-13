@@ -29,7 +29,7 @@ that doesn't exist on a fresh DB. Use `db push` until the migration history is r
 | HIGH | PERCENT voucher `maxAmount` cap silently bypassed | Thread `maxAmount` through `validate()` → `voucherMeta` → `computeTotals` | `packages/domain/src/commerce/voucher.service.ts`, `checkout.service.ts` |
 | HIGH | TOCTOU double-spend in `requestDisbursement` | Transaction-scoped `pg_advisory_xact_lock(hashtext(memberId))` serialises concurrent requests | `packages/domain/src/affiliate/disbursement.service.ts` |
 | HIGH | Self-referral / circular inviter-chain pays buyer on own purchase | `cutChainCycles()` cycle-guard in `walkInviterChain` + skip `node.id === buyerMemberId` in commit loop | `packages/domain/src/affiliate/utils/walk-inviter-chain.ts`, `affiliator.service.ts` |
-| MEDIUM | Password change did not revoke other sessions | `changePassword` now revokes all non-revoked refresh tokens (mirrors `resetPassword`) | `apps/mobile-api/src/modules/account/account.service.ts` |
+| MEDIUM | Password change did not revoke other sessions | `changePassword` revokes every non-revoked refresh token **except the caller's own** (`NOT: { id: currentSessionId }`, sid threaded from `authGuard`) — see note below | `apps/mobile-api/src/modules/account/account.service.ts` |
 | MEDIUM | Unbounded multipart upload (memory/S3 DoS) | `limits.files`/`parts` cap + `upload.array('image', MAX)` (MAX=10) | `apps/mobile-api/src/modules/upload/upload.routes.ts` |
 | LOW | Swagger UI + OpenAPI JSON exposed in prod | Gated behind `API_DOCS_ENABLED` flag (default ON, so staging keeps docs; set `=false` in real production) | `packages/common/src/openapi/swagger.middleware.ts`, `config/env.ts` |
 | LOW | Voucher-validate enumeration (no rate limit) | Per-member `voucherValidateRateLimiter` (20/15min) on the route | `packages/common/src/middlewares/rate-limit.middleware.ts`, `apps/mobile-api/.../commerce.routes.ts` |
@@ -38,6 +38,28 @@ New regression tests: `network-auth.spec.ts`, `admin-rbac.spec.ts`,
 `affiliate/inviter-chain-cycle.spec.ts`, voucher-`maxAmount` case in
 `commerce/voucher.spec.ts`. `api-smoke.spec.ts` network assertions updated to the
 auth-gated behaviour.
+
+### Note — password change keeps the caller's session (2026-07-30)
+
+The original fix revoked **all** refresh tokens, which logged the member out of
+the very device they had just used: `authGuard` calls `assertSessionActive(sid)`
+on every request, so the caller's own access token died instantly (not after the
+15m TTL), and `changePassword` returns a profile object, not a fresh token
+bundle. Product decision: keep the caller's session, evict the rest.
+
+Why this does not weaken the original threat model: a stolen refresh token is a
+*different* `refresh_token` row, so it is still revoked. The one surviving
+session is the one that presented a valid access token **and** proved knowledge
+of the old password. Both degenerate paths fail safe toward *more* revocation —
+a missing `sessionId` falls back to revoke-all, and the `memberId` filter means
+a `currentSessionId` that isn't this member's simply excludes nothing.
+
+`forgotPasswordVerification` is deliberately **left revoking everything**: that
+caller is unauthenticated and only proved control of the OTP channel, so every
+pre-existing session stays suspect.
+
+Covered by `apps/mobile-api/tests/account-change-password.spec.ts` (7 cases,
+incl. caller-survives / other-device-evicted / live-token-count).
 
 ---
 
@@ -108,3 +130,98 @@ listed member. Now that the route is auth-gated this is no longer an anonymous l
 exposing the whole member base's contact PII to any logged-in user is over-exposure —
 strip contact fields (or scope to network team members). Needs FE coordination since the
 flat `NetworkMemberModel` declares those fields.
+
+---
+
+## 2026-07-15 — Rate limiter defeated in the deployed environment (CRITICAL, FIXED in app)
+
+**Source:** live black-box pentest of `https://be-bb-staging.brainboostos.com` + config review.
+
+**Symptom:** 60 login attempts against `/api/member/oauth/token` (limit 30/15min) produced
+**zero 429s**; `RateLimit-Remaining` bounced 13–29 and never reached 0.
+
+**Root cause (confirmed on the box, not inferred):** the deployed chain is
+`Cloudflare → nginx (proxy_pass 127.0.0.1:3000, X-Forwarded-For = $proxy_add_x_forwarded_for) → Node`
+— **two** proxy hops — but the app boots with `TRUST_PROXY=1` (trusts nginx only).
+Express therefore resolves `req.ip` to the **rotating Cloudflare edge IP**, not the
+visitor. `express-rate-limit` keyed on `req.ip`, so every few requests landed on a new
+CF-edge key and no per-IP bucket ever filled. PM2 runs a single `fork` instance
+(`instances: 1`), so this was NOT a multi-store problem — the key itself was wrong.
+There is also no edge rate limiting (CDK `// TODO WAF` is unbuilt; Cloudflare has no
+rate rule on these paths).
+
+**Fix (app, shipped):** `packages/common/src/middlewares/rate-limit.middleware.ts` now
+keys every limiter on a `clientIp()` helper that prefers the `CF-Connecting-IP` header
+(Cloudflare always sets it to the real visitor and strips client-supplied copies),
+falling back to `req.ip`. Unit-tested in
+`apps/mobile-api/tests/rate-limit-client-ip.spec.ts`. Deploy = rebuild `@bb/common` +
+`pm2 reload bb-mobile-api`.
+
+**Required infra hardening (NOT yet done — must accompany the app fix):**
+1. **Firewall the origin to Cloudflare IP ranges.** nginx listens on `0.0.0.0:80/443`;
+   if the origin IP is reachable directly, an attacker can bypass Cloudflare and forge
+   `CF-Connecting-IP`, re-defeating the limiter. Restrict inbound 80/443 to Cloudflare's
+   published CIDRs (security group / ufw / nginx `allow`+`deny`), or use Cloudflare
+   Tunnel so the origin has no public port.
+2. **(Recommended) Fix `req.ip` globally too** so logs/audit show the real client: either
+   set `TRUST_PROXY=2` (CF + nginx) OR add nginx `ngx_http_realip_module`
+   (`set_real_ip_from <CF CIDRs>; real_ip_header CF-Connecting-IP;`) and keep
+   `TRUST_PROXY=1`. The realip-module route is preferred (Cloudflare-range-aware, not a
+   brittle hop count).
+3. **When the API scales beyond one instance** (ECS or `pm2 -i >1`), the in-memory store
+   no longer suffices — a shared store is required. **IMPLEMENTED:** every limiter now
+   uses a Redis store (`rate-limit-redis` + `ioredis`) when `REDIS_URL` is set, gated so
+   `REDIS_URL` unset falls back to the per-process MemoryStore (single-process staging /
+   local dev, unchanged). Each limiter has its own key prefix (`rl:<name>:`) so buckets
+   stay independent, and the store is wrapped in a **fail-open** decorator: a Redis outage
+   degrades to "no throttling" rather than 500-ing auth. The ElastiCache node
+   (`cache.t4g.micro`, single node) + `REDIS_URL` injection are provisioned in
+   `infra/cdk/lib/bb-ecs-stack.ts`. Code: `packages/common/src/middlewares/rate-limit.middleware.ts`;
+   tests: `apps/mobile-api/tests/rate-limit-store.spec.ts`.
+
+**Verify after deploy:** re-run ~40 rapid login attempts from one client; expect a `429`
+after the 30th within the 15-min window, and `RateLimit-Remaining` decrementing
+monotonically.
+
+---
+
+## 2026-07-16 — Per-identifier rate-limit keying (shared-IP / carrier-NAT fix)
+
+**Problem:** credential limiters keyed on client IP. A whole office (one NAT'd
+public IP) — and, in production, thousands of mobile users behind one **carrier
+CGNAT** IP — share a single bucket, so one user's failed logins / OTP attempts
+`429` everyone else. The 3-attempt OTP-verify limiters are the worst: 3 people
+on one carrier IP verifying their own codes in 15 min block the 4th.
+
+**Fix (implemented, `rate-limit.middleware.ts`):** credential limiters now key on
+the **account identifier from the request body**, not the IP. IP is only a
+fallback when no identifier is present (malformed body, social/refresh grant).
+The identifier is normalized (casing/formatting can't spawn a fresh bucket) and
+SHA-256 hashed (no raw email/phone in Redis keys). Mapping:
+
+| Limiter | Body field → key |
+|---|---|
+| login | `username` (IP fallback for social/refresh grants) + `skipSuccessfulRequests` |
+| register | `username` else phone target |
+| registerByPhone | `otpPhoneTarget(phoneCode, phone)` |
+| forgotPassword request/verify | `email` else digits-normalized `phone` |
+| validateOtp | `target` |
+| validateOtpEmail / validateOtpPhone | `memberId` |
+| requestVerificationEmail / Phone | `memberId` |
+
+This also **hardens** targeted attacks: an OTP-guess budget is now per-victim,
+not per-attacker-IP, so rotating IPs can't multiply the guesses.
+
+**Verified:** unit tests `apps/mobile-api/tests/rate-limit-identifier.spec.ts`
+(normalization, kind-isolation, IP fallback, phone canonicalization) + live
+2-account/1-IP run: exhausting user A's 30-login budget left user B on the same
+IP completely unblocked (5/5 passed).
+
+**Deliberately NOT done — per-IP volumetric backstop in-app.** Adding an in-app
+per-IP cap would re-introduce the carrier-NAT lockout this change removes.
+Volumetric per-IP protection belongs at the **edge (Cloudflare rate rules / AWS
+WAF) with a CAPTCHA challenge** (a challenged carrier user solves a captcha; a
+bot fails it), not a hard app-layer block. Ties to the existing `// TODO WAF`.
+
+**Cleanup:** removed the dead `adminLoginRateLimiter` (admin app deleted 2026-07,
+no consumers).

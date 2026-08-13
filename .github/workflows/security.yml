@@ -11,27 +11,29 @@ permissions:
   contents: read
 
 jobs:
-  # --- Step 2: dependency vulnerability audit ---
+  # --- Step 2: dependency vulnerability audit (OSV-Scanner) ---
+  # `pnpm audit` was retired: npm removed the legacy audit endpoint it calls
+  # (HTTP 410), so it can no longer run. OSV-Scanner reads pnpm-lock.yaml
+  # directly against the OSV database — no registry endpoint, no install needed.
   dep-audit:
     name: dependency audit
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      # production deps must be clean at moderate+; fail the build if not
+      # Production deps must be clean. Dev/build-tooling advisories (not in the
+      # prod tree) are triaged in .osv-scanner.prod.toml; anything else — any
+      # production vulnerability — fails the build.
       - name: audit (prod, blocking)
-        run: pnpm audit --prod --audit-level=moderate
-      # dev deps reported but non-blocking (most are local tooling only)
+        run: |
+          docker run --rm -v "${{ github.workspace }}:/src" ghcr.io/google/osv-scanner:latest \
+            --config=/src/.osv-scanner.prod.toml --lockfile=/src/pnpm-lock.yaml
+      # Full report incl. the triaged dev-tooling advisories — visible in the
+      # logs for awareness, never blocks (scans without the ignore file).
       - name: audit (all, advisory)
         if: always()
-        run: pnpm audit --audit-level=moderate || true
+        run: |
+          docker run --rm -v "${{ github.workspace }}:/src" ghcr.io/google/osv-scanner:latest \
+            --lockfile=/src/pnpm-lock.yaml || true
 
   # --- Step 1: secret leak scan over full git history ---
   secret-scan:

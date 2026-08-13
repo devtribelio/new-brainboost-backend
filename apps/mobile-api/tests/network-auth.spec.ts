@@ -12,13 +12,13 @@ describe('network member/tag endpoints require auth', () => {
     const res = await request(app).get('/api/member/network/member?page=1&perPage=100');
     expect(res.status).toBe(401);
     expect(res.body.success).toBe(false);
-    expect(res.body.error.code).toBe('UNAUTHORIZED');
+    expect(res.body.error.code).toBe('BEARER_TOKEN_MISSING');
   });
 
   it('GET /api/member/network/tag without a token → 401', async () => {
     const res = await request(app).get('/api/member/network/tag');
     expect(res.status).toBe(401);
     expect(res.body.success).toBe(false);
-    expect(res.body.error.code).toBe('UNAUTHORIZED');
+    expect(res.body.error.code).toBe('BEARER_TOKEN_MISSING');
   });
 });

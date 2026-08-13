@@ -1,4 +1,4 @@
-import { BadRequestException } from '@bb/common/exceptions';
+import { badRequest, ERROR_CODES, BadRequestException } from '@bb/common/exceptions';
 
 // Repo PKs are UUID v7 (`@db.Uuid`). FE often passes legacyId/code instead.
 // Guard `findUnique({ where: { id } })` so a non-UUID input fails cleanly
@@ -13,6 +13,6 @@ export function isUuid(input: string | null | undefined): input is string {
 // passing FE input straight into a Uuid `where: { id }` lookup.
 export function assertUuid(input: string | null | undefined): asserts input is string {
   if (!isUuid(input)) {
-    throw new BadRequestException('Invalid id format');
+    throw badRequest(ERROR_CODES.ID_FORMAT_INVALID);
   }
 }

@@ -8,6 +8,8 @@ import * as elbv2 from 'aws-cdk-lib/aws-elasticloadbalancingv2';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
+import * as ssm from 'aws-cdk-lib/aws-ssm';
+import * as elasticache from 'aws-cdk-lib/aws-elasticache';
 import * as events from 'aws-cdk-lib/aws-events';
 
 export interface BbEcsStackProps extends cdk.StackProps {
@@ -20,6 +22,11 @@ export interface BbEcsStackProps extends cdk.StackProps {
   // service-nya sama sekali, jadi bisa merge dulu tanpa butuh image/secret siap.
   resyncEnabled?: boolean;
   resyncImageTag?: string;     // tag image bb/resync-worker (default: sama dgn imageTag)
+  // bb-comms di-build dari repo TERPISAH (bb-notification-service, Go) → siklus
+  // rilisnya sendiri. `commsImageTag` melepasnya dari lockstep imageTag mobile-api
+  // (pola sama dgn resyncImageTag), jadi bisa deploy notification tanpa rebuild
+  // mobile-api. Default: sama dgn imageTag (backward compatible).
+  commsImageTag?: string;
 }
 
 export class BbEcsStack extends cdk.Stack {
@@ -44,6 +51,12 @@ export class BbEcsStack extends cdk.Stack {
       JWT_ACCESS_SECRET: sm('JWT_ACCESS_SECRET'),
       JWT_REFRESH_SECRET: sm('JWT_REFRESH_SECRET'),
       ADMIN_JWT_SECRET: sm('ADMIN_JWT_SECRET'),
+      // TTL token — di Secrets Manager biar bisa diubah tanpa edit kode (cukup ganti
+      // value di secret + force-new-deployment). INTERIM: access dipanjangkan ke 7d
+      // untuk menekan keluhan "sesi berakhir" selagi grace-window dikerjakan; aman krn
+      // revocation tetap dicek ke DB tiap request. Default env.ts kalau key tak ada: 15m / 30d.
+      JWT_ACCESS_EXPIRES_IN: sm('JWT_ACCESS_EXPIRES_IN'),
+      JWT_REFRESH_EXPIRES_IN: sm('JWT_REFRESH_EXPIRES_IN'),
       S3_ACCESS_KEY_ID: sm('S3_ACCESS_KEY_ID'),
       S3_SECRET_ACCESS_KEY: sm('S3_SECRET_ACCESS_KEY'),
       S3_BUCKET: sm('S3_BUCKET'),
@@ -98,14 +111,28 @@ export class BbEcsStack extends cdk.Stack {
       SQS_REGION: this.region,
       API_DOCS_ENABLED: 'false',
       TRUST_PROXY: '1', // di belakang ALB (1 hop) → req.ip = X-Forwarded-For, rate-limit akurat
+      // === Logging (docs/logging.md) ===
+      // Semua LOG_* di-set eksplisit, bukan ngandelin default env.ts: saat insiden
+      // kita ganti nilai di sini + redeploy, tanpa perlu inget default-nya apa.
+      LOG_LEVEL: 'info',            // 'debug' nambah db.op, 'trace' nambah db.query
+      LOG_HTTP: 'true',             // satu baris http.response per request
+      LOG_HTTP_INCOMING: 'true',    // + http.request pas request masuk — request yang
+                                    //   hang/crash nggak pernah nyampe baris response
+      LOG_HTTP_BODY: 'true',        // body (deep-redacted + truncated) di baris response
+      LOG_SLOW_REQUEST_MS: '1000',  // di atas ini → warn + slow:true
+      // Prefix match. /health = health check ALB (targetGroup di bawah), /api/docs
+      // mati di prod (API_DOCS_ENABLED=false) tapi tetap di-skip biar aman.
+      LOG_IGNORE_PATHS: '/health,/api/docs',
+      LOG_PRISMA: 'true',           // efektif cuma kalau LOG_LEVEL=debug (db.op level debug)
     };
 
     // === ECR images ===
-    const img = (repo: string) =>
+    const img = (repo: string, tag: string = props.imageTag) =>
       ecs.ContainerImage.fromEcrRepository(
-        ecr.Repository.fromRepositoryName(this, `${repo}Repo`, `bb/${repo}`), props.imageTag);
+        ecr.Repository.fromRepositoryName(this, `${repo}Repo`, `bb/${repo}`), tag);
     const mobileApiImg = img('mobile-api');   // dipakai 3×: api, comms-relay, cron
-    const commsImg = img('bb-comms');
+    // bb-comms: repo terpisah → tag sendiri (default = imageTag kalau tak diisi).
+    const commsImg = img('bb-comms', props.commsImageTag ?? props.imageTag);
     // backoffice-api & admin-ejs sudah DIHAPUS dari monorepo (2026-07) — tidak ada service-nya di sini.
 
     // === Task role (perm runtime: SQS) ===
@@ -137,8 +164,42 @@ export class BbEcsStack extends cdk.Stack {
 
     const placement = { vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC }, assignPublicIp: true, securityGroups: [appSg] };
 
+    // === ElastiCache Redis — shared rate-limit store across mobile-api tasks ===
+    // mobile-api autoscales 2->6 tasks; express-rate-limit's default store is
+    // per-process, so without a shared store the effective limit is
+    // `limit x taskCount` and resets on every deploy. One small node is plenty
+    // for rate-limit counters (add a replica / CfnReplicationGroup later if HA is
+    // wanted — the app fails open on Redis loss, so a single node is safe). The
+    // resulting endpoint is injected as REDIS_URL into the task env below.
+    const redisSg = new ec2.SecurityGroup(this, 'RedisSg', {
+      vpc, description: 'bb rate-limit redis', allowAllOutbound: false,
+    });
+    redisSg.addIngressRule(appSg, ec2.Port.tcp(6379), 'Fargate tasks to Redis');
+    const redisSubnets = new elasticache.CfnSubnetGroup(this, 'RedisSubnets', {
+      description: 'bb rate-limit redis subnets',
+      subnetIds: vpc.selectSubnets({ subnetType: ec2.SubnetType.PUBLIC }).subnetIds,
+    });
+    const redis = new elasticache.CfnCacheCluster(this, 'Redis', {
+      engine: 'redis',
+      cacheNodeType: 'cache.t4g.micro',
+      numCacheNodes: 1,
+      port: 6379,
+      vpcSecurityGroupIds: [redisSg.securityGroupId],
+      cacheSubnetGroupName: redisSubnets.ref,
+    });
+    redis.addDependency(redisSubnets);
+    // rate-limit.middleware.ts reads REDIS_URL; empty => per-process MemoryStore.
+    env.REDIS_URL = `redis://${redis.attrRedisEndpointAddress}:${redis.attrRedisEndpointPort}`;
+
     // ============ HTTP service helper (di belakang ALB) ============
-    const makeHttpService = (id: string, image: ecs.ContainerImage, port: number, command?: string[]) => {
+    // desiredCount WAJIB >= minCapacity autoscaler-nya. Kalau lebih kecil, tiap
+    // `cdk deploy` menurunkan service ke angka ini dan Application Auto Scaling
+    // baru menaikkannya lagi saat ada alarm — pada CPU rendah alarm itu tidak
+    // pernah datang, jadi prod berjalan di bawah floor tanpa ketahuan (mobile-api
+    // sempat 1 task padahal min 2, 21 Juli 2026).
+    const makeHttpService = (
+      id: string, image: ecs.ContainerImage, port: number, command?: string[], desiredCount = 1,
+    ) => {
       const td = new ecs.FargateTaskDefinition(this, `${id}Task`, {
         cpu: 512, memoryLimitMiB: 1024, taskRole,
         runtimePlatform: { cpuArchitecture: ecs.CpuArchitecture.ARM64 }, // Graviton: native build di Mac + ~20% lebih murah
@@ -151,14 +212,14 @@ export class BbEcsStack extends cdk.Stack {
         portMappings: [{ containerPort: port }],
       });
       return new ecs.FargateService(this, `${id}Svc`, {
-        cluster, taskDefinition: td, desiredCount: 1,
+        cluster, taskDefinition: td, desiredCount,
         minHealthyPercent: 100, maxHealthyPercent: 200, ...placement,
         circuitBreaker: { rollback: true }, // deploy gagal → cepet stop + rollback (bukan gantung 3 jam)
       });
     };
 
     // ---- mobile-api (autoscale 2->6 berdasar CPU; min 2 = floor) ----
-    const mobileSvc = makeHttpService('mobile-api', mobileApiImg, 3000, ['node', 'dist/main.js']);
+    const mobileSvc = makeHttpService('mobile-api', mobileApiImg, 3000, ['node', 'dist/main.js'], 2);
     const scaling = mobileSvc.autoScaleTaskCount({ minCapacity: 2, maxCapacity: 6 });
     scaling.scaleOnCpuUtilization('Cpu', { targetUtilizationPercent: 60 });
 
@@ -178,6 +239,23 @@ export class BbEcsStack extends cdk.Stack {
       alb.addListener('Http', { // logical ID sama dgn branch non-cert → update in-place (bukan create baru)
         port: 80, open: true,
         defaultAction: elbv2.ListenerAction.redirect({ protocol: 'HTTPS', port: '443', permanent: true }),
+      });
+
+      // ALB ini di-share ke stack app lain (BackofficeBbStack, BbMarketplaceStack)
+      // via host-based routing — mereka menambah target group + listener rule sendiri
+      // ke listener 443 ini. Kontraknya param SSM di bawah; default action (mobile-api)
+      // tidak tersentuh. Stack konsumen menempelkan cert domainnya sendiri lewat SNI.
+      new ssm.StringParameter(this, 'SharedAlbListenerArnParam', {
+        parameterName: '/bb/shared-alb/https-listener-arn',
+        stringValue: https.listenerArn,
+      });
+      new ssm.StringParameter(this, 'SharedAlbSgIdParam', {
+        parameterName: '/bb/shared-alb/sg-id',
+        stringValue: alb.connections.securityGroups[0].securityGroupId,
+      });
+      new ssm.StringParameter(this, 'SharedAlbDnsParam', {
+        parameterName: '/bb/shared-alb/dns-name',
+        stringValue: alb.loadBalancerDnsName,
       });
     } else {
       // belum ada cert → HTTP:80 doang
@@ -204,23 +282,51 @@ export class BbEcsStack extends cdk.Stack {
       circuitBreaker: { rollback: true },
     });
 
-    // ============ cron (EventBridge → RunTask, tiap jam) ============
+    // ============ cron (EventBridge → RunTask) ============
+    // Dua lane, binary sama (dist/jobs-runner.js), argv = filter nama job (lihat
+    // apps/mobile-api/src/jobs-runner.ts — nama salah = exit 1, bukan diem-diem no-op).
     // Task def eksplisit biar bisa set ARM64 + taskRole.
-    const cronTd = new ecs.FargateTaskDefinition(this, 'CronTask', {
-      cpu: 256, memoryLimitMiB: 512, taskRole,
-      runtimePlatform: { cpuArchitecture: ecs.CpuArchitecture.ARM64 },
-    });
-    cronTd.addContainer('cron', {
-      image: mobileApiImg, command: ['node', 'dist/jobs-runner.js'],
-      environment: env, secrets,
-      logging: ecs.LogDrivers.awsLogs({ streamPrefix: 'cron', logGroup: logGroup('cron') }),
-    });
+    // Mendaftarkan job di jobs-runner.ts BELUM cukup — nama yang tidak ada di argv
+    // lane mana pun tidak akan pernah jalan, tanpa error. Jaga daftar ini sinkron
+    // dengan lane PM2 di ecosystem.config.js.
+    //  - Cron (hourly): affiliate PENDING->BALANCE + expire stale payments +
+    //    topic digest (aman tiap jam: no-op kecuali jam WIB == notification.digestHour).
+    //  - CronDisburse (tiap 5 mnt): sweep payout yang sudah di-approve backoffice ke
+    //    Xendit, biar approval MANUAL nggak nunggu sampai jam berikutnya. Idempotent —
+    //    cuma ambil row PENDING dengan approvedAt terisi, overlap antar lane aman.
+    const makeCronLane = (id: string, streamPrefix: string, jobNames: string[]) => {
+      const td = new ecs.FargateTaskDefinition(this, `${id}Task`, {
+        cpu: 256, memoryLimitMiB: 512, taskRole,
+        runtimePlatform: { cpuArchitecture: ecs.CpuArchitecture.ARM64 },
+      });
+      td.addContainer(streamPrefix, {
+        image: mobileApiImg, command: ['node', 'dist/jobs-runner.js', ...jobNames],
+        environment: env, secrets,
+        logging: ecs.LogDrivers.awsLogs({ streamPrefix, logGroup: logGroup(streamPrefix) }),
+      });
+      return td;
+    };
     new ecsPatterns.ScheduledFargateTask(this, 'Cron', {
       cluster,
       schedule: events.Schedule.cron({ minute: '0' }), // 0 * * * *  hourly
       subnetSelection: { subnetType: ec2.SubnetType.PUBLIC },
       securityGroups: [appSg],
-      scheduledFargateTaskDefinitionOptions: { taskDefinition: cronTd },
+      scheduledFargateTaskDefinitionOptions: {
+        taskDefinition: makeCronLane('Cron', 'cron', [
+          'affiliatePendingToBalance',
+          'expirePendingPayments',
+          'topicDigest',
+        ]),
+      },
+    });
+    new ecsPatterns.ScheduledFargateTask(this, 'CronDisburse', {
+      cluster,
+      schedule: events.Schedule.cron({ minute: '*/5' }), // tiap 5 menit
+      subnetSelection: { subnetType: ec2.SubnetType.PUBLIC },
+      securityGroups: [appSg],
+      scheduledFargateTaskDefinitionOptions: {
+        taskDefinition: makeCronLane('CronDisburse', 'cron-disburse', ['executeApprovedDisbursements']),
+      },
     });
     // CATATAN: ScheduledFargateTask nggak set assignPublicIp. Kalau cron gagal pull image
     // (no route ke ECR di public subnet), tambah VPC endpoint (ECR/S3/Logs/Secrets) atau NAT.
@@ -295,7 +401,7 @@ export class BbEcsStack extends cdk.Stack {
         // diomit → default 2× RESYNC_INTERVAL_SEC.
         environment: {
           NODE_ENV: 'production',
-          RESYNC_INTERVAL_SEC: '3600',            // loop worker (detik). 1800 = tiap 30 mnt
+          RESYNC_INTERVAL_SEC: '600',             // loop worker (detik). 600 = tiap 10 mnt (was 3600/1jam)
           RESYNC_SYNCERS: 'all',                  // "all" atau CSV: members,enrollments,kyc,tree,commissions,reviews,posts
           RESYNC_BATCH_SIZE: '1000',              // row per batch
           RESYNC_LEGACY_RECONNECT_RETRIES: '3',   // reconnect saat legacy ECONNRESET

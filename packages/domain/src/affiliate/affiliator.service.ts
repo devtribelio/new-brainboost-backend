@@ -1,6 +1,6 @@
 import { prisma } from '@bb/db';
 import { logger } from '@bb/common/config/logger';
-import { NotFoundException, BadRequestException } from '@bb/common/exceptions';
+import { badRequest, notFound, ERROR_CODES } from '@bb/common/exceptions';
 import { assignMemberAffiliateCode } from './utils/code-generator';
 import {
   AFFILIATE_BASED,
@@ -26,7 +26,7 @@ export class AffiliatorService {
    */
   async getMe(memberId: string) {
     const member = await prisma.member.findUnique({ where: { id: memberId } });
-    if (!member) throw new NotFoundException('Member not found');
+    if (!member) throw notFound(ERROR_CODES.MEMBER_NOT_FOUND);
 
     if (!member.affiliateCode) {
       const code = await assignMemberAffiliateCode(memberId);
@@ -52,7 +52,7 @@ export class AffiliatorService {
    */
   async setMode(memberId: string, mode: AffiliateBased) {
     if (!Object.values(AFFILIATE_BASED).includes(mode)) {
-      throw new BadRequestException(`Invalid affiliateBased: ${mode}`);
+      throw badRequest(ERROR_CODES.AFFILIATE_MODE_INVALID, { mode });
     }
     return prisma.member.update({
       where: { id: memberId },
@@ -479,7 +479,9 @@ export class AffiliatorService {
     ]);
 
     // Resolve buyers in one batch — buyerMemberId has no relation in the schema.
-    const buyerIds = [...new Set(rows.map((r) => r.buyerMemberId).filter((id): id is string => !!id))];
+    const buyerIds = [
+      ...new Set(rows.map((r) => r.buyerMemberId).filter((id): id is string => !!id)),
+    ];
     const buyers = buyerIds.length
       ? await prisma.member.findMany({
           where: { id: { in: buyerIds } },
@@ -490,7 +492,7 @@ export class AffiliatorService {
 
     const enriched = rows.map((r) => ({
       ...r,
-      buyer: r.buyerMemberId ? buyerById.get(r.buyerMemberId) ?? null : null,
+      buyer: r.buyerMemberId ? (buyerById.get(r.buyerMemberId) ?? null) : null,
     }));
 
     return { rows: enriched, total };

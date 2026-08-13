@@ -1,7 +1,9 @@
 import { prisma } from '@bb/db';
-import { BadRequestException, NotFoundException } from '@bb/common/exceptions';
+import { badRequest, notFound, ERROR_CODES } from '@bb/common/exceptions';
 import type { PaginationParams } from '@bb/common/utils/pagination.util';
 import { assertUuid } from '@bb/common/utils/uuid.util';
+import { PUBLISHED_STATUS_FILTER } from '@bb/common/utils/post-status.util';
+import { MuteScope } from '@bb/domain/notification/mute-scope';
 
 interface TopicListQuery {
   keyword?: string;
@@ -9,6 +11,9 @@ interface TopicListQuery {
   networkInput?: string;
   // Authed member id. When provided, each row gets `isSubscribed` set.
   memberId?: string;
+  // Filter by subscription state of the authed member. Anonymous callers are
+  // treated as subscribed-to-nothing: true → empty, false → no-op.
+  isSubscribe?: boolean;
 }
 
 export interface TopicSubscribeResult {
@@ -31,6 +36,15 @@ export class TopicService {
       if (!networkId) return { rows: [], total: 0 };
       where.networkId = networkId;
     }
+    if (q.isSubscribe !== undefined) {
+      if (q.memberId) {
+        where.subscriptions = q.isSubscribe
+          ? { some: { memberId: q.memberId } }
+          : { none: { memberId: q.memberId } };
+      } else if (q.isSubscribe) {
+        return { rows: [], total: 0 };
+      }
+    }
 
     const [rows, total] = await Promise.all([
       prisma.topic.findMany({
@@ -47,13 +61,71 @@ export class TopicService {
     }
 
     const topicIds = rows.map((r) => r.id);
+    // Mute is independent of subscription — a member may mute a topic they never
+    // subscribed to — so this runs on every authed path, including the one where
+    // the isSubscribe filter already pins the subscription state.
+    const muted = await this.mutedTopicIds(q.memberId, topicIds);
+
+    // Filter already pins the subscription state of every row.
+    if (q.isSubscribe !== undefined) {
+      const decorated = rows.map((r) =>
+        Object.assign(r, { isSubscribed: q.isSubscribe, isMute: muted.has(r.id) }),
+      );
+      return { rows: decorated, total };
+    }
+
     const subs = await prisma.topicSubscription.findMany({
       where: { memberId: q.memberId, topicId: { in: topicIds } },
       select: { topicId: true },
     });
     const subscribed = new Set(subs.map((s) => s.topicId));
-    const decorated = rows.map((r) => Object.assign(r, { isSubscribed: subscribed.has(r.id) }));
+    const decorated = rows.map((r) =>
+      Object.assign(r, { isSubscribed: subscribed.has(r.id), isMute: muted.has(r.id) }),
+    );
     return { rows: decorated, total };
+  }
+
+  /**
+   * One topic by legacyId or UUID, decorated for the authenticated caller.
+   *
+   * Exists for push deep links: a `topicDigest` tap on a cold start has only the
+   * topicId, and `list` cannot fetch one topic (it is keyed on network code, and a
+   * missing topic would come back as an empty array — indistinguishable from a bad
+   * network code). 404 here says exactly one thing. See
+   * docs/fcm-targeted-push-contract.md #5.
+   */
+  async detail(topicInput: string, memberId?: string) {
+    const topic = await this.resolveTopicByAnyId(topicInput);
+    if (!topic || !topic.isActive) throw notFound(ERROR_CODES.TOPIC_NOT_FOUND);
+
+    // countPost is real here, unlike `list` where it stays 0 — one count for one
+    // topic is cheap, one per row is not. The topic screen header needs the number.
+    const countPost = await prisma.post.count({
+      where: { topicId: topic.id, isDeleted: false, publishStatus: PUBLISHED_STATUS_FILTER },
+    });
+    if (!memberId) return Object.assign(topic, { countPost });
+
+    const [subscription, muted] = await Promise.all([
+      prisma.topicSubscription.findUnique({
+        where: { memberId_topicId: { memberId, topicId: topic.id } },
+        select: { id: true },
+      }),
+      this.mutedTopicIds(memberId, [topic.id]),
+    ]);
+    return Object.assign(topic, {
+      countPost,
+      isSubscribed: subscription !== null,
+      isMute: muted.has(topic.id),
+    });
+  }
+
+  // notification_mutes is keyed (memberId, scope, refId) with refId = topic UUID.
+  private async mutedTopicIds(memberId: string, topicIds: string[]): Promise<Set<string>> {
+    const rows = await prisma.notificationMute.findMany({
+      where: { memberId, scope: MuteScope.Topic, refId: { in: topicIds } },
+      select: { refId: true },
+    });
+    return new Set(rows.map((r) => r.refId));
   }
 
   // FE sends `code` (8-char alphanumeric from /info). Backend accepts code,
@@ -61,7 +133,10 @@ export class TopicService {
   // — duplicated rather than cross-module import to keep services self-contained.
   private async resolveNetworkId(input: string): Promise<string | null> {
     if (!input) return null;
-    const byCode = await prisma.network.findUnique({ where: { code: input }, select: { id: true } });
+    const byCode = await prisma.network.findUnique({
+      where: { code: input },
+      select: { id: true },
+    });
     if (byCode) return byCode.id;
     const legacyId = Number.parseInt(input, 10);
     if (Number.isFinite(legacyId) && input === String(legacyId)) {
@@ -94,19 +169,19 @@ export class TopicService {
       select: { id: true, legacyId: true, isActive: true },
     });
     if (!member || !member.isActive) {
-      throw new BadRequestException('Member is not active');
+      throw badRequest(ERROR_CODES.MEMBER_INACTIVE);
     }
 
     const topic = await this.resolveTopicByAnyId(topicInput);
-    if (!topic) throw new NotFoundException('Topic not found');
-    if (!topic.isActive) throw new BadRequestException('Topic is not active');
+    if (!topic) throw notFound(ERROR_CODES.TOPIC_NOT_FOUND);
+    if (!topic.isActive) throw badRequest(ERROR_CODES.TOPIC_INACTIVE);
 
     if (topic.networkId) {
       const networkMember = await prisma.networkMember.findUnique({
         where: { networkId_memberId: { networkId: topic.networkId, memberId } },
       });
       if (!networkMember) {
-        throw new BadRequestException('Must join the parent network before subscribing to topic');
+        throw badRequest(ERROR_CODES.TOPIC_PARENT_NETWORK_REQUIRED);
       }
     }
 
@@ -157,7 +232,7 @@ export class TopicService {
       select: { id: true, legacyId: true },
     });
     const topic = await this.resolveTopicByAnyId(topicInput);
-    if (!topic) throw new NotFoundException('Topic not found');
+    if (!topic) throw notFound(ERROR_CODES.TOPIC_NOT_FOUND);
 
     await prisma.topicSubscription.deleteMany({ where: { memberId, topicId: topic.id } });
     await prisma.topicJoinRequest.updateMany({

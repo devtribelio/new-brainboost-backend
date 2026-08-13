@@ -16,6 +16,7 @@ describe('VoucherService', () => {
     notYet: `T-VOUCH-FUTURE-${ts}`,
     exhausted: `T-VOUCH-EXHAUSTED-${ts}`,
     quotaOne: `T-VOUCH-RACE-${ts}`,
+    multiProduct: `T-VOUCH-MULTI-${ts}`,
     cappedPercent: `T-VOUCH-CAP-${ts}`,
     idempotent: `T-VOUCH-IDEM-${ts}`,
   };
@@ -34,13 +35,7 @@ describe('VoucherService', () => {
       data: [
         { code: codes.valid, type: 'AMOUNT', value: 50_000, isActive: true },
         { code: codes.inactive, type: 'AMOUNT', value: 50_000, isActive: false },
-        {
-          code: codes.wrongProduct,
-          type: 'AMOUNT',
-          value: 50_000,
-          isActive: true,
-          productId: productBId,
-        },
+        { code: codes.wrongProduct, type: 'AMOUNT', value: 50_000, isActive: true },
         {
           code: codes.expired,
           type: 'AMOUNT',
@@ -85,6 +80,20 @@ describe('VoucherService', () => {
           isActive: true,
           used: 0,
         },
+        { code: codes.multiProduct, type: 'AMOUNT', value: 50_000, isActive: true },
+      ],
+    });
+
+    // Product scope now lives in the voucher_products junction (0 rows = global).
+    const [wrong, multi] = await Promise.all([
+      prisma.voucher.findUniqueOrThrow({ where: { code: codes.wrongProduct } }),
+      prisma.voucher.findUniqueOrThrow({ where: { code: codes.multiProduct } }),
+    ]);
+    await prisma.voucherProduct.createMany({
+      data: [
+        { voucherId: wrong.id, productId: productBId },
+        { voucherId: multi.id, productId: productAId },
+        { voucherId: multi.id, productId: productBId },
       ],
     });
   });
@@ -118,6 +127,16 @@ describe('VoucherService', () => {
     const r = await service.validate(codes.wrongProduct, productAId);
     expect(r.valid).toBe(false);
     expect(r.reason).toMatch(/applicable/i);
+  });
+
+  it('accepts a multi-product voucher for every whitelisted product, rejects others', async () => {
+    const a = await service.validate(codes.multiProduct, productAId);
+    expect(a.valid).toBe(true);
+    const b = await service.validate(codes.multiProduct, productBId);
+    expect(b.valid).toBe(true);
+    const other = await service.validate(codes.multiProduct, randomUUID());
+    expect(other.valid).toBe(false);
+    expect(other.reason).toMatch(/applicable/i);
   });
 
   it('returns invalid for expired voucher', async () => {

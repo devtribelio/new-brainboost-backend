@@ -3,6 +3,7 @@ import { registerPostNotificationListener } from './post.listener';
 import { registerCommentNotificationListener } from './comment.listener';
 import { registerNetworkNotificationListener } from './network.listener';
 import { registerSubscriptionNotificationListener } from './subscription.listener';
+import { registerTopicNotificationListener } from './topic.listener';
 
 export function registerNotificationListeners(): void {
   registerCommerceNotificationListener();
@@ -10,4 +11,5 @@ export function registerNotificationListeners(): void {
   registerCommentNotificationListener();
   registerNetworkNotificationListener();
   registerSubscriptionNotificationListener();
+  registerTopicNotificationListener();
 }

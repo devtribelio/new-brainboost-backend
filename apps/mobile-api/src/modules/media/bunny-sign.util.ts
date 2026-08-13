@@ -74,10 +74,14 @@ export function signBunnyUrl(
  * so the HLS `.ts` segments — fetched as paths relative to the playlist — inherit
  * the token automatically.
  */
-export function signBunnyHlsUrl(guid: string, opts: { ttlSeconds?: number } = {}): string {
+export function signBunnyHlsUrl(
+  guid: string,
+  opts: { ttlSeconds?: number; expiresAt?: number } = {},
+): string {
   const fileUrl = `https://${env.bunny.streamCdnHost}/${guid}/playlist.m3u8`;
   return signBunnyUrl(fileUrl, env.bunny.streamTokenKey, {
     expirationSeconds: opts.ttlSeconds ?? env.media.signedUrlTtlSeconds,
+    expiresAt: opts.expiresAt,
     isDirectory: true,
     pathAllowed: `/${guid}/`,
   });

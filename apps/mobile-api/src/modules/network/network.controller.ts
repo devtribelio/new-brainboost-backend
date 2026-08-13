@@ -1,7 +1,7 @@
 import type { Request, Response } from 'express';
 import { NetworkService } from './network.service';
 import { ok, okPaginated } from '@bb/common/utils/response.util';
-import { BadRequestException, UnauthorizedException } from '@bb/common/exceptions';
+import { badRequest, unauthorized, ERROR_CODES } from '@bb/common/exceptions';
 import { parsePagination } from '@bb/common/utils/pagination.util';
 import { serializeNetworkMemberLegacy } from './network.serializer';
 import type { AuthenticatedRequest } from '@bb/common/interfaces/authenticated-request';
@@ -13,11 +13,7 @@ import {
   ApiResponse,
   ApiTags,
 } from '@bb/common/openapi/decorators';
-import {
-  NetworkJoinResultDto,
-  NetworkMemberEntryDto,
-  NetworkTagDto,
-} from './dto/network.dto';
+import { NetworkJoinResultDto, NetworkMemberEntryDto, NetworkTagDto } from './dto/network.dto';
 import { NetworkJoinBodyDto } from './dto/network-join-body.dto';
 import { NetworkRequestActionDto } from './dto/network-request-action.dto';
 
@@ -34,14 +30,14 @@ export class NetworkController {
   @ApiBody({ type: () => NetworkJoinBodyDto })
   @ApiResponse({ status: 200, type: () => NetworkJoinResultDto })
   join = async (req: AuthenticatedRequest, res: Response) => {
-    if (!req.user) throw new UnauthorizedException();
+    if (!req.user) throw unauthorized(ERROR_CODES.AUTH_REQUIRED);
     // Mobile sends `code`, legacy stub used `networkId` — accept both
     const networkInput =
       (req.body?.code as string) ||
       (req.body?.networkCode as string) ||
       (req.body?.networkId as string) ||
       '';
-    if (!networkInput) throw new BadRequestException('code or networkId required');
+    if (!networkInput) throw badRequest(ERROR_CODES.NETWORK_IDENTIFIER_REQUIRED);
     const action = (req.body?.action as string) ?? 'join';
     if (action === 'leave') {
       return ok(res, await this.networkService.leave(req.user.id, networkInput));
@@ -61,12 +57,14 @@ export class NetworkController {
   })
   @ApiQuery({ name: 'page', type: 'integer', required: false, example: 1 })
   @ApiQuery({ name: 'perPage', type: 'integer', required: false, example: 20 })
-  @ApiResponse({ status: 200, type: () => NetworkMemberEntryDto, isArray: true, envelope: 'paginated' })
+  @ApiResponse({
+    status: 200,
+    type: () => NetworkMemberEntryDto,
+    isArray: true,
+    envelope: 'paginated',
+  })
   members = async (req: Request, res: Response) => {
-    const networkInput =
-      (req.query.code as string) ||
-      (req.query.networkId as string) ||
-      '';
+    const networkInput = (req.query.code as string) || (req.query.networkId as string) || '';
     const p = parsePagination(req.query as Record<string, unknown>);
     const { rows, total } = await this.networkService.listMembers(p, networkInput);
     // FE NetworkMemberModel is a flat shape. Mix `member` + `member.profile`
@@ -103,16 +101,17 @@ export class NetworkController {
   })
   @ApiResponse({ status: 200, type: () => NetworkTagDto, isArray: true, envelope: 'paginated' })
   tags = async (req: Request, res: Response) => {
-    const networkInput =
-      (req.query.code as string) ||
-      (req.query.networkId as string) ||
-      '';
+    const networkInput = (req.query.code as string) || (req.query.networkId as string) || '';
     const keyword =
       typeof req.query.keyword === 'string' && req.query.keyword.length > 0
         ? req.query.keyword
         : undefined;
     const p = parsePagination(req.query as Record<string, unknown>);
-    const { rows, total, countByTag } = await this.networkService.listTags(p, networkInput, keyword);
+    const { rows, total, countByTag } = await this.networkService.listTags(
+      p,
+      networkInput,
+      keyword,
+    );
     // FE TagModel: `{tag, count, created}`. count = posts referencing
     // `#<tag>` in content (naive — no PostTag relation, see T3.5 note).
     const data = rows.map((t) => ({
@@ -126,11 +125,12 @@ export class NetworkController {
   @ApiBearerAuth()
   @ApiOperation({
     summary: 'Approve a pending network join request (team-only)',
-    description: 'Caller must be a NetworkTeamMember of the target network. Provide either `requestId` directly or `(code|networkId) + memberId`.',
+    description:
+      'Caller must be a NetworkTeamMember of the target network. Provide either `requestId` directly or `(code|networkId) + memberId`.',
   })
   @ApiBody({ type: () => NetworkRequestActionDto })
   approveRequest = async (req: AuthenticatedRequest, res: Response) => {
-    if (!req.user) throw new UnauthorizedException();
+    if (!req.user) throw unauthorized(ERROR_CODES.AUTH_REQUIRED);
     const body = req.body ?? {};
     const result = await this.networkService.approveRequest(req.user.id, {
       requestId: body.requestId,
@@ -147,7 +147,7 @@ export class NetworkController {
   })
   @ApiBody({ type: () => NetworkRequestActionDto })
   rejectRequest = async (req: AuthenticatedRequest, res: Response) => {
-    if (!req.user) throw new UnauthorizedException();
+    if (!req.user) throw unauthorized(ERROR_CODES.AUTH_REQUIRED);
     const body = req.body ?? {};
     const result = await this.networkService.rejectRequest(req.user.id, {
       requestId: body.requestId,

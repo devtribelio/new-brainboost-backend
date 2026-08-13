@@ -6,7 +6,12 @@
   "type": "commonjs",
   "pnpm": {
     "overrides": {
-      "qs@>=6.11.1 <=6.15.1": ">=6.15.2"
+      "qs@>=6.11.1 <=6.15.1": ">=6.15.2",
+      "body-parser@<1.20.6": "^1.20.6",
+      "brace-expansion@<2.0.0": "^1.1.18",
+      "brace-expansion@>=2.0.0 <5.0.9": "^5.0.9",
+      "js-yaml@<4.3.0": "^4.3.0",
+      "postcss@<8.5.18": "^8.5.18"
     }
   },
   "scripts": {
@@ -17,6 +22,7 @@
     "resync:worker": "tsx --conditions=development apps/resync-worker/src/worker.ts",
     "resync:seed-redirect": "tsx --conditions=development apps/resync-worker/src/seed-redirect.ts",
     "resync:unlock": "tsx --conditions=development apps/resync-worker/src/unlock.ts",
+    "resync:identity": "tsx --conditions=development apps/resync-worker/src/identity.ts",
     "resync:recount": "tsx --conditions=development apps/resync-worker/src/recount.ts",
     "resync:reset-watermark": "tsx --conditions=development apps/resync-worker/src/reset-watermark.ts",
     "resync:fix-dates": "tsx --conditions=development apps/resync-worker/src/fix-dates.ts",
@@ -52,11 +58,13 @@
     "backfill:affiliate-program-product": "tsx scripts/backfill-affiliate-program-product.ts",
     "normalize:slides-data": "tsx scripts/normalize-slides-data.ts",
     "seed:settings": "tsx prisma/seed-settings.ts",
+    "seed:app-version": "tsx prisma/seed-app-version.ts",
     "issue:credential": "tsx scripts/issue-credential.ts",
     "seed:revenuecat-iap": "tsx scripts/seed-revenuecat-iap.ts",
     "seed:test-account": "tsx scripts/seed-test-account.ts",
     "seed:subscription-plans": "tsx scripts/seed-subscription-plans.ts",
     "grant:subscription": "tsx scripts/grant-subscription.ts",
+    "digest:run": "tsx --conditions=development scripts/run-topic-digest.ts",
     "void:stray-affiliate-commissions": "tsx scripts/void-stray-affiliate-commissions.ts"
   },
   "dependencies": {
@@ -78,9 +86,7 @@
     "google-auth-library": "^10.6.2",
     "helmet": "^8.0.0",
     "jsonwebtoken": "^9.0.2",
-    "morgan": "^1.11.0",
-    "multer": "^1.4.5-lts.1",
-    "nanoid": "^5.1.11",
+    "nanoid": "^5.1.16",
     "passport": "^0.7.0",
     "passport-strategy": "^1.0.0",
     "pino": "^9.5.0",
@@ -97,8 +103,6 @@
     "@types/ejs": "^3.1.5",
     "@types/express": "^4.17.21",
     "@types/jsonwebtoken": "^9.0.7",
-    "@types/morgan": "^1.9.9",
-    "@types/multer": "^1.4.12",
     "@types/node": "^22.9.0",
     "@types/passport": "^1.0.17",
     "@types/passport-strategy": "^0.2.38",

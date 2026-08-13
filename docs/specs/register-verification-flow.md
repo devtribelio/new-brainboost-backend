@@ -33,6 +33,30 @@ log in freely.
 5. **Social (Google) link path order:** `email_in_use_unverified` (400) is checked BEFORE
    `Member not active` (401), because placeholders are now also inactive and the
    unverified error is the actionable one.
+
+   **Legacy exemption (added 2026-07-30).** The unverified block applies only to
+   `legacyId === null`. A legacy-migrated row with `isEmailVerified=false` is linked and
+   healed instead of blocked — `is_email_verified=0` carries no information on those rows
+   (legacy had no OTP gate; the only writer of that column is `tribelio-admin`'s
+   manual-create path, `tribelio-admin/default/controllers/member.php:250`), so the
+   provider attestation is the row's first real proof of ownership. Rationale for keeping
+   the block on new-flow rows is account pre-hijacking: a register placeholder may hold a
+   password an attacker chose, and linking would leave that attacker with permanent
+   password access to the real email owner's account (incl. affiliate balance + payout
+   bank). `legacyId` is unwritable from the API surface, so the exemption can't be forged.
+   Both the link path and the unique-violation retry path go through
+   `AuthService.linkSocialToExistingMember`. On the heal branch it also (a) revokes every
+   live refresh token — `issueTokenBundle` only clears the mobile bucket, web is
+   multi-session — and (b) re-levels `legacy_synced_at` to `updated_at` so the resync
+   touch-gate (`updatedAt > legacySyncedAt`, `apps/resync-worker/src/syncers/members.ts`)
+   stays untripped and legacy profile fields keep flowing.
+
+   Known gap, NOT covered: a legacy row whose `email` is NULL or differs from the Google
+   email still falls through to the create path and silently produces a **duplicate
+   account**. Affects phone-only legacy members and rows whose email/googleSub was nulled
+   during migration dedup (`scripts/migrate-members.ts:311-313`,
+   `apps/resync-worker/src/identity.ts:589`). Needs a separate decision (link by phone, or
+   an account-merge flow).
 6. **Email register issues OTP, not tokens.** `/auth/register` response changed from
    TokenBundle to `{ member_id, email, expired_date }` (mirror of `registerByPhone`).
    FE logs in via `/oauth/token` after validating. Per `docs/specs/api-fe.md` #38 the email
@@ -96,7 +120,15 @@ log in freely.
 - No cleanup cron for stale placeholders (they're reusable, so no dead-end, but rows linger).
 - PraMember pre-registration OTP is still `verify`-only (not consumed) and `register` does
   not require it — pre-registration remains attribution capture, not a verification gate.
-- Social login on an unverified placeholder could arguably take over the row (Google
-  verified the email) — currently still `email_in_use_unverified`.
+- Social login on an unverified **new-flow** placeholder stays `email_in_use_unverified` by
+  design (pre-hijacking, see #5). Legacy rows are exempt as of 2026-07-30. If the block is
+  ever lifted for new-flow rows too, it MUST come with voiding the row's password
+  (`passwordAlgo='social'` + sentinel hash) — otherwise the attacker's chosen password
+  survives the link. Not applicable to the legacy branch: legacy members really use their
+  password, so voiding it there would lock out real users.
+- Legacy rows with `email` NULL / mismatched still create duplicate accounts on social
+  login (see #5, "Known gap").
 
-Tests: `apps/mobile-api/tests/auth-unverified-reuse.spec.ts`.
+Tests: `apps/mobile-api/tests/auth-unverified-reuse.spec.ts`,
+`apps/mobile-api/tests/auth-social-google.spec.ts`
+(`describe('link path on legacy-migrated rows')`).

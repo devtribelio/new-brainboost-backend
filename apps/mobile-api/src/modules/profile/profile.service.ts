@@ -1,6 +1,6 @@
 import { isEmail } from 'class-validator';
 import { prisma } from '@bb/db';
-import { BadRequestException, NotFoundException } from '@bb/common/exceptions';
+import { badRequest, notFound, ERROR_CODES } from '@bb/common/exceptions';
 import { assertUuid } from '@bb/common/utils/uuid.util';
 import { normalizePhonePair } from '@bb/common/utils/phone.util';
 
@@ -14,32 +14,38 @@ export class ProfileService {
         },
       },
     });
-    if (!member) throw new NotFoundException('Member not found');
-    if (!member.isActive) throw new NotFoundException('Member is not active');
+    if (!member) throw notFound(ERROR_CODES.MEMBER_NOT_FOUND);
+    if (!member.isActive) throw notFound(ERROR_CODES.MEMBER_INACTIVE);
     return member;
   }
 
-  async updateInfo(memberId: string, dto: {
-    fullName?: string;
-    email?: string | null;
-    phone?: string;
-    phoneCode?: string;
-    gender?: string;
-    birthdate?: string;
-    bio?: string;
-    avatarUrl?: string;
-    coverUrl?: string;
-  }) {
+  async updateInfo(
+    memberId: string,
+    dto: {
+      fullName?: string;
+      email?: string | null;
+      phone?: string;
+      phoneCode?: string;
+      gender?: string;
+      birthdate?: string;
+      bio?: string;
+      avatarUrl?: string;
+      coverUrl?: string;
+    },
+  ) {
     const member = await prisma.member.findUnique({ where: { id: memberId } });
-    if (!member) throw new NotFoundException('Member not found');
-    if (!member.isActive) throw new NotFoundException('Member is not active');
+    if (!member) throw notFound(ERROR_CODES.MEMBER_NOT_FOUND);
+    if (!member.isActive) throw notFound(ERROR_CODES.MEMBER_INACTIVE);
 
-    if (dto.fullName !== undefined && (dto.fullName.trim().length < 4 || dto.fullName.length > 100)) {
-      throw new BadRequestException('fullName must be 4-100 chars');
+    if (
+      dto.fullName !== undefined &&
+      (dto.fullName.trim().length < 4 || dto.fullName.length > 100)
+    ) {
+      throw badRequest(ERROR_CODES.FULL_NAME_INVALID);
     }
 
     if (dto.gender !== undefined && !['MAN', 'WOMEN'].includes(dto.gender)) {
-      throw new BadRequestException('gender must be MAN or WOMEN');
+      throw badRequest(ERROR_CODES.GENDER_INVALID);
     }
 
     let birthdate: Date | null | undefined;
@@ -48,24 +54,28 @@ export class ProfileService {
         birthdate = null;
       } else {
         birthdate = new Date(dto.birthdate);
-        if (Number.isNaN(birthdate.getTime())) throw new BadRequestException('Invalid birthdate');
+        if (Number.isNaN(birthdate.getTime())) throw badRequest(ERROR_CODES.BIRTHDATE_INVALID);
         const ageYears = (Date.now() - birthdate.getTime()) / (1000 * 60 * 60 * 24 * 365.25);
-        if (ageYears < 13) throw new BadRequestException('Member must be at least 13 years old');
+        if (ageYears < 13) throw badRequest(ERROR_CODES.AGE_BELOW_MINIMUM);
       }
     }
 
     // Email is changeable only while unverified; once verified
-    // (auth/requestVerify type=email) it is locked — silently ignored here.
+    // (auth/requestVerify type=email) it is locked. Re-sending the current
+    // address is a no-op so FE form echoes don't error.
     let email: string | undefined;
-    if (dto.email && !member.isEmailVerified) {
+    if (dto.email) {
       const normalized = dto.email.trim().toLowerCase();
-      if (!isEmail(normalized)) throw new BadRequestException('Invalid email');
+      if (!isEmail(normalized)) throw badRequest(ERROR_CODES.EMAIL_INVALID);
       if (normalized !== member.email) {
+        if (member.isEmailVerified) {
+          throw badRequest(ERROR_CODES.EMAIL_LOCKED_AFTER_VERIFICATION);
+        }
         const emailTaken = await prisma.member.findFirst({
           where: { email: normalized, NOT: { id: memberId } },
           select: { id: true },
         });
-        if (emailTaken) throw new BadRequestException('Email already used by another member');
+        if (emailTaken) throw badRequest(ERROR_CODES.EMAIL_TAKEN_BY_OTHER_MEMBER);
         email = normalized;
       }
     }
@@ -75,11 +85,11 @@ export class ProfileService {
     let phoneChanged = false;
     if (dto.phone) {
       if (!/^\+?[0-9]{6,20}$/.test(dto.phone)) {
-        throw new BadRequestException('phone must be 6-20 digits, optional leading +');
+        throw badRequest(ERROR_CODES.PHONE_INVALID);
       }
       // Same canonical forms as register/login — dedup catches format variants.
       const pair = normalizePhonePair(dto.phone, dto.phoneCode ?? member.phoneCode ?? '+62');
-      if (pair.phone.length < 6) throw new BadRequestException('Invalid phone number');
+      if (pair.phone.length < 6) throw badRequest(ERROR_CODES.PHONE_INVALID);
       phone = pair.phone;
       phoneCode = pair.phoneCode;
       phoneChanged = pair.phone !== member.phone;
@@ -87,7 +97,7 @@ export class ProfileService {
         where: { phone: pair.phone, NOT: { id: memberId } },
         select: { id: true },
       });
-      if (phoneTaken) throw new BadRequestException('Phone already used by another member');
+      if (phoneTaken) throw badRequest(ERROR_CODES.PHONE_TAKEN_BY_OTHER_MEMBER);
     }
 
     return prisma.member.update({
@@ -156,14 +166,17 @@ export class ProfileService {
     return r?.id ?? null;
   }
 
-  async updateLocation(memberId: string, dto: {
-    countryId?: string;
-    provinceId?: string;
-    cityId?: string;
-    districtId?: string;
-    address?: string;
-    postalCode?: string;
-  }) {
+  async updateLocation(
+    memberId: string,
+    dto: {
+      countryId?: string;
+      provinceId?: string;
+      cityId?: string;
+      districtId?: string;
+      address?: string;
+      postalCode?: string;
+    },
+  ) {
     const countryId = await this.resolveCountry(dto.countryId);
     const provinceId = await this.resolveProvince(dto.provinceId);
     const cityId = await this.resolveCity(dto.cityId);

@@ -4,6 +4,12 @@
 > `proxy`, so runtime behaviour is unchanged). Backend still serves Model B (byte proxy).
 > Flipping to `signed` needs the new library populated + the DB `guid` rewrite (§11) + the
 > env swap (§6).
+>
+> **2026-08-11:** `GET /media/hls` was added — the same signed HLS URL as `signed`-mode
+> `/media/stream`, but returned as JSON so a native offline downloader can drive the fetch
+> itself. It is gated on `MEDIA_MODE === 'signed'` (404 `MEDIA_HLS_UNAVAILABLE` otherwise),
+> which makes **this migration a hard prerequisite for native offline playback**, not just a
+> bandwidth optimisation. See `docs/media-port.md` §8.
 
 ## 0. How to use this document
 
@@ -241,7 +247,12 @@ Because the Model B proxy code is never removed, rollback is always one env var 
   Model C may ship **without** retiring legacy (precondition §2 box 1, option 2).
 - HLS vs MP4 as the signed transport — confirm MP4 fallback is still enabled and decide.
 - Exact `token_path` directory-token form — confirm from Bunny docs.
-- Download flow: a dedicated longer-TTL signed URL, or reuse the streaming TTL.
+- ~~Download flow: a dedicated longer-TTL signed URL, or reuse the streaming TTL.~~
+  **Resolved (2026-08-11): dedicated.** `GET /media/hls?download=true` signs with
+  `MEDIA_DOWNLOAD_TTL_SECONDS` (24 h); plain streaming keeps `MEDIA_SIGNED_URL_TTL_SECONDS`
+  (2 h). The streaming TTL is not raised to cover downloads because the signed URL needs no
+  auth for its whole lifetime — a stream has no reason to stay shareable for a day. See
+  `docs/media-port.md` §8.
 
 ---
 

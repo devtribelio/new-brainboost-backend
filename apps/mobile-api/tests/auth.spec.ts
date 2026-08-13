@@ -9,7 +9,6 @@ describe('auth (contract)', () => {
     expect(res.status).toBe(400);
     expect(res.body.success).toBe(false);
     expect(res.body.error.code).toBe('VALIDATION_ERROR');
-    expect(res.body.error.message).toContain('Validation');
   });
 
   it('POST /api/member/oauth/token with invalid grant_type → 400', async () => {
@@ -43,7 +42,7 @@ describe('auth (contract)', () => {
         client_secret: 'WRONG',
       });
       expect(res.status).toBe(401);
-      expect(res.body.error.code).toBe('UNAUTHORIZED');
+      expect(res.body.error.code).toBe('INVALID_CLIENT_CREDENTIALS');
     });
 
     it('missing client_id → 400', async () => {
@@ -52,7 +51,7 @@ describe('auth (contract)', () => {
         grant_type: 'client_credentials',
       });
       expect(res.status).toBe(400);
-      expect(res.body.error.message).toContain('client_id');
+      expect(res.body.error.code).toBe('CLIENT_CREDENTIALS_REQUIRED');
     });
 
     it('anon access_token rejected by member-protected endpoints', async () => {

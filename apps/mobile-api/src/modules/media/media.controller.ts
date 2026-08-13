@@ -2,15 +2,18 @@ import { Readable } from 'node:stream';
 import type { Request, Response } from 'express';
 import { MediaService } from './media.service';
 import { MEDIA_RESOLUTIONS, type MediaResolution } from './dto/media.dto';
-import { verifyMediaToken } from './media-token.util';
-import { BadRequestException, UnauthorizedException } from '@bb/common/exceptions';
-import type { AuthenticatedRequest } from '@bb/common/interfaces/authenticated-request';
+import { verifyMediaToken, verifyDocumentToken } from './media-token.util';
 import {
-  ApiOperation,
-  ApiQuery,
-  ApiResponse,
-  ApiTags,
-} from '@bb/common/openapi/decorators';
+  badRequest,
+  unauthorized,
+  forbidden,
+  notFound,
+  ERROR_CODES,
+  UnauthorizedException,
+} from '@bb/common/exceptions';
+import { ok } from '@bb/common/utils/response.util';
+import type { AuthenticatedRequest } from '@bb/common/interfaces/authenticated-request';
+import { ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@bb/common/openapi/decorators';
 import { env } from '@bb/common/config/env';
 import { logger } from '@bb/common/config/logger';
 
@@ -63,7 +66,7 @@ export class MediaController {
   stream = async (req: Request, res: Response): Promise<void> => {
     const token = typeof req.query.t === 'string' ? req.query.t : '';
     if (!token) {
-      throw new BadRequestException('Missing media token');
+      throw badRequest(ERROR_CODES.MEDIA_TOKEN_MISSING);
     }
 
     // Throws UnauthorizedException on a bad/expired/tampered token.
@@ -72,7 +75,7 @@ export class MediaController {
     if (!payload.isPreview) {
       const user = (req as AuthenticatedRequest).user;
       if (!user) {
-        throw new UnauthorizedException('Authentication required for this media');
+        throw unauthorized(ERROR_CODES.MEDIA_AUTH_REQUIRED);
       }
       await this.mediaService.assertEnrollment(payload.courseId, user.id);
     }
@@ -165,7 +168,7 @@ export class MediaController {
   download = async (req: Request, res: Response): Promise<void> => {
     const token = typeof req.query.t === 'string' ? req.query.t : '';
     if (!token) {
-      throw new BadRequestException('Missing media token');
+      throw badRequest(ERROR_CODES.MEDIA_TOKEN_MISSING);
     }
 
     const payload = verifyMediaToken(token);
@@ -173,7 +176,7 @@ export class MediaController {
     if (!payload.isPreview) {
       const user = (req as AuthenticatedRequest).user;
       if (!user) {
-        throw new UnauthorizedException('Authentication required for this media');
+        throw unauthorized(ERROR_CODES.MEDIA_AUTH_REQUIRED);
       }
       await this.mediaService.assertEnrollment(payload.courseId, user.id);
     }
@@ -195,10 +198,142 @@ export class MediaController {
     // (Android DownloadManager / iOS URLSession / wget). Browsers tend to ignore
     // it and use the Bunny response's headers, so this is a hint, not a hard
     // guarantee — but it lets FE control the saved filename when supported.
-    const filename =
-      this.sanitizeFilename(req.query.filename) ?? `media-${payload.guid}.mp4`;
+    const filename = this.sanitizeFilename(req.query.filename) ?? `media-${payload.guid}.mp4`;
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.redirect(302, this.mediaService.buildDownloadUrl(payload.guid, resolution));
+  };
+
+  @ApiOperation({
+    summary: 'Get a signed Bunny HLS playlist URL (streaming or native offline download)',
+    description:
+      'Decrypts the opaque media token, gates access (enrollment for non-preview), and ' +
+      'returns a signed `playlist.m3u8` URL as JSON. Unlike `/media/stream` this does not ' +
+      'redirect: a native offline downloader (`AVAssetDownloadTask` on iOS, ExoPlayer ' +
+      '`DownloadManager` on Android) needs the URL as a string it manages itself, not a ' +
+      '302 to follow. The directory token covers every segment under the playlist, so one ' +
+      'URL is enough for the whole asset. Rate-limited per member.\n\n' +
+      '**Rendition is the client\'s choice** — HLS is adaptive, so there is no `res` here. ' +
+      'For offline downloads pin the 360p variant (iOS ' +
+      '`AVAssetDownloadTaskMinimumRequiredMediaBitrateKey`, Android ' +
+      '`DownloadHelper.getTrackSelections()`): most course assets are audio stored as video, ' +
+      'where 360p and 480p carry byte-identical audio and 720p only inflates it.',
+  })
+  @ApiQuery({ name: 't', type: 'string', required: true, description: 'Opaque media token.' })
+  @ApiQuery({
+    name: 'download',
+    type: 'boolean',
+    required: false,
+    description:
+      'Set `true` for offline download — mints the URL with the longer download TTL ' +
+      'instead of the streaming TTL.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Signed HLS playlist URL, its expiry, and the Bunny guid',
+  })
+  @ApiResponse({ status: 400, description: 'Missing media token' })
+  @ApiResponse({ status: 401, description: 'Invalid/expired token, or auth required' })
+  @ApiResponse({ status: 403, description: 'Not enrolled in the course' })
+  @ApiResponse({ status: 404, description: 'Signed media is not enabled on this deployment' })
+  @ApiResponse({ status: 429, description: 'Rate limit exceeded' })
+  hls = async (req: Request, res: Response): Promise<void> => {
+    // Signed HLS only works against the Token-Auth Bunny library (Model C). In
+    // `proxy` mode the configured library has token auth off and blocks empty
+    // referrers, so the URL would be a `403` on the one client that matters — a
+    // native player, which sends no `Referer`. Fail here instead, where the app
+    // can tell the difference between "not deployed yet" and "access denied".
+    if (env.media.mode !== 'signed') {
+      throw notFound(ERROR_CODES.MEDIA_HLS_UNAVAILABLE);
+    }
+
+    const token = typeof req.query.t === 'string' ? req.query.t : '';
+    if (!token) {
+      throw badRequest(ERROR_CODES.MEDIA_TOKEN_MISSING);
+    }
+
+    const payload = verifyMediaToken(token);
+
+    if (!payload.isPreview) {
+      const user = (req as AuthenticatedRequest).user;
+      if (!user) {
+        throw unauthorized(ERROR_CODES.MEDIA_AUTH_REQUIRED);
+      }
+      await this.mediaService.assertEnrollment(payload.courseId, user.id);
+    }
+
+    const forDownload = req.query.download === 'true' || req.query.download === '1';
+    const { url, expiresAt } = this.mediaService.buildHlsUrl(payload.guid, { forDownload });
+
+    const user = (req as AuthenticatedRequest).user;
+    logger.info(
+      {
+        memberId: user?.id ?? null,
+        courseId: payload.courseId,
+        guid: payload.guid,
+        forDownload,
+        isPreview: payload.isPreview,
+      },
+      'media: hls url issued',
+    );
+
+    // `guid` is returned as-is rather than re-wrapped in another opaque id: it is
+    // already visible in the signed URL's path, so a second identifier would buy
+    // nothing and give the app two keys for one asset.
+    ok(res, { url, expiresAt, guid: payload.guid });
+  };
+
+  @ApiOperation({
+    summary: 'Get a presigned URL for a lesson document (DocumentTemplate slide)',
+    description:
+      'Decrypts the opaque document token, gates access (enrollment for non-preview), ' +
+      'and 302-redirects to a short-lived presigned GET for the private S3 object. ' +
+      'The S3 key is carried inside the token and never reaches the client. ' +
+      'Rate-limited per member.',
+  })
+  @ApiQuery({ name: 't', type: 'string', required: true, description: 'Opaque document token.' })
+  @ApiQuery({
+    name: 'filename',
+    type: 'string',
+    required: false,
+    description: 'Preferred saved filename (Content-Disposition hint).',
+  })
+  @ApiResponse({
+    status: 302,
+    description: 'Redirect to a presigned S3 URL',
+    envelope: 'none',
+  })
+  @ApiResponse({ status: 400, description: 'Missing document token' })
+  @ApiResponse({ status: 401, description: 'Invalid/expired token, or auth required' })
+  @ApiResponse({ status: 403, description: 'Not enrolled in the course' })
+  @ApiResponse({ status: 429, description: 'Rate limit exceeded' })
+  document = async (req: Request, res: Response): Promise<void> => {
+    const token = typeof req.query.t === 'string' ? req.query.t : '';
+    if (!token) {
+      throw badRequest(ERROR_CODES.MEDIA_TOKEN_MISSING);
+    }
+
+    // Rejects a media (video) token — the two kinds are not interchangeable.
+    const payload = verifyDocumentToken(token);
+
+    if (!payload.isPreview) {
+      const user = (req as AuthenticatedRequest).user;
+      if (!user) {
+        throw unauthorized(ERROR_CODES.MEDIA_AUTH_REQUIRED);
+      }
+      await this.mediaService.assertEnrollment(payload.courseId, user.id);
+    }
+
+    const user = (req as AuthenticatedRequest).user;
+    logger.info(
+      { memberId: user?.id ?? null, courseId: payload.courseId, isPreview: payload.isPreview },
+      'media: document requested',
+    );
+
+    const filename = this.sanitizeFilename(req.query.filename);
+    if (filename) {
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    }
+    res.redirect(302, await this.mediaService.buildDocumentUrl(payload.key));
   };
 
   /** Validate the `res` query param; fall back to the configured default. */
@@ -207,7 +342,7 @@ export class MediaController {
       return raw as MediaResolution;
     }
     if (typeof raw === 'string' && raw !== '') {
-      throw new BadRequestException('Invalid resolution — expected 360p | 480p | 720p');
+      throw badRequest(ERROR_CODES.MEDIA_RESOLUTION_INVALID);
     }
     return env.media.defaultResolution as MediaResolution;
   }
@@ -219,7 +354,10 @@ export class MediaController {
    */
   private sanitizeFilename(raw: unknown): string | null {
     if (typeof raw !== 'string') return null;
-    const cleaned = raw.replace(/[^a-zA-Z0-9._\- ]/g, '').slice(0, 100).trim();
+    const cleaned = raw
+      .replace(/[^a-zA-Z0-9._\- ]/g, '')
+      .slice(0, 100)
+      .trim();
     return cleaned.length > 0 ? cleaned : null;
   }
 }

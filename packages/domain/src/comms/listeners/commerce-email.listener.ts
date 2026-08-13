@@ -3,6 +3,7 @@ import { logger } from '@bb/common/config/logger';
 import { commerceEvents } from '@bb/common/events/commerce-events';
 import { affiliateEvents } from '@bb/common/events/affiliate-events';
 import { enqueueComms } from '@bb/common/services/comms-outbox';
+import { settingsService, SETTING_KEYS } from '@bb/common/services/settings.service';
 
 /**
  * Outbound email producer for commerce events. Enqueues a transactional email
@@ -37,6 +38,38 @@ export function registerCommsEmailListeners(): void {
       logger.error(
         { err, transactionId: e.transactionId },
         '[comms-email] failed to enqueue CoursePaymentSuccess',
+      );
+    }
+  });
+
+  // Business sale alert — the single-tenant replacement for legacy's chief
+  // "Produk X Berhasil Terjual!" email (TBEmail_Engine_CoursePaymentSuccess).
+  // Recipients come from app_settings `sales.alertEmail` (comma-separated,
+  // empty = off) instead of a per-network owner. Subscription sales/renewals
+  // are deferred (isRenewal skip below; plan-backed skip lands with the
+  // subscription branch).
+  commerceEvents.on('commerce.payment.success', async (e) => {
+    if (e.isRenewal) return;
+    try {
+      const raw = await settingsService.get(SETTING_KEYS.salesAlertEmail, '');
+      const recipients = raw
+        .split(',')
+        .map((s) => s.trim())
+        .filter((s) => s.includes('@'));
+      if (recipients.length === 0) return;
+      for (const recipient of recipients) {
+        await enqueueComms({
+          type: 'SaleAlert',
+          channel: 'email',
+          priority: 'normal',
+          refId: e.transactionId, // bb-comms reads commerce_transactions by this id
+          recipient, // relay maps this to msg.to — bb-comms sends there, not to the buyer
+        });
+      }
+    } catch (err) {
+      logger.error(
+        { err, transactionId: e.transactionId },
+        '[comms-email] failed to enqueue SaleAlert',
       );
     }
   });

@@ -1,3 +1,4 @@
+import { traceService } from '@bb/common/utils/trace-service';
 import { Router } from 'express';
 import { PostController } from './post.controller';
 import { PostService } from '@bb/domain/post/post.service';
@@ -6,7 +7,7 @@ import { bindRoute } from '@bb/common/openapi/route-binder';
 
 export function postRoutes(): Router {
   const router = Router();
-  const ctrl = new PostController(new PostService());
+  const ctrl = new PostController(traceService(new PostService()));
 
   bindRoute({ router, controller: ctrl, method: 'get', path: '/post/list', handlerKey: 'list', middlewares: [authGuard] });
   bindRoute({ router, controller: ctrl, method: 'get', path: '/post/detail', handlerKey: 'detail', middlewares: [authGuard] });

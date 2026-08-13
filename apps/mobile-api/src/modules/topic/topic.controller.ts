@@ -1,7 +1,7 @@
 import type { Response } from 'express';
 import { TopicService } from './topic.service';
 import { ok, okPaginated } from '@bb/common/utils/response.util';
-import { BadRequestException, UnauthorizedException } from '@bb/common/exceptions';
+import { badRequest, unauthorized, ERROR_CODES } from '@bb/common/exceptions';
 import { parsePagination } from '@bb/common/utils/pagination.util';
 import { serializeTopic } from './topic.serializer';
 import type { AuthenticatedRequest } from '@bb/common/interfaces/authenticated-request';
@@ -31,19 +31,52 @@ export class TopicController {
     description: 'Network code (FE primary). Falls back to legacyId int / UUID.',
   })
   @ApiQuery({ name: 'networkId', type: 'string', required: false, example: 'network-uuid-1234' })
+  @ApiQuery({
+    name: 'isSubscribe',
+    type: 'boolean',
+    required: false,
+    example: true,
+    description:
+      'Filter by subscription state of the authed member. Omit to list all. Anonymous + true → empty list.',
+  })
   @ApiResponse({ status: 200, type: () => TopicDto, isArray: true, envelope: 'paginated' })
   list = async (req: AuthenticatedRequest, res: Response) => {
     const p = parsePagination(req.query as Record<string, unknown>);
     const keyword = (req.query.keyword as string) ?? undefined;
     // FE sends `code` (network code). `networkId` accepted as alias for backwards compat.
-    const networkInput =
-      (req.query.code as string) ?? (req.query.networkId as string) ?? undefined;
+    const networkInput = (req.query.code as string) ?? (req.query.networkId as string) ?? undefined;
+    const rawIsSubscribe = req.query.isSubscribe as string | undefined;
+    const isSubscribe =
+      rawIsSubscribe === undefined
+        ? undefined
+        : rawIsSubscribe === 'true' || rawIsSubscribe === '1';
     const { rows, total } = await this.topicService.list(p, {
       keyword,
       networkInput,
       memberId: req.user?.id,
+      isSubscribe,
     });
     return okPaginated(res, rows.map(serializeTopic), { page: p.page, perPage: p.perPage, total });
+  };
+
+  @ApiOperation({
+    summary: 'Get one topic by id',
+    description:
+      'Hydrates the topic screen after a push deep link (topicDigest). Accepts the topic UUID or its legacyId int. `isSubscribeTopic` / `isMute` are resolved for the authenticated caller and are false when anonymous. 404 when the topic is unknown or inactive.',
+  })
+  @ApiQuery({
+    name: 'topicId',
+    type: 'string',
+    required: true,
+    example: 'topic-uuid-1234',
+    description: 'Topic UUID or legacyId int.',
+  })
+  @ApiResponse({ status: 200, type: () => TopicDto })
+  detail = async (req: AuthenticatedRequest, res: Response) => {
+    const topicId = (req.query.topicId as string) ?? '';
+    if (!topicId) throw badRequest(ERROR_CODES.TOPIC_ID_REQUIRED);
+    const topic = await this.topicService.detail(topicId, req.user?.id);
+    return ok(res, serializeTopic(topic));
   };
 
   @ApiBearerAuth()
@@ -51,9 +84,9 @@ export class TopicController {
   @ApiBody({ type: () => TopicSubscribeBodyDto })
   @ApiResponse({ status: 200, type: () => TopicSubscribeResultDto })
   subscribe = async (req: AuthenticatedRequest, res: Response) => {
-    if (!req.user) throw new UnauthorizedException();
+    if (!req.user) throw unauthorized(ERROR_CODES.AUTH_REQUIRED);
     const topicId = (req.body?.topicId as string) ?? '';
-    if (!topicId) throw new BadRequestException('topicId required');
+    if (!topicId) throw badRequest(ERROR_CODES.TOPIC_ID_REQUIRED);
     const action = (req.body?.action as string) ?? 'subscribe';
     const result =
       action === 'unsubscribe'

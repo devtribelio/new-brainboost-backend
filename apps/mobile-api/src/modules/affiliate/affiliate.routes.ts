@@ -1,3 +1,4 @@
+import { traceService } from '@bb/common/utils/trace-service';
 import { Router } from 'express';
 import { AffiliateController } from './affiliate.controller';
 import { AffiliateProgramService } from '@bb/domain/affiliate/program.service';
@@ -13,11 +14,11 @@ import { RequestDisbursementDto, SetBankAccountDto, SubmitKycDto } from './dto/a
 export function affiliateRoutes(): Router {
   const router = Router();
   const ctrl = new AffiliateController(
-    new AffiliateProgramService(),
-    new AffiliatorService(),
-    new EnrollmentService(),
-    new VisitService(),
-    new DisbursementService(),
+    traceService(new AffiliateProgramService()),
+    traceService(new AffiliatorService()),
+    traceService(new EnrollmentService()),
+    traceService(new VisitService()),
+    traceService(new DisbursementService()),
   );
 
   // Affiliator profile

@@ -87,19 +87,28 @@ export async function syncInvitersScoped(
         stats.skipped += 1;
         return;
       }
+      // legacy parent present but not resolvable to a Member yet? LEAVE the current
+      // inviterId alone. Writing null here is destructive and order-dependent: this
+      // function runs BEFORE syncAffiliatorsScoped (the step that can materialise a
+      // member), so an inviter first created later in the same run would wipe every
+      // downline's chain — which is exactly how ~4k inviter links were lost on the
+      // 2026-07-09 run. Only a legacy row that genuinely has NO parent clears it.
       let inviterId: string | undefined;
+      let unresolvedParent = false;
       if (r.parent_id != null) {
         const invMember = nodeToMember.get(Number(r.parent_id));
-        if (invMember != null) inviterId = ctx.resolveMember(invMember);
+        inviterId = invMember != null ? ctx.resolveMember(invMember) : undefined;
+        unresolvedParent = inviterId === undefined;
       }
       if (ctx.dryRun) {
         stats.upserted += 1;
         return;
       }
       const base = {
-        inviterId: inviterId ?? null,
+        ...(unresolvedParent ? {} : { inviterId: inviterId ?? null }),
         affiliateBased: nonEmpty(r.affiliate_based) ?? 'PERFORMANCE',
       };
+      if (unresolvedParent) stats.skipped += 1;
       const code = nonEmpty(r.affiliator_code);
       try {
         await ctx.prisma.member.update({

@@ -1,5 +1,5 @@
 import { prisma } from '@bb/db';
-import { NotFoundException, BadRequestException } from '@bb/common/exceptions';
+import { badRequest, notFound, ERROR_CODES } from '@bb/common/exceptions';
 import { assignMemberAffiliateCode } from './utils/code-generator';
 
 export class EnrollmentService {
@@ -10,12 +10,13 @@ export class EnrollmentService {
    */
   async joinByCode(memberId: string, programCode: string) {
     const program = await prisma.affiliateProgram.findUnique({ where: { code: programCode } });
-    if (!program) throw new NotFoundException(`Program "${programCode}" not found`);
-    if (!program.isActive) throw new BadRequestException(`Program "${programCode}" is inactive`);
+    if (!program) throw notFound(ERROR_CODES.AFFILIATE_PROGRAM_NOT_FOUND, { programCode });
+    if (!program.isActive)
+      throw badRequest(ERROR_CODES.AFFILIATE_PROGRAM_INACTIVE, { programCode });
 
     // Ensure member has affiliateCode (legacy: every affiliator has a personal code)
     const member = await prisma.member.findUnique({ where: { id: memberId } });
-    if (!member) throw new NotFoundException('Member not found');
+    if (!member) throw notFound(ERROR_CODES.MEMBER_NOT_FOUND);
     if (!member.affiliateCode) {
       await assignMemberAffiliateCode(memberId);
     }
@@ -43,7 +44,7 @@ export class EnrollmentService {
 
   async leave(memberId: string, programCode: string) {
     const program = await prisma.affiliateProgram.findUnique({ where: { code: programCode } });
-    if (!program) throw new NotFoundException(`Program "${programCode}" not found`);
+    if (!program) throw notFound(ERROR_CODES.AFFILIATE_PROGRAM_NOT_FOUND, { programCode });
 
     return prisma.memberAffiliator.update({
       where: { memberId_programId: { memberId, programId: program.id } },

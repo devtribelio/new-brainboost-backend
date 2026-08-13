@@ -1,7 +1,7 @@
 import type { Request, Response, NextFunction, RequestHandler } from 'express';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
-import { BadRequestException } from '@bb/common/exceptions';
+import { badRequest, ERROR_CODES } from '@bb/common/exceptions';
 
 type ClassConstructor<T> = new (...args: unknown[]) => T;
 type Source = 'body' | 'query' | 'params';
@@ -24,9 +24,7 @@ export function validateDto<T extends object>(
           field: e.property,
           constraints: e.constraints,
         }));
-        return next(
-          new BadRequestException('Validation failed', details, 'VALIDATION_ERROR'),
-        );
+        return next(badRequest(ERROR_CODES.VALIDATION_ERROR, details));
       }
 
       (req as unknown as Record<Source, T>)[source] = instance;

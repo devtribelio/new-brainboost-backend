@@ -19,13 +19,13 @@ describe('tracker endpoints require auth', () => {
       });
     expect(res.status).toBe(401);
     expect(res.body.success).toBe(false);
-    expect(res.body.error.code).toBe('UNAUTHORIZED');
+    expect(res.body.error.code).toBe('BEARER_TOKEN_MISSING');
   });
 
   it('GET /api/user/stats/home without a token → 401', async () => {
     const res = await request(app).get('/api/user/stats/home');
     expect(res.status).toBe(401);
     expect(res.body.success).toBe(false);
-    expect(res.body.error.code).toBe('UNAUTHORIZED');
+    expect(res.body.error.code).toBe('BEARER_TOKEN_MISSING');
   });
 });

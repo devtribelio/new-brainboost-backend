@@ -1,6 +1,12 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '@bb/db';
-import { BadRequestException, NotFoundException } from '@bb/common/exceptions';
+import {
+  badRequest,
+  notFound,
+  ERROR_CODES,
+  messageFor,
+  type ErrorCode,
+} from '@bb/common/exceptions';
 import { logger } from '@bb/common/config/logger';
 import { env } from '@bb/common/config/env';
 import { settingsService, SETTING_KEYS } from '@bb/common/services/settings.service';
@@ -108,7 +114,7 @@ export class DisbursementService {
     if (min <= 0) return;
     const balance = await this.getWithdrawableBalance(memberId);
     if (balance < min) {
-      throw new BadRequestException('Saldo belum mencukupi untuk verifikasi KYC');
+      throw badRequest(ERROR_CODES.KYC_BALANCE_INSUFFICIENT);
     }
   }
 
@@ -144,16 +150,23 @@ export class DisbursementService {
     const kycApproved = member?.kycStatus === 'APPROVED';
     const hasBank = !!(member?.bankCode && member?.bankAccountNumber && member?.bankAccountName);
 
-    let reason = quote.reason ?? null;
-    if (!kycApproved) reason = 'KYC belum disetujui';
-    else if (!hasBank) reason = 'Rekening belum diisi';
-    else if (openDisbursement) reason = 'You already have a pending withdrawal';
+    // `reason` is display copy for the payout screen, so it comes from the same
+    // catalog as thrown errors — one wording per condition. `reasonCode` is
+    // returned alongside it so the client can branch without parsing the string.
+    let reasonCode: ErrorCode | null = quote.reasonCode ?? null;
+    if (!kycApproved) {
+      reasonCode =
+        member?.kycStatus === 'EXPIRED' ? ERROR_CODES.KYC_EXPIRED : ERROR_CODES.KYC_NOT_APPROVED;
+    } else if (!hasBank) reasonCode = ERROR_CODES.BANK_ACCOUNT_MISSING;
+    else if (openDisbursement) reasonCode = ERROR_CODES.DISBURSEMENT_ALREADY_PENDING;
+    const reason = reasonCode ? messageFor(reasonCode) : null;
 
     return {
       withdrawableBalance: balance,
       minBalance,
       eligible: quote.eligible && kycApproved && hasBank && !openDisbursement,
       reason,
+      reasonCode,
       fee: quote.fee,
       netAmount: quote.netAmount,
       kycStatus: member?.kycStatus ?? 'NONE',
@@ -187,14 +200,16 @@ export class DisbursementService {
         bankAccountName: true,
       },
     });
-    if (!member) throw new NotFoundException('Member not found');
+    if (!member) throw notFound(ERROR_CODES.MEMBER_NOT_FOUND);
     if (member.kycStatus !== 'APPROVED') {
-      throw new BadRequestException(
-        member.kycStatus === 'EXPIRED' ? 'KYC perlu diperbarui' : 'KYC belum disetujui',
+      // EXPIRED = was approved then revoked by a risk event (see docs/kyc-rekyc.md),
+      // which needs different copy from "never approved".
+      throw badRequest(
+        member.kycStatus === 'EXPIRED' ? ERROR_CODES.KYC_EXPIRED : ERROR_CODES.KYC_NOT_APPROVED,
       );
     }
     if (!member.bankCode || !member.bankAccountNumber || !member.bankAccountName) {
-      throw new BadRequestException('Rekening belum diisi');
+      throw badRequest(ERROR_CODES.BANK_ACCOUNT_MISSING);
     }
 
     // Runtime min-balance + fee (app_settings `disbursement.minBalance` / `disbursement.fee`)
@@ -215,53 +230,57 @@ export class DisbursementService {
     let created;
     try {
       created = await prisma.$transaction(async (tx) => {
-      // SECURITY (TOCTOU double-spend): serialize concurrent payout requests for
-      // the same member. Without this, two parallel requests both pass the
-      // existing-PENDING check and the balance read (READ COMMITTED — neither
-      // sees the other's uncommitted HELD row) and both create a PENDING payout,
-      // draining the balance Nx. A transaction-scoped advisory lock makes the
-      // second request block until the first commits, then see the PENDING row.
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${memberId}))`;
+        // SECURITY (TOCTOU double-spend): serialize concurrent payout requests for
+        // the same member. Without this, two parallel requests both pass the
+        // existing-PENDING check and the balance read (READ COMMITTED — neither
+        // sees the other's uncommitted HELD row) and both create a PENDING payout,
+        // draining the balance Nx. A transaction-scoped advisory lock makes the
+        // second request block until the first commits, then see the PENDING row.
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${memberId}))`;
 
-      const existing = await tx.affiliateDisbursement.findFirst({
-        where: {
-          memberId,
-          status: { in: [DISBURSEMENT_STATUS.PENDING, DISBURSEMENT_STATUS.PROCESSING] },
-        },
-      });
-      if (existing) throw new BadRequestException('You already have a pending withdrawal');
+        const existing = await tx.affiliateDisbursement.findFirst({
+          where: {
+            memberId,
+            status: { in: [DISBURSEMENT_STATUS.PENDING, DISBURSEMENT_STATUS.PROCESSING] },
+          },
+        });
+        if (existing) throw badRequest(ERROR_CODES.DISBURSEMENT_ALREADY_PENDING);
 
-      const { cleared, consumed } = await this.balanceInputs(memberId, tx);
-      const balance = Math.max(0, cleared - consumed);
-      const quote = quoteDisbursement(balance, amount, minBalance, fee);
-      if (!quote.eligible) throw new BadRequestException(quote.reason ?? 'Not eligible for withdrawal');
+        const { cleared, consumed } = await this.balanceInputs(memberId, tx);
+        const balance = Math.max(0, cleared - consumed);
+        const quote = quoteDisbursement(balance, amount, minBalance, fee);
+        // Surface the SPECIFIC reason (below min balance / net too small / over
+        // balance) so the client can react precisely; the generic code is only a
+        // fallback for a quote that reported ineligible without a reason.
+        if (!quote.eligible)
+          throw badRequest(quote.reasonCode ?? ERROR_CODES.DISBURSEMENT_NOT_ELIGIBLE);
 
-      if (reviewStale && quote.netAmount >= env.rekyc.largeDisbursementIdr) {
-        // Abort the tx (no row created, balance untouched); resetKyc runs in the catch.
-        throw new ReKycRequiredError(quote.netAmount);
-      }
+        if (reviewStale && quote.netAmount >= env.rekyc.largeDisbursementIdr) {
+          // Abort the tx (no row created, balance untouched); resetKyc runs in the catch.
+          throw new ReKycRequiredError(quote.netAmount);
+        }
 
-      const mode = await this.decideMode(memberId, quote.netAmount, tx);
+        const mode = await this.decideMode(memberId, quote.netAmount, tx);
 
-      return tx.affiliateDisbursement.create({
-        data: {
-          memberId,
-          grossAmount: quote.grossAmount,
-          fee: quote.fee,
-          netAmount: quote.netAmount,
-          status: DISBURSEMENT_STATUS.PENDING,
-          mode,
-          externalId: generateExternalId('disb'),
-          bankCode: member.bankCode,
-          bankAccountNumber: member.bankAccountNumber,
-          bankAccountName: member.bankAccountName,
-        },
-      });
+        return tx.affiliateDisbursement.create({
+          data: {
+            memberId,
+            grossAmount: quote.grossAmount,
+            fee: quote.fee,
+            netAmount: quote.netAmount,
+            status: DISBURSEMENT_STATUS.PENDING,
+            mode,
+            externalId: generateExternalId('disb'),
+            bankCode: member.bankCode,
+            bankAccountNumber: member.bankAccountNumber,
+            bankAccountName: member.bankAccountName,
+          },
+        });
       });
     } catch (err) {
       if (err instanceof ReKycRequiredError) {
         await this.resetKyc(memberId, 'LARGE_DISBURSEMENT', { metadata: { amount: err.amount } });
-        throw new BadRequestException('Pencairan besar memerlukan verifikasi KYC ulang');
+        throw badRequest(ERROR_CODES.KYC_REVERIFY_REQUIRED);
       }
       throw err;
     }
@@ -471,9 +490,9 @@ export class DisbursementService {
       where: { id: memberId },
       select: { kycStatus: true },
     });
-    if (!member) throw new NotFoundException('Member not found');
-    if (member.kycStatus === 'PENDING') throw new BadRequestException('KYC sedang ditinjau');
-    if (member.kycStatus === 'APPROVED') throw new BadRequestException('KYC sudah disetujui');
+    if (!member) throw notFound(ERROR_CODES.MEMBER_NOT_FOUND);
+    if (member.kycStatus === 'PENDING') throw badRequest(ERROR_CODES.KYC_IN_REVIEW);
+    if (member.kycStatus === 'APPROVED') throw badRequest(ERROR_CODES.KYC_ALREADY_APPROVED);
     await this.assertBalanceForKyc(memberId);
     const [updated] = await prisma.$transaction([
       prisma.member.update({
@@ -506,7 +525,7 @@ export class DisbursementService {
 
   async getKyc(memberId: string) {
     const member = await prisma.member.findUnique({ where: { id: memberId }, select: kycSelect });
-    if (!member) throw new NotFoundException('Member not found');
+    if (!member) throw notFound(ERROR_CODES.MEMBER_NOT_FOUND);
     // Surface the min-balance gate to the client so the FE can enable/disable the
     // "request KYC" CTA proactively instead of discovering the gate via a 400.
     const kycMinBalance = await settingsService.getNumber(
@@ -533,14 +552,14 @@ export class DisbursementService {
    */
   async createDiditSession(memberId: string) {
     if (!isDiditConfigured()) {
-      throw new BadRequestException('KYC provider not configured');
+      throw badRequest(ERROR_CODES.KYC_PROVIDER_NOT_CONFIGURED);
     }
     const member = await prisma.member.findUnique({
       where: { id: memberId },
       select: { kycStatus: true },
     });
-    if (!member) throw new NotFoundException('Member not found');
-    if (member.kycStatus === 'APPROVED') throw new BadRequestException('KYC sudah disetujui');
+    if (!member) throw notFound(ERROR_CODES.MEMBER_NOT_FOUND);
+    if (member.kycStatus === 'APPROVED') throw badRequest(ERROR_CODES.KYC_ALREADY_APPROVED);
     await this.assertBalanceForKyc(memberId);
 
     const session = await createSession(memberId);
@@ -732,7 +751,7 @@ export class DisbursementService {
       where: { id: memberId },
       select: { bankCode: true, bankAccountNumber: true, bankAccountName: true },
     });
-    if (!member) throw new NotFoundException('Member not found');
+    if (!member) throw notFound(ERROR_CODES.MEMBER_NOT_FOUND);
     return member;
   }
 

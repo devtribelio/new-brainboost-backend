@@ -78,7 +78,7 @@ describe('verifyAppleIdentityToken', () => {
     jwtVerifyMock.mockRejectedValueOnce(new Error('signature verification failed'));
 
     await expect(verifyAppleIdentityToken('bad.jwt.token')).rejects.toMatchObject({
-      message: 'invalid_apple_id_token',
+      code: 'APPLE_ID_TOKEN_INVALID',
     });
   });
 
@@ -86,7 +86,7 @@ describe('verifyAppleIdentityToken', () => {
     jwtVerifyMock.mockResolvedValueOnce({ payload: { email: 'c@example.com' } });
 
     await expect(verifyAppleIdentityToken('no.sub.token')).rejects.toMatchObject({
-      message: 'invalid_apple_id_token',
+      code: 'APPLE_ID_TOKEN_INVALID',
     });
   });
 });

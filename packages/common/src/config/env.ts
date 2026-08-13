@@ -34,6 +34,14 @@ export const env = {
     accessExpiresIn: optional('JWT_ACCESS_EXPIRES_IN', '15m'),
     refreshExpiresIn: optional('JWT_REFRESH_EXPIRES_IN', '30d'),
     anonExpiresIn: optional('JWT_ANON_EXPIRES_IN', '1h'),
+    // Grace window for a refresh token that was retired BY ROTATION: within it,
+    // replaying the parent returns the child's pair instead of 401 (idempotent
+    // refresh), and an access token whose `sid` was just superseded still
+    // passes authGuard. Only rows carrying `supersededById` are eligible, so
+    // logout / password change / single-session kick stay instant. 60s covers a
+    // lost refresh response on a flaky ID mobile network. Boot-time, like every
+    // other value here — change it via the secret + force-new-deployment.
+    refreshGraceSeconds: Number.parseInt(optional('REFRESH_GRACE_SECONDS', '60'), 10),
   },
   oauth: {
     clientId: optional('OAUTH_CLIENT_ID', ''),
@@ -107,8 +115,40 @@ export const env = {
   // the real client IP — required for per-IP rate limiting to work correctly.
   // Also accepts Express values like "loopback" or a CIDR list.
   trustProxy: optional('TRUST_PROXY', ''),
+  // Redis connection string for the shared rate-limit store. Empty = per-process
+  // in-memory store (fine for single-process PM2 staging / local dev). Set on
+  // multi-instance deployments (ECS 2-6 tasks) so all instances share one
+  // counter — otherwise the effective limit is `limit x instanceCount`. See
+  // rate-limit.middleware.ts + docs/security-audit-followups.md.
+  redisUrl: optional('REDIS_URL', ''),
   log: {
     level: optional('LOG_LEVEL', 'info'),
+    // Per-request access logging (requestLogger middleware). Replaces morgan:
+    // one structured line per response, correlated with every service log of
+    // the same request via requestId. Off in tests (keeps output readable).
+    http: optional('LOG_HTTP', nodeEnv === 'test' ? 'false' : 'true') !== 'false',
+    // Also log an `http.request` line the moment a request arrives, before any
+    // handler runs. Useful when chasing requests that hang or crash the process
+    // (no response line is ever emitted for those). Costs one line per request.
+    httpIncoming: optional('LOG_HTTP_INCOMING', 'false') === 'true',
+    // Attach the (deep-redacted, truncated) request body to the response line.
+    // ON in development because that is where you actually want to see payloads;
+    // OFF in production and test — bodies are large, and even redacted they
+    // widen the blast radius of a log leak. Set LOG_HTTP_BODY explicitly to
+    // override either way (e.g. =true on staging while chasing a client bug).
+    httpBody: optional('LOG_HTTP_BODY', nodeEnv === 'development' ? 'true' : 'false') === 'true',
+    // Responses slower than this get logged at warn with `slow: true`.
+    slowRequestMs: Number.parseInt(optional('LOG_SLOW_REQUEST_MS', '1000'), 10),
+    // Paths excluded from access logging — health probes and Swagger assets
+    // would otherwise dominate the log volume. Prefix match, comma separated.
+    ignorePaths: optional('LOG_IGNORE_PATHS', '/health,/api/docs')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
+    // Pipe Prisma's own log stream through pino (see config/prisma-logging.ts)
+    // so DB work is correlated too. Queries land at `debug`, so LOG_LEVEL=debug
+    // is required to actually see them.
+    prisma: optional('LOG_PRISMA', nodeEnv === 'test' ? 'false' : 'true') !== 'false',
   },
   // NOTE: SMTP (email) + Qontak (WhatsApp) delivery moved OUT to the separate
   // bb-comms worker (ADR-0002). bb-platform only enqueues to the comms outbox;
@@ -161,6 +201,21 @@ export const env = {
     // ThirdPartyCredential.name row the handler loads for per-channel toggles
     // (triggersAffiliate / canIngestRefund). Must match the seeded credential.
     providerName: optional('REVENUECAT_PROVIDER_NAME', 'revenuecat'),
+  },
+  fx: {
+    // USD→IDR lookup for foreign-storefront IAP. Both providers are keyless; the
+    // primary is ECB reference data (published once per business day, so calling
+    // more than daily gains nothing), the fallback a commercial aggregator.
+    // Timeout is deliberately short: this sits in the RevenueCat webhook path and
+    // a slow rate lookup must degrade to the next chain layer, never stall the 200.
+    primaryUrl: optional('FX_PRIMARY_URL', 'https://api.frankfurter.dev/v1'),
+    fallbackUrl: optional('FX_FALLBACK_URL', 'https://open.er-api.com/v6/latest/USD'),
+    timeoutMs: Number.parseInt(optional('FX_TIMEOUT_MS', '3000'), 10),
+    // How stale a rate derived from our own IDR RevenueCat events may be before it
+    // is refused. Observed worst gap between IDR purchases is ~2 days.
+    derivedMaxAgeDays: Number.parseInt(optional('FX_DERIVED_MAX_AGE_DAYS', '7'), 10),
+    // Last-resort static rate, also the value promoted by `fx.usdIdrPinned`.
+    staticUsdIdr: Number.parseInt(optional('FX_STATIC_USD_IDR', '17800'), 10),
   },
   commerce: {
     transactionExpiryHours: Number.parseInt(

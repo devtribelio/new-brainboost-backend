@@ -1,7 +1,7 @@
 import { Prisma } from '@prisma/client';
 import type { Product } from '@prisma/client';
 import { prisma } from '@bb/db';
-import { NotFoundException } from '@bb/common/exceptions';
+import { notFound, ERROR_CODES } from '@bb/common/exceptions';
 import type { PaginationParams } from '@bb/common/utils/pagination.util';
 import { EntitlementService } from '@bb/domain/subscription/entitlement.service';
 import type { Ownership, ProductMedia, ProductSort } from './dto/list-query.dto';
@@ -359,6 +359,10 @@ export class ProductService {
                 orderBy: { order: 'asc' },
                 include: { lessons: { orderBy: { order: 'asc' } } },
               },
+              bonuses: {
+                where: { isActive: true },
+                orderBy: { sortOrder: 'asc' },
+              },
             },
           },
         },
@@ -373,6 +377,10 @@ export class ProductService {
               sections: {
                 orderBy: { order: 'asc' },
                 include: { lessons: { orderBy: { order: 'asc' } } },
+              },
+              bonuses: {
+                where: { isActive: true },
+                orderBy: { sortOrder: 'asc' },
               },
             },
           },
@@ -395,12 +403,16 @@ export class ProductService {
                 orderBy: { order: 'asc' },
                 include: { lessons: { orderBy: { order: 'asc' } } },
               },
+              bonuses: {
+                where: { isActive: true },
+                orderBy: { sortOrder: 'asc' },
+              },
             },
           },
         },
       });
     }
-    if (!product) throw new NotFoundException('Product not found');
+    if (!product) throw notFound(ERROR_CODES.PRODUCT_NOT_FOUND);
 
     const [grouped, agg] = await Promise.all([
       prisma.review.groupBy({

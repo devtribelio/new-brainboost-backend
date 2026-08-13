@@ -1,6 +1,6 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '@bb/db';
-import { BadRequestException } from '@bb/common/exceptions';
+import { badRequest, ERROR_CODES } from '@bb/common/exceptions';
 
 export interface VoucherCheckResult {
   valid: boolean;
@@ -18,10 +18,14 @@ export class VoucherService {
    * Caller computes discount via `computeTotals()` using returned voucher meta.
    */
   async validate(code: string, productId: string): Promise<VoucherCheckResult> {
-    const voucher = await prisma.voucher.findUnique({ where: { code } });
+    const voucher = await prisma.voucher.findUnique({
+      where: { code },
+      include: { products: { select: { productId: true } } },
+    });
     if (!voucher) return { valid: false, reason: 'Voucher not found' };
     if (!voucher.isActive) return { valid: false, reason: 'Voucher inactive' };
-    if (voucher.productId && voucher.productId !== productId) {
+    // Product whitelist: 0 rows = global; >=1 rows = only the listed products.
+    if (voucher.products.length > 0 && !voucher.products.some((p) => p.productId === productId)) {
       return { valid: false, reason: 'Voucher not applicable to this product' };
     }
     const now = new Date();
@@ -80,7 +84,7 @@ export class VoucherService {
       // Voucher no longer redeemable — roll back the claim so this order isn't left
       // with a slot it never paid for (invariant: a claim row ⇒ `used` was bumped).
       await prisma.voucherRedemption.delete({ where: { transactionId } }).catch(() => {});
-      throw new BadRequestException('Voucher exhausted or no longer redeemable');
+      throw badRequest(ERROR_CODES.VOUCHER_EXHAUSTED);
     }
   }
 }

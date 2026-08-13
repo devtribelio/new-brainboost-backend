@@ -16,4 +16,6 @@ new BbEcsStack(app, 'BbEcsStack', {
   // Resync worker: off unless `-c resyncEnabled=true`. resyncImageTag defaults to imageTag.
   resyncEnabled: app.node.tryGetContext('resyncEnabled') === 'true',
   resyncImageTag: app.node.tryGetContext('resyncImageTag') || undefined,
+  // bb-comms (repo bb-notification-service) tag terpisah; default = imageTag.
+  commsImageTag: app.node.tryGetContext('commsImageTag') || undefined,
 });

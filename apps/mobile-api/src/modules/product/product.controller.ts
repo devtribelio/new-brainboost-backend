@@ -3,7 +3,7 @@ import { ProductService } from './product.service';
 import type { AffiliatorService } from '@bb/domain/affiliate/affiliator.service';
 import { EntitlementService } from '@bb/domain/subscription/entitlement.service';
 import { ok, okPaginated } from '@bb/common/utils/response.util';
-import { BadRequestException } from '@bb/common/exceptions';
+import { badRequest, ERROR_CODES } from '@bb/common/exceptions';
 import { parsePagination } from '@bb/common/utils/pagination.util';
 import { serializeProduct, serializeCourseDetailLegacy } from './product.serializer';
 import { prisma } from '@bb/db';
@@ -104,7 +104,7 @@ export class ProductController {
   @ApiResponse({ status: 200, type: () => CourseDetailDto })
   courseDetail = async (req: Request, res: Response) => {
     const code = (req.query.code as string) ?? '';
-    if (!code) throw new BadRequestException('code required');
+    if (!code) throw badRequest(ERROR_CODES.PRODUCT_CODE_REQUIRED);
     const { product, reviewAggregate } = await this.productService.courseDetail(code);
     const memberId = (req as { user?: { id?: string } }).user?.id;
     let affiliateCode: string | null = null;
@@ -148,12 +148,12 @@ export class ProductController {
   @ApiResponse({ status: 200, type: () => ProductShareDto })
   shareCourse = async (req: Request, res: Response) => {
     const code = (req.body?.code as string) ?? '';
-    if (!code) throw new BadRequestException('code required');
+    if (!code) throw badRequest(ERROR_CODES.PRODUCT_CODE_REQUIRED);
     const product = await prisma.product.findUnique({
       where: { code },
       select: { id: true, code: true, slug: true, title: true, marketingLink: true },
     });
-    if (!product) throw new BadRequestException(`Product not found: ${code}`);
+    if (!product) throw badRequest(ERROR_CODES.PRODUCT_NOT_FOUND, { code });
     const memberId = (req as { user?: { id?: string } }).user?.id;
     let affiliateCode: string | null = null;
     if (memberId) {

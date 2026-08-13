@@ -75,3 +75,39 @@ export class NotificationSeenResultDto {
   @ApiProperty({ type: 'integer', example: 3, description: 'Number of notification rows updated' })
   updated!: number;
 }
+
+export class NotificationMuteDto {
+  @ApiProperty({
+    enum: ['post', 'topic', 'network'],
+    example: 'topic',
+    description:
+      'What to silence. `post` = one thread, `topic` = every post in that topic, `network` = the whole community.',
+  })
+  scope!: string;
+
+  @ApiProperty({
+    example: 'topic-uuid-1234',
+    description:
+      'Id of the muted object. Accepts the UUID or the legacyId int as a string ("123") — the int is resolved to the UUID server-side.',
+  })
+  refId!: string;
+}
+
+export class NotificationMuteResultDto {
+  @ApiProperty({ enum: ['post', 'topic', 'network'], example: 'topic' })
+  scope!: string;
+
+  @ApiProperty({
+    format: 'uuid',
+    example: 'topic-uuid-1234',
+    description: 'Always the UUID, even when the request passed a legacyId.',
+  })
+  refId!: string;
+
+  @ApiProperty({
+    type: 'boolean',
+    example: true,
+    description: 'New mute state: true after /mute, false after /unmute.',
+  })
+  muted!: boolean;
+}

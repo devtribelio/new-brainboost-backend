@@ -1,5 +1,5 @@
 import { prisma } from '@bb/db';
-import { NotFoundException, BadRequestException } from '@bb/common/exceptions';
+import { badRequest, notFound, ERROR_CODES } from '@bb/common/exceptions';
 import { generateUniqueProgramCode } from './utils/code-generator';
 
 export class AffiliateProgramService {
@@ -16,7 +16,7 @@ export class AffiliateProgramService {
       where: { code },
       include: { product: true },
     });
-    if (!program) throw new NotFoundException(`Affiliate program "${code}" not found`);
+    if (!program) throw notFound(ERROR_CODES.AFFILIATE_PROGRAM_NOT_FOUND, { programCode: code });
     return program;
   }
 
@@ -25,12 +25,12 @@ export class AffiliateProgramService {
       where: { id },
       include: { product: true },
     });
-    if (!program) throw new NotFoundException(`Affiliate program ${id} not found`);
+    if (!program) throw notFound(ERROR_CODES.AFFILIATE_PROGRAM_NOT_FOUND, { programId: id });
     return program;
   }
 
   async create(input: { name: string; productId?: string | null; isActive?: boolean }) {
-    if (!input.name?.trim()) throw new BadRequestException('Program name is required');
+    if (!input.name?.trim()) throw badRequest(ERROR_CODES.AFFILIATE_PROGRAM_NAME_REQUIRED);
 
     const code = await generateUniqueProgramCode(async (candidate) => {
       const existing = await prisma.affiliateProgram.findUnique({ where: { code: candidate } });
@@ -47,7 +47,10 @@ export class AffiliateProgramService {
     });
   }
 
-  async update(id: string, input: { name?: string; productId?: string | null; isActive?: boolean }) {
+  async update(
+    id: string,
+    input: { name?: string; productId?: string | null; isActive?: boolean },
+  ) {
     return prisma.affiliateProgram.update({
       where: { id },
       data: {

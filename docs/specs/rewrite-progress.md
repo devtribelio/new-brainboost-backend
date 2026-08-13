@@ -24,8 +24,17 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` parity met for current s
   login on placeholder → generic 401 (403 discriminator written, disabled); `/auth/register` returns
   `{member_id, email, expired_date}` instead of tokens; new pre-login pair
   `requestVerificationEmail` / `validateOtpEmail`. See `docs/specs/register-verification-flow.md`.
+- Refresh grace window + supersession lineage (2026-08-03): `refresh_tokens.superseded_by_id`
+  makes rotation non-terminal for `REFRESH_GRACE_SECONDS` (60s), so parallel refresh, a lost
+  refresh response, and the rotation tail no longer log users out. Rotation is gated by a
+  conditional update inside a transaction; `assertSessionActive` honours the same window.
+  Only ever turns a 401 into a 200 — no client release needed. See `docs/specs/refresh-token-grace.md`.
 - Outstanding: parity tests against legacy social-login provider tokens; cleanup cron
   for stale unverified placeholders (optional — rows are reusable, no dead-end).
+- Outstanding (separate tickets): silent social re-auth still kicks the live mobile session
+  (`loginWithSocial` → `issueTokenBundle`) — needs a mobile fix or a `device_id` on
+  `refresh_tokens`; RTR reuse-detection (lineage is now in place for it); revert
+  `JWT_ACCESS_EXPIRES_IN` 7d → 15m once grace is verified in prod.
 
 ### account — `src/modules/account/`
 - Profile info/update, change-password, logout, pre-registration, delete-account, payment token, affiliate-connect.
@@ -59,7 +68,8 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` parity met for current s
 - Endpoint `GET|HEAD /api/member/media/stream?t={token}&res={360p|480p|720p}`; opaque AES-256-GCM token carries `guid`/`courseId`/`isPreview`.
 - Preview media open (anonymous OK); non-preview gated on `CourseEnrollment`. HTTP Range forwarded for seek/resume.
 - Model C (signed-URL) code shipped behind `MEDIA_MODE` (default `proxy`); `signed` mode 302-redirects to a Token-Auth signed Bunny HLS URL. Flip needs the new-library content migration — see `docs/specs/media-model-c-migration.md` §11.
-- Tests: `media-token` (5), `bunny-sign` (7), `media` (10), `media-signed` (5) — all green.
+- `GET /api/member/media/hls?t={token}&download=true` — same signed HLS URL returned as **JSON** for native offline downloaders (iOS cannot download progressive MP4 at all). Gated on `MEDIA_MODE === 'signed'` → 404 `MEDIA_HLS_UNAVAILABLE`, so the Model C cutover is a prerequisite for offline playback. Client must pin the 360p variant — audio lessons are video of a static image, and 360p/480p audio is byte-identical. Measurements + contract: `docs/specs/media-port.md` §8.
+- Tests: `media-token` (5), `bunny-sign` (7), `media` (25), `media-signed` (12) — all green.
 - Plan + Bunny audit: `docs/specs/media-port.md`, `docs/specs/media-model-c-migration.md`.
 
 ### commission — `src/modules/commission/`

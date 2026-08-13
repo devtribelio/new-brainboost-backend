@@ -15,5 +15,5 @@ export default defineConfig({
   // worker-thread transports (thread-stream/pino-pretty) MUST stay external —
   // bundling them breaks the worker file path resolution at runtime.
   noExternal: [/^@bb\//],
-  external: ['pino', 'pino-pretty', 'thread-stream'],
+  external: ['pino', 'pino-pretty', 'thread-stream', 'sharp'],
 });

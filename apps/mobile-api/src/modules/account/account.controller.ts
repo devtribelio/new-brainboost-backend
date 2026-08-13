@@ -11,20 +11,17 @@ import {
 } from '@bb/common/openapi/decorators';
 import { ErrorEnvelopeDto, GenericOkDto } from '@bb/common/openapi/common.dto';
 import type { AuthenticatedRequest } from '@bb/common/interfaces/authenticated-request';
-import { UnauthorizedException } from '@bb/common/exceptions';
+import { unauthorized, ERROR_CODES } from '@bb/common/exceptions';
 import { PreRegistrationDto } from './dto/pre-registration.dto';
 import { LogoutDto } from './dto/logout.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
-import {
-  RequestDeleteAccountDto,
-  VerificationDeleteAccountDto,
-} from './dto/delete-account.dto';
+import { RequestDeleteAccountDto, VerificationDeleteAccountDto } from './dto/delete-account.dto';
 import { GetPaymentTokenQueryDto } from './dto/payment-token.dto';
 import { AffiliateConnectResultDto } from './dto/affiliate-connect.dto';
 
 function requireUser(req: Request): AuthenticatedRequest['user'] & { id: string; email: string } {
   const user = (req as AuthenticatedRequest).user;
-  if (!user) throw new UnauthorizedException('Authentication required');
+  if (!user) throw unauthorized(ERROR_CODES.AUTH_REQUIRED);
   return user;
 }
 
@@ -70,7 +67,11 @@ export class AccountController {
   @ApiResponse({ status: 200, type: () => GenericOkDto })
   changePassword = async (req: Request, res: Response) => {
     const user = requireUser(req);
-    const result = await this.accountService.changePassword(user.id, req.body as ChangePasswordDto);
+    const result = await this.accountService.changePassword(
+      user.id,
+      req.body as ChangePasswordDto,
+      user.sessionId,
+    );
     return ok(res, result);
   };
 

@@ -1,6 +1,6 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '@bb/db';
-import { BadRequestException, ForbiddenException, NotFoundException } from '@bb/common/exceptions';
+import { badRequest, forbidden, notFound, ERROR_CODES } from '@bb/common/exceptions';
 import type { PaginationParams } from '@bb/common/utils/pagination.util';
 import { notificationEvents } from '@bb/common/events/notification-events';
 import { assertUuid } from '@bb/common/utils/uuid.util';
@@ -10,7 +10,10 @@ export class NetworkService {
   private async resolveNetworkId(input: string): Promise<string | null> {
     if (!input) return null;
     // Try by `code` first (mobile sends 8-char alphanumeric code from /info)
-    const byCode = await prisma.network.findUnique({ where: { code: input }, select: { id: true } });
+    const byCode = await prisma.network.findUnique({
+      where: { code: input },
+      select: { id: true },
+    });
     if (byCode) return byCode.id;
     // Try legacyId numeric
     const legacyId = Number.parseInt(input, 10);
@@ -84,11 +87,7 @@ export class NetworkService {
     return { rows: enriched, total };
   }
 
-  async listTags(
-    p: PaginationParams,
-    networkInput: string,
-    keyword?: string,
-  ) {
+  async listTags(p: PaginationParams, networkInput: string, keyword?: string) {
     const where: Prisma.NetworkTagWhereInput = {};
     if (networkInput) {
       const networkId = await this.resolveNetworkId(networkInput);
@@ -127,23 +126,23 @@ export class NetworkService {
 
   async join(memberId: string, networkInput: string) {
     const member = await prisma.member.findUnique({ where: { id: memberId } });
-    if (!member) throw new NotFoundException('Member not found');
-    if (!member.isActive) throw new ForbiddenException('Member is not active');
+    if (!member) throw notFound(ERROR_CODES.MEMBER_NOT_FOUND);
+    if (!member.isActive) throw forbidden(ERROR_CODES.MEMBER_INACTIVE);
 
     const networkId = await this.resolveNetworkId(networkInput);
-    if (!networkId) throw new NotFoundException('Network not found');
+    if (!networkId) throw notFound(ERROR_CODES.NETWORK_NOT_FOUND);
 
     const network = await prisma.network.findUnique({ where: { id: networkId } });
-    if (!network) throw new NotFoundException('Network not found');
-    if (!network.isActive) throw new ForbiddenException('Network is not active');
+    if (!network) throw notFound(ERROR_CODES.NETWORK_NOT_FOUND);
+    if (!network.isActive) throw forbidden(ERROR_CODES.NETWORK_INACTIVE);
     if (network.isHelpdesk) {
-      throw new BadRequestException('Cannot join helpdesk network directly');
+      throw badRequest(ERROR_CODES.NETWORK_HELPDESK_JOIN_FORBIDDEN);
     }
 
     const banned = await prisma.networkBannedMember.findUnique({
       where: { networkId_memberId: { networkId, memberId } },
     });
-    if (banned) throw new ForbiddenException('Member is banned from this network');
+    if (banned) throw forbidden(ERROR_CODES.NETWORK_MEMBER_BANNED);
 
     const existing = await prisma.networkMember.findUnique({
       where: { networkId_memberId: { networkId, memberId } },
@@ -187,38 +186,45 @@ export class NetworkService {
     const team = await prisma.networkTeamMember.findUnique({
       where: { networkId_memberId: { networkId, memberId } },
     });
-    if (!team) throw new ForbiddenException('Only network team can manage join requests');
+    if (!team) throw forbidden(ERROR_CODES.NETWORK_TEAM_ONLY);
   }
 
-  private async resolvePendingRequest(opts: { requestId?: string; networkInput?: string; memberId?: string }) {
+  private async resolvePendingRequest(opts: {
+    requestId?: string;
+    networkInput?: string;
+    memberId?: string;
+  }) {
     if (opts.requestId) {
       const r = await prisma.networkMemberRequest.findUnique({ where: { id: opts.requestId } });
-      if (!r) throw new NotFoundException('Join request not found');
+      if (!r) throw notFound(ERROR_CODES.JOIN_REQUEST_NOT_FOUND);
       return r;
     }
     if (opts.networkInput && opts.memberId) {
       const networkId = await this.resolveNetworkId(opts.networkInput);
-      if (!networkId) throw new NotFoundException('Network not found');
+      if (!networkId) throw notFound(ERROR_CODES.NETWORK_NOT_FOUND);
       const r = await prisma.networkMemberRequest.findUnique({
         where: { networkId_memberId: { networkId, memberId: opts.memberId } },
       });
-      if (!r) throw new NotFoundException('Join request not found');
+      if (!r) throw notFound(ERROR_CODES.JOIN_REQUEST_NOT_FOUND);
       return r;
     }
-    throw new BadRequestException('requestId or (networkId+memberId) required');
+    throw badRequest(ERROR_CODES.JOIN_REQUEST_PARAMS_REQUIRED);
   }
 
-  async approveRequest(approverId: string, opts: { requestId?: string; networkInput?: string; memberId?: string }) {
+  async approveRequest(
+    approverId: string,
+    opts: { requestId?: string; networkInput?: string; memberId?: string },
+  ) {
     const req = await this.resolvePendingRequest(opts);
     if (req.status !== 'PENDING') {
-      throw new BadRequestException(`Request already ${req.status}`);
+      throw badRequest(ERROR_CODES.JOIN_REQUEST_ALREADY_RESOLVED, { status: req.status });
     }
     await this.assertTeamMember(req.networkId, approverId);
 
     const banned = await prisma.networkBannedMember.findUnique({
       where: { networkId_memberId: { networkId: req.networkId, memberId: req.memberId } },
     });
-    if (banned) throw new ForbiddenException('Cannot approve banned member');
+    if (banned) throw forbidden(ERROR_CODES.JOIN_REQUEST_MEMBER_BANNED);
 
     await prisma.$transaction(async (tx) => {
       await tx.networkMemberRequest.update({
@@ -247,13 +253,21 @@ export class NetworkService {
       memberId: req.memberId,
     });
 
-    return { requestId: req.id, networkId: req.networkId, memberId: req.memberId, status: 'APPROVED' };
+    return {
+      requestId: req.id,
+      networkId: req.networkId,
+      memberId: req.memberId,
+      status: 'APPROVED',
+    };
   }
 
-  async rejectRequest(approverId: string, opts: { requestId?: string; networkInput?: string; memberId?: string }) {
+  async rejectRequest(
+    approverId: string,
+    opts: { requestId?: string; networkInput?: string; memberId?: string },
+  ) {
     const req = await this.resolvePendingRequest(opts);
     if (req.status !== 'PENDING') {
-      throw new BadRequestException(`Request already ${req.status}`);
+      throw badRequest(ERROR_CODES.JOIN_REQUEST_ALREADY_RESOLVED, { status: req.status });
     }
     await this.assertTeamMember(req.networkId, approverId);
 
@@ -262,12 +276,17 @@ export class NetworkService {
       data: { status: 'REJECTED' },
     });
 
-    return { requestId: req.id, networkId: req.networkId, memberId: req.memberId, status: 'REJECTED' };
+    return {
+      requestId: req.id,
+      networkId: req.networkId,
+      memberId: req.memberId,
+      status: 'REJECTED',
+    };
   }
 
   async leave(memberId: string, networkInput: string) {
     const networkId = await this.resolveNetworkId(networkInput);
-    if (!networkId) throw new BadRequestException('Network not found');
+    if (!networkId) throw badRequest(ERROR_CODES.NETWORK_NOT_FOUND);
     const existing = await prisma.networkMember.findUnique({
       where: { networkId_memberId: { networkId, memberId } },
     });

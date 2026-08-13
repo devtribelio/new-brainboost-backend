@@ -107,7 +107,7 @@ Setelah row tertulis: `setImmediate(() => fcm.dispatch(memberId, ...))` — tida
 
 | Event modul | Emit di | Listener | Action label |
 |---|---|---|---|
-| post publish | `post.service.ts` setelah `prisma.post.create` (status published) | post.listener | `newPost` |
+| post publish | `post.service.ts` setelah `prisma.post.create` (status published) | **topic.listener** | `newPost` → semua subscriber `topic_subscriptions`, kecuali author. No-op kalau `topicId` null. Fan-out di-slice 200/chunk (subscriber tidak terbatas, beda dari network team). Post di network tanpa topic **belum** punya fan-out. |
 | comment create (non-reply) | `comment.service.ts` create | comment.listener | `newComment`, `tag` (jika mentioned) |
 | reply create | `reply.service.ts` create | comment.listener | `newReply`, `tag` |
 | post-like create | `post.service.ts:169` like create | post.listener | `newLike` |
@@ -117,6 +117,67 @@ Setelah row tertulis: `setImmediate(() => fcm.dispatch(memberId, ...))` — tida
 | commerce paid | `commerceEvents.on('commerce.payment.success')` (existing emit di `payment.service.ts:155`) | commerce.listener | `paymentSuccess` (buyer); `commissionEarned` (per affiliator) |
 
 Idempotensi: dedupeKey unik. Re-emit (webhook redelivery, retries) silent-skip.
+
+### Title/body selalu plain text (2026-08-04)
+
+`title` dan `body` dinormalisasi `toPlainText()` (`@bb/common/utils/plain-text.util`) di
+`NotificationProducer.create()` — satu titik cegat, sebelum baris ditulis **dan** sebelum
+`dispatchPush`, jadi baris tersimpan dan payload FCM selalu sama dan selalu plain.
+
+Kenapa perlu: body `newPost` berasal dari `post.excerpt`, dan excerpt itu
+`content.slice(0, 200)` dari HTML editor mentah — push sampai ke lock screen sebagai
+harfiah `<p>p adu</p>`. Android/iOS merender `body` apa adanya, tidak ada sanitizer di
+sisi client. Title pun bukan tanpa risiko: isinya interpolasi `fullName` yang
+user-controlled.
+
+`toPlainText` beda tugas dari `sanitizeContent` (comment.service): yang itu menjaga apa
+yang **disimpan** (tag dibuang tanpa batas kata, entity dibiarkan) karena client
+me-render ulang isinya; yang ini untuk **ditampilkan**, jadi batas blok jadi spasi,
+entity di-decode, whitespace dirapatkan. Output dijamin tidak mengandung `<`/`>` sama
+sekali — entity di-decode dulu, bracket hasil decode diganti spasi sesudahnya, sehingga
+`&lt;script&gt;` tidak bisa balik jadi markup.
+
+Post-nya sendiri **tidak** diubah: `post.excerpt` tetap HTML karena ikut terekspos di
+`postContentData.excerpt` dan dirender feed. Perbaikan ditaruh di batas notifikasi saja.
+
+Baris lama tidak ikut terbersihkan (saat perubahan ini: 45 dari 139 baris `body`
+mengandung `<`). Kalau perlu, backfill sekali jalan pakai `toPlainText` — tidak ada
+migrasi otomatis.
+
+### Mute (diperbaiki 2026-08-03, semantik diubah 2026-08-04)
+
+**Mute meredam push saja, bukan barisnya.** Sejak 2026-08-04 penerima yang me-mute tetap
+dapat baris `notifications` (unread, ikut `meta.unread`); yang dilewati hanya
+`dispatchPush`. Sebelumnya listener membuang mereka dari daftar penerima sehingga
+riwayatnya hilang permanen dan unmute tidak bisa mengembalikannya.
+
+Mekanismenya: listener **tidak lagi memfilter penerima**, tapi meneruskan
+`muteScopes: Array<{scope, refId}>` ke `CreateNotificationInput`. Producer yang menerjemahkan
+itu jadi `pushMuted` lewat `RecipientResolver.mutedMemberIds` — `createForMany` menanyakannya
+**sekali untuk satu batch** lalu meneruskan boolean per member ke `create()`, jadi fan-out
+topic tidak berubah dari 1 query jadi N. `filterNotMuted` dihapus supaya listener baru tidak
+tanpa sengaja mengulang pola lama (`mutedMemberIds` mengembalikan Set, bukan daftar tersaring).
+
+Cek `pushMuted` sengaja **sebelum** `claimPushSlot`: push yang memang tidak diminta tidak
+boleh memotong jatah unopened-push, kalau tidak me-mute satu topic ramai perlahan
+membungkam topic lain yang masih diikuti.
+
+Scope valid: **`post` | `topic` | `network`** — satu sumber di `notification/mute-scope.ts`
+(`MuteScope`, `assertMuteScope`, `resolveMuteRefId`), dipakai `mute()` **dan** `unmute()`.
+Sebelumnya: `unmute` tidak memvalidasi scope sama sekali (typo = no-op yang terlihat sukses),
+`mute` melempar `Error` polos → 500 bukan 400, dan controller menduplikasi daftar scope.
+
+`notification_mutes.ref_id` bertipe `@db.Uuid` tapi FE mengirim legacyId int seperti di
+endpoint lain → `resolveMuteRefId` menerjemahkan int→UUID (404 kalau tidak ketemu,
+400 kalau bukan int maupun UUID). Tanpa ini int mentah sampai ke Prisma → P2023 → 500.
+
+Cek mute dulu hanya jalan di `comment.created`. Sekarang `muteScopes` diteruskan juga oleh
+`post.liked`, `comment.liked` (resolve scope lewat post induk komentar), fan-out
+`post.published`, dan ketiga handler network. **Commerce sengaja tidak** —
+`paymentSuccess`/`commissionEarned` transaksional, mute post/topic/network tidak boleh
+meredamnya (sejalan dengan `PUSH_LIMIT_EXEMPT`).
+
+Untuk `newPost` scope `post` tidak dipakai: post-nya baru lahir, mustahil sudah di-mute.
 
 ---
 
@@ -132,6 +193,141 @@ Query single round-trip per resolve (Prisma `findMany select: {memberId}` + `whe
 
 ---
 
+## 7b. Push fatigue — unopened push limit (2026-08-03)
+
+Member yang tidak kunjung membuka app berhenti diberi push setelah N kali. **Yang ditahan
+hanya pengiriman FCM** — baris `notifications` tetap ditulis, jadi begitu app dibuka
+daftarnya lengkap. Gerbangnya di `NotificationProducer.claimPushSlot`, dipanggil dari
+`dispatchPush` (satu-satunya jalur push).
+
+- **Counter:** `members.unopened_push_count` (Int, default 0, migrasi
+  `20260803150000_add_unopened_push_count`). Per member, bukan per device — aturan
+  single-active-device di `registerDevice` sudah memastikan hanya satu device
+  memegang `fcmToken`.
+- **Ambang:** `app_settings` key `notification.unopenedPushLimit`
+  (`SETTING_KEYS.notificationUnopenedPushLimit`), fallback `UNOPENED_PUSH_LIMIT_DEFAULT`=**0**.
+  **`0` = gerbang mati tapi counter tetap jalan** — ini mode rilis awalnya, supaya
+  distribusi nyatanya bisa diukur dari log (`unopenedPushCount` ikut di baris
+  `[notification] push firing`) sebelum dinyalakan. Naikkan ke `3` lewat DB, efektif
+  ≤30 detik (`CACHE_TTL_MS`), tanpa deploy — sekaligus tombol darurat.
+- **Reset (re-arm) — SETIAP request ber-auth member.** `resetUnopenedPushCount`
+  (`packages/common/src/utils/member-activity.util.ts`) dipanggil dari `authGuard`,
+  `optionalAuthGuard` + `anonOrMemberGuard` (hanya saat scope `member`). Throttle
+  in-process 60 detik, `updateMany` bersyarat (`unopenedPushCount > 0`) supaya member
+  yang sudah 0 tidak menulis apa pun, fire-and-forget. Dua titik lama tetap ada:
+  `MemberService.findById({touchActivity:true})` ← `/member/info` dan
+  `NotificationService.markSeen`.
+  **Jangan pernah menambahkan `lastActiveAt` ke hook ini** — pemicu re-KYC dormant
+  (`member.service.ts`) justru butuh kolom itu MASIH menyimpan stempel sesi
+  sebelumnya saat `/member/info` jalan; itulah ukuran lama menganggurnya. Menyegarkan
+  per request akan membuat jaraknya nol dan mematikan re-KYC dormant tanpa error.
+  `authGuardLenient` sengaja TIDAK ikut: endpoint-nya dipakai saat member justru
+  meninggalkan sesi (logout cleanup).
+- **Menembus batas tanpa menaikkan counter:** `paymentSuccess`, `paymentPending`,
+  `paymentRefunded`, `subscriptionRenewed`, `commissionEarned` (`PUSH_LIMIT_EXEMPT`).
+  Alasan sama dengan commerce yang dikecualikan dari mute.
+- **Konkurensi:** `update({ data: { increment: 1 } })` mengembalikan nilai pasca-increment,
+  jadi dua notifikasi bersamaan tidak bisa sama-sama melihat hitungan yang sama.
+  Read-then-write akan meloloskan keduanya.
+- **Fail open:** kalau pengecekan budget error, push tetap dikirim.
+
+**Kenapa reset diperlebar (2026-08-04).** Versi pertama hanya mereset di `/member/info`.
+Tim FE mengonfirmasi endpoint itu **hanya dipanggil saat cold start**, tidak saat app
+kembali dari background — jadi member yang rajin mengangkat app dari background tidak
+pernah reset dan akan bungkam permanen setelah N push, persis kebalikan dari tujuan
+fiturnya. `lastActiveAt` tidak bisa dipakai sebagai penyelamat karena ditulis oleh
+endpoint yang sama, jadi sama basinya. Karena itu sinyal kehadiran diambil dari request
+apa pun yang ber-auth — tidak perlu rilis klien. Ini sekaligus menutup kasus member yang
+sedang DI DALAM app lalu menerima >N notifikasi: dia pasti sedang memanggil API, jadi
+counter-nya ikut ter-reset.
+
+**Masih terbuka:** sinyal foreground eksplisit dari FE tetap lebih baik, dan
+cold-start-only juga berarti `lastActiveAt` sendiri tidak akurat untuk keperluan lain
+(mis. ukuran dormansi re-KYC lebih longgar dari kenyataan). Butuh rilis klien.
+
+---
+
+## 7c. Digest topic harian (2026-08-04)
+
+Satu push per member per malam yang merangkum post topic yang **belum dia baca**.
+Job `packages/domain/src/jobs/topic-digest.ts`, kontrak FE:
+`docs/fcm-targeted-push-contract.md` (Addendum 2026-08-03).
+
+- **Berdampingan dengan push instan `newPost`, bukan menggantikannya.** Push per post
+  tetap jalan dan tetap tunduk pada budget §7b. Digest adalah lapisan kedua untuk
+  member yang melewatkannya.
+- **Menghitung baris `newPost` yang masih `read_at IS NULL`**, bukan `count(post)`.
+  Konsekuensinya: member yang sudah membaca semuanya **tidak dapat digest sama sekali**
+  — tanpa aturan khusus — dan angkanya jujur ("9 post baru" = 9 yang belum dilihat).
+  Basis post mentah akan memberi tahu orang tentang post yang sudah dia baca.
+- **Tidak menulis baris notifikasi.** Baris per post sudah ada; digest cuma merangkumnya.
+- **Kebal budget §7b dan tidak menaikkan counter** (`NotificationProducer.sendPushOnly`).
+  Disengaja: jam 21:00 member yang seharian mengabaikan app pasti sudah lewat limit,
+  padahal justru dia yang paling butuh rangkumannya. Batasnya dijaga oleh jadwal
+  (sekali sehari), bukan oleh budget.
+- **Pemicu = tick `bb-cron` per jam**; job-nya sendiri yang memutuskan apakah jam
+  sekarang = `notification.digestHour`. Itulah yang membuat jam kirim bisa diubah dari
+  `app_settings` tanpa deploy dan tanpa menyentuh PM2. `notification.digestEnabled`
+  ships `false`. `topicDigest` harus ada di argv lane hourly (`ecosystem.config.js`
+  **dan** CDK `Cron`) — nama yang tidak disebut di argv tidak pernah jalan, tanpa error.
+- **`digestHour` adalah jam bulat 0–23.** `wibHour()` mengembalikan integer, jadi nilai
+  seperti `14.5` diterima `getNumber` (finite) tapi tidak akan pernah cocok → digest
+  diam selamanya tanpa error. Granularitas menit butuh dua perubahan sekaligus: tick
+  cron dipercepat dan setting disimpan sebagai menit-dalam-hari + pencocokan jendela.
+- **Trigger manual (QA): `pnpm digest:run`** (`scripts/run-topic-digest.ts`) — memanggil
+  job yang sama dengan `{ force: true }`, jadi mengabaikan `digestEnabled` + gerbang jam,
+  tapi TIDAK mengabaikan aturan per-member (tidak ada unread / semua topic di-mute →
+  tetap tidak dapat apa-apa). **Default dry-run**: mencetak apa yang akan dikirim tanpa
+  mengirim dan tanpa menyentuh watermark. Kirim betulan harus eksplisit `--send`, dan
+  `--member=<uuid|email>` mempersempit sapuan ke satu akun — cara aman menguji di
+  produksi, sekaligus membatasi watermark yang terbakar ke akun itu saja. Bahayanya
+  memang di watermark: run betulan menstempel `last_topic_digest_at`, jadi digest
+  terjadwal malam itu tidak punya sisa untuk dilaporkan.
+- **Jam dibaca WIB** dengan offset tetap +7 (tidak ada DST), konsisten dengan
+  penanganan waktu di resync worker.
+- **Watermark `members.last_topic_digest_at`** — hanya baris yang lebih baru dari ini
+  yang dihitung, jadi post yang sama tidak pernah dilaporkan dua malam berturut-turut.
+  **Semua member yang dievaluasi distempel**, termasuk yang semua topicnya di-mute;
+  tanpa itu baris mereka ikut terhitung tiap malam selamanya.
+- **Mute dibuang SEBELUM menghitung** (#8), jadi total tidak pernah mengiklankan post
+  dari topic yang diminta diam. Semua topic ter-mute → tidak ada push malam itu.
+- **`notifications.topic_id`** (migrasi `20260804120000_add_topic_digest`) —
+  didenormalisasi keluar dari `payload` supaya pengelompokan per topic pakai query
+  terindeks, bukan scan JSON. Hanya `newPost` yang mengisinya. Baris lama tetap NULL:
+  itu riwayat yang sudah terkirim, bukan bahan digest.
+- **Bentuk push** (semua nilai `data` string, #13):
+
+  | Topic aktif | title | body | routing |
+  |---|---|---|---|
+  | 1 | nama topic | `Ada 9 post baru di Mindset` | `refTable: topic` + `refId` |
+  | 2+ | `Tribe` | `Ada 27 post baru di Mindset, Bisnis, dan 1 topik lain` | `type: tribeDigest` |
+
+  Nama topic diurutkan dari yang paling banyak aktivitasnya.
+
+- **`topicDigest` / `tribeDigest` BEKU sejak dipakai** (#3). App merutekan berdasarkan
+  nilai itu, jadi rename = deep link putus di semua build yang sudah beredar. Tambah
+  nilai baru, jangan pernah mengganti nama.
+
+**Risiko yang diketahui dan diterima:** karena kebal budget, member yang berbulan-bulan
+tidak membuka app tetap menerima satu push tiap malam. Itu pelan tapi permanen, dan pola
+seperti itu yang biasanya berujung notifikasi dimatikan dari setelan OS. Rem khusus
+digest (mis. berhenti setelah N malam tanpa member kembali) belum dibuat — scaffolding-nya
+sama dengan §7b kalau nanti diperlukan.
+
+**Deep link topic:** `GET /api/member/topic/detail?topicId=` (#5) sudah ada — menerima UUID
+atau legacyId, `optionalAuthGuard`, 404 kalau topic tidak ada atau `isActive=false` (itu
+yang membedakan "topic hilang" dari "request salah bentuk", alasan opsi A dipilih di
+kontrak). `countPost` di endpoint ini **dihitung sungguhan** (published, non-deleted) —
+beda dari `/topic/list` yang masih selalu `0`, karena satu count untuk satu topic murah
+sedangkan satu per baris tidak.
+
+**Belum dikerjakan dari kontrak:** kontrak menulis
+mute sebagai `action: "mute"` di endpoint subscribe + field `isMuteNotification`;
+implementasi di sini `POST /notification/mute { scope, refId }` + `isMute` di
+`GET /topic/list`. Fungsinya sama, **namanya beda — FE perlu diberi tahu.**
+
+---
+
 ## 8. Fase + acceptance
 
 | Fase | Deliverable | Acceptance |
@@ -140,8 +336,8 @@ Query single round-trip per resolve (Prisma `findMany select: {memberId}` + `whe
 | 2 | post/comment/reply/like listener + mentions | publish post di network N → semua member N (kecuali author) dapat row; comment di post P → author P + mentioned dapat row; tag pakai action `tag` |
 | 3 | network join-request/approve/memberJoin | request → admin notif; approve → requester + creator notif |
 | 4 | FCM v1 service + push dispatch | row tertulis + FCM dipanggil dengan `{title, body, data:{type, refId}}`; invalid token cleanup |
-| 5 (opt) | NotificationMute table + endpoint | mute post → no row dibuat untuk muted member |
-| QA | Tests integration | producer dedupe; resolver exclude muted; commerce → row |
+| 5 (opt) | NotificationMute table + endpoint | mute post → row tetap dibuat, push-nya yang dilewati (lihat §Mute) |
+| QA | Tests integration | producer dedupe; muted member tetap dapat row tanpa memotong push budget; commerce → row |
 
 ---
 
