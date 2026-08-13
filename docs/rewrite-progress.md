@@ -68,7 +68,8 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` parity met for current s
 - Endpoint `GET|HEAD /api/member/media/stream?t={token}&res={360p|480p|720p}`; opaque AES-256-GCM token carries `guid`/`courseId`/`isPreview`.
 - Preview media open (anonymous OK); non-preview gated on `CourseEnrollment`. HTTP Range forwarded for seek/resume.
 - Model C (signed-URL) code shipped behind `MEDIA_MODE` (default `proxy`); `signed` mode 302-redirects to a Token-Auth signed Bunny HLS URL. Flip needs the new-library content migration — see `docs/media-model-c-migration.md` §11.
-- Tests: `media-token` (5), `bunny-sign` (7), `media` (10), `media-signed` (5) — all green.
+- `GET /api/member/media/hls?t={token}&download=true` — same signed HLS URL returned as **JSON** for native offline downloaders (iOS cannot download progressive MP4 at all). Gated on `MEDIA_MODE === 'signed'` → 404 `MEDIA_HLS_UNAVAILABLE`, so the Model C cutover is a prerequisite for offline playback. Client must pin the 360p variant — audio lessons are video of a static image, and 360p/480p audio is byte-identical. Measurements + contract: `docs/media-port.md` §8.
+- Tests: `media-token` (5), `bunny-sign` (7), `media` (25), `media-signed` (12) — all green.
 - Plan + Bunny audit: `docs/media-port.md`, `docs/media-model-c-migration.md`.
 
 ### commission — `src/modules/commission/`

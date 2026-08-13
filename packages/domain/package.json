@@ -26,7 +26,7 @@
     "@bb/db": "workspace:*",
     "@prisma/client": "^5.22.0",
     "google-auth-library": "^10.6.2",
-    "nanoid": "^5.1.11",
+    "nanoid": "^5.1.16",
     "xendit-node": "^7.0.0"
   },
   "devDependencies": {

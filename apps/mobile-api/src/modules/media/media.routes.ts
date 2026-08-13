@@ -42,6 +42,20 @@ export function mediaRoutes(): Router {
     middlewares: [optionalAuthGuard, mediaDownloadRateLimiter],
   });
 
+  // HLS playlist URL — same gating and rate limit as download, but returns JSON
+  // rather than a 302: the native offline downloaders drive the fetch themselves
+  // and need the URL as a value. One signed URL covers the whole asset, which is
+  // also why it carries the download rate limiter — it is the bulk-scrape
+  // surface, more so than a single MP4 rendition.
+  bindRoute({
+    router,
+    controller: ctrl,
+    method: 'get',
+    path: '/media/hls',
+    handlerKey: 'hls',
+    middlewares: [optionalAuthGuard, mediaDownloadRateLimiter],
+  });
+
   // Lesson documents (DocumentTemplate slides) — same gating and rate limit as
   // download, but the asset is a private S3 object rather than a Bunny video, so
   // it 302s to a presigned GET instead of a signed Bunny URL.
