@@ -1183,9 +1183,24 @@ model CommercePayment {
   paymentType           String                @map("payment_type") // "cc" | "va" | "eWallet" | "voucher"
   bank                  String? // BCA / BNI / MANDIRI / BRI / PERMATA
   ewalletType           String?               @map("ewallet_type") // OVO / DANA / LINKAJA / GOPAY / SHOPEEPAY
+  // `amount` / `acceptedAmount` are ALWAYS IDR minor-unit-free integers, including for
+  // foreign-storefront IAP: the ingest layer converts before writing, so every downstream
+  // consumer (commission base, reporting, transaction history) stays currency-blind.
   amount                Int
   fee                   Int                   @default(0)
   acceptedAmount        Int                   @default(0) @map("accepted_amount")
+  // FX snapshot — populated ONLY when the purchase was settled in a non-IDR currency
+  // (RevenueCat storefronts outside Indonesia). `currency` is the buyer's storefront
+  // currency, `amountLocal` what they actually paid in it, `amountUsd` RevenueCat's own
+  // USD figure (the bridge we convert through), `fxRateIdr` the USD→IDR rate this row was
+  // converted with, and `fxRateSource` which layer of the resolution chain answered.
+  // Kept per-row, not in a rates table: the rate a payment used must stay reproducible
+  // even after the live rate has moved on.
+  currency              String?               @default("IDR")
+  amountLocal           Decimal?              @map("amount_local") @db.Decimal(18, 4)
+  amountUsd             Decimal?              @map("amount_usd") @db.Decimal(18, 4)
+  fxRateIdr             Decimal?              @map("fx_rate_idr") @db.Decimal(18, 6)
+  fxRateSource          String?               @map("fx_rate_source")
   status                CommercePaymentStatus @default(PENDING)
   vendorStatus          String?               @map("vendor_status")
   externalId            String?               @map("external_id")

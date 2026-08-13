@@ -31,3 +31,8 @@ scripts/media-copy-failures.json
 # TS incremental build info
 *.tsbuildinfo
 scripts/member-redirect.json
+
+# Pre-apply snapshots written by scripts/backfill-rc-currency.ts. Production row
+# data (payment ids + amounts) and only useful on the machine that ran the repair —
+# keep them locally as the rollback reference, out of the repo.
+scripts/backfill-rc-currency.before-*.json

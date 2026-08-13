@@ -24,6 +24,11 @@ export const SETTING_KEYS = {
   disbursementAutoApproveMax: 'disbursement.autoApproveMax',
   disbursementFee: 'disbursement.fee',
   disbursementMinBalance: 'disbursement.minBalance',
+  // USD→IDR rate used to normalise foreign-storefront IAP purchases. `fxUsdIdr` is the
+  // static floor of the resolution chain; setting `fxUsdIdrPinned` to true promotes it
+  // above the FX API, which is the ops kill-switch when the provider misbehaves.
+  fxUsdIdr: 'fx.usdIdr',
+  fxUsdIdrPinned: 'fx.usdIdrPinned',
   kycMinBalance: 'kyc.minBalance',
   notificationUnopenedPushLimit: 'notification.unopenedPushLimit',
   notificationDigestEnabled: 'notification.digestEnabled',

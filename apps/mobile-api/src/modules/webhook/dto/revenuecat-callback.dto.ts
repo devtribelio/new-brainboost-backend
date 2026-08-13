@@ -76,20 +76,53 @@ export class RevenueCatEventDto {
   @IsString()
   original_transaction_id?: string;
 
-  @ApiPropertyOptional({ example: 9.99, description: 'USD, after store commission' })
+  @ApiPropertyOptional({
+    example: 22.38,
+    description:
+      'GROSS price in USD (tax-inclusive, before store commission), converted by RevenueCat from the purchase currency. Verified: a USD-storefront event has price == price_in_purchased_currency exactly. This is the bridge used to normalise foreign purchases to IDR.',
+  })
   @IsOptional()
   @IsNumber()
   price?: number;
 
-  @ApiPropertyOptional({ example: 149000, description: 'Local currency (IDR for ID users)' })
+  @ApiPropertyOptional({
+    example: 399000,
+    description:
+      "Price in the BUYER'S storefront currency — IDR only when they bought from the Indonesian store. Never treat as rupiah without checking `currency`.",
+  })
   @IsOptional()
   @IsNumber()
   price_in_purchased_currency?: number;
 
-  @ApiPropertyOptional({ example: 'IDR' })
+  @ApiPropertyOptional({
+    example: 'IDR',
+    description: "ISO code of the buyer's storefront currency. Seen so far: IDR, HKD, MYR, SGD, USD, AUD.",
+  })
   @IsOptional()
   @IsString()
   currency?: string;
+
+  @ApiPropertyOptional({
+    example: 'PRODUCTION',
+    description:
+      'PRODUCTION | SANDBOX. Sandbox events carry price 0 — ingesting one in production would record a free sale, so the handler refuses them.',
+  })
+  @IsOptional()
+  @IsString()
+  environment?: string;
+
+  @ApiPropertyOptional({ example: 'APP_STORE', description: 'APP_STORE | PLAY_STORE | STRIPE | …' })
+  @IsOptional()
+  @IsString()
+  store?: string;
+
+  @ApiPropertyOptional({
+    example: 1786542454487,
+    description: 'When the event happened at RevenueCat (ms). Used to pick the FX rate of the purchase day rather than of processing time.',
+  })
+  @IsOptional()
+  @IsNumber()
+  event_timestamp_ms?: number;
 
   @ApiPropertyOptional({
     example: 0.7,
@@ -109,7 +142,8 @@ export class RevenueCatEventDto {
 
   @ApiPropertyOptional({
     example: 0.0991,
-    description: 'Tax as decimal fraction (e.g. 0.0991). Informational — in tax-inclusive regions like ID, this is consumer-paid PPN, NOT a deduction from developer share.',
+    description:
+      'Tax as decimal fraction of the GROSS price (e.g. 0.0991 = ID PPN 11%). Currently informational. OPEN QUESTION: `takehome_percentage` is measured against the EX-TAX price while `price` is tax-inclusive, so multiplying them overstates net by 1/(1-tax) — see docs/revenuecat-webhook-port.md before relying on either for settlement math.',
   })
   @IsOptional()
   @IsNumber()
