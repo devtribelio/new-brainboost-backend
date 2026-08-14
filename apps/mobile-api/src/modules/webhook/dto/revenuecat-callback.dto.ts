@@ -105,7 +105,7 @@ export class RevenueCatEventDto {
   @ApiPropertyOptional({
     example: 'PRODUCTION',
     description:
-      'PRODUCTION | SANDBOX. Sandbox events carry price 0 — ingesting one in production would record a free sale, so the handler refuses them.',
+      'PRODUCTION | SANDBOX. Declared for audit only — sandbox events ARE ingested (App Review purchases arrive as SANDBOX against the production app). Persisted in commerce_payments.log_request so test rows stay identifiable.',
   })
   @IsOptional()
   @IsString()
