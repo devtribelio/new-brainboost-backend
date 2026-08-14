@@ -229,9 +229,24 @@ a different reason (it double-counts tax, since `c` is already tax-adjusted).
 
 ### Also fixed alongside
 
-- **Sandbox guard.** `environment`, `store`, `event_timestamp_ms` were dropped by the DTO
-  whitelist. Sandbox events carry `price: 0`, which would now hit the catalog fallback and
-  record a full-price sale, so a SANDBOX event in production is refused (200, not ingested).
+- **Event provenance visible.** `environment`, `store`, `event_timestamp_ms` were dropped by
+  the DTO whitelist and are now declared, so `commerce_payments.log_request` shows which
+  store an event came from and whether it was SANDBOX. `event_timestamp_ms` also dates the
+  FX lookup to the purchase day rather than to processing time.
+
+  **Sandbox events are NOT refused.** A guard rejecting them in production was written and
+  removed before merge, for two reasons. First, App Review runs its purchases in the
+  SANDBOX environment against the PRODUCTION app — dropping those events leaves the
+  reviewer with no `CourseEnrollment` and `isPurchased: false`, i.e. a purchase that
+  visibly does nothing, which is a rejection path. Second, the premise was wrong: sandbox
+  events carry REAL prices, not `price: 0` (this repo's own fixture is a sandbox event with
+  `gross = 429000` — see `revenuecat-net-amount.spec.ts`), so they never reach the catalog
+  fallback the guard was meant to protect.
+
+  Consequence to keep in mind: a sandbox purchase in production is recorded as an ordinary
+  sale, and since the `revenuecat` credential runs with `triggersAffiliate = true` it can
+  mint a real affiliate commission. That predates the FX work and is unchanged by it — the
+  mitigation is to keep sandbox testing off the production webhook.
 - **Google Play SKUs.** `resolveProduct` matched `iosProductId` only — a Play purchase
   returned `product_not_found` (member paid, no access, provider given a 200 so it never
   retried). Now matches either SKU column.
