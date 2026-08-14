@@ -51,6 +51,18 @@ const SETTINGS: Array<{ key: string; value: string; description: string }> = [
     description: 'Minimum withdrawable balance (IDR) required to request a payout (gross >= this).',
   },
   {
+    key: 'fx.usdIdr',
+    value: '17800',
+    description:
+      'USD→IDR rate used to normalise foreign-storefront IAP purchases. Acts as the static floor of the resolution chain; promoted to top priority when fx.usdIdrPinned is true.',
+  },
+  {
+    key: 'fx.usdIdrPinned',
+    value: 'false',
+    description:
+      "Pin the USD→IDR rate to fx.usdIdr ('true' to enable), overriding the FX API and RevenueCat-derived rates. Use when the live rate is wrong or the providers are down.",
+  },
+  {
     key: 'kyc.minBalance',
     value: '55000',
     description:
@@ -66,6 +78,24 @@ const SETTINGS: Array<{ key: string; value: string; description: string }> = [
     key: 'subscription.reminderDaysBefore',
     value: '7,3,1',
     description: 'Comma-separated H-minus buckets for the renewal reminder job (email + push).',
+  },
+  {
+    key: 'notification.unopenedPushLimit',
+    value: '0',
+    description:
+      'Max push sent to a member while they stay out of the app; further push is suppressed (the in-app notification row is still written). Resets when the member opens the app. 0 = gate off (counter still tracked). Ship value is 0 — raise to 3 only after confirming the app calls /member/info on resume, not just cold start.',
+  },
+  {
+    key: 'notification.digestEnabled',
+    value: 'false',
+    description:
+      "Nightly topic digest: one push per member summarising the topic posts they have not read. 'true' to enable. Ships disabled.",
+  },
+  {
+    key: 'notification.digestHour',
+    value: '21',
+    description:
+      'Hour of day (0-23, Asia/Jakarta) the topic digest is sent. The job runs on the hourly cron tick and only acts on this hour, so changing this value moves the send time with no redeploy.',
   },
   {
     key: 'sales.alertEmail',

@@ -22,6 +22,11 @@ export interface BbEcsStackProps extends cdk.StackProps {
   // service-nya sama sekali, jadi bisa merge dulu tanpa butuh image/secret siap.
   resyncEnabled?: boolean;
   resyncImageTag?: string;     // tag image bb/resync-worker (default: sama dgn imageTag)
+  // bb-comms di-build dari repo TERPISAH (bb-notification-service, Go) → siklus
+  // rilisnya sendiri. `commsImageTag` melepasnya dari lockstep imageTag mobile-api
+  // (pola sama dgn resyncImageTag), jadi bisa deploy notification tanpa rebuild
+  // mobile-api. Default: sama dgn imageTag (backward compatible).
+  commsImageTag?: string;
 }
 
 export class BbEcsStack extends cdk.Stack {
@@ -46,6 +51,12 @@ export class BbEcsStack extends cdk.Stack {
       JWT_ACCESS_SECRET: sm('JWT_ACCESS_SECRET'),
       JWT_REFRESH_SECRET: sm('JWT_REFRESH_SECRET'),
       ADMIN_JWT_SECRET: sm('ADMIN_JWT_SECRET'),
+      // TTL token — di Secrets Manager biar bisa diubah tanpa edit kode (cukup ganti
+      // value di secret + force-new-deployment). INTERIM: access dipanjangkan ke 7d
+      // untuk menekan keluhan "sesi berakhir" selagi grace-window dikerjakan; aman krn
+      // revocation tetap dicek ke DB tiap request. Default env.ts kalau key tak ada: 15m / 30d.
+      JWT_ACCESS_EXPIRES_IN: sm('JWT_ACCESS_EXPIRES_IN'),
+      JWT_REFRESH_EXPIRES_IN: sm('JWT_REFRESH_EXPIRES_IN'),
       S3_ACCESS_KEY_ID: sm('S3_ACCESS_KEY_ID'),
       S3_SECRET_ACCESS_KEY: sm('S3_SECRET_ACCESS_KEY'),
       S3_BUCKET: sm('S3_BUCKET'),
@@ -100,14 +111,28 @@ export class BbEcsStack extends cdk.Stack {
       SQS_REGION: this.region,
       API_DOCS_ENABLED: 'false',
       TRUST_PROXY: '1', // di belakang ALB (1 hop) → req.ip = X-Forwarded-For, rate-limit akurat
+      // === Logging (docs/logging.md) ===
+      // Semua LOG_* di-set eksplisit, bukan ngandelin default env.ts: saat insiden
+      // kita ganti nilai di sini + redeploy, tanpa perlu inget default-nya apa.
+      LOG_LEVEL: 'info',            // 'debug' nambah db.op, 'trace' nambah db.query
+      LOG_HTTP: 'true',             // satu baris http.response per request
+      LOG_HTTP_INCOMING: 'true',    // + http.request pas request masuk — request yang
+                                    //   hang/crash nggak pernah nyampe baris response
+      LOG_HTTP_BODY: 'true',        // body (deep-redacted + truncated) di baris response
+      LOG_SLOW_REQUEST_MS: '1000',  // di atas ini → warn + slow:true
+      // Prefix match. /health = health check ALB (targetGroup di bawah), /api/docs
+      // mati di prod (API_DOCS_ENABLED=false) tapi tetap di-skip biar aman.
+      LOG_IGNORE_PATHS: '/health,/api/docs',
+      LOG_PRISMA: 'true',           // efektif cuma kalau LOG_LEVEL=debug (db.op level debug)
     };
 
     // === ECR images ===
-    const img = (repo: string) =>
+    const img = (repo: string, tag: string = props.imageTag) =>
       ecs.ContainerImage.fromEcrRepository(
-        ecr.Repository.fromRepositoryName(this, `${repo}Repo`, `bb/${repo}`), props.imageTag);
+        ecr.Repository.fromRepositoryName(this, `${repo}Repo`, `bb/${repo}`), tag);
     const mobileApiImg = img('mobile-api');   // dipakai 3×: api, comms-relay, cron
-    const commsImg = img('bb-comms');
+    // bb-comms: repo terpisah → tag sendiri (default = imageTag kalau tak diisi).
+    const commsImg = img('bb-comms', props.commsImageTag ?? props.imageTag);
     // backoffice-api & admin-ejs sudah DIHAPUS dari monorepo (2026-07) — tidak ada service-nya di sini.
 
     // === Task role (perm runtime: SQS) ===
@@ -261,7 +286,11 @@ export class BbEcsStack extends cdk.Stack {
     // Dua lane, binary sama (dist/jobs-runner.js), argv = filter nama job (lihat
     // apps/mobile-api/src/jobs-runner.ts — nama salah = exit 1, bukan diem-diem no-op).
     // Task def eksplisit biar bisa set ARM64 + taskRole.
-    //  - Cron (hourly): affiliate PENDING->BALANCE + expire stale payments.
+    // Mendaftarkan job di jobs-runner.ts BELUM cukup — nama yang tidak ada di argv
+    // lane mana pun tidak akan pernah jalan, tanpa error. Jaga daftar ini sinkron
+    // dengan lane PM2 di ecosystem.config.js.
+    //  - Cron (hourly): affiliate PENDING->BALANCE + expire stale payments +
+    //    topic digest (aman tiap jam: no-op kecuali jam WIB == notification.digestHour).
     //  - CronDisburse (tiap 5 mnt): sweep payout yang sudah di-approve backoffice ke
     //    Xendit, biar approval MANUAL nggak nunggu sampai jam berikutnya. Idempotent —
     //    cuma ambil row PENDING dengan approvedAt terisi, overlap antar lane aman.
@@ -283,7 +312,11 @@ export class BbEcsStack extends cdk.Stack {
       subnetSelection: { subnetType: ec2.SubnetType.PUBLIC },
       securityGroups: [appSg],
       scheduledFargateTaskDefinitionOptions: {
-        taskDefinition: makeCronLane('Cron', 'cron', ['affiliatePendingToBalance', 'expirePendingPayments']),
+        taskDefinition: makeCronLane('Cron', 'cron', [
+          'affiliatePendingToBalance',
+          'expirePendingPayments',
+          'topicDigest',
+        ]),
       },
     });
     new ecsPatterns.ScheduledFargateTask(this, 'CronDisburse', {

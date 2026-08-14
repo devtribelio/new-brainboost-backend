@@ -2,7 +2,7 @@
 // `Sharp`/`Metadata` as named types instead of a `sharp.*` namespace.
 import sharp, { type Metadata, type Sharp } from 'sharp';
 import { env } from '../config/env';
-import { BadRequestException } from '../exceptions';
+import { badRequest, ERROR_CODES } from '../exceptions';
 
 export interface ProcessedImage {
   buffer: Buffer;
@@ -37,11 +37,11 @@ export class ImageProcessor {
       pipeline = sharp(input, { failOn: 'error' });
       metadata = await pipeline.metadata();
     } catch {
-      throw new BadRequestException('Uploaded file is not a valid image');
+      throw badRequest(ERROR_CODES.UPLOAD_IMAGE_INVALID);
     }
 
     if (!metadata.format || !metadata.width || !metadata.height) {
-      throw new BadRequestException('Uploaded file is not a valid image');
+      throw badRequest(ERROR_CODES.UPLOAD_IMAGE_INVALID);
     }
 
     const out = await pipeline

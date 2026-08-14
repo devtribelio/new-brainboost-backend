@@ -5,30 +5,15 @@ import type { IncrementResponse, Options, Store } from 'express-rate-limit';
 import { RedisStore, type RedisReply } from 'rate-limit-redis';
 import { Redis } from 'ioredis';
 import { fail } from '@bb/common/utils/response.util';
+import { ERROR_CODES, messageFor } from '@bb/common/exceptions';
 import { env } from '@bb/common/config/env';
 import { logger } from '@bb/common/config/logger';
 import { otpPhoneTarget } from '@bb/common/utils/phone.util';
+import { clientIp } from '@bb/common/utils/client-ip.util';
 
-// Real client IP for rate-limit keying.
-//
-// The deployed chain is Cloudflare -> nginx (proxy_pass 127.0.0.1) -> Node, i.e.
-// TWO proxy hops, but the app runs with TRUST_PROXY=1 (trusts nginx only). Express
-// therefore resolves `req.ip` to the ROTATING Cloudflare edge IP, not the visitor,
-// so per-IP buckets scatter across CF's edge fleet and the limiter never fills
-// (verified: 60 login attempts, zero 429s). Cloudflare always sets CF-Connecting-IP
-// to the real client and strips any client-supplied copy, so it is the reliable key
-// regardless of hop count. Fall back to req.ip for non-CF traffic (dev, LAN, health).
-//
-// SECURITY NOTE: CF-Connecting-IP is only trustworthy while traffic is forced
-// through Cloudflare. The origin (nginx on 0.0.0.0:80/443) MUST be firewalled to
-// Cloudflare's published IP ranges, otherwise an attacker reaching the origin
-// directly can forge this header. See docs/security-audit-followups.md.
-export function clientIp(req: Pick<Request, 'headers' | 'ip'>): string {
-  const cf = req.headers['cf-connecting-ip'];
-  if (typeof cf === 'string' && cf.trim() !== '') return cf.trim();
-  if (Array.isArray(cf) && cf[0]) return cf[0].trim();
-  return req.ip ?? 'anonymous';
-}
+// Re-exported for back-compat: `clientIp` moved to utils/client-ip.util.ts so
+// the request logger can reuse it without pulling in this module's side effects.
+export { clientIp };
 
 // Brute-force / abuse throttling for unauthenticated, credential-facing
 // endpoints (oauth token, register, forgot-password, OTP).
@@ -44,13 +29,10 @@ export function clientIp(req: Pick<Request, 'headers' | 'ip'>): string {
 
 const WINDOW_MS = 15 * 60 * 1000; // 15 minutes
 
-const TOO_MANY_REQUESTS_MESSAGE =
-  'Too many requests — please wait a few minutes and try again.';
-
 // Shared 429 responder so every limiter speaks the same envelope as the rest
-// of the API (see error.middleware.ts `statusToCode` -> TOO_MANY_REQUESTS).
+// of the API, with copy from the same catalog as thrown errors.
 const tooManyRequestsHandler: RequestHandler = (_req, res) => {
-  fail(res, 429, 'TOO_MANY_REQUESTS', TOO_MANY_REQUESTS_MESSAGE);
+  fail(res, 429, ERROR_CODES.TOO_MANY_REQUESTS, messageFor(ERROR_CODES.TOO_MANY_REQUESTS));
 };
 
 // Disable throttling under the test runner: integration tests hammer these
@@ -198,6 +180,8 @@ const byRegisterTarget = byIdentifier('register', (b) => {
   const code = str(b.phoneCode);
   return phone && code ? otpPhoneTarget(code, phone) : undefined;
 });
+// Pre-registration: the email the OTP will be mailed to.
+const byEmail = byIdentifier('email', (b) => str(b.email)?.toLowerCase());
 // Forgot-password: email, or a digits-normalized phone (no phoneCode field here).
 const byEmailOrPhone = byIdentifier('reset', (b) => {
   const email = str(b.email)?.toLowerCase();
@@ -206,11 +190,19 @@ const byEmailOrPhone = byIdentifier('reset', (b) => {
   return phone ? phone.replace(/[^0-9]/g, '') || undefined : undefined;
 });
 
+// Authenticated senders: the body carries no identifier because the OTP target
+// is derived server-side from the session, so key on the member itself.
+const byAuthUser = (req: Request): string => {
+  const user = (req as unknown as { user?: { id?: string } }).user;
+  return user?.id ?? `ip:${clientIp(req)}`;
+};
+
 /** Internal: identifier keyers exposed for unit tests. Not part of the public API. */
 export const _keyers = {
   byUsername,
   byMemberId,
   byTarget,
+  byEmail,
   byPhoneTarget,
   byRegisterTarget,
   byEmailOrPhone,
@@ -287,6 +279,20 @@ export const requestVerificationEmailRateLimiter: RequestHandler = makeRateLimit
   name: 'verify-request-email',
   limit: 10,
   keyGenerator: byMemberId,
+});
+// Pre-registration is UNAUTHENTICATED and mails whatever address is posted, so
+// without this it is an open relay for mailbombing a third party.
+export const preRegistrationRateLimiter: RequestHandler = makeRateLimiter({
+  name: 'pre-registration',
+  limit: 10,
+  keyGenerator: byEmail,
+});
+// Authenticated, but a stolen session should not be able to mailbomb the owner
+// with deletion notices — and the endpoint is a once-ever action per account.
+export const requestDeleteAccountRateLimiter: RequestHandler = makeRateLimiter({
+  name: 'delete-account-request',
+  limit: 5,
+  keyGenerator: byAuthUser,
 });
 
 // --- Account creation — keyed on the identity being registered --------------

@@ -1,6 +1,11 @@
 import { prisma } from '@bb/db';
 import { env } from '@bb/common/config/env';
-import { BadRequestException, NotFoundException } from '@bb/common/exceptions';
+import {
+  badRequest,
+  notFound,
+  BadRequestException,
+  ERROR_CODES,
+} from '@bb/common/exceptions';
 import { computeTotals } from './utils/compute-totals';
 import { generateOrderCode } from './utils/generate-order-code';
 import { VoucherService } from './voucher.service';
@@ -31,9 +36,9 @@ export class CheckoutService {
       where: { id: input.productId },
       select: { id: true, price: true, isActive: true, status: true },
     });
-    if (!product) throw new NotFoundException('Product not found');
+    if (!product) throw notFound(ERROR_CODES.PRODUCT_NOT_FOUND);
     if (!product.isActive || product.status !== 'active') {
-      throw new BadRequestException('Product not available');
+      throw badRequest(ERROR_CODES.PRODUCT_NOT_AVAILABLE);
     }
 
     // Subscription checkout guard (PRD BE-14). Same plan passes on purpose —
@@ -75,12 +80,16 @@ export class CheckoutService {
     }
 
     let voucherId: string | undefined;
-    let voucherMeta:
-      | { type: 'PERCENT' | 'AMOUNT'; value: number; maxAmount?: number | null }
-      | null = null;
+    let voucherMeta: {
+      type: 'PERCENT' | 'AMOUNT';
+      value: number;
+      maxAmount?: number | null;
+    } | null = null;
     if (input.voucherCode) {
       const check = await this.voucherService.validate(input.voucherCode, input.productId);
-      if (!check.valid) throw new BadRequestException(check.reason ?? 'Voucher invalid');
+      // voucherService.validate() reports an internal English reason — keep it as
+      // diagnostics, don't surface it as copy.
+      if (!check.valid) throw badRequest(ERROR_CODES.VOUCHER_INVALID, { reason: check.reason });
       voucherId = check.voucherId;
       // maxAmount MUST be threaded through — omitting it silently bypasses the
       // PERCENT cap in computeTotals (over-discount / revenue loss).
@@ -101,9 +110,7 @@ export class CheckoutService {
     );
 
     const code = await generateOrderCode();
-    const expiredAt = new Date(
-      Date.now() + env.commerce.transactionExpiryHours * 3600 * 1000,
-    );
+    const expiredAt = new Date(Date.now() + env.commerce.transactionExpiryHours * 3600 * 1000);
 
     const tx = await prisma.commerceTransaction.create({
       data: {
@@ -153,7 +160,8 @@ export class CheckoutService {
       orderBy: { createdAt: 'desc' },
       select: { affiliatorMemberId: true, programId: true },
     });
-    if (!visit || !visit.programId) return { affiliatorId: null, programId: visit?.programId ?? null };
+    if (!visit || !visit.programId)
+      return { affiliatorId: null, programId: visit?.programId ?? null };
 
     const affiliator = await prisma.memberAffiliator.findUnique({
       where: {

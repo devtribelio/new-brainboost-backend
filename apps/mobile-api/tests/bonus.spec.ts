@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import * as bcrypt from 'bcryptjs';
 import { prisma } from '@bb/db';
 import { env } from '@bb/common/config/env';
+import { ERROR_CODES } from '@bb/common/exceptions';
 import type { S3StorageService } from '@bb/common/services/s3-storage.service';
 import { BonusService } from '@/modules/bonus/bonus.service';
 
@@ -67,15 +68,24 @@ describe('BonusService.getAccessUrl — course-access-gated presigned URL (real 
     expect(lastPresign?.ttl).toBe(env.s3.presignExpires);
   });
 
-  it('denies (403) a member with no access to the course — server-side gate', async () => {
-    await expect(service.getAccessUrl(strangerMember, bonusId)).rejects.toThrow(/not enrolled/i);
+  it('denies (403) a member not enrolled in the course — server-side gate', async () => {
+    await expect(service.getAccessUrl(strangerMember, bonusId)).rejects.toMatchObject({
+      status: 403,
+      code: ERROR_CODES.COURSE_NOT_ENROLLED,
+    });
   });
 
   it('404s an unknown bonus id', async () => {
-    await expect(service.getAccessUrl(enrolledMember, crypto.randomUUID())).rejects.toThrow(/not found/i);
+    await expect(service.getAccessUrl(enrolledMember, crypto.randomUUID())).rejects.toMatchObject({
+      status: 404,
+      code: ERROR_CODES.BONUS_NOT_FOUND,
+    });
   });
 
   it('404s an inactive bonus (soft-hidden)', async () => {
-    await expect(service.getAccessUrl(enrolledMember, inactiveBonusId)).rejects.toThrow(/not found/i);
+    await expect(service.getAccessUrl(enrolledMember, inactiveBonusId)).rejects.toMatchObject({
+      status: 404,
+      code: ERROR_CODES.BONUS_NOT_FOUND,
+    });
   });
 });

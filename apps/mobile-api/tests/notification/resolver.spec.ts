@@ -69,15 +69,20 @@ describe('RecipientResolver', () => {
     expect(ids).not.toContain(memberDisabled);
   });
 
-  it('filterNotMuted drops members who muted the scope', async () => {
+  it('mutedMemberIds reports who muted the scope', async () => {
     const fakeRefId = '00000000-0000-0000-0000-000000000001';
     await prisma.notificationMute.create({
       data: { memberId: memberA, scope: 'network', refId: fakeRefId },
     });
-    const ids = await resolver.filterNotMuted([memberA, memberB], [
+    const muted = await resolver.mutedMemberIds([memberA, memberB], [
       { scope: 'network', refId: fakeRefId },
     ]);
-    expect(ids).not.toContain(memberA);
-    expect(ids).toContain(memberB);
+    expect(muted.has(memberA)).toBe(true);
+    expect(muted.has(memberB)).toBe(false);
+  });
+
+  it('mutedMemberIds is empty when no scope is given', async () => {
+    const muted = await resolver.mutedMemberIds([memberA, memberB], []);
+    expect(muted.size).toBe(0);
   });
 });

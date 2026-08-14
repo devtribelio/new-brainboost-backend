@@ -1,5 +1,5 @@
 import { prisma } from '@bb/db';
-import { NotFoundException } from '@bb/common/exceptions';
+import { notFound, ERROR_CODES } from '@bb/common/exceptions';
 import { S3StorageService, s3StorageService } from '@bb/common/services/s3-storage.service';
 import { EntitlementService } from '@bb/domain/subscription/entitlement.service';
 import { env } from '@bb/common/config/env';
@@ -24,7 +24,7 @@ export class BonusService {
       where: { id: bonusId, isActive: true },
       select: { courseId: true, fileKey: true },
     });
-    if (!bonus) throw new NotFoundException('Bonus not found');
+    if (!bonus) throw notFound(ERROR_CODES.BONUS_NOT_FOUND);
 
     await this.entitlement.assertCourseAccess(memberId, bonus.courseId);
 

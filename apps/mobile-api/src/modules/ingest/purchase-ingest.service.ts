@@ -1,7 +1,9 @@
 import { prisma } from '@bb/db';
 import { logger } from '@bb/common/config/logger';
-import { BadRequestException } from '@bb/common/exceptions';
+import { badRequest, ERROR_CODES } from '@bb/common/exceptions';
+import { isUuid } from '@bb/common/utils/uuid.util';
 import { commerceEvents } from '@bb/common/events/commerce-events';
+import { fxRateService } from '@bb/common/services/fx-rate.service';
 import { generateOrderCode } from '@bb/domain/commerce/utils/generate-order-code';
 import { attributionService } from '@bb/domain/affiliate/attribution.service';
 import { COMMISSION_STATUS } from '@bb/domain/affiliate/constants';
@@ -35,7 +37,18 @@ export interface NormalizedPurchase {
    */
   netAmount?: number;
   voucherAmount?: number;
+  /**
+   * Currency `grossAmount`/`netAmount` are denominated in. Absent or 'IDR' means they
+   * are already rupiah and pass through untouched. Anything else triggers normalisation
+   * via `amountUsd` — see `normalizeToIdr`.
+   */
   currency?: string;
+  /**
+   * The purchase converted to USD by the upstream provider. Required to normalise a
+   * non-IDR purchase: one USD→IDR rate then covers every storefront, so we never carry
+   * a per-currency rate table.
+   */
+  amountUsd?: number;
   affiliatorCode?: string; // explicit per-purchase attribution (last-touch), optional
   refundOfProviderEventId?: string; // for type=REFUND: the original purchase's providerEventId
   /** Subscription renewal vs first purchase — drives `subscriptionRenewed` notif. */
@@ -49,6 +62,33 @@ export interface NormalizedPurchase {
   occurredAt?: string;
   raw?: unknown;
 }
+
+/** Product fields the ingest path needs: identity plus the catalog prices used as the FX floor. */
+interface ResolvedProduct {
+  id: string;
+  price: number;
+  iosPrice: number | null;
+}
+
+/** What `normalizeToIdr` settled on, both for the write and for the audit columns. */
+interface NormalizedAmounts {
+  gross: number;
+  accepted: number;
+  currency: string;
+  amountLocal: number | null;
+  amountUsd: number | null;
+  fxRateIdr: number | null;
+  fxRateSource: string | null;
+}
+
+/**
+ * A converted amount this far from the catalog price is refused and replaced by the
+ * catalog price. The live bug scored 0.0001x, so this net catches a broken rate (or a
+ * provider changing its encoding) even if every other assumption fails. The band is wide
+ * on purpose: foreign price tiers legitimately run 1.03x-1.26x the Indonesian one.
+ */
+const FX_SANITY_MIN = 0.25;
+const FX_SANITY_MAX = 4;
 
 export interface IngestResult {
   status:
@@ -66,21 +106,24 @@ export interface IngestResult {
 
 export class PurchaseIngestService {
   async ingest(input: NormalizedPurchase, cred: VerifiedCredential): Promise<IngestResult> {
-    if (!input.providerEventId) throw new BadRequestException('providerEventId is required');
+    if (!input.providerEventId) throw badRequest(ERROR_CODES.INGEST_EVENT_ID_REQUIRED);
     if (input.type !== 'PURCHASE' && input.type !== 'REFUND') {
-      throw new BadRequestException('type must be PURCHASE or REFUND');
+      throw badRequest(ERROR_CODES.INGEST_TYPE_INVALID);
     }
 
     if (input.type === 'REFUND') return this.handleRefund(input, cred);
 
     const memberId = await this.resolveMember(input.memberRef);
     if (!memberId) return { status: 'member_not_found' };
-    const productId = await this.resolveProduct(input.productRef);
-    if (!productId) return { status: 'product_not_found' };
+    const product = await this.resolveProduct(input.productRef);
+    if (!product) return { status: 'product_not_found' };
+    const productId = product.id;
 
     // Idempotency: one transaction per (provider, providerEventId).
     const existing = await prisma.commerceTransaction.findUnique({
-      where: { provider_providerEventId: { provider: cred.name, providerEventId: input.providerEventId } },
+      where: {
+        provider_providerEventId: { provider: cred.name, providerEventId: input.providerEventId },
+      },
       select: { id: true },
     });
     if (existing) return { status: 'duplicate', transactionId: existing.id };
@@ -97,14 +140,11 @@ export class PurchaseIngestService {
       ? input.providerEventId
       : (input.attributionKey ?? input.providerEventId);
 
-    const gross = Math.max(0, Math.round(input.grossAmount));
     const voucherAmount = Math.max(0, Math.round(input.voucherAmount ?? 0));
-    // `acceptedAmount` = net settlement (after store cut + tax). When the
-    // adapter didn't compute it, mirror `gross` so reporting stays non-null and
-    // identical to legacy behavior.
-    const accepted = input.netAmount != null
-      ? Math.max(0, Math.min(gross, Math.round(input.netAmount)))
-      : gross;
+    // Every amount written below is IDR. For a foreign storefront that means converting
+    // first — `normalizeToIdr` also returns the FX audit trail for the payment row.
+    const money = await this.normalizeToIdr(input, product);
+    const { gross, accepted } = money;
 
     // RevenueCat can deliver a burst of events in the same instant (IAP restore
     // flood). The order code is count-derived → concurrent inserts collide on
@@ -143,6 +183,13 @@ export class PurchaseIngestService {
               paymentType: cred.name,
               amount: gross,
               acceptedAmount: accepted,
+              // FX audit: null on the IDR path, populated whenever a conversion happened
+              // so the rate behind `amount` stays reproducible after the live rate moves.
+              currency: money.currency,
+              amountLocal: money.amountLocal,
+              amountUsd: money.amountUsd,
+              fxRateIdr: money.fxRateIdr,
+              fxRateSource: money.fxRateSource,
               // Audit trail: full upstream payload so we can later reconcile
               // unexpected `acceptedAmount` values, replay fee math when RC
               // changes encoding, or cross-reference with Apple settlement
@@ -168,7 +215,12 @@ export class PurchaseIngestService {
 
         // Genuine idempotency duplicate (provider, providerEventId already used)?
         const dup = await prisma.commerceTransaction.findUnique({
-          where: { provider_providerEventId: { provider: cred.name, providerEventId: input.providerEventId } },
+          where: {
+            provider_providerEventId: {
+              provider: cred.name,
+              providerEventId: input.providerEventId,
+            },
+          },
           select: { id: true },
         });
         if (dup) return { status: 'duplicate', transactionId: dup.id };
@@ -205,7 +257,11 @@ export class PurchaseIngestService {
     // Affiliate override only resolved when this settle is the commission-bearing one.
     // Pass productId so per-product attribution (B-5) prefers a visit for THIS product.
     const overrideAffiliatorMemberId = affiliateEligible
-      ? await attributionService.resolveOverrideAffiliatorMemberId(memberId, input.affiliatorCode, productId)
+      ? await attributionService.resolveOverrideAffiliatorMemberId(
+          memberId,
+          input.affiliatorCode,
+          productId,
+        )
       : null;
 
     commerceEvents.emit('commerce.payment.success', {
@@ -241,13 +297,18 @@ export class PurchaseIngestService {
     return { status: 'committed', transactionId: txId, paymentId };
   }
 
-  private async handleRefund(input: NormalizedPurchase, cred: VerifiedCredential): Promise<IngestResult> {
+  private async handleRefund(
+    input: NormalizedPurchase,
+    cred: VerifiedCredential,
+  ): Promise<IngestResult> {
     if (!cred.canIngestRefund) return { status: 'refund_not_permitted' };
     const originalEventId = input.refundOfProviderEventId;
-    if (!originalEventId) throw new BadRequestException('refundOfProviderEventId required for REFUND');
+    if (!originalEventId) throw badRequest(ERROR_CODES.INGEST_REFUND_REFERENCE_REQUIRED);
 
     const tx = await prisma.commerceTransaction.findUnique({
-      where: { provider_providerEventId: { provider: cred.name, providerEventId: originalEventId } },
+      where: {
+        provider_providerEventId: { provider: cred.name, providerEventId: originalEventId },
+      },
       select: {
         id: true,
         memberId: true,
@@ -261,7 +322,11 @@ export class PurchaseIngestService {
     const paymentIds = tx.payments.map((p) => p.id);
     const res = await prisma.affiliateCommission.updateMany({
       where: { paymentId: { in: paymentIds }, status: { not: COMMISSION_STATUS.VOIDED } },
-      data: { status: COMMISSION_STATUS.VOIDED, voidedAt: new Date(), voidedReason: `refund:${input.providerEventId}` },
+      data: {
+        status: COMMISSION_STATUS.VOIDED,
+        voidedAt: new Date(),
+        voidedReason: `refund:${input.providerEventId}`,
+      },
     });
     await prisma.commerceTransaction.update({ where: { id: tx.id }, data: { status: 'REFUNDED' } });
 
@@ -296,8 +361,133 @@ export class PurchaseIngestService {
     return { status: 'refunded', transactionId: tx.id, voidedCommissions: res.count };
   }
 
+  /**
+   * Bring a purchase onto the IDR scale every downstream consumer assumes.
+   *
+   * IDR purchases (the overwhelming majority) short-circuit: the figures are already
+   * rupiah and no FX columns are written. For a foreign storefront the local figure is
+   * useless as rupiah, so the amount is rebuilt from the provider's USD conversion:
+   *
+   *     amountIdr = round(amountUsd x usdIdrRate)
+   *
+   * The store's cut is re-applied as the RATIO the provider reported rather than a fresh
+   * percentage, so whatever `computeNetAmount` decided upstream survives conversion.
+   *
+   * Falls back to the catalog price when the event carries no usable USD figure, when
+   * every FX layer failed, or when the result fails the sanity band. That fallback is
+   * logged at error: it means an amount was invented rather than converted, which
+   * reporting needs to be able to find.
+   */
+  private async normalizeToIdr(
+    input: NormalizedPurchase,
+    product: ResolvedProduct,
+  ): Promise<NormalizedAmounts> {
+    const rawGross = Math.max(0, input.grossAmount);
+    const takehomeRatio =
+      input.netAmount != null && rawGross > 0
+        ? Math.max(0, Math.min(1, input.netAmount / rawGross))
+        : 1;
+
+    const currency = (input.currency ?? 'IDR').toUpperCase();
+    if (currency === 'IDR') {
+      const gross = Math.round(rawGross);
+      return {
+        gross,
+        accepted:
+          input.netAmount != null
+            ? Math.max(0, Math.min(gross, Math.round(input.netAmount)))
+            : gross,
+        currency,
+        amountLocal: null,
+        amountUsd: null,
+        fxRateIdr: null,
+        fxRateSource: null,
+      };
+    }
+
+    const catalog = product.iosPrice ?? product.price;
+    const withFallback = (reason: string): NormalizedAmounts => {
+      // Priced product: its catalog price is the best available stand-in.
+      if (catalog > 0) {
+        logger.error(
+          { currency, grossLocal: rawGross, amountUsd: input.amountUsd, catalog, reason },
+          '[ingest] FX unavailable — falling back to catalog price',
+        );
+        return {
+          gross: catalog,
+          accepted: Math.floor(catalog * takehomeRatio),
+          currency,
+          amountLocal: rawGross,
+          amountUsd: input.amountUsd ?? null,
+          fxRateIdr: null,
+          fxRateSource: 'catalog_fallback',
+        };
+      }
+      // No catalog price to fall back to (free/unpriced product). Keep the local figure
+      // rather than writing 0 — an unconverted amount is at least traceable via
+      // `fx_rate_source`, whereas a zero silently reads as a legitimate free sale.
+      logger.error(
+        { currency, grossLocal: rawGross, amountUsd: input.amountUsd, reason },
+        '[ingest] FX unavailable and product has no catalog price — amount left unconverted',
+      );
+      const local = Math.round(rawGross);
+      return {
+        gross: local,
+        accepted: Math.floor(local * takehomeRatio),
+        currency,
+        amountLocal: rawGross,
+        amountUsd: input.amountUsd ?? null,
+        fxRateIdr: null,
+        fxRateSource: 'unconverted',
+      };
+    };
+
+    if (input.amountUsd == null || input.amountUsd <= 0)
+      return withFallback('no usable USD amount');
+
+    const at = input.occurredAt ? new Date(input.occurredAt) : new Date();
+    const fx = await fxRateService.getUsdIdr(Number.isNaN(at.getTime()) ? new Date() : at);
+    if (!fx) return withFallback('no FX rate from any source');
+
+    const gross = Math.round(input.amountUsd * fx.rate);
+    // The sanity band needs a catalog price to compare against; an unpriced product has no
+    // reference, so the converted value is taken as-is rather than refused against zero.
+    if (catalog > 0) {
+      const ratio = gross / catalog;
+      if (ratio < FX_SANITY_MIN || ratio > FX_SANITY_MAX) {
+        return withFallback(`converted amount ${gross} is ${ratio.toFixed(4)}x catalog`);
+      }
+    }
+
+    logger.info(
+      {
+        currency,
+        amountLocal: rawGross,
+        amountUsd: input.amountUsd,
+        fxRate: fx.rate,
+        fxSource: fx.source,
+        amountIdr: gross,
+      },
+      '[ingest] foreign-currency purchase normalized to IDR',
+    );
+
+    return {
+      gross,
+      accepted: Math.floor(gross * takehomeRatio),
+      currency,
+      amountLocal: rawGross,
+      amountUsd: input.amountUsd,
+      fxRateIdr: fx.rate,
+      fxRateSource: fx.source,
+    };
+  }
+
   private async resolveMember(ref: NormalizedPurchase['memberRef']): Promise<string | null> {
-    if (ref?.byId) {
+    // `isUuid` guard is what makes the `byEmail` fallback reachable at all:
+    // `members.id` is `@db.Uuid`, so handing Prisma a non-UUID string (e.g.
+    // RevenueCat's `$RCAnonymousID:…` app_user_id) throws P2023 → 500 → the
+    // provider retries forever and the email branch below never runs.
+    if (isUuid(ref?.byId)) {
       const m = await prisma.member.findUnique({ where: { id: ref.byId }, select: { id: true } });
       if (m) return m.id;
     }
@@ -311,19 +501,32 @@ export class PurchaseIngestService {
     return null;
   }
 
-  private async resolveProduct(ref: NormalizedPurchase['productRef']): Promise<string | null> {
-    if (ref?.byId) {
-      const p = await prisma.product.findUnique({ where: { id: ref.byId }, select: { id: true } });
-      if (p) return p.id;
+  /**
+   * Returns the product row, not just its id: the catalog price is the floor of the FX
+   * chain, so the amount math needs it on every ingest.
+   */
+  private async resolveProduct(
+    ref: NormalizedPurchase['productRef'],
+  ): Promise<ResolvedProduct | null> {
+    const select = { id: true, price: true, iosPrice: true } as const;
+    // Same P2023 guard as resolveMember — a non-UUID `byId` must fall through to
+    // the SKU lookup, not 500.
+    if (isUuid(ref?.byId)) {
+      const p = await prisma.product.findUnique({ where: { id: ref.byId }, select });
+      if (p) return p;
     }
     if (ref?.bySku) {
-      // A store SKU can arrive from either platform — Android SKUs never resolved
-      // before this OR (BE-13); both columns are unique so findFirst is exact.
+      // Matches BOTH store SKUs: keying on `iosProductId` alone meant a Google Play
+      // purchase resolved to nothing and returned `product_not_found` — the member paid
+      // and never got access, with the provider given a 200 so it never retried.
       const p = await prisma.product.findFirst({
         where: { OR: [{ iosProductId: ref.bySku }, { androidProductId: ref.bySku }] },
-        select: { id: true },
+        // Deterministic pick if a SKU were ever duplicated across the two columns:
+        // oldest row wins, so a re-delivery always resolves to the same product.
+        orderBy: { createdAt: 'asc' },
+        select,
       });
-      if (p) return p.id;
+      if (p) return p;
     }
     return null;
   }

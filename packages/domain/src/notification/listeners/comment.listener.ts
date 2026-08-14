@@ -4,6 +4,7 @@ import { notificationEvents } from '@bb/common/events/notification-events';
 import { NotificationProducer } from '../notification.producer';
 import { RecipientResolver } from '../recipient.resolver';
 import { resolveMentionMemberIds } from '../mentions.util';
+import { MuteScope } from '../mute-scope';
 import { ActionLabel, NotifGroup } from '../action-labels';
 
 const producer = new NotificationProducer();
@@ -15,7 +16,7 @@ export function registerCommentNotificationListener(): void {
       const [post, actor] = await Promise.all([
         prisma.post.findUnique({
           where: { id: e.postId },
-          select: { authorId: true, networkId: true, excerpt: true },
+          select: { authorId: true, topicId: true, networkId: true, excerpt: true },
         }),
         prisma.member.findUnique({ where: { id: e.authorId }, select: { fullName: true } }),
       ]);
@@ -50,26 +51,22 @@ export function registerCommentNotificationListener(): void {
       if (targets.size === 0) return;
       const enabled = await resolver.filterEnabled([...targets.keys()]);
       if (enabled.length === 0) return;
-      const muteScopes: Array<{ scope: string; refId: string }> = [{ scope: 'post', refId: e.postId }];
-      if (post.networkId) muteScopes.push({ scope: 'network', refId: post.networkId });
-      const notMuted = await resolver.filterNotMuted(enabled, muteScopes);
-      if (notMuted.length === 0) return;
+      const muteScopes: Array<{ scope: MuteScope; refId: string }> = [
+        { scope: MuteScope.Post, refId: e.postId },
+      ];
+      if (post.topicId) muteScopes.push({ scope: MuteScope.Topic, refId: post.topicId });
+      if (post.networkId) muteScopes.push({ scope: MuteScope.Network, refId: post.networkId });
 
       const excerpt = e.content.slice(0, 200);
-      const network = post.networkId
-        ? await prisma.network.findUnique({ where: { id: post.networkId }, select: { name: true } })
-        : null;
 
-      for (const memberId of notMuted) {
+      for (const memberId of enabled) {
         const label = targets.get(memberId)!;
         const title =
           label === ActionLabel.Tag
             ? `${actor.fullName} menandai kamu di ${isReply ? 'balasan' : 'komentar'}`
             : label === ActionLabel.NewReply
               ? `${actor.fullName} membalas komentarmu`
-              : network
-                ? `${actor.fullName} mengomentari postinganmu di ${network.name}`
-                : `${actor.fullName} mengomentari postinganmu`;
+              : `${actor.fullName} mengomentari postinganmu`;
 
         await producer.createForMember({
           memberId,
@@ -86,6 +83,7 @@ export function registerCommentNotificationListener(): void {
             actorId: e.authorId,
           },
           dedupeKey: `${label}:${e.commentId}:${memberId}`,
+          muteScopes,
         });
       }
     } catch (err) {
@@ -96,12 +94,26 @@ export function registerCommentNotificationListener(): void {
   notificationEvents.on('comment.liked', async (e) => {
     try {
       if (e.actorId === e.commentAuthorId) return;
-      const actor = await prisma.member.findUnique({
-        where: { id: e.actorId },
-        select: { fullName: true },
-      });
-      if (!actor) return;
+      const [actor, comment] = await Promise.all([
+        prisma.member.findUnique({
+          where: { id: e.actorId },
+          select: { fullName: true },
+        }),
+        // The event carries no postId, but mute is scoped to the post/topic/network
+        // the comment hangs off — so resolve them through the parent post.
+        prisma.comment.findUnique({
+          where: { id: e.commentId },
+          select: { postId: true, post: { select: { topicId: true, networkId: true } } },
+        }),
+      ]);
+      if (!actor || !comment) return;
 
+      const muteScopes: Array<{ scope: MuteScope; refId: string }> = [
+        { scope: MuteScope.Post, refId: comment.postId },
+      ];
+      if (comment.post.topicId) muteScopes.push({ scope: MuteScope.Topic, refId: comment.post.topicId });
+      if (comment.post.networkId)
+        muteScopes.push({ scope: MuteScope.Network, refId: comment.post.networkId });
       await producer.createForMember({
         memberId: e.commentAuthorId,
         type: ActionLabel.NewLike,
@@ -109,6 +121,7 @@ export function registerCommentNotificationListener(): void {
         title: `${actor.fullName} menyukai komentarmu`,
         payload: { refTable: 'comment', refId: e.commentId, actorId: e.actorId },
         dedupeKey: `newLike:comment:${e.commentId}:${e.actorId}`,
+        muteScopes,
       });
     } catch (err) {
       logger.error({ err, commentId: e.commentId }, '[notification] comment.liked listener failed');

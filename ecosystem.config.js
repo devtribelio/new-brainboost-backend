@@ -57,16 +57,22 @@ module.exports = {
       max_memory_restart: '200M',
     },
     {
-      // Scheduled jobs, hourly lane (affiliate PENDING->BALANCE, expire stale payments).
+      // Scheduled jobs, hourly lane (affiliate PENDING->BALANCE, expire stale
+      // payments, topic digest).
       // One-shot per cron tick: PM2 spawns it, it runs the listed jobs once and exits,
       // PM2 waits for the next tick (autorestart:false + cron_restart). Single
       // instance = jobs fire exactly once. To move off PM2 later (ECS), point
       // EventBridge → ECS RunTask at the SAME dist/jobs-runner.js — no code change.
       // argv = job filter (see jobs-runner.ts); no args would run ALL jobs.
+      // Registering a job in jobs-runner.ts is NOT enough — a name missing here
+      // simply never runs, silently. Keep this list in sync with the CDK lane
+      // (infra/cdk/lib/bb-ecs-stack.ts, `Cron`).
       name: 'bb-cron',
       cwd: root,
       script: 'apps/mobile-api/dist/jobs-runner.js',
-      args: 'affiliatePendingToBalance expirePendingPayments refreshAffiliateLeaderboard sweepOrphanUploads',
+      // topicDigest last, and safe on every tick: it no-ops unless the current WIB
+      // hour matches `notification.digestHour`, so it can never delay the money jobs.
+      args: 'affiliatePendingToBalance expirePendingPayments refreshAffiliateLeaderboard sweepOrphanUploads topicDigest',
       exec_mode: 'fork',
       instances: 1,
       autorestart: false,

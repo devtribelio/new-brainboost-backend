@@ -1,3 +1,4 @@
+import { traceService } from '@bb/common/utils/trace-service';
 import { Router } from 'express';
 import { NotificationController } from './notification.controller';
 import { NotificationService } from '@bb/domain/notification/notification.service';
@@ -6,7 +7,7 @@ import { bindRoute } from '@bb/common/openapi/route-binder';
 
 export function notificationRoutes(): Router {
   const router = Router();
-  const ctrl = new NotificationController(new NotificationService());
+  const ctrl = new NotificationController(traceService(new NotificationService()));
 
   bindRoute({ router, controller: ctrl, method: 'get', path: '/notification/list', handlerKey: 'list', middlewares: [authGuard] });
   bindRoute({ router, controller: ctrl, method: 'post', path: '/notification/seen', handlerKey: 'seen', middlewares: [authGuard] });

@@ -9,6 +9,7 @@ import { expirePendingPayments } from '@bb/domain/jobs/expire-pending-payments';
 import { sweepOrphanUploads } from '@bb/domain/jobs/sweep-orphan-uploads';
 import { subscriptionExpire } from '@bb/domain/jobs/subscription-expire';
 import { subscriptionRenewalReminder } from '@bb/domain/jobs/subscription-renewal-reminder';
+import { topicDigest } from '@bb/domain/jobs/topic-digest';
 
 /**
  * Standalone scheduled-jobs entrypoint. Runs the registered jobs ONCE, then exits.
@@ -47,6 +48,9 @@ const JOBS: Array<{ name: string; run: () => Promise<unknown> }> = [
   // ⚠️ emails require the bb-comms SubscriptionRenewalReminder template (BE-18
   // external dependency) — do not schedule this runner on prod before it ships.
   { name: 'subscriptionRenewalReminder', run: () => subscriptionRenewalReminder() },
+  // Safe on every hourly tick: the job no-ops unless the current WIB hour matches
+  // `notification.digestHour`, which is what keeps the send time editable from the DB.
+  { name: 'topicDigest', run: () => topicDigest() },
 ];
 
 const requested = process.argv.slice(2);

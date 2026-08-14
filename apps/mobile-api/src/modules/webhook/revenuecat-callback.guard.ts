@@ -1,7 +1,7 @@
 import { timingSafeEqual } from 'node:crypto';
 import type { RequestHandler } from 'express';
 import { env } from '@bb/common/config/env';
-import { UnauthorizedException } from '@bb/common/exceptions';
+import { unauthorized, ERROR_CODES } from '@bb/common/exceptions';
 import { credentialService } from '@/modules/ingest/credential.service';
 
 /**
@@ -24,7 +24,7 @@ export const revenueCatCallbackGuard: RequestHandler = async (req, _res, next) =
   try {
     const header = req.header('authorization') ?? '';
     const presented = header.startsWith('Bearer ') ? header.slice(7) : header;
-    if (!presented) throw new UnauthorizedException('Missing RevenueCat authorization');
+    if (!presented) throw unauthorized(ERROR_CODES.WEBHOOK_AUTH_MISSING);
 
     // Primary: DB-stored, rotatable secret.
     const cred = await credentialService.verifySecret(env.revenuecat.providerName, presented);
@@ -34,7 +34,7 @@ export const revenueCatCallbackGuard: RequestHandler = async (req, _res, next) =
     const envSecret = env.revenuecat.webhookAuth;
     if (envSecret && constantTimeEqual(presented, envSecret)) return next();
 
-    throw new UnauthorizedException('Invalid RevenueCat authorization');
+    throw unauthorized(ERROR_CODES.WEBHOOK_AUTH_INVALID);
   } catch (err) {
     next(err);
   }

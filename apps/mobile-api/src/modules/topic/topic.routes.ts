@@ -1,3 +1,4 @@
+import { traceService } from '@bb/common/utils/trace-service';
 import { Router } from 'express';
 import { TopicController } from './topic.controller';
 import { TopicService } from './topic.service';
@@ -6,7 +7,7 @@ import { bindRoute } from '@bb/common/openapi/route-binder';
 
 export function topicRoutes(): Router {
   const router = Router();
-  const ctrl = new TopicController(new TopicService());
+  const ctrl = new TopicController(traceService(new TopicService()));
 
   bindRoute({
     router,
@@ -14,6 +15,14 @@ export function topicRoutes(): Router {
     method: 'get',
     path: '/topic/list',
     handlerKey: 'list',
+    middlewares: [optionalAuthGuard],
+  });
+  bindRoute({
+    router,
+    controller: ctrl,
+    method: 'get',
+    path: '/topic/detail',
+    handlerKey: 'detail',
     middlewares: [optionalAuthGuard],
   });
   bindRoute({

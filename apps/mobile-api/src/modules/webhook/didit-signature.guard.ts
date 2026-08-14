@@ -1,6 +1,6 @@
 import type { RequestHandler } from 'express';
 import { verifyDiditWebhookSignature } from '@bb/common/services/didit-signature';
-import { UnauthorizedException } from '@bb/common/exceptions';
+import { unauthorized, ERROR_CODES } from '@bb/common/exceptions';
 
 /**
  * Didit webhook auth: HMAC-SHA256 over the RAW body (captured by the express.json
@@ -12,7 +12,7 @@ export const diditSignatureGuard: RequestHandler = (req, _res, next) => {
   const signature = req.header('x-signature');
   const timestamp = req.header('x-timestamp');
   if (!verifyDiditWebhookSignature(rawBody, signature, timestamp)) {
-    return next(new UnauthorizedException('Invalid webhook signature'));
+    return next(unauthorized(ERROR_CODES.WEBHOOK_SIGNATURE_INVALID));
   }
   next();
 };

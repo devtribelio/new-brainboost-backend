@@ -8,10 +8,7 @@ import {
   RequestForgotPasswordDto,
   ValidateOtpDto,
 } from './dto/forgot-password.dto';
-import {
-  PhoneVerificationResponseDto,
-  RegisterByPhoneDto,
-} from './dto/register-by-phone.dto';
+import { PhoneVerificationResponseDto, RegisterByPhoneDto } from './dto/register-by-phone.dto';
 import { RequestVerificationPhoneDto } from './dto/request-verification-phone.dto';
 import { ValidateOtpPhoneDto } from './dto/validate-otp-phone.dto';
 import {
@@ -22,13 +19,8 @@ import { ValidateOtpEmailDto } from './dto/validate-otp-email.dto';
 import { RequestVerifyDto, VerifyDto } from './dto/verify-contact.dto';
 import { ok, okCreated } from '@bb/common/utils/response.util';
 import type { AuthenticatedRequest } from '@bb/common/interfaces/authenticated-request';
-import { UnauthorizedException } from '@bb/common/exceptions';
-import {
-  ApiBody,
-  ApiOperation,
-  ApiResponse,
-  ApiTags,
-} from '@bb/common/openapi/decorators';
+import { unauthorized, ERROR_CODES } from '@bb/common/exceptions';
+import { ApiBody, ApiOperation, ApiResponse, ApiTags } from '@bb/common/openapi/decorators';
 import { ErrorEnvelopeDto, GenericOkDto, TokenBundleDto } from '@bb/common/openapi/common.dto';
 
 @ApiTags('Auth')
@@ -50,8 +42,18 @@ export class AuthController {
   })
   @ApiBody({ type: () => LoginDto })
   @ApiResponse({ status: 200, description: 'Tokens issued', type: () => TokenBundleDto })
-  @ApiResponse({ status: 400, description: 'Invalid request', type: () => ErrorEnvelopeDto, envelope: 'none' })
-  @ApiResponse({ status: 401, description: 'Invalid credentials', type: () => ErrorEnvelopeDto, envelope: 'none' })
+  @ApiResponse({
+    status: 400,
+    description: 'Invalid request',
+    type: () => ErrorEnvelopeDto,
+    envelope: 'none',
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Invalid credentials',
+    type: () => ErrorEnvelopeDto,
+    envelope: 'none',
+  })
   login = async (req: Request, res: Response) => {
     const tokens = await this.authService.login(req.body as LoginDto);
     return ok(res, tokens);
@@ -67,8 +69,17 @@ export class AuthController {
     ].join(' '),
   })
   @ApiBody({ type: () => RegisterDto })
-  @ApiResponse({ status: 201, description: 'Registered, OTP sent', type: () => EmailVerificationResponseDto })
-  @ApiResponse({ status: 400, description: 'Validation error', type: () => ErrorEnvelopeDto, envelope: 'none' })
+  @ApiResponse({
+    status: 201,
+    description: 'Registered, OTP sent',
+    type: () => EmailVerificationResponseDto,
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Validation error',
+    type: () => ErrorEnvelopeDto,
+    envelope: 'none',
+  })
   register = async (req: Request, res: Response) => {
     const result = await this.authService.register(req.body as RegisterDto);
     return okCreated(res, result);
@@ -87,7 +98,7 @@ export class AuthController {
   @ApiResponse({ status: 200, type: () => DeviceEnrollmentResultDto })
   registerDevice = async (req: Request, res: Response) => {
     const user = (req as AuthenticatedRequest).user;
-    if (!user) throw new UnauthorizedException('Authentication required');
+    if (!user) throw unauthorized(ERROR_CODES.AUTH_REQUIRED);
     const result = await this.authService.registerDevice(user.id, req.body as RegisterDeviceDto);
     return ok(res, result);
   };
@@ -105,8 +116,11 @@ export class AuthController {
   @ApiResponse({ status: 200, type: () => DeviceEnrollmentResultDto })
   cloudMessaging = async (req: Request, res: Response) => {
     const user = (req as AuthenticatedRequest).user;
-    if (!user) throw new UnauthorizedException('Authentication required');
-    const result = await this.authService.registerCloudMessaging(user.id, req.body as CloudMessagingDto);
+    if (!user) throw unauthorized(ERROR_CODES.AUTH_REQUIRED);
+    const result = await this.authService.registerCloudMessaging(
+      user.id,
+      req.body as CloudMessagingDto,
+    );
     return ok(res, result);
   };
 
@@ -114,7 +128,9 @@ export class AuthController {
   @ApiBody({ type: () => RequestForgotPasswordDto })
   @ApiResponse({ status: 200, type: () => GenericOkDto })
   requestForgotPassword = async (req: Request, res: Response) => {
-    const result = await this.authService.requestForgotPassword(req.body as RequestForgotPasswordDto);
+    const result = await this.authService.requestForgotPassword(
+      req.body as RequestForgotPasswordDto,
+    );
     return ok(res, result);
   };
 
@@ -213,7 +229,7 @@ export class AuthController {
   @ApiResponse({ status: 200, type: () => GenericOkDto })
   requestVerify = async (req: Request, res: Response) => {
     const user = (req as AuthenticatedRequest).user;
-    if (!user) throw new UnauthorizedException('Authentication required');
+    if (!user) throw unauthorized(ERROR_CODES.AUTH_REQUIRED);
     const result = await this.authService.requestVerify(
       user.id,
       (req.body as RequestVerifyDto).type,
@@ -229,7 +245,7 @@ export class AuthController {
   @ApiResponse({ status: 200, type: () => GenericOkDto })
   verify = async (req: Request, res: Response) => {
     const user = (req as AuthenticatedRequest).user;
-    if (!user) throw new UnauthorizedException('Authentication required');
+    if (!user) throw unauthorized(ERROR_CODES.AUTH_REQUIRED);
     const body = req.body as VerifyDto;
     const result = await this.authService.verify(user.id, body.type, body.code);
     return ok(res, result);

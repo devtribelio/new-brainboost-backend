@@ -152,13 +152,19 @@ export class CourseLessonItemDto {
   @ApiProperty({
     type: 'array',
     description:
-      'Lean slide objects `{ id, type, data }`. Media slides expose an opaque `data.streamUrl` ' +
+      'Lean slide objects `{ id, type, bonus, data }`. `bonus` is a placement hint — render the ' +
+      'slide in the course bonus section rather than inline in the player; it does NOT change ' +
+      'access, a bonus slide is gated like any other slide in its lesson. Media slides expose an opaque `data.streamUrl` ' +
       '(audio under `data.audio.streamUrl`) pointing at the media proxy — Bunny `guid`/`videoLibraryId`/' +
-      'iframe HTML are scrubbed. Non-media slide types keep their `data`. Empty array when null.',
+      'iframe HTML are scrubbed. `DocumentTemplate` exposes an opaque `data.fileUrl` plus ' +
+      '`data.fileName`/`data.sizeBytes` (both null when unknown) — the private S3 key is never ' +
+      'emitted; legacy slides authored before the gate existed still carry a plain public ' +
+      '`data.url` instead. Other slide types keep their `data`. Empty array when null.',
     example: [
       {
         id: 'ABC123XYZ',
         type: 'AudioTemplate',
+        bonus: false,
         duration: 480,
         data: {
           title: 'Intro',
@@ -172,6 +178,7 @@ export class CourseLessonItemDto {
       {
         id: 'XYZ789ABC',
         type: 'VideoTemplate',
+        bonus: false,
         duration: 720,
         data: {
           title: 'BLoC Deep Dive',
@@ -179,6 +186,19 @@ export class CourseLessonItemDto {
           platform: 'mp4',
           streamUrl: '/api/member/media/stream?t=<opaque-token>',
           downloadUrl: '/api/member/media/download?t=<opaque-token>',
+        },
+      },
+      {
+        id: 'DOC456QRS',
+        type: 'DocumentTemplate',
+        bonus: true,
+        data: {
+          title: 'Workbook',
+          description: '<p>Latihan pekan 1</p>',
+          downloadable: true,
+          fileName: 'workbook-pekan-1.pdf',
+          sizeBytes: 2_310_442,
+          fileUrl: '/api/member/media/document?t=<opaque-token>',
         },
       },
     ],

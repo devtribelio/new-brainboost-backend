@@ -3,6 +3,7 @@ import type { AppModule } from '@bb/common/core/module.interface';
 import { logger } from '@bb/common/config/logger';
 import { withModulePrefix } from '@bb/common/openapi/registry';
 
+import { AppVersionModule } from '@/modules/app-version/app-version.module';
 import { AuthModule } from '@/modules/auth/auth.module';
 import { AccountModule } from '@/modules/account/account.module';
 import { MemberModule } from '@/modules/member/member.module';
@@ -31,6 +32,7 @@ import { TrackingModule } from '@/modules/tracker/tracking.module';
 import { StatsModule } from '@/modules/tracker/stats.module';
 
 const modules: AppModule[] = [
+  AppVersionModule,
   AuthModule,
   AccountModule,
   MemberModule,

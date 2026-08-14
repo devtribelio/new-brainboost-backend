@@ -280,7 +280,9 @@ describe('DisbursementService — payout flow', () => {
       expect(summary.minBalance).toBe(50_000);
       expect(summary.eligible).toBe(false);
       // and the request itself is now blocked by the runtime min
-      await expect(svc.requestDisbursement(id)).rejects.toThrow(/Minimum balance/i);
+      await expect(svc.requestDisbursement(id)).rejects.toMatchObject({
+        code: 'DISBURSEMENT_BELOW_MIN_BALANCE',
+      });
     } finally {
       await prisma.appSetting.deleteMany({ where: { key: SETTING_KEYS.disbursementMinBalance } });
       SettingsService.clearCache();

@@ -1,3 +1,4 @@
+import { traceService } from '@bb/common/utils/trace-service';
 import { Router } from 'express';
 import { ProfileController } from './profile.controller';
 import { ProfileService } from './profile.service';
@@ -6,7 +7,7 @@ import { bindRoute } from '@bb/common/openapi/route-binder';
 
 export function profileRoutes(): Router {
   const router = Router();
-  const ctrl = new ProfileController(new ProfileService());
+  const ctrl = new ProfileController(traceService(new ProfileService()));
 
   bindRoute({ router, controller: ctrl, method: 'get', path: '/account/profile/info', handlerKey: 'getInfo', middlewares: [authGuard] });
   bindRoute({ router, controller: ctrl, method: 'post', path: '/account/profile/update', handlerKey: 'update', middlewares: [authGuard] });

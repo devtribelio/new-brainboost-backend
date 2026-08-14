@@ -44,6 +44,15 @@ model Member {
   latitude             Float?
   longitude            Float?
   notificationsEnabled Boolean   @default(true) @map("notifications_enabled")
+  /// Push sent since the member last opened the app; reset to 0 on app resume
+  /// (/member/info touchActivity) and on /notification/seen. Once it passes
+  /// `notification.unopenedPushLimit` (app_settings) further push is suppressed —
+  /// the notification ROW is still written, only FCM delivery is skipped.
+  unopenedPushCount    Int       @default(0) @map("unopened_push_count")
+  /// Watermark for the nightly topic digest: only unread `newPost` rows created
+  /// after this are counted, so a member is never told twice about the same post.
+  /// null = never digested (counts everything unread).
+  lastTopicDigestAt    DateTime? @map("last_topic_digest_at")
 
   // --- Affiliate payout: default bank account stored on the profile (manual KYC flow) ---
   bankCode          String? @map("bank_code")
@@ -174,6 +183,15 @@ model RefreshToken {
   expiresAt  DateTime  @map("expires_at")
   revokedAt  DateTime? @map("revoked_at")
   createdAt  DateTime  @default(now()) @map("created_at")
+
+  /// Lineage pointer to the row that replaced this one on refresh rotation.
+  /// Set ONLY by rotation — logout / password change / single-session kick all
+  /// revoke without a successor. That asymmetry is what makes the refresh grace
+  /// window safe: a revoked row is eligible for grace only when this is filled,
+  /// so deliberate revocation still kicks instantly. Deliberately a plain
+  /// scalar, no FK: rotation writes this pointer in the same transaction that
+  /// gates the race, BEFORE the child row exists.
+  supersededById String? @unique @map("superseded_by_id") @db.Uuid
 
   member Member @relation(fields: [memberId], references: [id], onDelete: Cascade)
 
@@ -907,6 +925,10 @@ model Notification {
   id         String    @id @default(uuid(7)) @db.Uuid
   memberId   String    @map("member_id") @db.Uuid
   networkId  String?   @map("network_id") @db.Uuid
+  /// Topic this notification originates from. Denormalised out of `payload` so the
+  /// nightly digest can group unread rows per topic with an indexed query instead
+  /// of digging through JSON. Only `newPost` sets it today.
+  topicId    String?   @map("topic_id") @db.Uuid
   type       String
   notifGroup String?   @map("notif_group")
   title      String
@@ -924,6 +946,8 @@ model Notification {
   @@index([memberId, readAt])
   @@index([memberId, networkId])
   @@index([memberId, seenAt])
+  // Digest sweep: unread rows of one type, grouped per member+topic.
+  @@index([type, readAt, topicId])
   @@map("notifications")
 }
 
@@ -1243,9 +1267,24 @@ model CommercePayment {
   paymentType           String                @map("payment_type") // "cc" | "va" | "eWallet" | "voucher"
   bank                  String? // BCA / BNI / MANDIRI / BRI / PERMATA
   ewalletType           String?               @map("ewallet_type") // OVO / DANA / LINKAJA / GOPAY / SHOPEEPAY
+  // `amount` / `acceptedAmount` are ALWAYS IDR minor-unit-free integers, including for
+  // foreign-storefront IAP: the ingest layer converts before writing, so every downstream
+  // consumer (commission base, reporting, transaction history) stays currency-blind.
   amount                Int
   fee                   Int                   @default(0)
   acceptedAmount        Int                   @default(0) @map("accepted_amount")
+  // FX snapshot — populated ONLY when the purchase was settled in a non-IDR currency
+  // (RevenueCat storefronts outside Indonesia). `currency` is the buyer's storefront
+  // currency, `amountLocal` what they actually paid in it, `amountUsd` RevenueCat's own
+  // USD figure (the bridge we convert through), `fxRateIdr` the USD→IDR rate this row was
+  // converted with, and `fxRateSource` which layer of the resolution chain answered.
+  // Kept per-row, not in a rates table: the rate a payment used must stay reproducible
+  // even after the live rate has moved on.
+  currency              String?               @default("IDR")
+  amountLocal           Decimal?              @map("amount_local") @db.Decimal(18, 4)
+  amountUsd             Decimal?              @map("amount_usd") @db.Decimal(18, 4)
+  fxRateIdr             Decimal?              @map("fx_rate_idr") @db.Decimal(18, 6)
+  fxRateSource          String?               @map("fx_rate_source")
   status                CommercePaymentStatus @default(PENDING)
   vendorStatus          String?               @map("vendor_status")
   externalId            String?               @map("external_id")
@@ -1374,6 +1413,24 @@ model AppSetting {
   createdAt   DateTime @default(now()) @map("created_at")
 
   @@map("app_settings")
+}
+
+/// Force/soft update config for the mobile app, ONE ROW PER PLATFORM. Drives
+/// `GET /api/app/version-check` — replaces the app's Supabase `mobile_version_config`
+/// and its store-listing scrape, so this table is the sole source of the update verdict.
+/// Verdict: version < forceBelow -> force, else version < latestVersion -> soft, else none.
+/// Missing row = "none" (fail-safe). Edited by ops via SQL / backoffice-bb; cached ~60s.
+model AppVersionConfig {
+  platform      String   @id // "android" | "ios"
+  latestVersion String   @map("latest_version") // semver; soft-update threshold + informational
+  forceBelow    String?  @map("force_below") // semver; null = force disabled. Keep <= latestVersion
+  storeUrl      String?  @map("store_url") // optional override; app v1 uses its native store redirect
+  softMessage   String?  @map("soft_message") // dialog body for the soft verdict; null = app default copy
+  forceMessage  String?  @map("force_message") // dialog body for the force verdict; null = app default copy
+  updatedAt     DateTime @updatedAt @map("updated_at")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@map("app_version_configs")
 }
 
 /// Auth + per-channel capability toggles for 3rd-party ingestion (IAP/Scalev/Lynk.id) via

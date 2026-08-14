@@ -48,8 +48,7 @@ Postgres via the kernel.
 
 `NormalizedPurchase` mapping:
 
-- `memberRef.byId = event.app_user_id` (the new `Member.id` UUID set by the iOS
-  SDK), fallback `byEmail = subscriber_attributes.$email`.
+- `memberRef` — see **Member resolution** below.
 - `productRef.bySku = event.product_id` → resolved against `Product.iosProductId`.
 - `grossAmount = event.price_in_purchased_currency` (local IDR, **not** `event.price`
   which is USD).
@@ -57,6 +56,39 @@ Postgres via the kernel.
   `CANCELLATION` carries the same `transaction_id`, not the purchase's `event.id`).
   REFUND uses its own `event.id` as `providerEventId` and
   `refundOfProviderEventId = transaction_id`.
+
+## Member resolution (`app_user_id` is not always a UUID)
+
+`app_user_id` only carries `Member.id` once the app has called
+`Purchases.logIn()`. A purchase completed before that — or after a
+reinstall/logout — arrives as RC's anonymous id instead:
+
+```json
+{ "app_user_id": "$RCAnonymousID:1384062dfb284e6883fafe704b2bb252",
+  "aliases": ["$RCAnonymousID:1384062dfb284e6883fafe704b2bb252"] }
+```
+
+`RevenueCatWebhookHandler.memberRef()` resolves in this order:
+
+1. **first UUID** among `app_user_id` → `original_app_user_id` → `aliases`
+   (RC backfills `aliases` with the real id when the SDK aliases an anonymous
+   customer later, so the id is often still recoverable);
+2. else `subscriber_attributes.$email.value` → `memberRef.byEmail`, matched
+   case-insensitively against `members.email`.
+
+Anonymous ids are **dropped**, never passed through as `byId`. This is the
+whole point of the guard: `members.id` is `@db.Uuid`, so
+`findUnique({ where: { id: '$RCAnonymousID:…' } })` throws Prisma **P2023**,
+which `errorHandler` maps to **400** — RC then exhausts its retries and the
+event is lost for good (member paid, no access), and the `$email` fallback in
+`resolveMember` never runs because the throw happens first. `isUuid()` guards
+both `resolveMember` and `resolveProduct` in `purchaseIngestService` so every
+ingest channel is covered, not just RC.
+
+When nothing resolves, the ingest returns `member_not_found` and the handler
+logs at **warn** (`[revenuecat] ingested`, with `appUserId` + `memberRef`) —
+the response is still 200, so this log line is the only alertable signal that a
+paid purchase went ungranted.
 
 ## Burst handling (IAP-restore flood)
 
@@ -133,8 +165,101 @@ pnpm issue:credential revenuecat --refund   # upsert: prints a NEW key ONCE
 The same command is used for the very first issue. `--refund` →
 `canIngestRefund=true`; omitting `--affiliate` → `triggersAffiliate=false`.
 
+## Currency: foreign storefronts (fixed 2026-08-13)
+
+`price_in_purchased_currency` is in the **buyer's storefront currency**, not IDR. The
+handler used to pass it straight through as rupiah, so an A$39.99 purchase was stored as
+`amount = 40` and paid a **Rp5** affiliate commission (payment `019ff63c-9ee7…`). 9 of 61
+RevenueCat payments were affected (HKD 3, MYR 2, SGD 2, USD 1, AUD 1); all were repaired
+by `scripts/backfill-rc-currency.ts` (idempotent, stamps `log_response.backfill`).
+
+**Bridge = USD.** Every event carries `price` in USD regardless of storefront (verified: a
+USD-storefront event has `price == price_in_purchased_currency` exactly; the HKD one lands
+on the 7.75–7.85 peg). So ONE pair, `USD/IDR`, covers every storefront present and future —
+we never store per-currency rates.
+
+```
+amountIdr = round(price_usd × usdIdrRate)
+accepted  = floor(amountIdr × (netAmount / grossAmount))   # ratio, not a fresh %
+```
+
+`FxRateService.getUsdIdr()` (`packages/common/src/services/fx-rate.service.ts`) resolves in
+order — first layer that answers wins, never dead-ends:
+
+1. in-process cache, keyed by UTC day (6 h TTL)
+2. `fx.usdIdrPinned` + `fx.usdIdr` in `app_settings` → source `manual` (ops kill-switch)
+3. FX API: `api.frankfurter.dev/v1` (ECB) → `open.er-api.com` → source `api`
+4. derived from our own IDR RevenueCat payments (`price_in_purchased_currency / price`,
+   ≤7 days back) → source `revenuecat_derived`
+5. `fx.usdIdr` unpinned / `FX_STATIC_USD_IDR` → source `static`
+6. caller's floor: `product.iosPrice`, logged at **error**, source `catalog_fallback`
+
+Layer 4 is exact — an IDR event carries both legs of the pair, so its ratio is the rate RC
+billed with. It sits below the API only because it needs a recent IDR sale to exist.
+Measured drift between the two: **0.082 %** (Frankfurter 17 843 vs derived 17 828.42 on
+2026-08-12), so the ordering costs nothing.
+
+**Sanity band.** A converted amount outside `0.25×–4×` the catalog price is refused and
+replaced by the catalog price. Foreign tiers legitimately run 1.03×–1.26× the Indonesian
+one; the live bug scored 0.0001×.
+
+**Snapshot columns** on `commerce_payments` (migration `20260813120000_add_payment_fx_snapshot`),
+all NULL on the IDR path: `currency`, `amount_local`, `amount_usd`, `fx_rate_idr`,
+`fx_rate_source`. The rate lives on the payment, not in a rates table, because the rate a
+row used must stay reproducible after the live rate moves on. `amount`/`accepted_amount`
+stay IDR integers, so commission/reporting/history remain currency-blind.
+
+**Cadence.** ECB publishes once per business day (~16:00 CET); a weekend query returns the
+last business day and echoes that date. Calling more than daily cannot produce a new
+number, which is why the cache is day-keyed.
+
+### Open: `takehome_percentage` is measured on a different base than `price`
+
+`takehome_percentage` is **0.7 in every tax regime observed** (IDR, AUD, SGD, MYR, HKD,
+USD) while `commission_percentage` tracks tax exactly (`0.3 × (1 − tax)` in all six). That
+only holds if takehome is a share of the **ex-tax** price, whereas `price` is tax-inclusive
+— so `gross × takehome` overstates net by `1/(1 − tax)`: **+11 % ID**, +10 % AU, +9 % SG,
++8 % MY, 0 % HK/US. True proceeds would be `gross × (1 − commission − tax)`.
+
+Not changed — deliberately deferred. Overpaid commission so far: **Rp13 840** across 4 rows,
+all still `PENDING`. **Verify against one month of App Store Connect → Payments and
+Financial Reports before correcting**: 0.6306 is derived from Apple's stated rule, not from
+a bank settlement. The fallback branch `(1-c)(1-t)` in `computeNetAmount` is also wrong for
+a different reason (it double-counts tax, since `c` is already tax-adjusted).
+
+### Also fixed alongside
+
+- **Event provenance visible.** `environment`, `store`, `event_timestamp_ms` were dropped by
+  the DTO whitelist and are now declared, so `commerce_payments.log_request` shows which
+  store an event came from and whether it was SANDBOX. `event_timestamp_ms` also dates the
+  FX lookup to the purchase day rather than to processing time.
+
+  **Sandbox events are NOT refused.** A guard rejecting them in production was written and
+  removed before merge, for two reasons. First, App Review runs its purchases in the
+  SANDBOX environment against the PRODUCTION app — dropping those events leaves the
+  reviewer with no `CourseEnrollment` and `isPurchased: false`, i.e. a purchase that
+  visibly does nothing, which is a rejection path. Second, the premise was wrong: sandbox
+  events carry REAL prices, not `price: 0` (this repo's own fixture is a sandbox event with
+  `gross = 429000` — see `revenuecat-net-amount.spec.ts`), so they never reach the catalog
+  fallback the guard was meant to protect.
+
+  Consequence to keep in mind: a sandbox purchase in production is recorded as an ordinary
+  sale, and since the `revenuecat` credential runs with `triggersAffiliate = true` it can
+  mint a real affiliate commission. That predates the FX work and is unchanged by it — the
+  mitigation is to keep sandbox testing off the production webhook.
+- **Google Play SKUs.** `resolveProduct` matched `iosProductId` only — a Play purchase
+  returned `product_not_found` (member paid, no access, provider given a 200 so it never
+  retried). Now matches either SKU column.
+
 ## Env
 
+- `FX_PRIMARY_URL` / `FX_FALLBACK_URL` — keyless FX providers (defaults above). Note
+  `api.frankfurter.app` now 301s via Cloudflare; use `api.frankfurter.dev/v1`.
+- `FX_TIMEOUT_MS` (3000) — short on purpose: this sits in the webhook path and must
+  degrade to the next layer, never stall the 200. ~1 in 5 probe calls timed out.
+- `FX_DERIVED_MAX_AGE_DAYS` (7) — staleness bound for layer 4. Worst observed gap between
+  IDR purchases is ~2 days.
+- `FX_STATIC_USD_IDR` (17800) — last-resort rate, also what `fx.usdIdrPinned` promotes.
 - `REVENUECAT_WEBHOOK_AUTH` — OPTIONAL bootstrap/emergency fallback secret. The
   steady-state secret lives in the DB (`revenuecat` credential `keyHash`); leave
   this unset once that row exists. If set, a matching header still passes (so the
@@ -151,7 +276,10 @@ The same command is used for the very first issue. `--refund` →
 - `apps/mobile-api/src/modules/webhook/webhook.controller.ts` / `webhook.routes.ts` (wired)
 - `apps/mobile-api/src/modules/ingest/credential.service.ts` (`verifyByName`)
 - `apps/mobile-api/src/modules/ingest/purchase-ingest.service.ts` (`handleRefund` revoke enrollment)
-- `packages/common/src/config/env.ts` (`revenuecat` block)
+- `packages/common/src/services/fx-rate.service.ts` (USD→IDR resolution chain)
+- `packages/common/src/config/env.ts` (`revenuecat` + `fx` blocks)
+- `scripts/backfill-rc-currency.ts` (one-off repair, idempotent, re-runnable)
+- `apps/mobile-api/tests/ingest/fx-normalization.spec.ts`
 - `scripts/seed-revenuecat-iap.ts` (+ `seed:revenuecat-iap` script)
 - `apps/mobile-api/tests/commerce/revenuecat-webhook.spec.ts`
 

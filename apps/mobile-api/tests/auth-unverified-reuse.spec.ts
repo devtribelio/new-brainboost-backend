@@ -207,7 +207,20 @@ describe('inactive-until-verified register flow', () => {
       expect(rows[0]!.id).toBe(afterFirst!.id);
       expect(rows[0]!.fullName).toBe('Email Second');
 
-      // Resend OTP pre-login (no auth).
+      // Resend OTP pre-login (no auth). Inside the resend cooldown this is
+      // refused — unlike register above, a pure send endpoint has no half-done
+      // write to rescue, so the user is told to wait.
+      const tooSoon = await request(app).post('/api/member/auth/requestVerificationEmail').send({
+        memberId: rows[0]!.id,
+      });
+      expect(tooSoon.status).toBe(400);
+      expect(tooSoon.body.error.code).toBe('OTP_RESEND_TOO_SOON');
+
+      // Age the send out of the cooldown window, then the resend goes through.
+      await prisma.otpCode.updateMany({
+        where: { target: EMAIL },
+        data: { createdAt: new Date(Date.now() - 10 * 60 * 1000) },
+      });
       const resend = await request(app).post('/api/member/auth/requestVerificationEmail').send({
         memberId: rows[0]!.id,
       });

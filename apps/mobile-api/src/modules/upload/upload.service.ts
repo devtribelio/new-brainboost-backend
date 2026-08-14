@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { extname } from 'node:path';
-import { BadRequestException } from '@bb/common/exceptions';
+import { badRequest, ERROR_CODES } from '@bb/common/exceptions';
 import {
   S3StorageService,
   s3StorageService,
@@ -13,15 +13,86 @@ import { recordUpload } from '@bb/common/services/upload-registry.service';
 // already neutralises non-image payloads), reject obviously executable
 // extensions up front so a malformed multipart never reaches the processor.
 const BLOCKED_EXTENSIONS = new Set([
-  '.exe', '.bat', '.cmd', '.com', '.cpl', '.dll', '.scr', '.msi', '.msp', '.mst',
-  '.vbs', '.vbe', '.wsf', '.wsh', '.ps1', '.psm1', '.psd1', '.ps1xml', '.psc1',
-  '.psc2', '.jse', '.js', '.jar', '.sh', '.bash', '.zsh', '.fish', '.csh',
-  '.tcsh', '.ksh', '.ade', '.adp', '.app', '.application', '.appref-ms', '.asp',
-  '.aspx', '.cer', '.chm', '.crt', '.diagcab', '.fxp', '.gadget', '.hlp',
-  '.hpj', '.hta', '.htc', '.inf', '.ins', '.isp', '.its', '.lnk', '.mad', '.maf',
-  '.mag', '.mam', '.maq', '.mar', '.mas', '.mat', '.mau', '.mav', '.maw',
-  '.mcf', '.mda', '.mdb', '.mde', '.mdt', '.mdw', '.mdz', '.php', '.php3', '.php4',
-  '.php5', '.phtml', '.pl', '.py', '.pyc', '.pyo', '.rb',
+  '.exe',
+  '.bat',
+  '.cmd',
+  '.com',
+  '.cpl',
+  '.dll',
+  '.scr',
+  '.msi',
+  '.msp',
+  '.mst',
+  '.vbs',
+  '.vbe',
+  '.wsf',
+  '.wsh',
+  '.ps1',
+  '.psm1',
+  '.psd1',
+  '.ps1xml',
+  '.psc1',
+  '.psc2',
+  '.jse',
+  '.js',
+  '.jar',
+  '.sh',
+  '.bash',
+  '.zsh',
+  '.fish',
+  '.csh',
+  '.tcsh',
+  '.ksh',
+  '.ade',
+  '.adp',
+  '.app',
+  '.application',
+  '.appref-ms',
+  '.asp',
+  '.aspx',
+  '.cer',
+  '.chm',
+  '.crt',
+  '.diagcab',
+  '.fxp',
+  '.gadget',
+  '.hlp',
+  '.hpj',
+  '.hta',
+  '.htc',
+  '.inf',
+  '.ins',
+  '.isp',
+  '.its',
+  '.lnk',
+  '.mad',
+  '.maf',
+  '.mag',
+  '.mam',
+  '.maq',
+  '.mar',
+  '.mas',
+  '.mat',
+  '.mau',
+  '.mav',
+  '.maw',
+  '.mcf',
+  '.mda',
+  '.mdb',
+  '.mde',
+  '.mdt',
+  '.mdw',
+  '.mdz',
+  '.php',
+  '.php3',
+  '.php4',
+  '.php5',
+  '.phtml',
+  '.pl',
+  '.py',
+  '.pyc',
+  '.pyo',
+  '.rb',
 ]);
 
 export interface UploadKindConfig {
@@ -82,7 +153,7 @@ export class UploadService {
     kind: UploadKind = DEFAULT_UPLOAD_KIND,
   ): Promise<UploadedItem[]> {
     if (!files || files.length === 0) {
-      throw new BadRequestException('No files received in field "image"');
+      throw badRequest(ERROR_CODES.UPLOAD_FILE_MISSING);
     }
 
     const cfg: UploadKindConfig = UPLOAD_KINDS[kind];
@@ -90,10 +161,10 @@ export class UploadService {
     for (const f of files) {
       const ext = extname(f.originalname).toLowerCase();
       if (BLOCKED_EXTENSIONS.has(ext)) {
-        throw new BadRequestException(`File extension "${ext}" is not allowed`);
+        throw badRequest(ERROR_CODES.UPLOAD_EXTENSION_NOT_ALLOWED, { extension: ext });
       }
       if (!f.mimetype?.startsWith('image/')) {
-        throw new BadRequestException(`Only image uploads are allowed (got "${f.mimetype}")`);
+        throw badRequest(ERROR_CODES.UPLOAD_NOT_IMAGE, { mimetype: f.mimetype });
       }
 
       const processed = await this.processor.process(f.buffer, {

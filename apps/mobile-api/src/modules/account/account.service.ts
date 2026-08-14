@@ -1,11 +1,7 @@
 import bcrypt from 'bcryptjs';
 import { createHash } from 'node:crypto';
 import { prisma } from '@bb/db';
-import {
-  BadRequestException,
-  NotFoundException,
-  UnauthorizedException,
-} from '@bb/common/exceptions';
+import { badRequest, unauthorized, notFound, ERROR_CODES } from '@bb/common/exceptions';
 import { otpService } from '@bb/common/services/otp.service';
 import { isReusableUnverifiedMember } from '@bb/common/utils/member-state.util';
 import { otpPhoneTarget } from '@bb/common/utils/phone.util';
@@ -28,23 +24,23 @@ export class AccountService {
    * overwrites once set.
    */
   async affiliateConnect(memberId: string, affiliatorCode: string) {
-    if (!affiliatorCode) throw new BadRequestException('affiliatorCode required');
+    if (!affiliatorCode) throw badRequest(ERROR_CODES.AFFILIATOR_CODE_REQUIRED);
 
     const me = await prisma.member.findUnique({
       where: { id: memberId },
       select: { id: true, affiliateCode: true, inviterId: true },
     });
-    if (!me) throw new NotFoundException('Member not found');
+    if (!me) throw notFound(ERROR_CODES.MEMBER_NOT_FOUND);
 
     if (me.affiliateCode && me.affiliateCode === affiliatorCode) {
-      throw new BadRequestException('Cannot connect to your own affiliate code');
+      throw badRequest(ERROR_CODES.AFFILIATE_SELF_CONNECT);
     }
 
     const inviter = await prisma.member.findUnique({
       where: { affiliateCode: affiliatorCode },
       select: { id: true, affiliateCode: true, legacyId: true },
     });
-    if (!inviter) throw new NotFoundException(`Affiliator code "${affiliatorCode}" not found`);
+    if (!inviter) throw notFound(ERROR_CODES.AFFILIATOR_CODE_NOT_FOUND, { affiliatorCode });
 
     // Already connected — return existing without overwriting
     if (me.inviterId) {
@@ -77,7 +73,7 @@ export class AccountService {
 
   async preRegistration(dto: PreRegistrationDto) {
     if (dto.password !== dto.confirmation) {
-      throw new BadRequestException('password and confirmation do not match');
+      throw badRequest(ERROR_CODES.PASSWORD_CONFIRMATION_MISMATCH);
     }
 
     // Reusable unverified placeholders (abandoned-at-OTP registers) must not
@@ -95,7 +91,7 @@ export class AccountService {
       },
     });
     if (existing.some((m) => !isReusableUnverifiedMember(m))) {
-      throw new BadRequestException('Email or phone already registered');
+      throw badRequest(ERROR_CODES.EMAIL_OR_PHONE_ALREADY_REGISTERED);
     }
 
     let affiliateMemberId: string | undefined;
@@ -175,20 +171,20 @@ export class AccountService {
     return { loggedOut: true, logoutFrom: null };
   }
 
-  async changePassword(memberId: string, dto: ChangePasswordDto) {
+  async changePassword(memberId: string, dto: ChangePasswordDto, currentSessionId?: string) {
     if (dto.newPassword !== dto.confirmNewPassword) {
-      throw new BadRequestException('newPassword and confirmNewPassword do not match');
+      throw badRequest(ERROR_CODES.PASSWORD_CONFIRMATION_MISMATCH);
     }
 
     const member = await prisma.member.findUnique({ where: { id: memberId } });
-    if (!member) throw new NotFoundException('Member not found');
-    if (!member.isActive) throw new UnauthorizedException('Member is not active');
+    if (!member) throw notFound(ERROR_CODES.MEMBER_NOT_FOUND);
+    if (!member.isActive) throw unauthorized(ERROR_CODES.MEMBER_INACTIVE);
 
     const matches = await this.verifyPassword(dto.oldPassword, member);
-    if (!matches) throw new BadRequestException('Old password is incorrect');
+    if (!matches) throw badRequest(ERROR_CODES.PASSWORD_INCORRECT);
 
     if (dto.oldPassword === dto.newPassword) {
-      throw new BadRequestException('New password must differ from old password');
+      throw badRequest(ERROR_CODES.PASSWORD_MUST_DIFFER);
     }
 
     const passwordHash = await bcrypt.hash(dto.newPassword, 10);
@@ -209,10 +205,19 @@ export class AccountService {
 
     // SECURITY: a password change must evict any other (possibly compromised)
     // session. Without this, a stolen refresh token keeps minting access tokens
-    // indefinitely after the victim changes their password. Mirrors the
-    // forgot-password resetPassword + logout revoke-all behaviour.
+    // indefinitely after the victim changes their password.
+    //
+    // Unlike forgot-password (where the caller is unauthenticated, so every
+    // session is suspect) the caller here proved knowledge of the OLD password,
+    // so their own session is trusted and kept alive — `authGuard` re-checks
+    // `refreshToken.revokedAt` on every request, so revoking it would log the
+    // member out of the very device they just used. Only the OTHER devices go.
     await prisma.refreshToken.updateMany({
-      where: { memberId, revokedAt: null },
+      where: {
+        memberId,
+        revokedAt: null,
+        ...(currentSessionId ? { NOT: { id: currentSessionId } } : {}),
+      },
       data: { revokedAt: new Date() },
     });
 
@@ -253,27 +258,31 @@ export class AccountService {
   }): string {
     if (member.email) return member.email;
     if (member.phone && member.phoneCode) return otpPhoneTarget(member.phoneCode, member.phone);
-    throw new BadRequestException('Member has no email or phone on file');
+    throw badRequest(ERROR_CODES.CONTACT_NOT_ON_FILE);
   }
 
   async requestDeleteAccount(memberId: string, dto: RequestDeleteAccountDto) {
     if (dto.agree === false) {
-      throw new BadRequestException('Confirmation required to proceed');
+      throw badRequest(ERROR_CODES.CONFIRMATION_REQUIRED);
     }
     const member = await prisma.member.findUnique({ where: { id: memberId } });
-    if (!member) throw new NotFoundException('Member not found');
+    if (!member) throw notFound(ERROR_CODES.MEMBER_NOT_FOUND);
 
     await otpService.issue({
       target: this.deleteAccountOtpTarget(member),
       purpose: 'delete-account',
       recipientName: member.fullName ?? undefined,
+      // Below the email channel default: deleting an account is a once-ever
+      // action, so the email budget (10) buys nothing and a compromised session
+      // should not be able to spam the owner's inbox while it works.
+      maxPerDay: 5,
     });
     return { memberId };
   }
 
   async verificationDeleteAccount(memberId: string, dto: VerificationDeleteAccountDto) {
     const member = await prisma.member.findUnique({ where: { id: memberId } });
-    if (!member) throw new NotFoundException('Member not found');
+    if (!member) throw notFound(ERROR_CODES.MEMBER_NOT_FOUND);
 
     await otpService.consume(this.deleteAccountOtpTarget(member), dto.otpCode, 'delete-account');
 
@@ -294,9 +303,9 @@ export class AccountService {
 
   async recoverAccountScheduled(memberId: string) {
     const member = await prisma.member.findUnique({ where: { id: memberId } });
-    if (!member) throw new NotFoundException('Member not found');
+    if (!member) throw notFound(ERROR_CODES.MEMBER_NOT_FOUND);
     if (!member.scheduledDeletionAt) {
-      throw new BadRequestException('Account is not scheduled for deletion');
+      throw badRequest(ERROR_CODES.DELETION_NOT_SCHEDULED);
     }
 
     await prisma.member.update({

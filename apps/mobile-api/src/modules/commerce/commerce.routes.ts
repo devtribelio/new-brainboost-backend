@@ -1,3 +1,4 @@
+import { traceService } from '@bb/common/utils/trace-service';
 import { Router } from 'express';
 import { authGuard } from '@bb/common/middlewares/auth.middleware';
 import { voucherValidateRateLimiter } from '@bb/common/middlewares/rate-limit.middleware';
@@ -13,8 +14,8 @@ import { ListTransactionsQueryDto } from './dto/list-transactions.dto';
 
 export function commerceRoutes(): Router {
   const router = Router();
-  const voucher = new VoucherService();
-  const ctrl = new CommerceController(new CheckoutService(voucher), new PaymentService(), voucher);
+  const voucher = traceService(new VoucherService());
+  const ctrl = new CommerceController(traceService(new CheckoutService(voucher)), traceService(new PaymentService()), voucher);
 
   bindRoute({
     router,
