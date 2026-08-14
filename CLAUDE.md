@@ -138,6 +138,15 @@ For deep symbol-level mapping see `docs/legacy-analysis.md`.
 
 ## 4. Architecture & Patterns
 
+### Keep it simple (default posture — overrides "clever")
+
+- **Keep it simple.** Prefer straightforward solutions over clever ones.
+- **Don't over-engineer.** No abstraction, pattern, or layer until it's actually needed. No interface with one implementer, no config knob with one value, no generic helper called once.
+- **Don't add unrequested features/handling.** Scope = what was asked. Extra error branches, extra flags, extra endpoints = scope creep.
+- **10 lines beats 50 lines** when the result is identical. Pick the 10.
+- **No premature optimization.** Write the obvious version; optimize only with a measured problem.
+- **Code to the point, minimal boilerplate.** No ceremony wrappers, no comment restating the code.
+
 ### Already decided
 
 - **Module-per-feature** under `src/modules/<feature>/`. Each module exports an `AppModule` (`name`, `prefix`, `routes()`).

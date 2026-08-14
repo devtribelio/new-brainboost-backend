@@ -51,6 +51,18 @@ const SETTINGS: Array<{ key: string; value: string; description: string }> = [
     description: 'Minimum withdrawable balance (IDR) required to request a payout (gross >= this).',
   },
   {
+    key: 'fx.usdIdr',
+    value: '17800',
+    description:
+      'USD→IDR rate used to normalise foreign-storefront IAP purchases. Acts as the static floor of the resolution chain; promoted to top priority when fx.usdIdrPinned is true.',
+  },
+  {
+    key: 'fx.usdIdrPinned',
+    value: 'false',
+    description:
+      "Pin the USD→IDR rate to fx.usdIdr ('true' to enable), overriding the FX API and RevenueCat-derived rates. Use when the live rate is wrong or the providers are down.",
+  },
+  {
     key: 'kyc.minBalance',
     value: '55000',
     description:

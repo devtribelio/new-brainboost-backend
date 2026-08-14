@@ -88,6 +88,12 @@ export class RevenueCatWebhookHandler {
       return { handled: false, status: 'skipped' };
     }
 
+    // Sandbox events are ingested like any other. Refusing them in production was tried
+    // and reverted: App Review runs its purchases in the SANDBOX environment against the
+    // PRODUCTION app, so dropping them leaves the reviewer with no CourseEnrollment and
+    // `isPurchased: false` — a purchase that visibly does nothing, i.e. a rejection.
+    // `environment` is still carried on the DTO so sandbox rows stay identifiable in
+    // `commerce_payments.log_request` after the fact.
     const cred = await credentialService.verifyByName(env.revenuecat.providerName);
     if (!cred) {
       // Misconfiguration: the credential row is missing/inactive. Log loudly and
@@ -128,6 +134,9 @@ export class RevenueCatWebhookHandler {
 
   private toPurchase(event: RevenueCatEventDto): NormalizedPurchase {
     const gross = event.price_in_purchased_currency ?? 0;
+    const occurredAt = event.event_timestamp_ms
+      ? new Date(event.event_timestamp_ms).toISOString()
+      : undefined;
     return {
       // Key on the store transaction id so a later CANCELLATION (which carries the
       // same transaction_id, not the purchase's event id) can link back to it.
@@ -149,7 +158,10 @@ export class RevenueCatWebhookHandler {
       // `AffiliateVisit` (logged by the app on the affiliate link), scoped to the
       // purchased product (B-5: ingest passes productId) → buyer inviter.
       affiliatorCode: undefined,
-      // Use local currency (IDR), NOT event.price which is in USD.
+      // `grossAmount` is in `currency`, NOT necessarily IDR: `price_in_purchased_currency`
+      // follows the buyer's storefront, so an AU purchase arrives as 39.99 (AUD). Ingest
+      // normalises to IDR using `amountUsd` — passing the local figure through untouched
+      // is what recorded A$39.99 as Rp40 and paid a Rp5 commission on it.
       grossAmount: gross,
       netAmount: computeNetAmount(
         gross,
@@ -158,8 +170,11 @@ export class RevenueCatWebhookHandler {
         event.tax_percentage,
       ),
       currency: event.currency,
+      // RevenueCat's own USD conversion of the same purchase — the single bridge that
+      // lets one USD/IDR rate serve every storefront.
+      amountUsd: event.price,
       isRenewal: event.type === 'RENEWAL',
-      occurredAt: undefined,
+      occurredAt,
       raw: event,
     };
   }
