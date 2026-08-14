@@ -88,18 +88,12 @@ export class RevenueCatWebhookHandler {
       return { handled: false, status: 'skipped' };
     }
 
-    // Sandbox events carry `price: 0`, so ingesting one in production records a real
-    // enrollment against a free "sale" — and with amounts at zero it looks like an
-    // ordinary row, not an error. Refused explicitly rather than left to the amount
-    // math. 200 so RC stops retrying: a sandbox event will never become valid here.
-    if (env.isProduction && event.environment?.toUpperCase() === 'SANDBOX') {
-      logger.warn(
-        { eventId: event.id, eventType: event.type, appUserId: event.app_user_id },
-        '[revenuecat] sandbox event received in production — not ingested',
-      );
-      return { handled: false, status: 'sandbox_skipped' };
-    }
-
+    // Sandbox events are ingested like any other. Refusing them in production was tried
+    // and reverted: App Review runs its purchases in the SANDBOX environment against the
+    // PRODUCTION app, so dropping them leaves the reviewer with no CourseEnrollment and
+    // `isPurchased: false` — a purchase that visibly does nothing, i.e. a rejection.
+    // `environment` is still carried on the DTO so sandbox rows stay identifiable in
+    // `commerce_payments.log_request` after the fact.
     const cred = await credentialService.verifyByName(env.revenuecat.providerName);
     if (!cred) {
       // Misconfiguration: the credential row is missing/inactive. Log loudly and

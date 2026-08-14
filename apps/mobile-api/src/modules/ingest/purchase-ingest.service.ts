@@ -346,10 +346,10 @@ export class PurchaseIngestService {
    * The store's cut is re-applied as the RATIO the provider reported rather than a fresh
    * percentage, so whatever `computeNetAmount` decided upstream survives conversion.
    *
-   * Falls back to the catalog price when there is no usable USD figure (sandbox events
-   * carry price 0), when every FX layer failed, or when the result fails the sanity band.
-   * That fallback is logged at error: it means an amount was invented rather than
-   * converted, which reporting needs to be able to find.
+   * Falls back to the catalog price when the event carries no usable USD figure, when
+   * every FX layer failed, or when the result fails the sanity band. That fallback is
+   * logged at error: it means an amount was invented rather than converted, which
+   * reporting needs to be able to find.
    */
   private async normalizeToIdr(
     input: NormalizedPurchase,
