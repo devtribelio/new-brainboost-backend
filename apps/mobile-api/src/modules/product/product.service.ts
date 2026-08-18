@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import type { Product } from '@prisma/client';
 import { prisma } from '@bb/db';
 import { notFound, ERROR_CODES } from '@bb/common/exceptions';
+import { ACTIVE_ENROLLMENT } from '@bb/domain/commerce/enrollment';
 import type { PaginationParams } from '@bb/common/utils/pagination.util';
 import type { Ownership, ProductMedia, ProductSort } from './dto/list-query.dto';
 
@@ -52,9 +53,12 @@ export class ProductService {
     if (q.keyword) where.title = { contains: q.keyword, mode: 'insensitive' };
     if (q.type) where.type = q.type;
     if (q.ownership === 'not_purchased' && q.memberId) {
+      // `ACTIVE_ENROLLMENT` in the `none` filter is what makes a refunded course
+      // reappear in the catalog — otherwise the cancelled row keeps hiding it and
+      // the member can never find the product to buy again.
       where.OR = [
         { course: null },
-        { course: { enrollments: { none: { memberId: q.memberId } } } },
+        { course: { enrollments: { none: { memberId: q.memberId, ...ACTIVE_ENROLLMENT } } } },
       ];
     }
     const [rows, total] = await Promise.all([
@@ -96,6 +100,7 @@ export class ProductService {
         SELECT 1 FROM courses c
         JOIN course_enrollment ce ON ce.course_id = c.id
         WHERE c.product_id = p.id AND ce.member_id = ${q.memberId}::uuid
+          AND ce.is_canceled = false
       )`);
     }
     if (q.media && q.media.length > 0) {
@@ -175,6 +180,7 @@ export class ProductService {
   ) {
     const enrollmentWhere: Prisma.CourseEnrollmentWhereInput = {
       memberId,
+      ...ACTIVE_ENROLLMENT,
       course: {
         product: {
           isActive: true,
@@ -215,7 +221,7 @@ export class ProductService {
       .map((r) => r.id);
     if (courseProductIds.length === 0) return set;
     const enrollments = await prisma.courseEnrollment.findMany({
-      where: { memberId, course: { productId: { in: courseProductIds } } },
+      where: { memberId, ...ACTIVE_ENROLLMENT, course: { productId: { in: courseProductIds } } },
       select: { course: { select: { productId: true } } },
     });
     for (const e of enrollments) set.add(e.course.productId);

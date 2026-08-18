@@ -5,6 +5,7 @@ import { computeTotals } from './utils/compute-totals';
 import { generateOrderCode } from './utils/generate-order-code';
 import { VoucherService } from './voucher.service';
 import { attributionService } from '@bb/domain/affiliate/attribution.service';
+import { ACTIVE_ENROLLMENT } from './enrollment';
 
 export interface StartCheckoutInput {
   memberId: string;
@@ -35,6 +36,18 @@ export class CheckoutService {
     if (!product.isActive || product.status !== 'active') {
       throw badRequest(ERROR_CODES.PRODUCT_NOT_AVAILABLE);
     }
+
+    // Block paying twice for a course the member still holds — the grant is
+    // keyed on (memberId, courseId), so a second purchase would take the money
+    // and change nothing. `ACTIVE_ENROLLMENT` is what keeps this from locking
+    // out a refunded member: their row is cancelled, so re-purchase is allowed.
+    // Checkout only — the ingest path (IAP/Scalev) cannot refuse a purchase the
+    // store has already charged for.
+    const owned = await prisma.courseEnrollment.findFirst({
+      where: { memberId: input.memberId, ...ACTIVE_ENROLLMENT, course: { productId: product.id } },
+      select: { id: true },
+    });
+    if (owned) throw badRequest(ERROR_CODES.PRODUCT_ALREADY_PURCHASED);
 
     let voucherId: string | undefined;
     let voucherMeta: {

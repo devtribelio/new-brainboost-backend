@@ -6,6 +6,7 @@ import { badRequest, ERROR_CODES } from '@bb/common/exceptions';
 import { parsePagination } from '@bb/common/utils/pagination.util';
 import { serializeProduct, serializeCourseDetailLegacy } from './product.serializer';
 import { prisma } from '@bb/db';
+import { hasActiveEnrollment } from '@bb/domain/commerce/enrollment';
 import {
   ApiBearerAuth,
   ApiOperation,
@@ -115,11 +116,8 @@ export class ProductController {
       });
       affiliateCode = m?.affiliateCode ?? null;
       if (product.course) {
-        const enrollment = await prisma.courseEnrollment.findUnique({
-          where: { memberId_courseId: { memberId, courseId: product.course.id } },
-          select: { id: true },
-        });
-        isPurchase = !!enrollment;
+        // Live enrollment only — a refunded purchase leaves a cancelled row behind.
+        isPurchase = await hasActiveEnrollment(memberId, product.course.id);
       }
     }
     return ok(

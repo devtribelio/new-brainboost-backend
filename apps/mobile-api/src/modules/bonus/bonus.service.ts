@@ -2,6 +2,7 @@ import { prisma } from '@bb/db';
 import { forbidden, notFound, ERROR_CODES } from '@bb/common/exceptions';
 import { S3StorageService, s3StorageService } from '@bb/common/services/s3-storage.service';
 import { env } from '@bb/common/config/env';
+import { hasActiveEnrollment } from '@bb/domain/commerce/enrollment';
 import type { BonusAccessUrlDto } from './bonus.dto';
 
 export class BonusService {
@@ -21,11 +22,9 @@ export class BonusService {
     });
     if (!bonus) throw notFound(ERROR_CODES.BONUS_NOT_FOUND);
 
-    const enrollment = await prisma.courseEnrollment.findUnique({
-      where: { memberId_courseId: { memberId, courseId: bonus.courseId } },
-      select: { id: true },
-    });
-    if (!enrollment) throw forbidden(ERROR_CODES.COURSE_NOT_ENROLLED);
+    if (!(await hasActiveEnrollment(memberId, bonus.courseId))) {
+      throw forbidden(ERROR_CODES.COURSE_NOT_ENROLLED);
+    }
 
     const expiresInSec = env.s3.presignExpires;
     const url = await this.storage.getPresignedGetUrl(bonus.fileKey, expiresInSec);
