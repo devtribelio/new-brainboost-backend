@@ -1,7 +1,7 @@
 import { forbidden, ERROR_CODES, ForbiddenException } from '@bb/common/exceptions';
 import { env } from '@bb/common/config/env';
-import { prisma } from '@bb/db';
 import { S3StorageService, s3StorageService } from '@bb/common/services/s3-storage.service';
+import { hasActiveEnrollment } from '@bb/domain/commerce/enrollment';
 import type { MediaResolution } from './dto/media.dto';
 import { signBunnyHlsUrl, signBunnyMp4Url } from './bunny-sign.util';
 
@@ -16,15 +16,13 @@ export class MediaService {
   constructor(private readonly storage: S3StorageService = s3StorageService) {}
 
   /**
-   * Throw `ForbiddenException` unless `memberId` is enrolled in `courseId`.
-   * Used to gate non-preview media — preview media skips this entirely.
+   * Throw `ForbiddenException` unless `memberId` holds a live enrollment in
+   * `courseId`. Used to gate non-preview media — preview media skips this
+   * entirely. A refunded enrollment is kept as a cancelled row, so this must
+   * check the flag, not mere row existence.
    */
   async assertEnrollment(courseId: string, memberId: string): Promise<void> {
-    const enrollment = await prisma.courseEnrollment.findUnique({
-      where: { memberId_courseId: { memberId, courseId } },
-      select: { id: true },
-    });
-    if (!enrollment) {
+    if (!(await hasActiveEnrollment(memberId, courseId))) {
       throw forbidden(ERROR_CODES.COURSE_NOT_ENROLLED);
     }
   }

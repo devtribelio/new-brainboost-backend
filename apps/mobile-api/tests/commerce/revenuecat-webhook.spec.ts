@@ -314,11 +314,14 @@ describe('RevenueCat webhook', () => {
     });
     expect(tx?.status).toBe('REFUNDED');
 
-    // enrollment revoked → isPurchased false
+    // Enrollment revoked → isPurchased false. The row is kept and cancelled, not
+    // deleted, so progress + purchase history survive a refund dispute; access
+    // checks read the flag (see `@bb/domain/commerce/enrollment`).
     const enrollment = await prisma.courseEnrollment.findUnique({
       where: { memberId_courseId: { memberId, courseId } },
     });
-    expect(enrollment).toBeNull();
+    expect(enrollment?.isCanceled).toBe(true);
+    expect(enrollment?.canceledAt).toBeInstanceOf(Date);
   });
 
   // Kept last: it rotates the credential's keyHash, invalidating AUTH for any
