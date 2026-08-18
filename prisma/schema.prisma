@@ -453,6 +453,7 @@ model CourseEnrollment {
   expiredDate        DateTime? @map("expired_date")
   isCanceled         Boolean   @default(false) @map("is_canceled")
   cancelationReason  String?   @map("cancelation_reason")
+  canceledAt         DateTime? @map("canceled_at")
   certificateCode    String?   @map("certificate_code")
   certificateCreated DateTime? @map("certificate_created")
   createdAt          DateTime  @default(now()) @map("created_at")
