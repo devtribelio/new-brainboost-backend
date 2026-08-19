@@ -39,8 +39,16 @@ export class EntitlementService {
     return (await this.getActiveSubscriptionForMember(memberId)) !== null;
   }
 
-  /** See class doc — retail rows are valid by existence, lazy rows by date. */
-  isEnrollmentValid(e: Pick<CourseEnrollment, 'viaSubscriptionId' | 'expiredDate'>): boolean {
+  /**
+   * See class doc — retail rows are valid by existence, lazy rows by date.
+   * A refund soft-cancels the row instead of deleting it (`is_canceled`), so the
+   * flag is checked FIRST: a cancelled retail row would otherwise pass on the
+   * by-existence branch and keep serving a refunded member.
+   */
+  isEnrollmentValid(
+    e: Pick<CourseEnrollment, 'viaSubscriptionId' | 'expiredDate' | 'isCanceled'>,
+  ): boolean {
+    if (e.isCanceled) return false;
     if (!e.viaSubscriptionId) return true;
     return e.expiredDate !== null && e.expiredDate > new Date();
   }
@@ -73,7 +81,16 @@ export class EntitlementService {
         dateStart: new Date(),
       },
       // Refresh a stale lazy row (old lapsed sub → this member's current sub).
-      update: { viaSubscriptionId: sub.id, expiredDate: sub.expiresAt },
+      // Also un-cancels a refunded retail row: the refund revoked the *purchase*,
+      // but the sub grants access independently — it becomes a lazy row that dies
+      // with the subscription instead of a resurrected lifetime one.
+      update: {
+        viaSubscriptionId: sub.id,
+        expiredDate: sub.expiresAt,
+        isCanceled: false,
+        cancelationReason: null,
+        canceledAt: null,
+      },
     });
   }
 }

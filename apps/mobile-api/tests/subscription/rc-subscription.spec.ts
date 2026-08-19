@@ -12,6 +12,7 @@ import request from 'supertest';
 import { randomUUID } from 'node:crypto';
 import { buildApp } from '@/app';
 import { prisma } from '@bb/db';
+import { hasActiveEnrollment } from '@bb/domain/commerce/enrollment';
 import { CredentialService } from '@/modules/ingest/credential.service';
 import { subscriptionEvents } from '@bb/common/events/subscription-events';
 
@@ -356,10 +357,13 @@ describe('RC subscription flow (BE-12/BE-13)', () => {
       }),
     );
     expect(r.body.status).toBe('refunded');
-    expect(
-      await prisma.courseEnrollment.findUnique({
-        where: { memberId_courseId: { memberId: buyerId, courseId: course.id } },
-      }),
-    ).toBeNull(); // enrollment revoked, exactly as before subscriptions existed
+    // Revocation is a soft-cancel, not a DELETE: the row survives so progress and
+    // purchase history do, and every access gate reads `isCanceled`.
+    const revoked = await prisma.courseEnrollment.findUnique({
+      where: { memberId_courseId: { memberId: buyerId, courseId: course.id } },
+    });
+    expect(revoked?.isCanceled).toBe(true);
+    expect(revoked?.canceledAt).not.toBeNull();
+    expect(await hasActiveEnrollment(buyerId, course.id)).toBe(false);
   });
 });

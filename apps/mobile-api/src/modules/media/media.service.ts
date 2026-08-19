@@ -19,9 +19,10 @@ export class MediaService {
 
   /**
    * Throw `ForbiddenException` unless `memberId` may access `courseId`:
-   * valid enrollment (retail = by existence; subscription lazy row = by date)
-   * OR an active subscription — which lazily creates the enrollment row
-   * (BE-10 → delegates to EntitlementService.assertCourseAccess, BE-06).
+   * valid enrollment (retail = by existence; subscription lazy row = by date;
+   * a refunded row is cancelled, never valid) OR an active subscription — which
+   * lazily creates the enrollment row (BE-10 → delegates to
+   * EntitlementService.assertCourseAccess, BE-06).
    * Used to gate non-preview media — preview media skips this entirely.
    */
   async assertEnrollment(courseId: string, memberId: string): Promise<void> {

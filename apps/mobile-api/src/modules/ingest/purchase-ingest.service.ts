@@ -330,19 +330,24 @@ export class PurchaseIngestService {
     });
     await prisma.commerceTransaction.update({ where: { id: tx.id }, data: { status: 'REFUNDED' } });
 
-    // Revoke course access so `isPurchased` flips back to false. All read paths
-    // (product list, course detail, media gating) key on enrollment existence,
-    // so a hard delete is the single point that revokes access everywhere. A
-    // later re-purchase re-creates the enrollment via the success listener.
-    // Idempotent: deleteMany is a no-op if already revoked.
+    // Revoke course access so `isPurchased` flips back to false. Soft-cancel, not
+    // delete: the row carries progress and purchase history that a refund dispute
+    // needs, and every read path filters on `isCanceled` (see
+    // `@bb/domain/commerce/enrollment`). A later re-purchase revives this same row.
+    // Idempotent: updateMany matches 0 rows if already revoked.
     let revokedEnrollments = 0;
     // Revoke for any course-backed product (course + mini_course). Mirror of the
     // grant gate in payment-success.listener — key on the linked course row, not type.
     if (tx.product?.course) {
-      const del = await prisma.courseEnrollment.deleteMany({
-        where: { memberId: tx.memberId, courseId: tx.product.course.id },
+      const revoked = await prisma.courseEnrollment.updateMany({
+        where: { memberId: tx.memberId, courseId: tx.product.course.id, isCanceled: false },
+        data: {
+          isCanceled: true,
+          cancelationReason: `refund:${input.providerEventId}`,
+          canceledAt: new Date(),
+        },
       });
-      revokedEnrollments = del.count;
+      revokedEnrollments = revoked.count;
     }
 
     logger.info(

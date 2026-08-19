@@ -150,6 +150,7 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   PRODUCT_NOT_FOUND: 'Produk tidak ditemukan',
   PRODUCT_NOT_AVAILABLE: 'Produk sudah tidak tersedia',
   PRODUCT_CODE_REQUIRED: 'Kode produk wajib diisi',
+  PRODUCT_ALREADY_PURCHASED: 'Kelas ini sudah kamu miliki',
   VOUCHER_INVALID: 'Voucher tidak dapat digunakan',
   VOUCHER_EXHAUSTED: 'Kuota voucher sudah habis',
 

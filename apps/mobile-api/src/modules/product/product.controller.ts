@@ -117,13 +117,13 @@ export class ProductController {
       });
       affiliateCode = m?.affiliateCode ?? null;
       if (product.course) {
-        // Valid enrollment (retail by existence, lazy row by date — BE-06
-        // predicate) OR an active subscription = "owned" (BE-11).
+        // Valid enrollment (retail by existence, lazy row by date, refunded row
+        // never — BE-06 predicate) OR an active subscription = "owned" (BE-11).
         // viaSubscription marks access that exists ONLY because of the sub —
         // a valid RETAIL enrollment wins (lifetime beats borrowed access).
         const enrollment = await prisma.courseEnrollment.findUnique({
           where: { memberId_courseId: { memberId, courseId: product.course.id } },
-          select: { viaSubscriptionId: true, expiredDate: true },
+          select: { viaSubscriptionId: true, expiredDate: true, isCanceled: true },
         });
         const validEnrollment =
           enrollment != null && this.entitlement.isEnrollmentValid(enrollment);

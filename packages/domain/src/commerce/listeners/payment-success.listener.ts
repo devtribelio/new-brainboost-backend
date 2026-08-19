@@ -77,17 +77,39 @@ async function grantCourseEnrollment(memberId: string, productId: string): Promi
   // committed but enrollment never granted (xendit + revenuecat alike, since both
   // converge on this event). Keying on `product.course` closes that leak.
   if (!product?.course) return;
-  // createMany + skipDuplicates: idempotent without throwing on the
-  // (memberId, courseId) unique. `create`+catch worked but Prisma still logs
-  // the swallowed P2002 at error level (prisma:error noise on every re-purchase
-  // / redelivered IAP event) — skipDuplicates avoids the throw entirely.
-  await prisma.courseEnrollment.createMany({
-    data: [{ memberId, courseId: product.course.id, dateStart: new Date() }],
-    skipDuplicates: true,
+  // A refund leaves the enrollment behind as a cancelled row, so plain
+  // createMany+skipDuplicates would silently skip it: the member pays again and
+  // stays revoked. Revive first, then insert only when there was nothing to
+  // revive. Both statements are no-ops on a redelivered event (updateMany
+  // matches 0 rows once the enrollment is live, createMany skips the duplicate),
+  // which keeps the P2002 noise out of the logs that skipDuplicates was for.
+  const revived = await prisma.courseEnrollment.updateMany({
+    where: { memberId, courseId: product.course.id, isCanceled: true },
+    // Re-purchase restarts the course: progress, completion and any certificate
+    // earned on the refunded run are cleared, so `progress` can never disagree
+    // with a certificate that is no longer backed by a purchase. The member's
+    // listening history (`listening_session`) is a separate log and survives.
+    data: {
+      isCanceled: false,
+      cancelationReason: null,
+      canceledAt: null,
+      progress: 0,
+      dateStart: new Date(),
+      dateEnd: null,
+      certificateCode: null,
+      certificateCreated: null,
+    },
   });
+  if (revived.count === 0) {
+    await prisma.courseEnrollment.createMany({
+      data: [{ memberId, courseId: product.course.id, dateStart: new Date() }],
+      skipDuplicates: true,
+    });
+  }
   // A retail purchase over a subscription lazy row upgrades it to lifetime:
   // clear the marker (+expiry) so the buyer keeps access after the sub lapses.
-  // No-op for genuine retail rows (marker already NULL).
+  // No-op for genuine retail rows (marker already NULL), and it runs after the
+  // revive/insert above so a re-purchased lazy row is upgraded too.
   await prisma.courseEnrollment.updateMany({
     where: { memberId, courseId: product.course.id, viaSubscriptionId: { not: null } },
     data: { viaSubscriptionId: null, expiredDate: null },
