@@ -37,8 +37,12 @@ export function activeEnrollment(now: Date = new Date()): Prisma.CourseEnrollmen
 
 /**
  * Purchase-ownership filter: a paid (or legacy) enrollment that is not refunded.
- * Deliberately ignores trial rows so a member on trial can still check out, and
- * so the course keeps showing up in the `not_purchased` catalog.
+ * Deliberately ignores trial rows, so a member on trial can still check out — the
+ * trial must never block the sale it exists to advertise.
+ *
+ * Checkout guard ONLY. The catalog's `not_purchased` shelf uses `activeEnrollment()`
+ * instead: a course the member can already open does not belong on a "belum dibeli"
+ * shelf, even though it is genuinely not paid for yet.
  */
 export const OWNED_FOR_PURCHASE = {
   isCanceled: false,

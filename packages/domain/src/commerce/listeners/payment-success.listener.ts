@@ -4,6 +4,7 @@ import { logger } from '@bb/common/config/logger';
 import { commerceEvents } from '@bb/common/events/commerce-events';
 import { AffiliatorService } from '@bb/domain/affiliate/affiliator.service';
 import { VoucherService } from '../voucher.service';
+import { loadTrialGrant, trialExpiresAt, type TrialGrant } from '../trial';
 
 const affiliatorService = new AffiliatorService();
 const voucherService = new VoucherService();
@@ -72,21 +73,6 @@ export function registerCommerceListeners(): void {
   });
 }
 
-interface TrialGrant {
-  voucherId: string;
-  trialDays: number;
-}
-
-/** Non-null only for a `type='TRIAL'` voucher with a usable duration. */
-async function loadTrialGrant(voucherId: string): Promise<TrialGrant | null> {
-  const v = await prisma.voucher.findUnique({
-    where: { id: voucherId },
-    select: { id: true, type: true, trialDays: true },
-  });
-  if (v?.type !== 'TRIAL' || v.trialDays == null || v.trialDays <= 0) return null;
-  return { voucherId: v.id, trialDays: v.trialDays };
-}
-
 async function grantCourseEnrollment(
   memberId: string,
   productId: string,
@@ -108,7 +94,7 @@ async function grantCourseEnrollment(
   // a stale date on an unmarked row is harmless today but is exactly the kind of
   // thing a future gate would read).
   const grant = trial
-    ? { viaVoucherId: trial.voucherId, expiredDate: addDays(now, trial.trialDays) }
+    ? { viaVoucherId: trial.voucherId, expiredDate: trialExpiresAt(now, trial.trialDays) }
     : { viaVoucherId: null, expiredDate: null };
 
   // A refund leaves the enrollment behind as a cancelled row, and a trial leaves
@@ -152,8 +138,4 @@ async function grantCourseEnrollment(
       skipDuplicates: true,
     });
   }
-}
-
-function addDays(from: Date, days: number): Date {
-  return new Date(from.getTime() + days * 24 * 60 * 60 * 1000);
 }

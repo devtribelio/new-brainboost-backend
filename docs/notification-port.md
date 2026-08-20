@@ -115,6 +115,7 @@ Setelah row tertulis: `setImmediate(() => fcm.dispatch(memberId, ...))` — tida
 | network join-request | `network.service.ts` | network.listener | `requestJoin` (ke admin) |
 | network approve | `network.service.ts` | network.listener | `approveJoin` (ke requester), `memberJoin` (ke creator) |
 | commerce paid | `commerceEvents.on('commerce.payment.success')` (existing emit di `payment.service.ts:155`) | commerce.listener | `paymentSuccess` (buyer); `commissionEarned` (per affiliator) |
+| commerce trial | event yang sama, tapi voucher-nya `type='TRIAL'` (`loadTrialGrant()` di `commerce/trial.ts`) | commerce.listener | `trialStarted` (buyer) — menggantikan `paymentSuccess`, judul "Uji coba kamu aktif", tanggal berakhir di body. `refTable` tetap `commerce_payment` → aman tanpa rilis app; masuk `PUSH_LIMIT_EXEMPT`. Komisi tidak terbit (nilainya 0) |
 
 Idempotensi: dedupeKey unik. Re-emit (webhook redelivery, retries) silent-skip.
 
@@ -223,7 +224,7 @@ daftarnya lengkap. Gerbangnya di `NotificationProducer.claimPushSlot`, dipanggil
   per request akan membuat jaraknya nol dan mematikan re-KYC dormant tanpa error.
   `authGuardLenient` sengaja TIDAK ikut: endpoint-nya dipakai saat member justru
   meninggalkan sesi (logout cleanup).
-- **Menembus batas tanpa menaikkan counter:** `paymentSuccess`, `paymentPending`,
+- **Menembus batas tanpa menaikkan counter:** `paymentSuccess`, `trialStarted`, `paymentPending`,
   `paymentRefunded`, `subscriptionRenewed`, `commissionEarned` (`PUSH_LIMIT_EXEMPT`).
   Alasan sama dengan commerce yang dikecualikan dari mute.
 - **Konkurensi:** `update({ data: { increment: 1 } })` mengembalikan nilai pasca-increment,
