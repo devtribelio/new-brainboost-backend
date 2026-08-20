@@ -3,7 +3,7 @@ export interface ComputeTotalsInput {
   qty?: number;
   voucher?:
     | {
-        type: 'PERCENT' | 'AMOUNT';
+        type: 'PERCENT' | 'AMOUNT' | 'TRIAL';
         value: number;
         maxAmount?: number | null;
       }
@@ -21,6 +21,10 @@ export interface ComputeTotalsResult {
  * Voucher rules:
  *  - PERCENT: floor(itemTotal * value / 100), capped at maxAmount when set.
  *  - AMOUNT: flat IDR discount.
+ *  - TRIAL: always 100% — a free trial settles as an amount=0 order through the
+ *    existing voucher-bypass path, and `value` is not a discount for this type.
+ *    Handled explicitly: falling through to the AMOUNT branch would read `value`
+ *    (0 on a trial row) and silently charge the member full price.
  *  - Voucher discount cannot exceed itemTotal (clamp to itemTotal).
  *
  * Legacy parity: `priceRecipient` uses floor((max(productPrice - voucherAmount, 0)) * rate / 100)
@@ -32,7 +36,9 @@ export function computeTotals(input: ComputeTotalsInput): ComputeTotalsResult {
 
   let voucherAmount = 0;
   if (input.voucher) {
-    if (input.voucher.type === 'PERCENT') {
+    if (input.voucher.type === 'TRIAL') {
+      voucherAmount = itemTotal;
+    } else if (input.voucher.type === 'PERCENT') {
       const raw = Math.floor((itemTotal * input.voucher.value) / 100);
       voucherAmount = input.voucher.maxAmount != null ? Math.min(raw, input.voucher.maxAmount) : raw;
     } else {

@@ -451,6 +451,13 @@ model CourseEnrollment {
   dateStart          DateTime? @map("date_start")
   dateEnd            DateTime? @map("date_end")
   expiredDate        DateTime? @map("expired_date")
+  // Free-trial marker: set when this row was granted by a `type='TRIAL'` voucher
+  // (expiredDate = grant time + voucher.trialDays). NULL = retail/legacy row, which
+  // access gates must treat as ALWAYS valid REGARDLESS of expiredDate — the legacy
+  // migration filled expired_date on lifetime purchases, so honouring it globally
+  // would cut off paying buyers. No FK by design (mirrors AffiliateAttributionClaim):
+  // deleting a voucher must not delete or lock the enrollment it granted.
+  viaVoucherId       String?   @map("via_voucher_id") @db.Uuid
   isCanceled         Boolean   @default(false) @map("is_canceled")
   cancelationReason  String?   @map("cancelation_reason")
   canceledAt         DateTime? @map("canceled_at")
@@ -464,6 +471,7 @@ model CourseEnrollment {
 
   @@unique([memberId, courseId])
   @@index([memberId, createdAt])
+  @@index([viaVoucherId])
   @@map("course_enrollment")
 }
 
@@ -1250,9 +1258,17 @@ model Voucher {
   id        String    @id @default(uuid(7)) @db.Uuid
   legacyId  Int?      @unique @map("legacy_id")
   code      String    @unique
-  type      String // "PERCENT" | "AMOUNT"
+  type      String // "PERCENT" | "AMOUNT" | "TRIAL"
   value     Int
   maxAmount Int?      @map("max_amount") // cap for PERCENT
+  // TRIAL only: days of course access granted. The discount is always 100% (the
+  // order settles through the existing amount=0 voucher bypass), so `value` is
+  // ignored for TRIAL and the duration is what the voucher actually configures.
+  // DB CHECK enforces > 0 when type='TRIAL'. Once-per-member is NOT enforced here:
+  // the record of "this member already trialed on this voucher" is the enrollment
+  // row's `via_voucher_id` (see CourseEnrollment), so `voucher_redemptions` keeps
+  // its original shape and the quota/idempotency machinery is untouched.
+  trialDays Int?      @map("trial_days")
   quota     Int? // null = unlimited
   used      Int       @default(0)
   startsAt  DateTime? @map("starts_at")

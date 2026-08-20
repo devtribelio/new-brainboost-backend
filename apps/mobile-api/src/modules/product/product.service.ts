@@ -2,7 +2,7 @@ import { Prisma } from '@prisma/client';
 import type { Product } from '@prisma/client';
 import { prisma } from '@bb/db';
 import { notFound, ERROR_CODES } from '@bb/common/exceptions';
-import { ACTIVE_ENROLLMENT } from '@bb/domain/commerce/enrollment';
+import { activeEnrollment, OWNED_FOR_PURCHASE } from '@bb/domain/commerce/enrollment';
 import type { PaginationParams } from '@bb/common/utils/pagination.util';
 import type { Ownership, ProductMedia, ProductSort } from './dto/list-query.dto';
 
@@ -53,12 +53,14 @@ export class ProductService {
     if (q.keyword) where.title = { contains: q.keyword, mode: 'insensitive' };
     if (q.type) where.type = q.type;
     if (q.ownership === 'not_purchased' && q.memberId) {
-      // `ACTIVE_ENROLLMENT` in the `none` filter is what makes a refunded course
+      // `OWNED_FOR_PURCHASE` in the `none` filter is what makes a refunded course
       // reappear in the catalog — otherwise the cancelled row keeps hiding it and
-      // the member can never find the product to buy again.
+      // the member can never find the product to buy again. Same reasoning covers
+      // a free trial: "not purchased" is literally true while on trial, and hiding
+      // the product would remove the only route to converting the trial to a sale.
       where.OR = [
         { course: null },
-        { course: { enrollments: { none: { memberId: q.memberId, ...ACTIVE_ENROLLMENT } } } },
+        { course: { enrollments: { none: { memberId: q.memberId, ...OWNED_FOR_PURCHASE } } } },
       ];
     }
     const [rows, total] = await Promise.all([
@@ -180,7 +182,7 @@ export class ProductService {
   ) {
     const enrollmentWhere: Prisma.CourseEnrollmentWhereInput = {
       memberId,
-      ...ACTIVE_ENROLLMENT,
+      ...activeEnrollment(),
       course: {
         product: {
           isActive: true,
@@ -221,7 +223,7 @@ export class ProductService {
       .map((r) => r.id);
     if (courseProductIds.length === 0) return set;
     const enrollments = await prisma.courseEnrollment.findMany({
-      where: { memberId, ...ACTIVE_ENROLLMENT, course: { productId: { in: courseProductIds } } },
+      where: { memberId, ...activeEnrollment(), course: { productId: { in: courseProductIds } } },
       select: { course: { select: { productId: true } } },
     });
     for (const e of enrollments) set.add(e.course.productId);
