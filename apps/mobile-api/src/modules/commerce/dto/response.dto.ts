@@ -195,8 +195,12 @@ export class VoucherValidateResultDto {
   @ApiPropertyOptional({ example: 50_000 })
   voucherAmount?: number;
 
-  @ApiPropertyOptional({ example: 'AMOUNT', enum: ['PERCENT', 'AMOUNT'] })
+  @ApiPropertyOptional({ example: 'AMOUNT', enum: ['PERCENT', 'AMOUNT', 'TRIAL'] })
   type?: string;
+
+  /** TRIAL only: days of course access this voucher grants. */
+  @ApiPropertyOptional({ example: 7 })
+  trialDays?: number | null;
 
   @ApiPropertyOptional({ example: 'Voucher quota exhausted' })
   reason?: string;

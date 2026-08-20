@@ -13,6 +13,12 @@ export const ActionLabel = {
   ApproveJoin: 'approveJoin',
   MemberJoin: 'memberJoin',
   PaymentSuccess: 'paymentSuccess',
+  // Free-trial voucher grant. Separate from PaymentSuccess because the member did
+  // not pay and the only thing worth telling them is when access stops. Safe to add
+  // without a client release: payment notifications route on `refTable`, and an
+  // unknown `type` falls to the default icon — which paymentSuccess already does.
+  // FROZEN once shipped, same rule as the digest values above.
+  TrialStarted: 'trialStarted',
   PaymentPending: 'paymentPending',
   PaymentRefunded: 'paymentRefunded',
   SubscriptionRenewed: 'subscriptionRenewed',

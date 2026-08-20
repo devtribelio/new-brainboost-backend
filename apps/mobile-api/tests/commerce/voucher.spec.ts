@@ -7,6 +7,7 @@ describe('VoucherService', () => {
   const service = new VoucherService();
   let productAId: string;
   let productBId: string;
+  let memberId: string;
   const ts = Date.now();
   const codes = {
     valid: `T-VOUCH-VALID-${ts}`,
@@ -19,9 +20,16 @@ describe('VoucherService', () => {
     multiProduct: `T-VOUCH-MULTI-${ts}`,
     cappedPercent: `T-VOUCH-CAP-${ts}`,
     idempotent: `T-VOUCH-IDEM-${ts}`,
+    trial: `T-VOUCH-TRIAL-${ts}`,
+    trialTwo: `T-VOUCH-TRIAL2-${ts}`,
   };
 
   beforeAll(async () => {
+    const member = await prisma.member.create({
+      data: { email: `t-voucher-${ts}@t.local`, passwordHash: 'x' },
+    });
+    memberId = member.id;
+
     const productA = await prisma.product.create({
       data: { type: 'course', title: 'Voucher Test Product A', price: 500_000 },
     });
@@ -81,6 +89,8 @@ describe('VoucherService', () => {
           used: 0,
         },
         { code: codes.multiProduct, type: 'AMOUNT', value: 50_000, isActive: true },
+        { code: codes.trial, type: 'TRIAL', value: 0, trialDays: 7, isActive: true },
+        { code: codes.trialTwo, type: 'TRIAL', value: 0, trialDays: 3, isActive: true },
       ],
     });
 
@@ -107,58 +117,61 @@ describe('VoucherService', () => {
       where: { voucherId: { in: vs.map((v) => v.id) } },
     });
     await prisma.voucher.deleteMany({ where: { code: { in: Object.values(codes) } } });
+    await prisma.courseEnrollment.deleteMany({ where: { memberId } });
+    await prisma.course.deleteMany({ where: { productId: { in: [productAId, productBId] } } });
     await prisma.product.deleteMany({ where: { id: { in: [productAId, productBId] } } });
+    await prisma.member.delete({ where: { id: memberId } }).catch(() => {});
     await prisma.$disconnect();
   });
 
   it('returns invalid for unknown code', async () => {
-    const r = await service.validate('DOES-NOT-EXIST', productAId);
+    const r = await service.validate('DOES-NOT-EXIST', productAId, memberId);
     expect(r.valid).toBe(false);
     expect(r.reason).toMatch(/not found/i);
   });
 
   it('returns invalid for inactive voucher', async () => {
-    const r = await service.validate(codes.inactive, productAId);
+    const r = await service.validate(codes.inactive, productAId, memberId);
     expect(r.valid).toBe(false);
     expect(r.reason).toMatch(/inactive/i);
   });
 
   it('returns invalid when voucher scoped to different product', async () => {
-    const r = await service.validate(codes.wrongProduct, productAId);
+    const r = await service.validate(codes.wrongProduct, productAId, memberId);
     expect(r.valid).toBe(false);
     expect(r.reason).toMatch(/applicable/i);
   });
 
   it('accepts a multi-product voucher for every whitelisted product, rejects others', async () => {
-    const a = await service.validate(codes.multiProduct, productAId);
+    const a = await service.validate(codes.multiProduct, productAId, memberId);
     expect(a.valid).toBe(true);
-    const b = await service.validate(codes.multiProduct, productBId);
+    const b = await service.validate(codes.multiProduct, productBId, memberId);
     expect(b.valid).toBe(true);
-    const other = await service.validate(codes.multiProduct, randomUUID());
+    const other = await service.validate(codes.multiProduct, randomUUID(), memberId);
     expect(other.valid).toBe(false);
     expect(other.reason).toMatch(/applicable/i);
   });
 
   it('returns invalid for expired voucher', async () => {
-    const r = await service.validate(codes.expired, productAId);
+    const r = await service.validate(codes.expired, productAId, memberId);
     expect(r.valid).toBe(false);
     expect(r.reason).toMatch(/expired/i);
   });
 
   it('returns invalid for not-yet-active voucher', async () => {
-    const r = await service.validate(codes.notYet, productAId);
+    const r = await service.validate(codes.notYet, productAId, memberId);
     expect(r.valid).toBe(false);
     expect(r.reason).toMatch(/yet active/i);
   });
 
   it('returns invalid when quota exhausted', async () => {
-    const r = await service.validate(codes.exhausted, productAId);
+    const r = await service.validate(codes.exhausted, productAId, memberId);
     expect(r.valid).toBe(false);
     expect(r.reason).toMatch(/exhaust/i);
   });
 
   it('returns valid for valid voucher', async () => {
-    const r = await service.validate(codes.valid, productAId);
+    const r = await service.validate(codes.valid, productAId, memberId);
     expect(r.valid).toBe(true);
     expect(r.type).toBe('AMOUNT');
     expect(r.voucherAmount).toBe(50_000);
@@ -166,7 +179,7 @@ describe('VoucherService', () => {
   });
 
   it('threads maxAmount through for PERCENT vouchers (cap must not be silently dropped)', async () => {
-    const r = await service.validate(codes.cappedPercent, productAId);
+    const r = await service.validate(codes.cappedPercent, productAId, memberId);
     expect(r.valid).toBe(true);
     expect(r.type).toBe('PERCENT');
     expect(r.voucherAmount).toBe(50);
@@ -215,5 +228,49 @@ describe('VoucherService', () => {
     ]);
     const after = await prisma.voucher.findUnique({ where: { id: v!.id } });
     expect(after?.used).toBe(before + 1);
+  });
+
+  it('returns trialDays for a TRIAL voucher', async () => {
+    const r = await service.validate(codes.trial, productAId, memberId);
+    expect(r.valid).toBe(true);
+    expect(r.type).toBe('TRIAL');
+    expect(r.trialDays).toBe(7);
+  });
+
+  it('rejects a TRIAL voucher the member already trialed on this product', async () => {
+    const v = await prisma.voucher.findUniqueOrThrow({ where: { code: codes.trialTwo } });
+    // The proof of a prior trial is the ENROLLMENT, not a redemption row — and it
+    // is deliberately still counted after the trial has expired, so a member cannot
+    // re-trial the same course every time the clock runs out.
+    const course = await prisma.course.create({ data: { productId: productAId, durationMin: 10 } });
+    await prisma.courseEnrollment.create({
+      data: {
+        memberId,
+        courseId: course.id,
+        viaVoucherId: v.id,
+        expiredDate: new Date(Date.now() - 24 * 3600 * 1000), // long expired
+      },
+    });
+
+    const r = await service.validate(codes.trialTwo, productAId, memberId);
+    expect(r.valid).toBe(false);
+    expect(r.reason).toMatch(/already used/i);
+    expect(r.errorCode).toBe('VOUCHER_TRIAL_ALREADY_USED');
+  });
+
+  it('another member may still redeem the same TRIAL voucher', async () => {
+    const other = await prisma.member.create({
+      data: { email: `t-voucher-other-${ts}@t.local`, passwordHash: 'x' },
+    });
+    const r = await service.validate(codes.trialTwo, productAId, other.id);
+    expect(r.valid).toBe(true);
+    await prisma.member.delete({ where: { id: other.id } });
+  });
+
+  it('a trial on ANOTHER product does not block this one', async () => {
+    // The scope is (voucher, product): a multi-product trial code still owes the
+    // member a trial on every product it whitelists.
+    const r = await service.validate(codes.trial, productBId, memberId);
+    expect(r.valid).toBe(true);
   });
 });
