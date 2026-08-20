@@ -2,7 +2,7 @@ import { Prisma } from '@prisma/client';
 import type { Product } from '@prisma/client';
 import { prisma } from '@bb/db';
 import { notFound, ERROR_CODES } from '@bb/common/exceptions';
-import { activeEnrollment, OWNED_FOR_PURCHASE } from '@bb/domain/commerce/enrollment';
+import { activeEnrollment } from '@bb/domain/commerce/enrollment';
 import type { PaginationParams } from '@bb/common/utils/pagination.util';
 import type { Ownership, ProductMedia, ProductSort } from './dto/list-query.dto';
 
@@ -53,14 +53,19 @@ export class ProductService {
     if (q.keyword) where.title = { contains: q.keyword, mode: 'insensitive' };
     if (q.type) where.type = q.type;
     if (q.ownership === 'not_purchased' && q.memberId) {
-      // `OWNED_FOR_PURCHASE` in the `none` filter is what makes a refunded course
+      // `activeEnrollment()` in the `none` filter is what makes a refunded course
       // reappear in the catalog — otherwise the cancelled row keeps hiding it and
-      // the member can never find the product to buy again. Same reasoning covers
-      // a free trial: "not purchased" is literally true while on trial, and hiding
-      // the product would remove the only route to converting the trial to a sale.
+      // the member can never find the product to buy again. It also hides a course
+      // the member is CURRENTLY trialing (they already have access, so it does not
+      // belong in a "belum dibeli" shelf) while letting it come back the moment the
+      // trial expires — the predicate is date-based, so that needs no sweep.
+      //
+      // Note this is deliberately NOT `OWNED_FOR_PURCHASE`: that one answers "is it
+      // paid for" and is the checkout guard's job, so buying stays possible mid-trial
+      // even though the product is not listed here.
       where.OR = [
         { course: null },
-        { course: { enrollments: { none: { memberId: q.memberId, ...OWNED_FOR_PURCHASE } } } },
+        { course: { enrollments: { none: { memberId: q.memberId, ...activeEnrollment() } } } },
       ];
     }
     const [rows, total] = await Promise.all([

@@ -107,14 +107,14 @@ describe('free-trial voucher', () => {
     expect(await prisma.voucherRedemption.count({ where: { voucherId: trialVoucherId } })).toBe(1);
   });
 
-  it('a trial course counts as owned for access but NOT as purchased', async () => {
-    // Both halves matter: the member can consume the content, and the product
-    // stays visible in the catalog so the trial has somewhere to convert.
+  it('a trial course shows as owned and drops out of the not_purchased shelf', async () => {
     const purchased = await productService.list(PAGE, { memberId, ownership: 'purchased' });
     expect(purchased.rows.map((r) => r.id)).toContain(productId);
 
+    // The member can already open it, so it does not belong on a "belum dibeli"
+    // shelf — even though no money changed hands yet. It comes back on expiry.
     const catalog = await productService.list(PAGE, { memberId, ownership: 'not_purchased' });
-    expect(catalog.rows.map((r) => r.id)).toContain(productId);
+    expect(catalog.rows.map((r) => r.id)).not.toContain(productId);
   });
 
   it('refuses a second checkout with the same trial code', async () => {
@@ -130,6 +130,10 @@ describe('free-trial voucher', () => {
 
     const purchased = await productService.list(PAGE, { memberId, ownership: 'purchased' });
     expect(purchased.rows.map((r) => r.id)).not.toContain(productId);
+
+    // ...and returns to the catalog, so the member can still buy it.
+    const catalog = await productService.list(PAGE, { memberId, ownership: 'not_purchased' });
+    expect(catalog.rows.map((r) => r.id)).toContain(productId);
   });
 
   it('expired_date is ignored on a retail row (legacy lifetime purchases must not expire)', async () => {

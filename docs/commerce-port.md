@@ -585,9 +585,13 @@ production table to buy a guarantee the enrollment unique already provides.
   A **function**, not a const: `new Date()` inside a module-level object freezes at
   process boot and every trial looks valid (or expired) forever.
 - `OWNED_FOR_PURCHASE` — *is it already paid for?* Trial says **no**.
-  `{ isCanceled: false, viaVoucherId: null }`. Used by the checkout already-owned
-  guard and the `not_purchased` catalog filter, so a trial never blocks the sale it
-  exists to advertise.
+  `{ isCanceled: false, viaVoucherId: null }`. **Checkout guard only** — a trial must
+  never block the sale it exists to advertise.
+
+The `not_purchased` catalog shelf uses `activeEnrollment()`, NOT `OWNED_FOR_PURCHASE`:
+a course the member can already open does not belong on a "belum dibeli" shelf, even
+though it is genuinely unpaid. It returns to the shelf the moment the trial expires —
+date-based predicate, no sweep. Buying mid-trial still works, just not from that shelf.
 
 `expired_date` is honoured **only** for trial rows. A retail/legacy row is valid by
 existence: the legacy migration filled `expired_date` on lifetime purchases and the
@@ -614,6 +618,46 @@ pre-trial gate never read it, so honouring it globally would cut off paying buye
 `grantCourseEnrollment` matches only cancelled rows and trial rows. A redelivered
 event for a live paid enrollment updates 0 rows instead of wiping progress; a
 redelivered trial event excludes its own voucher, so `expired_date` can't be extended.
+
+### Outbound comms
+
+A trial fires the same `commerce.payment.success` as a purchase, so all three
+outbound paths had to learn about it — none of them may say "Pembayaran berhasil"
+to someone who was never charged:
+
+| Path | Purchase | Trial |
+|---|---|---|
+| Push + in-app | `paymentSuccess` — "Pembayaran berhasil" | `trialStarted` — "Uji coba kamu aktif" / "Akses {produk} terbuka sampai {tanggal}." |
+| Buyer email | `CoursePaymentSuccess` | `CourseTrialStarted` (bb-comms) |
+| Sales alert email | `SaleAlert` | **not sent** — a trial is not a sale |
+
+- `ActionLabel.TrialStarted` needs **no client release**: payment notifications route
+  on `refTable` (unchanged, `commerce_payment`) and an unknown `type` falls to the
+  default icon — which `paymentSuccess` already does. Value is FROZEN once shipped.
+- It is in `PUSH_LIMIT_EXEMPT`: transactional, must not spend the unopened-push budget.
+- The end date lives in the **body**, not the title — Android truncates titles at
+  ~40 chars and the date is the only new information in the message.
+- `loadTrialGrant()` lives in `commerce/trial.ts` and all three listeners call it.
+  It is deliberately NOT a field on the event: an optional field is read as
+  "not a trial" by any emitter that forgets it, and that failure is silent.
+- Dates are rendered in **WIB** (`formatDateWib` / `formatDateWIB`) in both repos.
+  Timestamps are stored tz-less in app-clock UTC, so a raw format shows the previous
+  day for anything after 17:00 WIB — tolerable on a receipt, not on the one date that
+  defines when access stops.
+- bb-comms derives the end date from `paid_at + vouchers.trial_days`, NOT from
+  `course_enrollment.expired_date`: the enrollment is written by a different async
+  listener, so reading it races the email. Both formulas use the same two committed
+  values, so they cannot disagree.
+
+**Deploy order is binding: bb-comms first, backend second.** An unknown message type
+goes straight to the DLQ (`internal/mq/consumer.go`), so shipping the backend first
+parks every trial email there until bb-comms catches up (replayable, but late).
+
+### Known gap
+
+No reminder before a trial expires — the member hears at day 0 and then access stops
+silently at day N. An H-1 email is usually the highest-converting message in a trial
+flow; it needs a cron plus a sent-marker to avoid double sends, and is NOT built.
 
 ### Out of scope here
 

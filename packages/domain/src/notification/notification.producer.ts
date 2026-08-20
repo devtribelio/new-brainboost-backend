@@ -15,6 +15,7 @@ export const UNOPENED_PUSH_LIMIT_DEFAULT = 0;
 // reasoning that keeps commerce out of the mute rules.
 const PUSH_LIMIT_EXEMPT: ReadonlySet<string> = new Set<string>([
   ActionLabel.PaymentSuccess,
+  ActionLabel.TrialStarted,
   ActionLabel.PaymentPending,
   ActionLabel.PaymentRefunded,
   ActionLabel.SubscriptionRenewed,
