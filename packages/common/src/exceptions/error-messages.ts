@@ -153,6 +153,7 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   PRODUCT_ALREADY_PURCHASED: 'Kelas ini sudah kamu miliki',
   VOUCHER_INVALID: 'Voucher tidak dapat digunakan',
   VOUCHER_EXHAUSTED: 'Kuota voucher sudah habis',
+  VOUCHER_TRIAL_ALREADY_USED: 'Voucher uji coba ini sudah pernah kamu pakai',
 
   // --- media -----------------------------------------------------------------
   MEDIA_TOKEN_MISSING: 'Media tidak dapat diakses, muat ulang halaman',
