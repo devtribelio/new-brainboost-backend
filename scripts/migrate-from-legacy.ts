@@ -14,6 +14,7 @@ import { randomUUID } from 'node:crypto';
 import type { Connection, RowDataPacket } from 'mysql2/promise';
 import { PrismaClient } from '@prisma/client';
 import { normalizePhonePair } from '@bb/common/utils/phone.util';
+import { detectPasswordAlgo } from '@bb/common/utils/password-algo.util';
 import { connectLegacyDb } from './legacy-db';
 
 const BATCH = Number.parseInt(process.env.MIGRATE_BATCH ?? '1000', 10);
@@ -362,7 +363,7 @@ async function migrateMembers(legacy: Connection) {
         appleSub,
         fullName,
         passwordHash: legacyPassword ?? `${randomUUID()}${randomUUID()}`,
-        passwordAlgo: legacyPassword ? 'legacy' : 'social',
+        passwordAlgo: detectPasswordAlgo(legacyPassword),
         avatarUrl: nonEmpty(r.image_url),
         bio: nonEmpty(r.biography),
         isActive: bool(r.is_active),

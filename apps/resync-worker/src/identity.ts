@@ -40,6 +40,7 @@ import { randomUUID } from 'node:crypto';
 import { PrismaClient } from '@prisma/client';
 import type { RowDataPacket } from 'mysql2/promise';
 import { normalizePhonePair } from '@bb/common/utils/phone.util';
+import { detectPasswordAlgo } from '@bb/common/utils/password-algo.util';
 import { connectLegacyDb } from './legacy-db';
 import { acquireLock, releaseLock } from './core';
 import { applyKycDecisions } from './syncers/kyc';
@@ -119,7 +120,7 @@ function toIdentity(r: any): LegacyIdentity {
     isEmailVerified: email ? bool(r.is_email_verified) : false,
     isPhoneVerified: phone ? bool(r.is_phone_verified) : false,
     passwordHash: legacyPassword ?? `${randomUUID()}${randomUUID()}`,
-    passwordAlgo: legacyPassword ? 'legacy' : 'social',
+    passwordAlgo: detectPasswordAlgo(legacyPassword),
     createdAt: toDate(r.date_register) ?? new Date(),
     bankCode: nonEmpty(r.bank_account_bank),
     bankAccountNumber: nonEmpty(r.bank_account_number),
