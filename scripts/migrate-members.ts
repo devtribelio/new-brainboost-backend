@@ -27,6 +27,7 @@ import { writeFileSync } from 'node:fs';
 import type { Connection, RowDataPacket } from 'mysql2/promise';
 import { PrismaClient } from '@prisma/client';
 import { normalizePhonePair } from '@bb/common/utils/phone.util';
+import { detectPasswordAlgo } from '@bb/common/utils/password-algo.util';
 import { connectLegacyDb } from './legacy-db';
 
 const REDIRECT_PATH = 'scripts/member-redirect.json';
@@ -200,7 +201,7 @@ async function fetchMembers(legacy: Connection, scope: Scope): Promise<LegacyMem
         appleSub,
         fullName,
         passwordHash: legacyPassword ?? `${randomUUID()}${randomUUID()}`,
-        passwordAlgo: legacyPassword ? 'legacy' : 'social',
+        passwordAlgo: detectPasswordAlgo(legacyPassword),
         avatarUrl: nonEmpty(r.image_url),
         bio: nonEmpty(r.biography),
         bankCode: nonEmpty(r.bank_account_bank),
