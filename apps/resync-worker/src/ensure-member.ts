@@ -19,6 +19,7 @@ import { randomUUID } from 'node:crypto';
 import type { RowDataPacket } from 'mysql2/promise';
 import type { PrismaClient } from '@prisma/client';
 import { normalizePhonePair } from '@bb/common/utils/phone.util';
+import { detectPasswordAlgo } from '@bb/common/utils/password-algo.util';
 import type { LegacyClient } from './legacy-db';
 import { bool, nonEmpty, toDate } from './util';
 
@@ -209,7 +210,7 @@ export function makeEnsureMember(deps: Deps) {
           ...profile,
           ...(bank ?? {}),
           passwordHash: legacyPassword ?? `${randomUUID()}${randomUUID()}`,
-          passwordAlgo: legacyPassword ? 'legacy' : 'social',
+          passwordAlgo: detectPasswordAlgo(legacyPassword),
           createdAt: toDate(r.date_register) ?? now,
           legacySyncedAt: now,
           updatedAt: now,
