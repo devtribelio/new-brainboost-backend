@@ -13,6 +13,13 @@ export class StartCheckoutResultDto {
   @ApiProperty({ example: 50_000 })
   voucherAmount!: number;
 
+  @ApiProperty({
+    example: 0,
+    description:
+      'Unused portion of a running subscription term, credited on a tier upgrade. 0 on every other order. Applied after the voucher.',
+  })
+  prorationCredit!: number;
+
   @ApiProperty({ example: 450_000 })
   amount!: number;
 

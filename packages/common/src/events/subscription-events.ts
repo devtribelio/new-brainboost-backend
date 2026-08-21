@@ -39,11 +39,38 @@ export interface SubscriptionCanceledEvent extends SubscriptionEventBase {
   reason: 'user' | 'store' | 'refund';
 }
 
+/**
+ * A tier downgrade was SCHEDULED. Nothing has changed yet — the plan fields
+ * still describe what the member is on today; `pendingPlanCode`/`pendingTier`
+ * are what they will land on at `effectiveAt`. Fired only when the pending
+ * change actually changes (a webhook redelivery is a no-op), so a consumer can
+ * treat it as "tell the owner", not "re-render".
+ */
+export interface SubscriptionPendingChangeEvent extends SubscriptionEventBase {
+  pendingPlanId: string;
+  pendingPlanCode: string;
+  pendingTier: string;
+  pendingSeatCount: number;
+  /** Seats occupied today. Above `pendingSeatCount` = someone must be evicted. */
+  claimedSeats: number;
+  effectiveAt: Date;
+}
+
+/** The scheduled change landed: `planCode`/`tier` are the NEW plan. */
+export interface SubscriptionPlanChangedEvent extends SubscriptionEventBase {
+  previousPlanCode: string;
+  previousTier: string;
+  /** Members whose seat was taken away because the new tier is smaller. */
+  evictedMemberIds: string[];
+}
+
 export type SubscriptionEventMap = {
   'subscription.activated': SubscriptionActivatedEvent;
   'subscription.renewed': SubscriptionRenewedEvent;
   'subscription.expired': SubscriptionExpiredEvent;
   'subscription.canceled': SubscriptionCanceledEvent;
+  'subscription.pending_change': SubscriptionPendingChangeEvent;
+  'subscription.plan_changed': SubscriptionPlanChangedEvent;
 };
 
 class TypedEmitter {

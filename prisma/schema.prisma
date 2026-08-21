@@ -1209,6 +1209,10 @@ model CommerceTransaction {
   shippingTotal                Int                       @default(0) @map("shipping_total") // reserved; 0 for course MVP
   feeTotal                     Int                       @default(0) @map("fee_total")
   voucherAmount                Int                       @default(0) @map("voucher_amount")
+  // Unused portion of a subscription term credited back on an upgrade. Reduces
+  // `amount` exactly like a voucher does, so the affiliate base (which is
+  // derived from what was actually paid) follows without extra plumbing.
+  prorationCredit              Int                       @default(0) @map("proration_credit")
   amount                       Int                       @default(0) // grand total
   voucherCode                  String?                   @map("voucher_code")
   voucherId                    String?                   @map("voucher_id") @db.Uuid
@@ -1541,6 +1545,14 @@ model MemberSubscription {
   expiresAt           DateTime           @map("expires_at")
   graceUntil          DateTime?          @map("grace_until") // expiresAt + app_settings subscription.graceDays
   canceledAt          DateTime?          @map("canceled_at") // cancel-INTENT (auto-renew off); access continues until expiry
+  // Scheduled tier change (downgrade only — an upgrade is applied on the spot).
+  // Declared any time, applied by the renewal that bills the new plan. Plain
+  // scalar planId, no FK: a plan row is never deleted, and the pointer is
+  // cleared on apply/cancel anyway.
+  pendingPlanId       String?            @map("pending_plan_id") @db.Uuid
+  pendingEffectiveAt  DateTime?          @map("pending_effective_at") // = expiresAt when declared
+  pendingSource       String?            @map("pending_source") // revenuecat | web — who owns the cancel path
+  pendingDeclaredAt   DateTime?          @map("pending_declared_at")
   source              String // xendit | revenuecat | granted
   providerRef         String?            @map("provider_ref") // RC original_transaction_id — EXPIRATION/CANCELLATION webhook lookup
   latestTransactionId String?            @map("latest_transaction_id") @db.Uuid
@@ -1569,6 +1581,10 @@ model SubscriptionSeat {
   subscriptionId String    @map("subscription_id") @db.Uuid
   seatNo         Int       @map("seat_no") // 1 = owner
   memberId       String?   @map("member_id") @db.Uuid // null = empty slot
+  // Owner's pick of who survives a pending downgrade. Kept on the SEAT so a
+  // member who leaves before the change lands drops out of the selection for
+  // free — a list stored on the subscription would go stale instead.
+  pendingKeep    Boolean   @default(false) @map("pending_keep")
   inviteCode     String?   @unique @map("invite_code") // crypto-random, single-use, rotated by generateInvite
   claimedAt      DateTime? @map("claimed_at")
   createdAt      DateTime  @default(now()) @map("created_at")

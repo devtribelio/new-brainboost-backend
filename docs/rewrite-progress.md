@@ -153,7 +153,8 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` parity met for current s
 - HTTP: modul `/subscription` (7 endpoint). Jobs: expire + renewal reminder (H-7/3/1). Script: `pnpm grant:subscription` (eligibility 2 sumber: Postgres + legacy MariaDB langsung).
 - Tests: 15 spec / 93 test subscription; full suite 567 green.
 - Aturan bisnis + runbook launch + query reporting: `docs/subscription-port.md`; log keputusan: `docs/subscription-progress.md`.
-- **Open items (eksternal)**: 3 template bb-comms (blocker jobs reminder di prod); SKU asli App Store/Play + entitlement RC; angka final `renewal_affiliate_rate` (COO); copy marketing; investigasi 655 legacy paying member tanpa akun baru (temuan BE-20).
+- **Tier change (Approach B) — selesai 2026-08-21.** Downgrade dijadwalkan (4 kolom pending di `member_subscriptions` + `subscription_seats.pending_keep`, migration `20260821120000`), upgrade langsung + proration (`commerce_transactions.proration_credit`, migration `20260821130000`). Diterapkan oleh pembayaran/RENEWAL — tak ada job apply-by-date. Eviction: owner → `pending_keep` → nomor seat terkecil. 3 endpoint baru (`POST/DELETE /subscription/pending`, `POST /subscription/pending/seats`) + job `subscriptionSeatChoiceReminder`. Ikut memperbaiki 3 cacat lama: jatah seat implisit dari jumlah row, grace diberikan ke yang berhenti sukarela, deteksi renewal komisi di-scope per-plan (tiap ganti tier bayar rate first-sale 40%). Spec: `docs/subscription-tier-change.md`.
+- **Open items (eksternal)**: 3 template bb-comms (blocker jobs reminder di prod); SKU asli App Store/Play + entitlement RC; angka final `renewal_affiliate_rate` (COO); **basis + rate komisi upgrade (COO)**; copy marketing; investigasi 655 legacy paying member tanpa akun baru (temuan BE-20).
 
 ## Not started ([ ])
 

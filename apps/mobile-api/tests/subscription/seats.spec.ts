@@ -121,6 +121,37 @@ describe('SeatService', () => {
     expect(claimed).toHaveLength(2); // owner + exactly one winner
   });
 
+  it('seats above the plan allowance are neither invitable nor claimable', async () => {
+    // A tier change keeps occupied seats even when they exceed the new plan, so
+    // an over-limit slot can come back empty later (the member leaves). It must
+    // not be sellable, and neither must a code minted before the shrink.
+    const stale = await seatService.generateInvite(ownerId); // seat 2 of 3
+    const soloProduct = await prisma.product.create({
+      data: { type: 'subscription', code: `TST-SEAT-SOLO-${uniq}`, title: 'Solo', price: 1 },
+    });
+    const solo = await prisma.subscriptionPlan.create({
+      data: {
+        productId: soloProduct.id,
+        code: `TSTS_SOLO_${uniq}`,
+        tier: 'SOLO',
+        periodMonths: 12,
+        seatCount: 1,
+        affiliateRate: 40,
+        renewalAffiliateRate: 20,
+        sortOrder: 99,
+      },
+    });
+    await prisma.memberSubscription.update({
+      where: { id: subId },
+      data: { planId: solo.id },
+    });
+
+    await expect(seatService.generateInvite(ownerId)).rejects.toThrow('Semua seat sudah terisi');
+    await expect(seatService.claimSeat(memberA, stale.inviteCode)).rejects.toThrow(
+      'jatah seat paket ini sudah penuh',
+    );
+  });
+
   it('a member holding a seat cannot claim another (one seat per member, DB-enforced)', async () => {
     const inv1 = await seatService.generateInvite(ownerId);
     await seatService.claimSeat(memberA, inv1.inviteCode);

@@ -227,6 +227,92 @@ describe('/subscription HTTP module (BE-19)', () => {
     ).toBeNull();
   });
 
+  it('declare → /me shows it → choose seats → cancel, all answering the /me shape', async () => {
+    const ownerToken = await login(ownerEmail);
+    const auth = (r: request.Test) => r.set('authorization', `Bearer ${ownerToken}`);
+
+    const declared = await auth(
+      request(app).post('/api/subscription/pending').send({ planCode: `TSTH_SOLO_${uniq}` }),
+    );
+    expect(declared.status).toBe(200);
+    expect(declared.body.data.pendingChange).toMatchObject({
+      planCode: `TSTH_SOLO_${uniq}`,
+      tier: 'SOLO',
+      seatCount: 1,
+      canCancel: true, // web-declared, so we own the revert
+    });
+    // Nothing about the running term moved.
+    expect(declared.body.data.planCode).toBe(`TSTH_DUO_${uniq}`);
+
+    const sub = await prisma.memberSubscription.findFirstOrThrow({ where: { ownerId } });
+    expect(sub.pendingEffectiveAt!.toISOString()).toBe(sub.expiresAt.toISOString());
+
+    // Seat 2 occupied → one member too many for SOLO, and they cannot be kept.
+    await prisma.subscriptionSeat.update({
+      where: { subscriptionId_seatNo: { subscriptionId: sub.id, seatNo: 2 } },
+      data: { memberId: guestId, claimedAt: new Date() },
+    });
+    const me = await auth(request(app).get('/api/subscription/me'));
+    expect(me.body.data.pendingChange.mustEvict).toBe(true);
+
+    const seat2 = await prisma.subscriptionSeat.findFirstOrThrow({
+      where: { subscriptionId: sub.id, seatNo: 2 },
+    });
+    const tooMany = await auth(
+      request(app).post('/api/subscription/pending/seats').send({ seatIds: [seat2.id] }),
+    );
+    expect(tooMany.status).toBe(400); // SOLO has room for the owner only
+    expect(tooMany.body.error.message).toContain('maksimal');
+
+    // An empty choice is legal — it means "keep nobody but me".
+    const none = await auth(
+      request(app).post('/api/subscription/pending/seats').send({ seatIds: [] }),
+    );
+    expect(none.status).toBe(200);
+
+    // A store-scheduled change is Apple's to revert, not ours.
+    await prisma.memberSubscription.update({
+      where: { id: sub.id },
+      data: { pendingSource: 'revenuecat' },
+    });
+    const storeOwned = await auth(request(app).delete('/api/subscription/pending'));
+    expect(storeOwned.status).toBe(400);
+    expect(storeOwned.body.error.message).toContain('App Store');
+
+    await prisma.memberSubscription.update({
+      where: { id: sub.id },
+      data: { pendingSource: 'web' },
+    });
+    const dropped = await auth(request(app).delete('/api/subscription/pending'));
+    expect(dropped.status).toBe(200);
+    expect(dropped.body.data.pendingChange).toBeNull();
+
+    // Leave the fixture as the cancel test expects it.
+    await prisma.subscriptionSeat.update({
+      where: { subscriptionId_seatNo: { subscriptionId: sub.id, seatNo: 2 } },
+      data: { memberId: null, claimedAt: null },
+    });
+  });
+
+  it('an upgrade is refused by the pending endpoint — it belongs to checkout', async () => {
+    const guestToken = await login(guestEmail);
+    // The guest owns nothing, so the same endpoint answers the no-subscription case.
+    const r = await request(app)
+      .post('/api/subscription/pending')
+      .set('authorization', `Bearer ${guestToken}`)
+      .send({ planCode: `TSTH_SOLO_${uniq}` });
+    expect(r.status).toBe(400);
+    expect(r.body.error.message).toContain('Tidak ada subscription aktif');
+
+    const ownerToken = await login(ownerEmail);
+    const up = await request(app)
+      .post('/api/subscription/pending')
+      .set('authorization', `Bearer ${ownerToken}`)
+      .send({ planCode: `TSTH_DUO_${uniq}` }); // already on DUO → revert, not an upgrade
+    expect(up.status).toBe(200);
+    expect(up.body.data.pendingChange).toBeNull();
+  });
+
   it('POST /cancel sets the intent (idempotent); RC-sourced subs get the store message', async () => {
     const ownerToken = await login(ownerEmail);
     const r = await request(app)
@@ -238,6 +324,7 @@ describe('/subscription HTTP module (BE-19)', () => {
     const sub = await prisma.memberSubscription.findFirstOrThrow({ where: { ownerId } });
     expect(sub.canceledAt).not.toBeNull();
     expect(sub.status).toBe('ACTIVE'); // access continues
+    expect(sub.graceUntil!.getTime()).toBe(sub.expiresAt.getTime()); // grace given up
 
     const again = await request(app)
       .post('/api/subscription/cancel')

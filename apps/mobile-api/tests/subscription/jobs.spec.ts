@@ -11,6 +11,7 @@ import { randomUUID } from 'node:crypto';
 import { prisma } from '@bb/db';
 import { subscriptionRenewalReminder } from '@bb/domain/jobs/subscription-renewal-reminder';
 import { subscriptionExpire } from '@bb/domain/jobs/subscription-expire';
+import { subscriptionSeatChoiceReminder } from '@bb/domain/jobs/subscription-seat-choice-reminder';
 import { SubscriptionService } from '@bb/domain/subscription/subscription.service';
 import { registerSubscriptionNotificationListener } from '@bb/domain/notification/listeners/subscription.listener';
 import { registerCommerceNotificationListener } from '@bb/domain/notification/listeners/commerce.listener';
@@ -316,5 +317,116 @@ describe('lifecycle notifications (BE-17)', () => {
     expect(
       await prisma.notification.count({ where: { memberId: ownerId, type: 'paymentSuccess' } }),
     ).toBe(0);
+  });
+});
+
+describe('subscriptionSeatChoiceReminder', () => {
+  let duoPlanId: string;
+  let duoProductId: string;
+
+  beforeAll(async () => {
+    const p = await prisma.product.create({
+      data: {
+        type: 'subscription',
+        code: `TSTJ-DUO-${uniq}`,
+        title: 'Jobs duo',
+        price: 1_499_000,
+        isActive: false,
+        status: 'inactive',
+      },
+    });
+    duoProductId = p.id;
+    duoPlanId = (
+      await prisma.subscriptionPlan.create({
+        data: {
+          productId: p.id,
+          code: `TSTJ_DUO_${uniq}`,
+          tier: 'DUO',
+          periodMonths: 12,
+          seatCount: 2,
+          affiliateRate: 40,
+          renewalAffiliateRate: 20,
+          sortOrder: 99,
+        },
+      })
+    ).id;
+  });
+
+  /** DUO sub, both seats occupied, scheduled down to the 1-seat SOLO plan. */
+  async function pendingDowngrade(daysAway: number) {
+    const res = await subscriptionService.activateFromPayment({
+      ownerId,
+      productId: duoProductId,
+      transactionId: randomUUID(),
+      source: 'xendit',
+    });
+    const sub = res.subscription!;
+    const effectiveAt = new Date(Date.now() + daysAway * DAY_MS);
+    const guest = await prisma.member.create({
+      data: { email: `sjobs-guest-${randomUUID().slice(0, 6)}-${uniq}@test.local`, passwordHash: 'x' },
+    });
+    await prisma.subscriptionSeat.update({
+      where: { subscriptionId_seatNo: { subscriptionId: sub.id, seatNo: 2 } },
+      data: { memberId: guest.id, claimedAt: new Date() },
+    });
+    return prisma.memberSubscription.update({
+      where: { id: sub.id },
+      data: {
+        planId: duoPlanId,
+        expiresAt: effectiveAt,
+        graceUntil: new Date(effectiveAt.getTime() + 7 * DAY_MS),
+        pendingPlanId: planId, // SOLO — 1 seat
+        pendingEffectiveAt: effectiveAt,
+        pendingSource: 'web',
+        pendingDeclaredAt: new Date(),
+      },
+    });
+  }
+
+  function choiceNotifs() {
+    return prisma.notification.findMany({
+      where: { memberId: ownerId, type: 'subscriptionChangeScheduled' },
+    });
+  }
+
+  it('nudges an owner who is over the incoming seat count and has not chosen', async () => {
+    await pendingDowngrade(2);
+    const res = await subscriptionSeatChoiceReminder();
+    expect(res.sent).toBe(1);
+    expect(await choiceNotifs()).toHaveLength(1);
+  });
+
+  it('stops once the owner has chosen anything at all', async () => {
+    const sub = await pendingDowngrade(2);
+    await prisma.subscriptionSeat.updateMany({
+      where: { subscriptionId: sub.id, seatNo: 1 },
+      data: { pendingKeep: true },
+    });
+    const res = await subscriptionSeatChoiceReminder();
+    expect(res.sent).toBe(0);
+    expect(await choiceNotifs()).toHaveLength(0);
+  });
+
+  it('says nothing when the household already fits the smaller plan', async () => {
+    const sub = await pendingDowngrade(2);
+    await prisma.subscriptionSeat.updateMany({
+      where: { subscriptionId: sub.id, seatNo: 2 },
+      data: { memberId: null, claimedAt: null },
+    });
+    const res = await subscriptionSeatChoiceReminder();
+    expect(res.sent).toBe(0);
+  });
+
+  it('one nudge per run, and the same bucket never fires twice', async () => {
+    await pendingDowngrade(2);
+    await subscriptionSeatChoiceReminder();
+    await subscriptionSeatChoiceReminder(); // second sweep, same day
+    expect(await choiceNotifs()).toHaveLength(1);
+  });
+
+  it('ignores a change that is still far away', async () => {
+    await pendingDowngrade(60);
+    const res = await subscriptionSeatChoiceReminder();
+    expect(res.sent).toBe(0);
   });
 });

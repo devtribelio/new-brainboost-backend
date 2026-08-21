@@ -66,6 +66,15 @@ export class RevenueCatEventDto {
   @IsString()
   product_id?: string;
 
+  @ApiPropertyOptional({
+    example: 'com.brainboost.ios.sub_solo_12m',
+    description:
+      'PRODUCT_CHANGE only: the SKU the subscription is changing TO (`product_id` stays the CURRENT one). Absent on every other event type.',
+  })
+  @IsOptional()
+  @IsString()
+  new_product_id?: string;
+
   @ApiPropertyOptional({ example: '2000000123456789' })
   @IsOptional()
   @IsString()

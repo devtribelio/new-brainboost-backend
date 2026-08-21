@@ -290,10 +290,18 @@ export class AffiliatorService {
    * renewalAffiliateRate on renewals.
    *
    * Renewal detection: the provider flag (RC RENEWAL) OR any OTHER non-null
-   * transactionId in the activation ledger for the buyer's sub on this plan.
+   * transactionId in the activation ledger for the buyer's ACTIVE sub.
    * "Other" makes it listener-order independent (this event's own activation may
    * or may not have landed yet); "non-null" excludes grants — the first PAID
    * purchase after a granted sub is the affiliate's first sale → full rate.
+   *
+   * Scoped to the SUBSCRIPTION, not to the plan. A tier change keeps the same
+   * `member_subscriptions` row and only flips `planId`, so a per-plan lookup
+   * found an empty ledger for the new tier and billed a plain renewal at the
+   * first-sale rate — 40% instead of 20%, on both the upgrade and the downgrade.
+   * Scoping to the ACTIVE sub still treats a repurchase after EXPIRED as a first
+   * sale, because that lands on a NEW subscription row (the old one is no longer
+   * ACTIVE, so its ledger is out of scope).
    */
   private async commitFlatSubscriptionCommission(
     input: {
@@ -336,7 +344,7 @@ export class AffiliatorService {
       input.isRenewal === true ||
       (await prisma.subscriptionActivation.count({
         where: {
-          subscription: { ownerId: input.buyerMemberId, planId: plan.id },
+          subscription: { ownerId: input.buyerMemberId, status: 'ACTIVE' },
           AND: [
             { transactionId: { not: null } },
             ...(input.transactionId ? [{ NOT: { transactionId: input.transactionId } }] : []),

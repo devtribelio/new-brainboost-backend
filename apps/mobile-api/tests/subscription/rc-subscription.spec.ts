@@ -250,6 +250,9 @@ describe('RC subscription flow (BE-12/BE-13)', () => {
     const sub = await prisma.memberSubscription.findFirstOrThrow({ where: { ownerId: buyerId } });
     expect(sub.status).toBe('ACTIVE'); // access continues to expiry
     expect(sub.canceledAt).not.toBeNull();
+    // Walking away gives up the grace week — it exists to fix a payment, and
+    // there is no payment coming. Access still runs to the paid expiry.
+    expect(sub.graceUntil!.getTime()).toBe(sub.expiresAt.getTime());
     expect((await commissions()).every((c) => c.status !== 'VOIDED')).toBe(true);
     expect(capturedEvents.filter((e) => e.name === 'canceled')).toEqual([
       { name: 'canceled', reason: 'store' },

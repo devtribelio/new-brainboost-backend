@@ -6,7 +6,7 @@ import { SubscriptionService } from '@bb/domain/subscription/subscription.servic
 import { SeatService } from '@bb/domain/subscription/seat.service';
 import { EntitlementService } from '@bb/domain/subscription/entitlement.service';
 import { SubscriptionController } from './subscription.controller';
-import { ClaimSeatDto } from './dto/subscription.dto';
+import { ChooseSeatsDto, ClaimSeatDto, DeclarePendingChangeDto } from './dto/subscription.dto';
 
 export function subscriptionRoutes(): Router {
   const router = Router();
@@ -25,6 +25,12 @@ export function subscriptionRoutes(): Router {
   bindRoute({ router, controller: ctrl, method: 'delete', path: '/seats/:seatId', handlerKey: 'removeSeat', middlewares: [authGuard] });
   bindRoute({ router, controller: ctrl, method: 'post', path: '/seats/leave', handlerKey: 'leaveSeat', middlewares: [authGuard] });
   bindRoute({ router, controller: ctrl, method: 'post', path: '/cancel', handlerKey: 'cancel', middlewares: [authGuard] });
+
+  // Scheduled tier change. All three answer with the same /me shape, so the app
+  // never has to merge a partial response into what it already rendered.
+  bindRoute({ router, controller: ctrl, method: 'post', path: '/pending', handlerKey: 'declarePending', middlewares: [authGuard, validateDto(DeclarePendingChangeDto)] });
+  bindRoute({ router, controller: ctrl, method: 'delete', path: '/pending', handlerKey: 'cancelPending', middlewares: [authGuard] });
+  bindRoute({ router, controller: ctrl, method: 'post', path: '/pending/seats', handlerKey: 'choosePendingSeats', middlewares: [authGuard, validateDto(ChooseSeatsDto)] });
 
   return router;
 }

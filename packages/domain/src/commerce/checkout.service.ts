@@ -11,6 +11,8 @@ import { generateOrderCode } from './utils/generate-order-code';
 import { VoucherService } from './voucher.service';
 import { attributionService } from '@bb/domain/affiliate/attribution.service';
 import { OWNED_FOR_PURCHASE } from './enrollment';
+import { isUpgrade } from '../subscription/tier';
+import { computeProration } from '../subscription/proration';
 
 export interface StartCheckoutInput {
   memberId: string;
@@ -25,6 +27,8 @@ export interface StartCheckoutResult {
   transactionCode: string;
   itemTotal: number;
   voucherAmount: number;
+  /** Unused term credited back on an upgrade; 0 on every other order. */
+  prorationCredit: number;
   amount: number;
   expiredAt: Date;
 }
@@ -58,23 +62,21 @@ export class CheckoutService {
     });
     if (owned) throw badRequest(ERROR_CODES.PRODUCT_ALREADY_PURCHASED);
 
+    let prorationCredit = 0;
     // Subscription checkout guard (PRD BE-14). Same plan passes on purpose —
     // that's web renewal-by-repurchase (the reminder emails point here); the
-    // activation listener extends the sub on payment success. Tier switches on
-    // web are Phase 2 (the only sanctioned switch path is RC PRODUCT_CHANGE).
+    // activation listener extends the sub on payment success.
     const plan = await prisma.subscriptionPlan.findUnique({
       where: { productId: product.id },
-      select: { id: true },
+      select: { id: true, seatCount: true },
     });
     if (plan) {
       const activeSub = await prisma.memberSubscription.findFirst({
         where: { ownerId: input.memberId, status: 'ACTIVE' },
-        select: { planId: true },
+        include: { plan: { include: { product: { select: { price: true } } } } },
       });
       if (activeSub && activeSub.planId !== plan.id) {
-        throw new BadRequestException(
-          'Kamu masih punya subscription aktif di paket lain — upgrade/downgrade belum tersedia',
-        );
+        prorationCredit = assertTierSwitchAllowed(activeSub, plan, product.price);
       }
       if (!activeSub) {
         // Seated on someone ELSE's ACTIVE sub → resolve that BEFORE paying, not
@@ -123,6 +125,7 @@ export class CheckoutService {
       unitPrice: product.price,
       qty: 1,
       voucher: voucherMeta,
+      prorationCredit,
     });
 
     const attribution = await this.resolveAttribution(input.memberId, input.productId);
@@ -145,6 +148,7 @@ export class CheckoutService {
         voucherAmount: totals.voucherAmount,
         voucherCode: input.voucherCode,
         voucherId,
+        prorationCredit: totals.prorationCredit,
         amount: totals.amount,
         affiliatorId: attribution.affiliatorId,
         programId: attribution.programId,
@@ -160,6 +164,7 @@ export class CheckoutService {
       transactionCode: tx.code,
       itemTotal: totals.itemTotal,
       voucherAmount: totals.voucherAmount,
+      prorationCredit: totals.prorationCredit,
       amount: totals.amount,
       expiredAt,
     };
@@ -200,4 +205,58 @@ export class CheckoutService {
       programId: visit.programId,
     };
   }
+}
+
+/**
+ * Which tier switches web checkout will sell, and at what price.
+ *
+ * **Upgrade** is sold immediately, prorated: the member gets the bigger plan and
+ * the seats today, and pays the new price minus whatever their current term is
+ * still worth. Same deal Apple gives on iOS, deliberately.
+ *
+ * **Downgrade** is only sold once the running term has actually ended (the grace
+ * window). Selling it earlier would apply the smaller plan on payment and strip
+ * the member of seats and access they already paid for — the exact failure the
+ * scheduled-change flow exists to prevent. Before that date the answer is
+ * "declare it, we will apply it then", which is what `POST /subscription/pending`
+ * is for. It also has to have BEEN declared: an undeclared downgrade means the
+ * member never saw the "who keeps a seat" step.
+ *
+ * Returns the proration credit to apply (0 for a downgrade).
+ */
+function assertTierSwitchAllowed(
+  sub: {
+    planId: string;
+    expiresAt: Date;
+    pendingPlanId: string | null;
+    plan: { seatCount: number; periodMonths: number; product: { price: number } };
+  },
+  target: { id: string; seatCount: number },
+  targetPrice: number,
+): number {
+  const from = { seatCount: sub.plan.seatCount, price: sub.plan.product.price };
+  const to = { seatCount: target.seatCount, price: targetPrice };
+  const now = new Date();
+
+  if (isUpgrade(from, to)) {
+    return computeProration({
+      oldPrice: sub.plan.product.price,
+      newPrice: targetPrice,
+      expiresAt: sub.expiresAt,
+      periodMonths: sub.plan.periodMonths,
+      now,
+    }).credit;
+  }
+
+  if (sub.pendingPlanId !== target.id) {
+    throw new BadRequestException(
+      'Jadwalkan dulu penurunan paket sebelum membayar — akses paket sekarang masih berjalan',
+    );
+  }
+  if (now < sub.expiresAt) {
+    throw new BadRequestException(
+      'Paket sekarang masih berjalan — pembayaran paket baru bisa dilakukan setelah masa aktif berakhir',
+    );
+  }
+  return 0;
 }

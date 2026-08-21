@@ -36,8 +36,13 @@ export class SeatService {
   async generateInvite(ownerId: string): Promise<InviteResult> {
     const sub = await this.activeSubOrThrow(ownerId);
 
+    // `seatNo <= plan.seatCount` is the allowance, not the row count: a tier
+    // change can leave MORE rows than the new plan allows, because `changePlan`
+    // only ever drops EMPTY slots — a Family→Solo with 3 occupied seats keeps
+    // all three. When one of those over-limit members later leaves, their slot
+    // must not become invitable again, which is exactly the revenue leak.
     const seat = await prisma.subscriptionSeat.findFirst({
-      where: { subscriptionId: sub.id, memberId: null },
+      where: { subscriptionId: sub.id, memberId: null, seatNo: { lte: sub.plan.seatCount } },
       orderBy: { seatNo: 'asc' },
     });
     if (!seat) throw new BadRequestException('Semua seat sudah terisi');
@@ -62,13 +67,21 @@ export class SeatService {
   async claimSeat(memberId: string, code: string): Promise<SubscriptionSeat> {
     const seat = await prisma.subscriptionSeat.findUnique({
       where: { inviteCode: code },
-      include: { subscription: true },
+      include: { subscription: { include: { plan: { select: { seatCount: true } } } } },
     });
     if (!seat) throw new BadRequestException('Kode undangan tidak valid');
 
     const sub = seat.subscription;
     if (sub.status !== 'ACTIVE' || (sub.graceUntil ?? sub.expiresAt) <= new Date()) {
       throw new BadRequestException('Subscription tidak aktif');
+    }
+    // Backstop for a code minted before a tier change shrank the allowance (the
+    // seatNo filter in generateInvite only guards fresh invites). Checking the
+    // seat NUMBER rather than counting occupants keeps this race-free: each code
+    // belongs to exactly one row, so two concurrent claimers can never both slip
+    // past a count that was true when they read it.
+    if (seat.seatNo > sub.plan.seatCount) {
+      throw new BadRequestException('Kode undangan sudah tidak berlaku — jatah seat paket ini sudah penuh');
     }
     if (sub.ownerId === memberId) {
       throw new BadRequestException('Kamu adalah pemilik subscription ini (sudah menempati seat 1)');
@@ -103,6 +116,56 @@ export class SeatService {
       '[subscription] seat claimed',
     );
     return prisma.subscriptionSeat.findUniqueOrThrow({ where: { id: seat.id } });
+  }
+
+  /**
+   * Owner picks which seats survive the pending downgrade. The selection is
+   * stored on the seats and only READ when the change actually lands, so it
+   * self-corrects: a member who leaves in the meantime takes their mark with
+   * them, and the fallback rule fills whatever is left over.
+   *
+   * The owner's own seat is never part of the choice — they pay the bill, and
+   * offering it as an option only invites them to lock themselves out.
+   */
+  async choosePendingSeats(ownerId: string, seatIds: string[]): Promise<void> {
+    const sub = await prisma.memberSubscription.findFirst({
+      where: { ownerId, status: 'ACTIVE' },
+    });
+    if (!sub) throw new BadRequestException('Tidak ada subscription aktif');
+    if (!sub.pendingPlanId) throw new BadRequestException('Tidak ada perubahan paket terjadwal');
+
+    const pendingPlan = await prisma.subscriptionPlan.findUniqueOrThrow({
+      where: { id: sub.pendingPlanId },
+    });
+    const seats = await prisma.subscriptionSeat.findMany({
+      where: { subscriptionId: sub.id, id: { in: seatIds } },
+    });
+    if (seats.length !== seatIds.length) {
+      throw new BadRequestException('Ada seat yang bukan milik subscription ini');
+    }
+    const chosen = seats.filter((s) => s.memberId !== null && s.memberId !== ownerId);
+    // +1 for the owner's seat, which is kept unconditionally.
+    if (chosen.length + 1 > pendingPlan.seatCount) {
+      throw new BadRequestException(
+        `Paket ${pendingPlan.tier} hanya punya ${pendingPlan.seatCount} seat — pilih maksimal ${pendingPlan.seatCount - 1} anggota`,
+      );
+    }
+
+    const chosenIds = chosen.map((s) => s.id);
+    await prisma.$transaction([
+      prisma.subscriptionSeat.updateMany({
+        where: { subscriptionId: sub.id },
+        data: { pendingKeep: false },
+      }),
+      prisma.subscriptionSeat.updateMany({
+        where: { id: { in: chosenIds } },
+        data: { pendingKeep: true },
+      }),
+    ]);
+    logger.info(
+      { ownerId, subscriptionId: sub.id, kept: chosenIds.length },
+      '[subscription] owner chose seats for the pending downgrade',
+    );
   }
 
   /** Owner kicks a member off a seat. Seat 1 (the owner) can't be removed. */
@@ -166,6 +229,7 @@ export class SeatService {
   private async activeSubOrThrow(ownerId: string) {
     const sub = await prisma.memberSubscription.findFirst({
       where: { ownerId, status: 'ACTIVE' },
+      include: { plan: { select: { seatCount: true } } },
     });
     if (!sub || (sub.graceUntil ?? sub.expiresAt) <= new Date()) {
       throw new BadRequestException('Subscription tidak aktif');

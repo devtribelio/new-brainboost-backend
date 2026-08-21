@@ -1,7 +1,9 @@
+import { prisma } from '@bb/db';
 import { logger } from '@bb/common/config/logger';
 import { env } from '@bb/common/config/env';
 import { subscriptionEvents } from '@bb/common/events/subscription-events';
 import { SubscriptionService } from '@bb/domain/subscription/subscription.service';
+import { isDowngrade, type TierRef } from '@bb/domain/subscription/tier';
 import { isUuid } from '@bb/common/utils/uuid.util';
 import {
   purchaseIngestService,
@@ -26,8 +28,15 @@ const REFUND_EVENT_TYPES = new Set(['CANCELLATION']);
  * intent) rather than a refund. Anything else — CUSTOMER_SUPPORT (real refund),
  * absent (legacy payloads, retail consumables), unknown — takes the refund path,
  * preserving pre-subscription behavior exactly.
+ *
+ * The two are NOT interchangeable downstream: BILLING_ERROR is dunning (the
+ * store is retrying a failed charge) and keeps the grace window, UNSUBSCRIBE is
+ * the member walking away and gives it up — see `withdrawGrace`.
  */
 const CANCEL_INTENT_REASONS = new Set(['UNSUBSCRIBE', 'BILLING_ERROR']);
+
+/** The cancel-intent reason that grace exists for. */
+const DUNNING_REASON = 'BILLING_ERROR';
 
 /**
  * Compute the net amount Brainboost takes home from a RC purchase event.
@@ -104,6 +113,14 @@ export class RevenueCatWebhookHandler {
       CANCEL_INTENT_REASONS.has(event.cancel_reason)
     ) {
       return this.handleCancelIntent(event);
+    }
+
+    // A SCHEDULED tier change must not be applied on receipt (see
+    // `deferIfDowngrade`). Only the downgrade direction is held back; an upgrade
+    // is charged by Apple immediately and must be ingested now.
+    if (event.type === 'PRODUCT_CHANGE') {
+      const deferred = await this.deferIfDowngrade(event);
+      if (deferred) return deferred;
     }
 
     const isPurchase = PURCHASE_EVENT_TYPES.has(event.type);
@@ -188,7 +205,9 @@ export class RevenueCatWebhookHandler {
       logger.warn({ eventId: event.id }, '[revenuecat] CANCELLATION without transaction ref — skipped');
       return { handled: false, status: 'skipped' };
     }
-    const sub = await this.subscriptionService.cancelIntentByProviderRef(providerRef);
+    const sub = await this.subscriptionService.cancelIntentByProviderRef(providerRef, {
+      keepGrace: event.cancel_reason === DUNNING_REASON,
+    });
     if (!sub) {
       // Not a sub / already intent / not active — nothing to do (idempotent).
       return { handled: true, status: 'cancel_intent_noop' };
@@ -210,6 +229,73 @@ export class RevenueCatWebhookHandler {
     return { handled: true, status: 'cancel_intent' };
   }
 
+  /**
+   * Hold back a SCHEDULED downgrade (BB tier-change, Approach B step 1).
+   *
+   * Apple applies an upgrade immediately but a downgrade only at the next
+   * renewal, and it emits `PRODUCT_CHANGE` the moment the change is SCHEDULED —
+   * up to a full term early. Ingesting that event applied the new plan on
+   * receipt, which strips a member of the tier they have already paid for (seats
+   * shrink, `planId` flips mid-term).
+   *
+   * The change is RECORDED, not applied: when the term actually ends Apple bills
+   * the new SKU and RC emits `RENEWAL` carrying it, which lands on
+   * `SubscriptionService.changePlan` at exactly the right moment. The pending
+   * row exists so `/me` can show what is coming and the owner can pick who keeps
+   * a seat before it lands — Apple gives us up to a full term of warning.
+   *
+   * No money moves on a downgrade, so skipping ingest also skips a phantom
+   * transaction + commission. Direction is resolved from the two SKUs; when
+   * either one can't be mapped to a plan we fall through to the old behaviour
+   * (ingest), which is harmless — an unresolvable SKU returns `product_not_found`.
+   */
+  private async deferIfDowngrade(
+    event: RevenueCatEventDto,
+  ): Promise<RevenueCatHandleResult | null> {
+    const [from, to] = await Promise.all([
+      planBySku(event.product_id),
+      planBySku(event.new_product_id),
+    ]);
+    if (!from || !to) {
+      logger.warn(
+        { eventId: event.id, productId: event.product_id, newProductId: event.new_product_id },
+        '[revenuecat] PRODUCT_CHANGE with unresolvable plan SKU — falling through to ingest',
+      );
+      return null;
+    }
+    if (!isDowngrade(from, to)) return null;
+
+    const providerRef = event.original_transaction_id ?? event.transaction_id;
+    const outcome = await this.subscriptionService.schedulePendingChange({
+      providerRef,
+      planId: to.planId,
+      source: 'revenuecat',
+    });
+    if (outcome.status === 'scheduled') {
+      const sub = outcome.subscription;
+      subscriptionEvents.emit('subscription.pending_change', {
+        subscriptionId: sub.id,
+        ownerId: sub.ownerId,
+        planId: sub.plan.id,
+        planCode: sub.plan.code,
+        tier: sub.plan.tier,
+        expiresAt: sub.expiresAt,
+        source: sub.source,
+        pendingPlanId: outcome.pendingPlan.id,
+        pendingPlanCode: outcome.pendingPlan.code,
+        pendingTier: outcome.pendingPlan.tier,
+        pendingSeatCount: outcome.pendingPlan.seatCount,
+        claimedSeats: outcome.claimedSeats,
+        effectiveAt: sub.expiresAt,
+      });
+    }
+    logger.info(
+      { eventId: event.id, from: from.code, to: to.code, providerRef, outcome: outcome.status },
+      '[revenuecat] scheduled downgrade recorded — applies at the renewal that bills it',
+    );
+    return { handled: true, status: `product_change_${outcome.status.replace('-', '_')}` };
+  }
+
   private toPurchase(event: RevenueCatEventDto): NormalizedPurchase {
     const gross = event.price_in_purchased_currency ?? 0;
     const occurredAt = event.event_timestamp_ms
@@ -228,7 +314,7 @@ export class RevenueCatWebhookHandler {
       attributionKey: event.original_transaction_id ?? event.transaction_id ?? event.id,
       type: 'PURCHASE',
       memberRef: this.memberRef(event),
-      productRef: { bySku: event.product_id },
+      productRef: { bySku: purchasedSku(event) },
       // Affiliate attribution is VISIT-driven (B-3): the customer-global RC
       // `affiliate_code` subscriber attribute is sticky (never expires) and would
       // ride along onto unrelated later purchases, so it is intentionally NOT
@@ -309,4 +395,41 @@ export class RevenueCatWebhookHandler {
   private emailAttr(event: RevenueCatEventDto): string | undefined {
     return event.subscriber_attributes?.['$email']?.value?.trim() || undefined;
   }
+}
+
+interface PlanRef extends TierRef {
+  planId: string;
+  code: string;
+}
+
+/**
+ * The SKU actually being bought. On `PRODUCT_CHANGE` that is `new_product_id` —
+ * `product_id` still names the CURRENT product, so reading it alone made an
+ * upgrade look like a same-plan renewal and silently extended the term by a
+ * period without a matching charge. The `??` also covers a payload that omits
+ * `new_product_id`.
+ */
+function purchasedSku(event: RevenueCatEventDto): string | undefined {
+  if (event.type === 'PRODUCT_CHANGE') return event.new_product_id ?? event.product_id;
+  return event.product_id;
+}
+
+async function planBySku(sku?: string | null): Promise<PlanRef | null> {
+  if (!sku) return null;
+  // Same OR + oldest-wins resolution as PurchaseIngestService.resolveProduct.
+  const product = await prisma.product.findFirst({
+    where: { OR: [{ iosProductId: sku }, { androidProductId: sku }] },
+    orderBy: { createdAt: 'asc' },
+    select: {
+      price: true,
+      subscriptionPlan: { select: { id: true, code: true, seatCount: true } },
+    },
+  });
+  if (!product?.subscriptionPlan) return null;
+  return {
+    planId: product.subscriptionPlan.id,
+    code: product.subscriptionPlan.code,
+    seatCount: product.subscriptionPlan.seatCount,
+    price: product.price,
+  };
 }

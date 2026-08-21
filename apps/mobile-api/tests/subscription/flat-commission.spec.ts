@@ -146,6 +146,57 @@ describe('flat subscription commission (BE-09)', () => {
     expect(all[1].amount).toBe(199_800); // floor(999000 * 20 / 100)
   });
 
+  it('a tier change is a renewal, not a fresh first sale', async () => {
+    // Renewal detection is scoped to the SUBSCRIPTION: a tier change keeps the
+    // same sub row and only flips planId, so a per-plan ledger lookup found
+    // nothing for the new tier and paid 40% on what is really a renewal.
+    const familyProduct = await prisma.product.create({
+      data: {
+        type: 'subscription',
+        code: `TST-FLAT-FAM-${uniq}`,
+        title: 'Flat family',
+        price: PRICE,
+      },
+    });
+    await prisma.subscriptionPlan.create({
+      data: {
+        productId: familyProduct.id,
+        code: `TSTF_FAM_${uniq}`,
+        tier: 'FAMILY',
+        periodMonths: 12,
+        seatCount: 4,
+        affiliateRate: 40,
+        renewalAffiliateRate: 20,
+        sortOrder: 99,
+      },
+    });
+
+    const firstTx = randomUUID();
+    await subscriptionService.activateFromPayment({
+      ownerId: buyerId,
+      productId,
+      transactionId: firstTx,
+      source: 'xendit',
+    });
+    await commit({ transactionId: firstTx });
+
+    const changeTx = randomUUID();
+    const changed = await subscriptionService.activateFromPayment({
+      ownerId: buyerId,
+      productId: familyProduct.id,
+      transactionId: changeTx,
+      source: 'xendit',
+    });
+    expect(changed.outcome).toBe('plan_change');
+    await commit({ transactionId: changeTx, productId: familyProduct.id });
+
+    const all = await prisma.affiliateCommission.findMany({
+      where: { recipientId: inviterId },
+      orderBy: { createdAt: 'asc' },
+    });
+    expect(all.map((r) => r.commissionRate)).toEqual([40, 20]);
+  });
+
   it('order-independent: commission listener running BEFORE activation still pays first-sale rate', async () => {
     // No activation ledger rows at all yet (activation listener hasn't run) —
     // the commission for THIS tx must not see itself as a prior sale.

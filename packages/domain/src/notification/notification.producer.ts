@@ -19,6 +19,10 @@ const PUSH_LIMIT_EXEMPT: ReadonlySet<string> = new Set<string>([
   ActionLabel.PaymentPending,
   ActionLabel.PaymentRefunded,
   ActionLabel.SubscriptionRenewed,
+  // Both are about losing access, on a deadline — the exact case a push budget
+  // must not swallow.
+  ActionLabel.SubscriptionChangeScheduled,
+  ActionLabel.SubscriptionSeatRemoved,
   ActionLabel.CommissionEarned,
 ]);
 

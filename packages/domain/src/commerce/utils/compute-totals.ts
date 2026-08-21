@@ -8,11 +8,19 @@ export interface ComputeTotalsInput {
         maxAmount?: number | null;
       }
     | null;
+  /**
+   * Unused portion of a running subscription term, credited on an upgrade.
+   * Applied AFTER the voucher, against whatever is left — the two stack rather
+   * than compete, and neither can push the order below zero.
+   */
+  prorationCredit?: number;
 }
 
 export interface ComputeTotalsResult {
   itemTotal: number;
   voucherAmount: number;
+  /** Credit actually applied — never more than what is left after the voucher. */
+  prorationCredit: number;
   amount: number;
 }
 
@@ -48,6 +56,9 @@ export function computeTotals(input: ComputeTotalsInput): ComputeTotalsResult {
     if (voucherAmount < 0) voucherAmount = 0;
   }
 
-  const amount = Math.max(0, itemTotal - voucherAmount);
-  return { itemTotal, voucherAmount, amount };
+  const afterVoucher = Math.max(0, itemTotal - voucherAmount);
+  const prorationCredit = Math.min(Math.max(input.prorationCredit ?? 0, 0), afterVoucher);
+
+  const amount = afterVoucher - prorationCredit;
+  return { itemTotal, voucherAmount, prorationCredit, amount };
 }

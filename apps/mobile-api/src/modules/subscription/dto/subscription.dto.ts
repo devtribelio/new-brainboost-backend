@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsString } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsNotEmpty, IsString, IsUUID } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@bb/common/openapi/decorators';
 
 export class ClaimSeatDto {
@@ -6,6 +6,53 @@ export class ClaimSeatDto {
   @IsString()
   @IsNotEmpty()
   code!: string;
+}
+
+export class DeclarePendingChangeDto {
+  @ApiProperty({ example: 'SOLO_12M', description: 'Plan to move down to at the end of the term' })
+  @IsString()
+  @IsNotEmpty()
+  planCode!: string;
+}
+
+export class ChooseSeatsDto {
+  @ApiProperty({
+    type: 'array',
+    itemType: 'string',
+    description:
+      'Seats that keep their access when the smaller plan lands. The owner’s seat is always kept and does not need to be listed.',
+  })
+  @IsArray()
+  @ArrayMaxSize(20)
+  @IsUUID('all', { each: true })
+  seatIds!: string[];
+}
+
+export class PendingChangeDto {
+  @ApiProperty({ example: 'SOLO_12M' })
+  planCode!: string;
+
+  @ApiProperty({ example: 'SOLO' })
+  tier!: string;
+
+  @ApiProperty({ example: 1 })
+  seatCount!: number;
+
+  @ApiProperty({ description: 'The change lands on this date — nothing changes before it' })
+  effectiveAt!: Date;
+
+  @ApiProperty({
+    example: true,
+    description: 'More seats are occupied than the new plan allows — the owner must choose',
+  })
+  mustEvict!: boolean;
+
+  @ApiProperty({
+    example: false,
+    description:
+      'False for a store-managed subscription: Apple/Google own the schedule, so it can only be reverted from the store’s subscription settings.',
+  })
+  canCancel!: boolean;
 }
 
 export class PlanItemDto {
@@ -68,6 +115,12 @@ export class SeatItemDto {
 
   @ApiPropertyOptional({ example: true, description: 'This seat is the caller' })
   isMe?: boolean;
+
+  @ApiPropertyOptional({
+    example: false,
+    description: 'Owner picked this seat to survive the pending downgrade',
+  })
+  keepOnChange?: boolean;
 }
 
 export class RenewalInfoDto {
@@ -111,6 +164,13 @@ export class SubscriptionMeDto {
 
   @ApiPropertyOptional({ type: () => RenewalInfoDto })
   renewal?: RenewalInfoDto;
+
+  @ApiPropertyOptional({
+    type: () => PendingChangeDto,
+    nullable: true,
+    description: 'A scheduled tier change. Absent when there is none.',
+  })
+  pendingChange?: PendingChangeDto | null;
 }
 
 export class InviteResponseDto {

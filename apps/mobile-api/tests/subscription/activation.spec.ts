@@ -276,6 +276,92 @@ describe('SubscriptionService.activateFromPayment', () => {
     expect(seats.map((s) => s.memberId)).toEqual([ownerId, member2]); // empty seat 3 dropped
   });
 
+  it('shrinking below the household evicts, honouring the owner’s choice', async () => {
+    const keeper = await makeMember('keeper');
+    const loser = await makeMember('loser');
+    const first = await activate({ productId: duoProductId }); // 3 seats
+    const subId = first.subscription!.id;
+    await prisma.subscriptionSeat.update({
+      where: { subscriptionId_seatNo: { subscriptionId: subId, seatNo: 2 } },
+      data: { memberId: loser, claimedAt: new Date() },
+    });
+    await prisma.subscriptionSeat.update({
+      where: { subscriptionId_seatNo: { subscriptionId: subId, seatNo: 3 } },
+      data: { memberId: keeper, claimedAt: new Date(), pendingKeep: true },
+    });
+    // The keeper is using the subscription, so they hold a lazy enrollment.
+    await prisma.courseEnrollment.create({
+      data: {
+        memberId: loser,
+        courseId,
+        viaSubscriptionId: subId,
+        expiredDate: first.subscription!.expiresAt,
+      },
+    });
+
+    const res = await activate({ productId: soloProductId }); // → 2 seats
+    expect(res.outcome).toBe('plan_change');
+    expect(res.evictedMemberIds).toEqual([loser]); // seat 3 was marked, seat 2 was not
+
+    const seats = await prisma.subscriptionSeat.findMany({
+      where: { subscriptionId: subId },
+      orderBy: { seatNo: 'asc' },
+    });
+    expect(seats).toHaveLength(2);
+    expect(seats.map((s) => s.memberId)).toEqual([ownerId, keeper]); // reseated contiguously
+    expect(seats.every((s) => !s.pendingKeep)).toBe(true); // selection consumed
+
+    // The evicted member's subscription-driven access is cut immediately.
+    const cut = await prisma.courseEnrollment.findUniqueOrThrow({
+      where: { memberId_courseId: { memberId: loser, courseId } },
+    });
+    expect(cut.expiredDate!.getTime()).toBeLessThanOrEqual(Date.now());
+  });
+
+  it('with no choice made, the fallback keeps the lowest seat numbers', async () => {
+    const a = await makeMember('fb-a');
+    const b = await makeMember('fb-b');
+    const first = await activate({ productId: duoProductId }); // 3 seats
+    const subId = first.subscription!.id;
+    await prisma.subscriptionSeat.update({
+      where: { subscriptionId_seatNo: { subscriptionId: subId, seatNo: 2 } },
+      data: { memberId: a, claimedAt: new Date() },
+    });
+    await prisma.subscriptionSeat.update({
+      where: { subscriptionId_seatNo: { subscriptionId: subId, seatNo: 3 } },
+      data: { memberId: b, claimedAt: new Date() },
+    });
+
+    const res = await activate({ productId: soloProductId }); // → 2 seats
+    expect(res.evictedMemberIds).toEqual([b]); // highest seat number goes first
+    const seats = await prisma.subscriptionSeat.findMany({
+      where: { subscriptionId: subId },
+      orderBy: { seatNo: 'asc' },
+    });
+    expect(seats.map((s) => s.memberId)).toEqual([ownerId, a]);
+  });
+
+  it('a plan change clears whatever change was scheduled', async () => {
+    const first = await activate({ productId: duoProductId });
+    await prisma.memberSubscription.update({
+      where: { id: first.subscription!.id },
+      data: {
+        pendingPlanId: first.subscription!.planId,
+        pendingEffectiveAt: first.subscription!.expiresAt,
+        pendingSource: 'web',
+        pendingDeclaredAt: new Date(),
+      },
+    });
+
+    await activate({ productId: soloProductId });
+    const after = await prisma.memberSubscription.findUniqueOrThrow({
+      where: { id: first.subscription!.id },
+    });
+    expect(after.pendingPlanId).toBeNull();
+    expect(after.pendingEffectiveAt).toBeNull();
+    expect(after.pendingSource).toBeNull();
+  });
+
   it('owner already seated on another sub → new sub created with seat 1 empty', async () => {
     // owner2 claims a seat on owner1's sub, then buys their own sub.
     const owner2 = await makeMember('owner2');

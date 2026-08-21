@@ -50,6 +50,28 @@ export function registerSubscriptionActivationListeners(): void {
           planChanged: result.outcome === 'plan_change',
         });
       }
+
+      // A tier change carries facts `renewed` has no room for — what they came
+      // from, and who lost a seat because the new tier is smaller. Emitted as
+      // its own event so the seat-eviction notice is not bolted onto a renewal
+      // receipt that every ordinary renewal also fires.
+      if (result.outcome === 'plan_change' && result.previousPlanId) {
+        const previous = await prisma.subscriptionPlan.findUnique({
+          where: { id: result.previousPlanId },
+        });
+        subscriptionEvents.emit('subscription.plan_changed', {
+          subscriptionId: sub.id,
+          ownerId: sub.ownerId,
+          planId: plan.id,
+          planCode: plan.code,
+          tier: plan.tier,
+          expiresAt: sub.expiresAt,
+          source: sub.source,
+          previousPlanCode: previous?.code ?? 'unknown',
+          previousTier: previous?.tier ?? 'unknown',
+          evictedMemberIds: result.evictedMemberIds ?? [],
+        });
+      }
     } catch (err) {
       logger.error(
         { err, transactionId: e.transactionId },

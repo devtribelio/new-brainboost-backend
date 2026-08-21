@@ -1,8 +1,9 @@
 /**
- * BE-14 — checkout guard for subscription products: different-plan purchase
- * while ACTIVE → 400; same plan = renewal-by-repurchase → allowed; seated on
- * someone else's ACTIVE sub → 400 (zombie seats don't block); retail checkout
- * untouched. Real Postgres, no mocks.
+ * BE-14 — checkout guard for subscription products: an upgrade is sold now and
+ * prorated; a downgrade must be scheduled first AND wait for the term to end;
+ * same plan = renewal-by-repurchase → allowed; seated on someone else's ACTIVE
+ * sub → 400 (zombie seats don't block); retail checkout untouched. Real
+ * Postgres, no mocks.
  */
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
 import { randomUUID } from 'node:crypto';
@@ -115,12 +116,63 @@ async function activateSolo(owner = ownerId) {
   ).subscription!;
 }
 
+async function activateDuo(owner = ownerId) {
+  return (
+    await subscriptionService.activateFromPayment({
+      ownerId: owner,
+      productId: duoProductId,
+      transactionId: randomUUID(),
+      source: 'xendit',
+    })
+  ).subscription!;
+}
+
 describe('checkout guard for subscription products (BE-14)', () => {
-  it('ACTIVE SOLO buying DUO → 400 (tier switch is Phase 2)', async () => {
+  it('upgrade is sold immediately, prorated against the running term', async () => {
     await activateSolo();
+    const res = await checkout.start({ memberId: ownerId, productId: duoProductId });
+    // Bought on day one of a 12-month term, so almost the whole old plan is
+    // credited back and the member pays little more than the difference.
+    expect(res.prorationCredit).toBeGreaterThan(0);
+    expect(res.amount).toBe(res.itemTotal - res.prorationCredit);
+
+    const tx = await prisma.commerceTransaction.findUniqueOrThrow({
+      where: { id: res.transactionId },
+    });
+    expect(tx.prorationCredit).toBe(res.prorationCredit);
+    expect(tx.amount).toBe(res.amount);
+  });
+
+  it('an undeclared downgrade is refused — it has to be scheduled first', async () => {
+    await activateDuo();
     await expect(
-      checkout.start({ memberId: ownerId, productId: duoProductId }),
-    ).rejects.toThrow('paket lain');
+      checkout.start({ memberId: ownerId, productId: soloProductId }),
+    ).rejects.toThrow('Jadwalkan dulu');
+  });
+
+  it('a declared downgrade still waits for the term to end', async () => {
+    await activateDuo();
+    await subscriptionService.declarePendingChangeByOwner(ownerId, `TSTCG_SOLO_${uniq}`);
+    await expect(
+      checkout.start({ memberId: ownerId, productId: soloProductId }),
+    ).rejects.toThrow('masa aktif berakhir');
+  });
+
+  it('a declared downgrade is sold once the term has ended (grace window), at full price', async () => {
+    const sub = await activateDuo();
+    await subscriptionService.declarePendingChangeByOwner(ownerId, `TSTCG_SOLO_${uniq}`);
+    // Term over, still inside grace — the moment web renewal actually happens.
+    await prisma.memberSubscription.update({
+      where: { id: sub.id },
+      data: {
+        expiresAt: new Date(Date.now() - 24 * 3600 * 1000),
+        graceUntil: new Date(Date.now() + 5 * 24 * 3600 * 1000),
+      },
+    });
+
+    const res = await checkout.start({ memberId: ownerId, productId: soloProductId });
+    expect(res.prorationCredit).toBe(0); // a downgrade credits nothing
+    expect(res.amount).toBe(res.itemTotal);
   });
 
   it('ACTIVE SOLO re-buying SOLO → allowed (web renewal-by-repurchase)', async () => {

@@ -9,6 +9,7 @@ import { expirePendingPayments } from '@bb/domain/jobs/expire-pending-payments';
 import { sweepOrphanUploads } from '@bb/domain/jobs/sweep-orphan-uploads';
 import { subscriptionExpire } from '@bb/domain/jobs/subscription-expire';
 import { subscriptionRenewalReminder } from '@bb/domain/jobs/subscription-renewal-reminder';
+import { subscriptionSeatChoiceReminder } from '@bb/domain/jobs/subscription-seat-choice-reminder';
 import { topicDigest } from '@bb/domain/jobs/topic-digest';
 
 /**
@@ -48,6 +49,10 @@ const JOBS: Array<{ name: string; run: () => Promise<unknown> }> = [
   // ⚠️ emails require the bb-comms SubscriptionRenewalReminder template (BE-18
   // external dependency) — do not schedule this runner on prod before it ships.
   { name: 'subscriptionRenewalReminder', run: () => subscriptionRenewalReminder() },
+  // In-app only (no comms template needed), so it is safe on prod from day one.
+  // After the renewal reminder purely for log readability — the two are
+  // independent, and a sub can legitimately receive both.
+  { name: 'subscriptionSeatChoiceReminder', run: () => subscriptionSeatChoiceReminder() },
   // Safe on every hourly tick: the job no-ops unless the current WIB hour matches
   // `notification.digestHour`, which is what keeps the send time editable from the DB.
   { name: 'topicDigest', run: () => topicDigest() },

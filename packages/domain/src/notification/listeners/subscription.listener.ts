@@ -2,6 +2,7 @@ import { logger } from '@bb/common/config/logger';
 import { subscriptionEvents } from '@bb/common/events/subscription-events';
 import { NotificationProducer } from '../notification.producer';
 import { ActionLabel, NotifGroup } from '../action-labels';
+import { formatDateWib } from '../../commerce/trial';
 
 const producer = new NotificationProducer();
 
@@ -58,6 +59,48 @@ export function registerSubscriptionNotificationListener(): void {
       });
     } catch (err) {
       logger.error({ err, subscriptionId: e.subscriptionId }, '[notification] sub expired failed');
+    }
+  });
+
+  subscriptionEvents.on('subscription.pending_change', async (e) => {
+    try {
+      const mustEvict = e.claimedSeats > e.pendingSeatCount;
+      await producer.createForMember({
+        memberId: e.ownerId,
+        type: ActionLabel.SubscriptionChangeScheduled,
+        notifGroup: NotifGroup.General,
+        title: `Paket berubah ke ${e.pendingTier}`,
+        // The date carries the reassurance ("nothing changes today"), so it goes
+        // in the body — Android truncates titles at ~40 chars.
+        body: mustEvict
+          ? `Mulai ${formatDateWib(e.effectiveAt)} paket kamu jadi ${e.pendingTier} (${e.pendingSeatCount} seat). Pilih siapa yang tetap dapat akses sebelum tanggal itu.`
+          : `Paket ${e.tier} kamu aktif sampai ${formatDateWib(e.effectiveAt)}, lalu berubah jadi ${e.pendingTier}.`,
+        payload: { ...subPayload(e), pendingPlanCode: e.pendingPlanCode, mustEvict },
+        // Keyed on the target plan: re-declaring a DIFFERENT downgrade is worth
+        // telling them about, re-declaring the same one is not.
+        dedupeKey: `subscriptionChangeScheduled:${e.subscriptionId}:${e.pendingPlanId}`,
+      });
+    } catch (err) {
+      logger.error({ err, subscriptionId: e.subscriptionId }, '[notification] pending change failed');
+    }
+  });
+
+  subscriptionEvents.on('subscription.plan_changed', async (e) => {
+    if (!e.evictedMemberIds.length) return; // nothing anyone needs to be told
+    try {
+      await producer.createForMany(
+        e.evictedMemberIds,
+        {
+          type: ActionLabel.SubscriptionSeatRemoved,
+          notifGroup: NotifGroup.General,
+          title: 'Akses langganan berakhir',
+          body: `Paket ${e.previousTier} yang kamu ikuti berubah jadi ${e.tier}, dan seat kamu tidak termasuk lagi.`,
+          payload: subPayload(e),
+        },
+        `subscriptionSeatRemoved:${e.subscriptionId}:${e.expiresAt.toISOString()}`,
+      );
+    } catch (err) {
+      logger.error({ err, subscriptionId: e.subscriptionId }, '[notification] seat removed failed');
     }
   });
 

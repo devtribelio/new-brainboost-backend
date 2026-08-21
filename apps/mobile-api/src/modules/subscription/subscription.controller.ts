@@ -1,7 +1,7 @@
 import type { Request, Response } from 'express';
 import { prisma } from '@bb/db';
 import { ok } from '@bb/common/utils/response.util';
-import { UnauthorizedException } from '@bb/common/exceptions';
+import { BadRequestException, UnauthorizedException } from '@bb/common/exceptions';
 import type { AuthenticatedRequest } from '@bb/common/interfaces/authenticated-request';
 import { subscriptionEvents } from '@bb/common/events/subscription-events';
 import type { SubscriptionService } from '@bb/domain/subscription/subscription.service';
@@ -16,13 +16,21 @@ import {
 } from '@bb/common/openapi/decorators';
 import {
   CancelResponseDto,
+  ChooseSeatsDto,
   ClaimSeatDto,
+  DeclarePendingChangeDto,
   InviteResponseDto,
+  PendingChangeDto,
   PlanItemDto,
   SeatItemDto,
   SubscriptionMeDto,
 } from './dto/subscription.dto';
-import { serializeMe, serializePlan, serializeSeat } from './subscription.serializer';
+import {
+  serializeMe,
+  serializePendingChange,
+  serializePlan,
+  serializeSeat,
+} from './subscription.serializer';
 
 /**
  * HTTP surface of the subscription feature (PRD BE-19). Thin by design — all
@@ -74,7 +82,80 @@ export class SubscriptionController {
       orderBy: { seatNo: 'asc' },
       include: { member: { select: { id: true, fullName: true } } },
     });
-    return ok(res, serializeMe(req.user.id, sub, seats));
+
+    let pending: PendingChangeDto | null = null;
+    if (sub.pendingPlanId) {
+      const pendingPlan = await prisma.subscriptionPlan.findUnique({
+        where: { id: sub.pendingPlanId },
+      });
+      if (pendingPlan) {
+        const claimed = seats.filter((s) => s.memberId !== null).length;
+        pending = serializePendingChange(sub, pendingPlan, claimed);
+      }
+    }
+    return ok(res, serializeMe(req.user.id, sub, seats, pending));
+  };
+
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Schedule a downgrade at the end of the term (web/Android; upgrades go to checkout)',
+  })
+  @ApiBody({ type: () => DeclarePendingChangeDto })
+  @ApiResponse({ status: 200, type: () => SubscriptionMeDto })
+  declarePending = async (req: AuthenticatedRequest, res: Response) => {
+    if (!req.user) throw new UnauthorizedException();
+    const { planCode } = req.body as DeclarePendingChangeDto;
+    const outcome = await this.subscriptionService.declarePendingChangeByOwner(
+      req.user.id,
+      planCode,
+    );
+    if (outcome.status === 'not-found') throw new UnauthorizedException();
+    if (outcome.status === 'scheduled') {
+      const sub = outcome.subscription;
+      subscriptionEvents.emit('subscription.pending_change', {
+        subscriptionId: sub.id,
+        ownerId: sub.ownerId,
+        planId: sub.plan.id,
+        planCode: sub.plan.code,
+        tier: sub.plan.tier,
+        expiresAt: sub.expiresAt,
+        source: sub.source,
+        pendingPlanId: outcome.pendingPlan.id,
+        pendingPlanCode: outcome.pendingPlan.code,
+        pendingTier: outcome.pendingPlan.tier,
+        pendingSeatCount: outcome.pendingPlan.seatCount,
+        claimedSeats: outcome.claimedSeats,
+        effectiveAt: sub.expiresAt,
+      });
+    }
+    return this.me(req, res);
+  };
+
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Drop a scheduled downgrade (store-managed subs must revert in the store)' })
+  @ApiResponse({ status: 200, type: () => SubscriptionMeDto })
+  cancelPending = async (req: AuthenticatedRequest, res: Response) => {
+    if (!req.user) throw new UnauthorizedException();
+    const sub = await this.entitlement.getActiveSubscriptionForMember(req.user.id);
+    if (!sub || sub.ownerId !== req.user.id) throw new UnauthorizedException();
+    if (sub.pendingSource === 'revenuecat') {
+      throw new BadRequestException(
+        'Perubahan paket ini dijadwalkan oleh App Store / Play Store — batalkan dari pengaturan langganan di store',
+      );
+    }
+    await this.subscriptionService.clearPendingChange(sub.id);
+    return this.me(req, res);
+  };
+
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Pick which seats survive the scheduled downgrade (owner only)' })
+  @ApiBody({ type: () => ChooseSeatsDto })
+  @ApiResponse({ status: 200, type: () => SubscriptionMeDto })
+  choosePendingSeats = async (req: AuthenticatedRequest, res: Response) => {
+    if (!req.user) throw new UnauthorizedException();
+    const { seatIds } = req.body as ChooseSeatsDto;
+    await this.seatService.choosePendingSeats(req.user.id, seatIds);
+    return this.me(req, res);
   };
 
   @ApiBearerAuth()

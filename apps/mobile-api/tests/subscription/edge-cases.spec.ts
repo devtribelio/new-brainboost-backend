@@ -157,6 +157,36 @@ describe('subscription edge cases (BE-21)', () => {
     await expect(seatService.generateInvite(ownerId)).rejects.toThrow('Semua seat sudah terisi');
   });
 
+  it('cancel-intent keeps grace only for a billing failure', async () => {
+    const providerRef = `otx-${uniq}-${Math.random().toString(36).slice(2, 8)}`;
+    const sub = await activate(duoProductId);
+    await prisma.memberSubscription.update({
+      where: { id: sub.subscription!.id },
+      data: { providerRef },
+    });
+    const armed = await prisma.memberSubscription.findUniqueOrThrow({
+      where: { id: sub.subscription!.id },
+    });
+    expect(armed.graceUntil!.getTime()).toBeGreaterThan(armed.expiresAt.getTime());
+
+    // BILLING_ERROR = dunning: the store is still retrying, grace is exactly
+    // what it is for.
+    const dunning = await subscriptionService.cancelIntentByProviderRef(providerRef, {
+      keepGrace: true,
+    });
+    expect(dunning!.graceUntil!.getTime()).toBe(armed.graceUntil!.getTime());
+
+    // UNSUBSCRIBE on a fresh sub: the member left, no payment is coming.
+    await prisma.memberSubscription.update({
+      where: { id: sub.subscription!.id },
+      data: { canceledAt: null },
+    });
+    const quit = await subscriptionService.cancelIntentByProviderRef(providerRef, {
+      keepGrace: false,
+    });
+    expect(quit!.graceUntil!.getTime()).toBe(quit!.expiresAt.getTime());
+  });
+
   it('TRUE duplicate race: two concurrent activations with the SAME transactionId → exactly one wins', async () => {
     const txId = randomUUID();
     const [a, b] = await Promise.all([

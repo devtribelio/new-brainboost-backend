@@ -26,6 +26,13 @@ export const ActionLabel = {
   SubscriptionExpired: 'subscriptionExpired',
   SubscriptionCanceled: 'subscriptionCanceled',
   SubscriptionReminder: 'subscriptionReminder',
+  // Scheduled tier change: the owner is told it is coming and, when the new tier
+  // is smaller than the household, asked to pick who keeps a seat. Safe to add
+  // without a client release — same reasoning as TrialStarted (routing is on
+  // `refTable`, an unknown `type` falls to the default icon).
+  SubscriptionChangeScheduled: 'subscriptionChangeScheduled',
+  // Sent to the member whose seat was taken when the smaller tier landed.
+  SubscriptionSeatRemoved: 'subscriptionSeatRemoved',
   CommissionEarned: 'commissionEarned',
 } as const;
 

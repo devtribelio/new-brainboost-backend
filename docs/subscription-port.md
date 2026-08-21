@@ -22,10 +22,12 @@ Dua jalur beli yang berkonvergensi di event `commerce.payment.success`:
 |---|---|
 | `subscription_plans` | Definisi tier (1:1 product): code, tier, periodMonths, seatCount, `affiliate_rate` (40), `renewal_affiliate_rate` (20, placeholder COO — editable runtime) |
 | `member_subscriptions` | Sub per owner: status `ACTIVE\|EXPIRED\|CANCELED`, `expires_at`, `grace_until`, `canceled_at` (= cancel-INTENT), `source` (`xendit\|revenuecat\|granted`), `provider_ref` (RC original_transaction_id), `latest_transaction_id` |
-| `subscription_seats` | Slot pre-provisioned (seat 1 = owner); `invite_code` unique single-use |
+| `subscription_seats` | Slot pre-provisioned (seat 1 = owner); `invite_code` unique single-use; `pending_keep` = pilihan owner saat downgrade terjadwal |
 | `subscription_activations` | Ledger append-only tiap perubahan expiry: `kind` `initial\|renewal\|plan_change\|grant` — kunci idempotensi + audit + deteksi renewal + guard kampanye grant |
 | `subscription_reminder_logs` | Dedupe job reminder, unique `(subscription_id, expires_at, days_before)` |
 | `course_enrollment.via_subscription_id` | Marker lazy enrollment (NULL = retail/legacy) |
+| `member_subscriptions.pending_*` | Ganti tier terjadwal — `pending_plan_id/effective_at/source/declared_at`. Lihat `docs/subscription-tier-change.md` |
+| `commerce_transactions.proration_credit` | Sisa masa yang dikreditkan saat upgrade tier |
 
 **3 partial unique index** (SQL manual di migration `20260707140000_add_subscription`;
 Prisma 5.22 mengabaikannya saat diff — no drift):
@@ -114,7 +116,12 @@ bukan nama constraint — matcher idempotensi di `subscription.service.ts` menco
     (at-most-once; gagal-setelah-claim TIDAK di-retry — bucket berikutnya adalah tangga
     retry alaminya).
 
-## 4. Peta test (15 spec, `apps/mobile-api/tests/subscription/`)
+**Ganti tier (Approach B, 2026-08-21):** downgrade dijadwalkan lalu diterapkan oleh
+pembayaran/RENEWAL yang menagihnya; upgrade langsung + proration. Aturan lengkap
+(eviction, urutan bump-sebelum-reconcile, batas beli-awal) di
+**`docs/subscription-tier-change.md`** — dibaca bersama §3 di bawah.
+
+## 4. Peta test (18 spec, `apps/mobile-api/tests/subscription/`)
 
 | Spec | Aturan |
 |---|---|
@@ -128,6 +135,7 @@ bukan nama constraint — matcher idempotensi di `subscription.service.ts` menco
 | `activation-listener.spec` / `subscription-email.spec` / `jobs.spec` | #14 #15 |
 | `subscription-http.spec` / `checkout-guard.spec` | #7 #8 + modul HTTP |
 | `seed-plans.spec` | seed idempoten |
+| `rc-product-change.spec` / `proration.spec` | ganti tier: downgrade ditahan, upgrade lewat, rumus proration |
 
 ## 5. Runbook launch (urutan!)
 
@@ -206,5 +214,7 @@ GROUP BY p.tier ORDER BY MIN(p.sort_order);
 | 3 template email di bb-comms | tim bb-comms | ❌ belum — blocker jobs reminder & receipt di prod |
 | SKU asli App Store/Play + entitlement RC | mobile/ops | ❌ placeholder di DB |
 | Angka final `renewal_affiliate_rate` | COO | ❌ placeholder 20% |
+| Basis + rate komisi **upgrade** tier | COO | ❌ default sekarang: kredit mengurangi basis, rate = renewal |
+| Konfirmasi payload `PRODUCT_CHANGE` asli | QA sandbox | ❌ belum pernah ada sampelnya di prod |
 | Copy email reminder + landing repurchase | marketing | ❌ |
 | Investigasi 655 legacy paying member tanpa akun baru | backend | ❌ temuan BE-20 |

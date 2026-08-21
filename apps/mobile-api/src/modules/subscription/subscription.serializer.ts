@@ -3,7 +3,12 @@ import type {
   SubscriptionPlan,
   SubscriptionSeat,
 } from '@prisma/client';
-import type { PlanItemDto, SeatItemDto, SubscriptionMeDto } from './dto/subscription.dto';
+import type {
+  PendingChangeDto,
+  PlanItemDto,
+  SeatItemDto,
+  SubscriptionMeDto,
+} from './dto/subscription.dto';
 
 type PlanWithProduct = SubscriptionPlan & {
   product: {
@@ -45,6 +50,29 @@ export function serializeSeat(seat: SeatWithMember, callerId: string): SeatItemD
     claimed: seat.memberId !== null,
     memberName: seat.member?.fullName ?? null,
     isMe: seat.memberId === callerId,
+    keepOnChange: seat.pendingKeep,
+  };
+}
+
+/**
+ * A scheduled tier change. `mustEvict` is computed from today's occupancy, not
+ * stored: members come and go between the declaration and the effective date, so
+ * the answer is only true at the moment it is asked.
+ */
+export function serializePendingChange(
+  sub: MemberSubscription,
+  pendingPlan: SubscriptionPlan,
+  claimedSeats: number,
+): PendingChangeDto {
+  return {
+    planCode: pendingPlan.code,
+    tier: pendingPlan.tier,
+    seatCount: pendingPlan.seatCount,
+    effectiveAt: sub.pendingEffectiveAt ?? sub.expiresAt,
+    mustEvict: claimedSeats > pendingPlan.seatCount,
+    // Apple/Google own their own schedule — offering our own revert button would
+    // leave the store still switching the plan underneath us.
+    canCancel: sub.pendingSource !== 'revenuecat',
   };
 }
 
@@ -52,6 +80,7 @@ export function serializeMe(
   callerId: string,
   sub: MemberSubscription & { plan: SubscriptionPlan },
   seats: SeatWithMember[],
+  pendingChange?: PendingChangeDto | null,
 ): SubscriptionMeDto {
   const role = sub.ownerId === callerId ? 'owner' : 'member';
   const base: SubscriptionMeDto = {
@@ -64,6 +93,7 @@ export function serializeMe(
     canceledAt: sub.canceledAt,
     source: sub.source,
     renewal: { productId: sub.plan.productId },
+    pendingChange: pendingChange ?? null,
   };
   if (role === 'owner') {
     base.seats = seats.map((s) => serializeSeat(s, callerId));
