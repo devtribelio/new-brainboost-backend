@@ -2,7 +2,7 @@ import { Prisma } from '@prisma/client';
 import type { Product } from '@prisma/client';
 import { prisma } from '@bb/db';
 import { notFound, ERROR_CODES } from '@bb/common/exceptions';
-import { ACTIVE_ENROLLMENT } from '@bb/domain/commerce/enrollment';
+import { activeEnrollment } from '@bb/domain/commerce/enrollment';
 import type { PaginationParams } from '@bb/common/utils/pagination.util';
 import { EntitlementService } from '@bb/domain/subscription/entitlement.service';
 import type { Ownership, ProductMedia, ProductSort } from './dto/list-query.dto';
@@ -14,23 +14,6 @@ interface ListQuery {
   ownership?: Ownership;
   sort?: ProductSort;
   media?: ProductMedia[];
-}
-
-/**
- * Enrollment VALIDITY (must mirror EntitlementService.isEnrollmentValid, BE-06):
- * retail/legacy rows (via_subscription_id NULL) count by existence; subscription
- * lazy rows only while expired_date is in the future. `ACTIVE_ENROLLMENT` sits on
- * top of both: a refund soft-cancels the row instead of deleting it, and it is
- * that flag which makes a refunded course reappear in the catalog — otherwise the
- * cancelled row keeps hiding it and the member can never buy it again.
- * Used by every ownership filter below so list badges and the media gate never
- * disagree.
- */
-function validEnrollmentWhere(now: Date): Prisma.CourseEnrollmentWhereInput {
-  return {
-    ...ACTIVE_ENROLLMENT,
-    OR: [{ viaSubscriptionId: null }, { expiredDate: { gt: now } }],
-  };
 }
 
 export interface ReviewAggregate {
@@ -76,17 +59,23 @@ export class ProductService {
     if (q.type) where.type = q.type;
     else where.type = { not: 'subscription' };
     if (q.ownership === 'not_purchased' && q.memberId) {
+      // `activeEnrollment()` in the `none` filter is what makes a refunded course
+      // reappear in the catalog — otherwise the cancelled row keeps hiding it and
+      // the member can never find the product to buy again. It also hides a course
+      // the member is CURRENTLY trialing (they already have access, so it does not
+      // belong in a "belum dibeli" shelf) while letting it come back the moment the
+      // trial expires — the predicate is date-based, so that needs no sweep.
+      //
+      // Note this is deliberately NOT `OWNED_FOR_PURCHASE`: that one answers "is it
+      // paid for" and is the checkout guard's job, so buying stays possible mid-trial
+      // even though the product is not listed here.
       if (await this.entitlement.hasActiveSubscription(q.memberId)) {
         // Subscribers own every course-backed product → only course-less ones remain.
         where.course = null;
       } else {
         where.OR = [
           { course: null },
-          {
-            course: {
-              enrollments: { none: { memberId: q.memberId, ...validEnrollmentWhere(new Date()) } },
-            },
-          },
+          { course: { enrollments: { none: { memberId: q.memberId, ...activeEnrollment() } } } },
         ];
       }
     }
@@ -133,15 +122,18 @@ export class ProductService {
         // Subscribers own every course-backed product → only course-less ones remain.
         conds.push(Prisma.sql`NOT EXISTS (SELECT 1 FROM courses c WHERE c.product_id = p.id)`);
       } else {
-        // Only VALID enrollments count (mirror of validEnrollmentWhere): not
-        // refunded, retail rows by existence, lazy rows only while expired_date
-        // is future.
+        // Only VALID enrollments count (raw-SQL mirror of `activeEnrollment()`):
+        // not refunded, retail rows (both grant markers NULL) by existence, granted
+        // rows — trial or subscription lazy — only while expired_date is future.
         conds.push(Prisma.sql`NOT EXISTS (
           SELECT 1 FROM courses c
           JOIN course_enrollment ce ON ce.course_id = c.id
           WHERE c.product_id = p.id AND ce.member_id = ${q.memberId}::uuid
             AND ce.is_canceled = false
-            AND (ce.via_subscription_id IS NULL OR ce.expired_date > now())
+            AND (
+              (ce.via_subscription_id IS NULL AND ce.via_voucher_id IS NULL)
+              OR ce.expired_date > now()
+            )
         )`);
       }
     }
@@ -265,7 +257,7 @@ export class ProductService {
 
     const enrollmentWhere: Prisma.CourseEnrollmentWhereInput = {
       memberId,
-      ...validEnrollmentWhere(new Date()), // refunded + lapsed lazy rows are not "owned"
+      ...activeEnrollment(), // refunded + lapsed trial/lazy rows are not "owned"
       course: {
         product: {
           isActive: true,
@@ -321,8 +313,8 @@ export class ProductService {
     const enrollments = await prisma.courseEnrollment.findMany({
       where: {
         memberId,
-        // refunded + lapsed lazy rows don't badge as owned
-        ...validEnrollmentWhere(new Date()),
+        // refunded + lapsed trial/lazy rows don't badge as owned
+        ...activeEnrollment(),
         course: { productId: { in: courseProductIds } },
       },
       select: { viaSubscriptionId: true, course: { select: { productId: true } } },

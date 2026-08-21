@@ -10,7 +10,7 @@ import { computeTotals } from './utils/compute-totals';
 import { generateOrderCode } from './utils/generate-order-code';
 import { VoucherService } from './voucher.service';
 import { attributionService } from '@bb/domain/affiliate/attribution.service';
-import { ACTIVE_ENROLLMENT } from './enrollment';
+import { OWNED_FOR_PURCHASE } from './enrollment';
 
 export interface StartCheckoutInput {
   memberId: string;
@@ -44,20 +44,16 @@ export class CheckoutService {
 
     // Block paying twice for a course the member still holds — the grant is
     // keyed on (memberId, courseId), so a second purchase would take the money
-    // and change nothing. `ACTIVE_ENROLLMENT` is what keeps this from locking
-    // out a refunded member: their row is cancelled, so re-purchase is allowed.
-    // `viaSubscriptionId: null` scopes the block to RETAIL ownership — a lazy row
-    // held via subscription must stay buyable, that purchase is the documented
-    // upgrade-to-lifetime path (payment-success listener clears the marker).
+    // and change nothing. `OWNED_FOR_PURCHASE` scopes the block to RETAIL
+    // ownership, which is what keeps it from locking out three cases: a refunded
+    // member (their row is cancelled), a member on a free trial (a trial row must
+    // not block the purchase it exists to sell), and a member holding the course
+    // through a subscription (that purchase is the documented upgrade-to-lifetime
+    // path — the payment-success listener clears the marker).
     // Checkout only — the ingest path (IAP/Scalev) cannot refuse a purchase the
     // store has already charged for.
     const owned = await prisma.courseEnrollment.findFirst({
-      where: {
-        memberId: input.memberId,
-        ...ACTIVE_ENROLLMENT,
-        viaSubscriptionId: null,
-        course: { productId: product.id },
-      },
+      where: { memberId: input.memberId, ...OWNED_FOR_PURCHASE, course: { productId: product.id } },
       select: { id: true },
     });
     if (owned) throw badRequest(ERROR_CODES.PRODUCT_ALREADY_PURCHASED);
@@ -102,15 +98,21 @@ export class CheckoutService {
 
     let voucherId: string | undefined;
     let voucherMeta: {
-      type: 'PERCENT' | 'AMOUNT';
+      type: 'PERCENT' | 'AMOUNT' | 'TRIAL';
       value: number;
       maxAmount?: number | null;
     } | null = null;
     if (input.voucherCode) {
-      const check = await this.voucherService.validate(input.voucherCode, input.productId);
+      const check = await this.voucherService.validate(
+        input.voucherCode,
+        input.productId,
+        input.memberId,
+      );
       // voucherService.validate() reports an internal English reason — keep it as
       // diagnostics, don't surface it as copy.
-      if (!check.valid) throw badRequest(ERROR_CODES.VOUCHER_INVALID, { reason: check.reason });
+      if (!check.valid) {
+        throw badRequest(check.errorCode ?? ERROR_CODES.VOUCHER_INVALID, { reason: check.reason });
+      }
       voucherId = check.voucherId;
       // maxAmount MUST be threaded through — omitting it silently bypasses the
       // PERCENT cap in computeTotals (over-discount / revenue loss).

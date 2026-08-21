@@ -123,11 +123,21 @@ export class ProductController {
         // a valid RETAIL enrollment wins (lifetime beats borrowed access).
         const enrollment = await prisma.courseEnrollment.findUnique({
           where: { memberId_courseId: { memberId, courseId: product.course.id } },
-          select: { viaSubscriptionId: true, expiredDate: true, isCanceled: true },
+          select: {
+            viaSubscriptionId: true,
+            viaVoucherId: true,
+            expiredDate: true,
+            isCanceled: true,
+          },
         });
         const validEnrollment =
           enrollment != null && this.entitlement.isEnrollmentValid(enrollment);
-        const validRetail = validEnrollment && enrollment!.viaSubscriptionId === null;
+        // Retail = neither grant marker set. A live TRIAL is valid access but not
+        // ownership, so it must not count as retail here either.
+        const validRetail =
+          validEnrollment &&
+          enrollment!.viaSubscriptionId === null &&
+          enrollment!.viaVoucherId === null;
         isPurchase =
           validEnrollment || (await this.entitlement.hasActiveSubscription(memberId));
         viaSubscription = isPurchase && !validRetail;

@@ -11,13 +11,20 @@ export type ActiveSubscription = MemberSubscription & { plan: SubscriptionPlan }
  * status=ACTIVE and coalesce(graceUntil, expiresAt) > now.
  *
  * Enrollment validity predicate — the sacred rule:
- * - via_subscription_id NULL (retail/legacy) → ALWAYS valid. expired_date is
+ * - BOTH grant markers NULL (retail/legacy) → ALWAYS valid. expired_date is
  *   deliberately ignored: legacy migration filled it on lifetime purchases, and
  *   the pre-subscription gate never read it. Honoring it would cut off paying
  *   lifetime buyers.
  * - via_subscription_id set (lazy row) → valid only while expired_date > now.
  *   Renewal bumps the date (SubscriptionService); seat removal/leave zeroes it
  *   (SeatService); expiry lets it die on its own — no cleanup job needed.
+ * - via_voucher_id set (free-trial row) → same shape: valid only while
+ *   expired_date > now, set once at grant time to grant + voucher.trialDays.
+ *
+ * This is the in-memory form of `activeEnrollment()` in commerce/enrollment.ts.
+ * The two MUST stay identical — one is the SQL filter behind list badges, the
+ * other gates content access, and a drift between them shows as a course the
+ * catalog says you own but the player refuses to open.
  */
 export class EntitlementService {
   async getActiveSubscriptionForMember(memberId: string): Promise<ActiveSubscription | null> {
@@ -40,16 +47,16 @@ export class EntitlementService {
   }
 
   /**
-   * See class doc — retail rows are valid by existence, lazy rows by date.
+   * See class doc — retail rows are valid by existence, granted rows by date.
    * A refund soft-cancels the row instead of deleting it (`is_canceled`), so the
    * flag is checked FIRST: a cancelled retail row would otherwise pass on the
    * by-existence branch and keep serving a refunded member.
    */
   isEnrollmentValid(
-    e: Pick<CourseEnrollment, 'viaSubscriptionId' | 'expiredDate' | 'isCanceled'>,
+    e: Pick<CourseEnrollment, 'viaSubscriptionId' | 'viaVoucherId' | 'expiredDate' | 'isCanceled'>,
   ): boolean {
     if (e.isCanceled) return false;
-    if (!e.viaSubscriptionId) return true;
+    if (!e.viaSubscriptionId && !e.viaVoucherId) return true;
     return e.expiredDate !== null && e.expiredDate > new Date();
   }
 

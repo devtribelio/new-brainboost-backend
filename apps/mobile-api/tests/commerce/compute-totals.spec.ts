@@ -73,4 +73,14 @@ describe('computeTotals', () => {
     expect(r.voucherAmount).toBe(0);
     expect(r.amount).toBe(100_000);
   });
+
+  it('TRIAL discounts 100% regardless of value (never falls through to the AMOUNT branch)', () => {
+    // The trap: TRIAL rows carry value=0, so an unhandled type would land in the
+    // AMOUNT branch, discount nothing and charge the member full price for what
+    // was advertised as a free trial.
+    const r = computeTotals({ unitPrice: 500_000, voucher: { type: 'TRIAL', value: 0 } });
+    expect(r.itemTotal).toBe(500_000);
+    expect(r.voucherAmount).toBe(500_000);
+    expect(r.amount).toBe(0);
+  });
 });

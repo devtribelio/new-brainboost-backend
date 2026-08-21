@@ -4,6 +4,7 @@ import { commerceEvents } from '@bb/common/events/commerce-events';
 import { affiliateEvents } from '@bb/common/events/affiliate-events';
 import { enqueueComms } from '@bb/common/services/comms-outbox';
 import { settingsService, SETTING_KEYS } from '@bb/common/services/settings.service';
+import { loadTrialGrant } from '@bb/domain/commerce/trial';
 
 /**
  * Outbound email producer for commerce events. Enqueues a transactional email
@@ -28,8 +29,14 @@ export function registerCommsEmailListeners(): void {
         select: { id: true },
       });
       if (plan) return;
+
+      // A trial gets its own type, not the receipt: every line of the receipt's
+      // money block is Rp 0 or a discount equal to the full price, which reads as
+      // a bill for a purchase that never happened. bb-comms resolves the end date
+      // itself from paid_at + trial_days.
+      const isTrial = e.voucherId ? (await loadTrialGrant(e.voucherId)) != null : false;
       await enqueueComms({
-        type: 'CoursePaymentSuccess',
+        type: isTrial ? 'CourseTrialStarted' : 'CoursePaymentSuccess',
         channel: 'email',
         priority: 'normal',
         refId: e.transactionId, // bb-comms reads commerce_transactions by this id
@@ -37,7 +44,7 @@ export function registerCommsEmailListeners(): void {
     } catch (err) {
       logger.error(
         { err, transactionId: e.transactionId },
-        '[comms-email] failed to enqueue CoursePaymentSuccess',
+        '[comms-email] failed to enqueue purchase email',
       );
     }
   });
@@ -51,6 +58,10 @@ export function registerCommsEmailListeners(): void {
   commerceEvents.on('commerce.payment.success', async (e) => {
     if (e.isRenewal) return;
     try {
+      // A free trial is not a sale. Alerting the team on one would mean an email
+      // per trial claimed, each saying "Penjualan baru" for Rp 0. Trial uptake is
+      // a number to read on the voucher dashboard, not an inbox event.
+      if (e.voucherId && (await loadTrialGrant(e.voucherId)) != null) return;
       const raw = await settingsService.get(SETTING_KEYS.salesAlertEmail, '');
       const recipients = raw
         .split(',')

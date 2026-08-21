@@ -1,23 +1,41 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '@bb/db';
-import { badRequest, ERROR_CODES } from '@bb/common/exceptions';
+import { badRequest, ERROR_CODES, type ErrorCode } from '@bb/common/exceptions';
+
+export type VoucherType = 'PERCENT' | 'AMOUNT' | 'TRIAL';
 
 export interface VoucherCheckResult {
   valid: boolean;
   voucherId?: string;
   voucherAmount?: number;
-  type?: 'PERCENT' | 'AMOUNT';
+  type?: VoucherType;
   /** Cap for PERCENT vouchers — MUST be threaded into computeTotals or the cap is silently bypassed. */
   maxAmount?: number | null;
+  /** TRIAL only: days of access the grant is worth. */
+  trialDays?: number | null;
   reason?: string;
+  /**
+   * Error code the caller should surface instead of the generic VOUCHER_INVALID.
+   * Only set where the member-facing copy has to be specific — "you already used
+   * this trial" is actionable, "voucher tidak dapat digunakan" is not.
+   */
+  errorCode?: ErrorCode;
 }
 
 export class VoucherService {
   /**
    * Dry-run: lookup voucher + check eligibility for productId. Does NOT redeem.
    * Caller computes discount via `computeTotals()` using returned voucher meta.
+   *
+   * `memberId` is required by the TRIAL once-per-member rule, which is enforced
+   * HERE rather than by a DB constraint: the proof that a member already used a
+   * trial is their enrollment row (`course_enrollment.via_voucher_id`), and a
+   * unique index cannot span tables. The residual race — two trial checkouts for
+   * the same course landing at once — cannot hand out two grants anyway, because
+   * `course_enrollment` is unique on (member_id, course_id); it can only burn an
+   * extra `quota` slot.
    */
-  async validate(code: string, productId: string): Promise<VoucherCheckResult> {
+  async validate(code: string, productId: string, memberId: string): Promise<VoucherCheckResult> {
     const voucher = await prisma.voucher.findUnique({
       where: { code },
       include: { products: { select: { productId: true } } },
@@ -38,12 +56,35 @@ export class VoucherService {
     if (voucher.quota != null && voucher.used >= voucher.quota) {
       return { valid: false, reason: 'Voucher quota exhausted' };
     }
+    if (voucher.type === 'TRIAL') {
+      // Defence in depth against a bad row: the DB CHECK already rejects
+      // trial_days <= 0, but a NULL here would silently grant a 0-day trial.
+      if (voucher.trialDays == null || voucher.trialDays <= 0) {
+        return { valid: false, reason: 'Trial voucher has no duration' };
+      }
+      // The once-per-member record is the ENROLLMENT, not a redemption row: it
+      // already carries member_id, and — unlike a redemption — it survives expiry,
+      // so a member cannot re-trial the same course every time the clock runs out.
+      // Deliberately NOT filtered on expiredDate/isCanceled for that reason.
+      const prior = await prisma.courseEnrollment.findFirst({
+        where: { memberId, viaVoucherId: voucher.id, course: { productId } },
+        select: { id: true },
+      });
+      if (prior) {
+        return {
+          valid: false,
+          reason: 'Trial already used by this member',
+          errorCode: ERROR_CODES.VOUCHER_TRIAL_ALREADY_USED,
+        };
+      }
+    }
     return {
       valid: true,
       voucherId: voucher.id,
-      type: voucher.type as 'PERCENT' | 'AMOUNT',
+      type: voucher.type as VoucherType,
       voucherAmount: voucher.value,
       maxAmount: voucher.maxAmount,
+      trialDays: voucher.trialDays,
     };
   }
 

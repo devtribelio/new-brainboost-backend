@@ -539,6 +539,131 @@ Wired:
 
 ---
 
+## 8b. Free-Trial Voucher (`type='TRIAL'`)
+
+New voucher type that grants **time-boxed course access** instead of a discount.
+Not legacy parity — legacy had no trial.
+
+### Model — 2 columns, 0 changes to `voucher_redemptions`
+
+| Column | Table | Purpose |
+|---|---|---|
+| `type = 'TRIAL'` | `vouchers` | free-form string, no DB enum → no migration on the column |
+| `trial_days` | `vouchers` | days of access. DB CHECK: `type <> 'TRIAL' OR trial_days > 0` |
+| `via_voucher_id` | `course_enrollment` | trial marker **and** once-per-member record. NULL = retail/legacy. No FK |
+
+Migration: `20260820120000_voucher_trial`. Quota, per-order idempotency and the
+`voucher_redemptions` table are **untouched** — a trial redeems through exactly the
+same two-phase path as any other voucher.
+
+### Once per member — enforced on the enrollment, not the redemption
+
+The proof that a member already used a trial is their enrollment row: it already
+carries `member_id`, and — unlike a redemption row — it **survives expiry**, so a
+member cannot re-trial the same course every time the clock runs out. `validate()`
+checks it deliberately WITHOUT filtering on `expired_date` / `is_canceled`.
+
+Scope is `(voucher, product)`. A second trial code for the same course re-opens the
+trial: an ops constraint (don't issue duplicate trial codes per course), not a DB one.
+
+This is an application-level check, not a DB constraint — a unique index cannot span
+tables. The residual race (two trial checkouts for the same course landing at once)
+**cannot hand out two grants**: `course_enrollment` is unique on `(member_id,
+course_id)`, so both settle onto one row. The only leak is an extra `quota` slot
+burned, which shows up as `used` rising without a matching enrollment.
+
+An earlier draft denormalised `member_id` + `is_trial` onto `voucher_redemptions` for
+a partial unique index. Dropped: it needed a backfill and an orphan `DELETE` on a
+production table to buy a guarantee the enrollment unique already provides.
+
+### Two access predicates, not one
+
+`packages/domain/src/commerce/enrollment.ts`:
+
+- `activeEnrollment()` — *may the member consume the content?* Trial says **yes**.
+  `{ isCanceled: false, OR: [{ viaVoucherId: null }, { expiredDate: { gt: now } }] }`.
+  A **function**, not a const: `new Date()` inside a module-level object freezes at
+  process boot and every trial looks valid (or expired) forever.
+- `OWNED_FOR_PURCHASE` — *is it already paid for?* Trial says **no**.
+  `{ isCanceled: false, viaVoucherId: null }`. **Checkout guard only** — a trial must
+  never block the sale it exists to advertise.
+
+The `not_purchased` catalog shelf uses `activeEnrollment()`, NOT `OWNED_FOR_PURCHASE`:
+a course the member can already open does not belong on a "belum dibeli" shelf, even
+though it is genuinely unpaid. It returns to the shelf the moment the trial expires —
+date-based predicate, no sweep. Buying mid-trial still works, just not from that shelf.
+
+`expired_date` is honoured **only** for trial rows. A retail/legacy row is valid by
+existence: the legacy migration filled `expired_date` on lifetime purchases and the
+pre-trial gate never read it, so honouring it globally would cut off paying buyers.
+
+### Flow
+
+1. `computeTotals` handles `TRIAL` **explicitly** → `voucherAmount = itemTotal` (100%).
+   Falling through to the AMOUNT branch would read `value` (0 on a trial row) and
+   charge the member full price for a "free" trial.
+2. `amount = 0` → the existing `completeVoucherBypass()` settles it with no Xendit
+   call. Affiliate commission is already 0 there (`productPrice - voucherAmount = 0`).
+   A `commerce_transactions` + `commerce_payments` row IS written, same as any order.
+3. `payment-success.listener` loads the voucher (not carried on the event — four
+   channels emit it), and grants `expired_date = now + trial_days`, `via_voucher_id`.
+4. Expiry needs **no cron**: the predicate is date-based, the row dies on its own.
+5. Conversion: buying the course updates the same row (unique `(member_id, course_id)`)
+   → clears `via_voucher_id` + `expired_date`, **resets `progress` to 0** and drops any
+   certificate. Side effect: the trial record is erased, so a refund after conversion
+   re-opens the trial. Known, accepted.
+
+### Idempotency trap
+
+`grantCourseEnrollment` matches only cancelled rows and trial rows. A redelivered
+event for a live paid enrollment updates 0 rows instead of wiping progress; a
+redelivered trial event excludes its own voucher, so `expired_date` can't be extended.
+
+### Outbound comms
+
+A trial fires the same `commerce.payment.success` as a purchase, so all three
+outbound paths had to learn about it — none of them may say "Pembayaran berhasil"
+to someone who was never charged:
+
+| Path | Purchase | Trial |
+|---|---|---|
+| Push + in-app | `paymentSuccess` — "Pembayaran berhasil" | `trialStarted` — "Uji coba kamu aktif" / "Akses {produk} terbuka sampai {tanggal}." |
+| Buyer email | `CoursePaymentSuccess` | `CourseTrialStarted` (bb-comms) |
+| Sales alert email | `SaleAlert` | **not sent** — a trial is not a sale |
+
+- `ActionLabel.TrialStarted` needs **no client release**: payment notifications route
+  on `refTable` (unchanged, `commerce_payment`) and an unknown `type` falls to the
+  default icon — which `paymentSuccess` already does. Value is FROZEN once shipped.
+- It is in `PUSH_LIMIT_EXEMPT`: transactional, must not spend the unopened-push budget.
+- The end date lives in the **body**, not the title — Android truncates titles at
+  ~40 chars and the date is the only new information in the message.
+- `loadTrialGrant()` lives in `commerce/trial.ts` and all three listeners call it.
+  It is deliberately NOT a field on the event: an optional field is read as
+  "not a trial" by any emitter that forgets it, and that failure is silent.
+- Dates are rendered in **WIB** (`formatDateWib` / `formatDateWIB`) in both repos.
+  Timestamps are stored tz-less in app-clock UTC, so a raw format shows the previous
+  day for anything after 17:00 WIB — tolerable on a receipt, not on the one date that
+  defines when access stops.
+- bb-comms derives the end date from `paid_at + vouchers.trial_days`, NOT from
+  `course_enrollment.expired_date`: the enrollment is written by a different async
+  listener, so reading it races the email. Both formulas use the same two committed
+  values, so they cannot disagree.
+
+**Deploy order is binding: bb-comms first, backend second.** An unknown message type
+goes straight to the DLQ (`internal/mq/consumer.go`), so shipping the backend first
+parks every trial email there until bb-comms catches up (replayable, but late).
+
+### Known gap
+
+No reminder before a trial expires — the member hears at day 0 and then access stops
+silently at day N. An H-1 email is usually the highest-converting message in a trial
+flow; it needs a cron plus a sent-marker to avoid double sends, and is NOT built.
+
+### Out of scope here
+
+Voucher authoring UI (`type=TRIAL`, `trial_days`) lives in the **backoffice-bb** repo.
+
+
 ## 9. Out of Scope (Backlog)
 
 - IAP (Apple/Google) — defer ke `subscription` module nanti

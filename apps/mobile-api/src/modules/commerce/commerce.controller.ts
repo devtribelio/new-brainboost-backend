@@ -138,7 +138,7 @@ export class CommerceController {
   @ApiResponse({ status: 200, type: () => VoucherValidateResultDto })
   validateVoucher = async (req: ReqWithUser, res: Response) => {
     const dto = req.body as ValidateVoucherDto;
-    const result = await this.voucher.validate(dto.code, dto.productId);
+    const result = await this.voucher.validate(dto.code, dto.productId, req.user!.id);
     return ok(res, result);
   };
 }
