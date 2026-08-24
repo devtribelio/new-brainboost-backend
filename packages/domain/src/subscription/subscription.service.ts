@@ -414,6 +414,24 @@ export class SubscriptionService {
     return this.schedulePendingChange({ ownerId, planId: target.id, source: 'web' });
   }
 
+  /**
+   * Occupants other than the owner. Used by both expiry paths (sweep job and RC
+   * EXPIRATION) to tell seat members why their access stopped — they lose it
+   * exactly like the owner does but can do nothing about it, so they need their
+   * own message.
+   *
+   * Safe to call after the status flip: expiry does not vacate seats (the rows
+   * linger as "zombie" seats until the member claims one elsewhere), so the list
+   * is the same before and after.
+   */
+  async seatHolderIds(subscriptionId: string, ownerId: string): Promise<string[]> {
+    const seats = await prisma.subscriptionSeat.findMany({
+      where: { subscriptionId, memberId: { not: null }, NOT: { memberId: ownerId } },
+      select: { memberId: true },
+    });
+    return seats.map((s) => s.memberId as string);
+  }
+
   /** Drop a scheduled change. Returns false when there was nothing pending. */
   async clearPendingChange(subscriptionId: string): Promise<boolean> {
     const res = await prisma.memberSubscription.updateMany({

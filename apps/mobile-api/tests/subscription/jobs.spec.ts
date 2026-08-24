@@ -230,6 +230,52 @@ describe('expire job (BE-16)', () => {
     expect(notifs).toHaveLength(1); // event → BE-17 listener, deduped
   });
 
+  it('seat members are told too — they lose access and cannot renew anything', async () => {
+    const seatMember = await prisma.member.create({
+      data: { email: `sjobs-seat-${uniq}@test.local`, passwordHash: 'x', isActive: true },
+    });
+    const sub = await makeSub(2);
+    // The spec's plan is 1-seat, so give the sub a second slot to sit on.
+    await prisma.subscriptionSeat.create({
+      data: {
+        subscriptionId: sub.id,
+        seatNo: 2,
+        memberId: seatMember.id,
+        claimedAt: new Date(),
+      },
+    });
+    await prisma.memberSubscription.update({
+      where: { id: sub.id },
+      data: {
+        expiresAt: new Date(Date.now() - 10 * DAY_MS),
+        graceUntil: new Date(Date.now() - 3 * DAY_MS),
+      },
+    });
+
+    expect((await subscriptionExpire()).expired).toBe(1);
+    await settle();
+
+    const theirs = await prisma.notification.findMany({
+      where: { memberId: seatMember.id, type: 'subscriptionExpired' },
+    });
+    expect(theirs).toHaveLength(1);
+    // Their copy must not tell them to renew — they have nothing to renew.
+    expect(theirs[0].body).toContain('Hubungi pemilik langganan');
+
+    const owners = await prisma.notification.findMany({
+      where: { memberId: ownerId, type: 'subscriptionExpired' },
+    });
+    expect(owners).toHaveLength(1);
+    expect(owners[0].body).toContain('Perpanjang');
+
+    await prisma.notification.deleteMany({ where: { memberId: seatMember.id } });
+    await prisma.subscriptionSeat.updateMany({
+      where: { memberId: seatMember.id },
+      data: { memberId: null, claimedAt: null },
+    });
+    await prisma.member.delete({ where: { id: seatMember.id } });
+  });
+
   it('a sub inside grace is untouched', async () => {
     const inGrace = await makeSub(2);
     await prisma.memberSubscription.update({

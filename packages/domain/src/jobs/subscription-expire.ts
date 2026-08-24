@@ -1,6 +1,9 @@
 import { prisma } from '@bb/db';
 import { logger } from '@bb/common/config/logger';
 import { subscriptionEvents } from '@bb/common/events/subscription-events';
+import { SubscriptionService } from '../subscription/subscription.service';
+
+const subscriptionService = new SubscriptionService();
 
 /**
  * Background job (PRD BE-16): flip subscriptions past their grace window
@@ -33,6 +36,7 @@ export async function subscriptionExpire(now: Date = new Date()): Promise<{ expi
       subscriptionEvents.emit('subscription.expired', {
         subscriptionId: sub.id,
         ownerId: sub.ownerId,
+        seatMemberIds: await subscriptionService.seatHolderIds(sub.id, sub.ownerId),
         planId: sub.plan.id,
         planCode: sub.plan.code,
         tier: sub.plan.tier,

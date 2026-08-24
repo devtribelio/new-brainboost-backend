@@ -189,6 +189,7 @@ export class RevenueCatWebhookHandler {
     subscriptionEvents.emit('subscription.expired', {
       subscriptionId: sub.id,
       ownerId: sub.ownerId,
+      seatMemberIds: await this.subscriptionService.seatHolderIds(sub.id, sub.ownerId),
       planId: sub.plan.id,
       planCode: sub.plan.code,
       tier: sub.plan.tier,

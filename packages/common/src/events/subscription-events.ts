@@ -32,7 +32,14 @@ export interface SubscriptionRenewedEvent extends SubscriptionEventBase {
   planChanged: boolean;
 }
 
-export type SubscriptionExpiredEvent = SubscriptionEventBase;
+export interface SubscriptionExpiredEvent extends SubscriptionEventBase {
+  /**
+   * Seat holders other than the owner, read before the subscription is flipped.
+   * They lose access exactly like the owner does but can do nothing about it, so
+   * they get their own copy — see the notification listener.
+   */
+  seatMemberIds: string[];
+}
 
 export interface SubscriptionCanceledEvent extends SubscriptionEventBase {
   /** user = cancel intent (access continues); store = RC UNSUBSCRIBE; refund = immediate revoke. */

@@ -57,6 +57,26 @@ export function registerSubscriptionNotificationListener(): void {
         payload: subPayload(e),
         dedupeKey: `subscriptionExpired:${e.subscriptionId}:${e.expiresAt.toISOString()}`,
       });
+
+      // Seat members lose access at the same instant and used to be told
+      // nothing at all — while a member cut by a tier change WAS told, even
+      // though the two are indistinguishable from where they sit. Their copy
+      // differs from the owner's on purpose: they cannot renew anything, so
+      // "perpanjang sekarang" is advice they cannot act on. What helps them is
+      // knowing why it stopped and who can turn it back on.
+      if (e.seatMemberIds.length) {
+        await producer.createForMany(
+          e.seatMemberIds,
+          {
+            type: ActionLabel.SubscriptionExpired,
+            notifGroup: NotifGroup.General,
+            title: 'Akses langganan berakhir',
+            body: `Langganan ${e.tier} yang kamu ikuti sudah berakhir, jadi aksesmu ikut berhenti. Hubungi pemilik langganan untuk memperpanjang.`,
+            payload: subPayload(e),
+          },
+          `subscriptionExpiredSeat:${e.subscriptionId}:${e.expiresAt.toISOString()}`,
+        );
+      }
     } catch (err) {
       logger.error({ err, subscriptionId: e.subscriptionId }, '[notification] sub expired failed');
     }
