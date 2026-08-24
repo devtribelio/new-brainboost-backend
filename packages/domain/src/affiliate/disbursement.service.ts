@@ -618,8 +618,9 @@ export class DisbursementService {
   }
 
   /**
-   * Webhook final decision: "Approved" → APPROVED, "Declined" → REJECTED. Writes
-   * are absolute so webhook replays converge to the same state (idempotent). The
+   * Webhook final decision: "Approved" → APPROVED, "Declined" → REJECTED. A webhook
+   * matching the current status is a full no-op (replay, or Didit echoing a manual
+   * backoffice decision pushed via update-status) so MANUAL provenance survives. The
    * session_id guard is the re-KYC safety net: a stale "Approved" from a previous
    * session (whose id no longer matches kycProviderRef) is IGNORED, so it cannot
    * silently re-approve an EXPIRED member (replaces Sumsub's resetApplicant).
@@ -639,6 +640,12 @@ export class DisbursementService {
     const { approved } = input;
     const rejectedReason = approved ? null : input.rejectedReason || 'REJECTED';
     const newStatus = approved ? 'APPROVED' : 'REJECTED';
+    if (member.kycStatus === newStatus) {
+      // Already there → full no-op, so a webhook that merely echoes the current
+      // status (a replay, or Didit confirming a backoffice manual decision pushed
+      // via update-status) can't overwrite kycSource/kycReviewedBy provenance.
+      return { handled: true, memberId: member.id, kycStatus: newStatus };
+    }
     await prisma.$transaction([
       prisma.member.update({
         where: { id: member.id },
@@ -651,21 +658,16 @@ export class DisbursementService {
           kycRejectedReason: rejectedReason,
         },
       }),
-      // Idempotent: a replayed webhook lands on the same status → no duplicate audit row.
-      ...(member.kycStatus === newStatus
-        ? []
-        : [
-            prisma.kycEvent.create({
-              data: {
-                memberId: member.id,
-                type: approved ? 'APPROVE' : 'REJECT',
-                fromStatus: member.kycStatus,
-                toStatus: newStatus,
-                actorType: 'DIDIT',
-                metadata: rejectedReason ? { rejectedReason } : undefined,
-              },
-            }),
-          ]),
+      prisma.kycEvent.create({
+        data: {
+          memberId: member.id,
+          type: approved ? 'APPROVE' : 'REJECT',
+          fromStatus: member.kycStatus,
+          toStatus: newStatus,
+          actorType: 'DIDIT',
+          metadata: rejectedReason ? { rejectedReason } : undefined,
+        },
+      }),
     ]);
     logger.info(
       { memberId: member.id, sessionId: input.sessionId, approved },
