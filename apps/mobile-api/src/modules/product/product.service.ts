@@ -82,15 +82,20 @@ export class ProductService {
     return { rows, total, ratingAvgByProduct, purchasedProductIds };
   }
 
-  private static orderByFor(sort?: ProductSort): Prisma.ProductOrderByWithRelationInput {
+  // Ordering keys off `id`, not `createdAt`: ids are UUID v7 (`@default(uuid(7))`),
+  // whose leading 48 bits are the insert-time ms, and Postgres compares `uuid`
+  // bytewise — so `id DESC` is `createdAt DESC` with a deterministic tie-break and
+  // a PK index behind it. Nothing writes `Product.createdAt` explicitly (the legacy
+  // migration included), so the two can't drift.
+  private static orderByFor(sort?: ProductSort): Prisma.ProductOrderByWithRelationInput[] {
     switch (sort) {
       case 'price_asc':
-        return { price: 'asc' };
+        return [{ price: 'asc' }, { id: 'desc' }];
       case 'price_desc':
-        return { price: 'desc' };
+        return [{ price: 'desc' }, { id: 'desc' }];
       case 'newest':
       default:
-        return { createdAt: 'desc' };
+        return [{ id: 'desc' }];
     }
   }
 
@@ -138,12 +143,12 @@ export class ProductService {
     const groupBy = needsRating ? Prisma.sql`GROUP BY p.id` : Prisma.empty;
     const orderBy =
       q.sort === 'price_asc'
-        ? Prisma.sql`p.price ASC, p.created_at DESC`
+        ? Prisma.sql`p.price ASC, p.id DESC`
         : q.sort === 'price_desc'
-          ? Prisma.sql`p.price DESC, p.created_at DESC`
+          ? Prisma.sql`p.price DESC, p.id DESC`
           : q.sort === 'top_rated'
-            ? Prisma.sql`COALESCE(AVG(r.stars), 0) DESC, p.created_at DESC`
-            : Prisma.sql`p.created_at DESC`;
+            ? Prisma.sql`COALESCE(AVG(r.stars), 0) DESC, p.id DESC`
+            : Prisma.sql`p.id DESC`;
 
     const idRows = await prisma.$queryRaw<{ id: string }[]>`
       SELECT p.id
@@ -180,6 +185,15 @@ export class ProductService {
   // ownership=purchased: drive query off CourseEnrollment so we can paginate
   // and sort by *purchase date*, not product.createdAt. Total = enrollment count
   // for the member, so meta.pagination.total matches the filtered result.
+  //
+  // Ordered by `id` (UUID v7 → insert-time ms prefix, compared bytewise by Postgres)
+  // rather than `createdAt`, which is NOT unique enough to paginate on: nothing writes
+  // that column explicitly, so every migrated row took `now()` at insert, and
+  // `scripts/migrate-members.ts` inserts via chunked `createMany` — `now()` is constant
+  // within a statement, so a whole chunk shares one byte-identical timestamp. A member
+  // with 11 such enrollments had no defined order at all under `createdAt DESC`, and
+  // two executions could return two different permutations, so `OFFSET 10` sliced
+  // different sets: page 2 repeated a row from page 1 and dropped another entirely.
   private async listPurchased(
     p: PaginationParams,
     memberId: string,
@@ -201,7 +215,7 @@ export class ProductService {
     const [enrollments, total] = await Promise.all([
       prisma.courseEnrollment.findMany({
         where: enrollmentWhere,
-        orderBy: { createdAt: 'desc' },
+        orderBy: { id: 'desc' },
         skip: p.skip,
         take: p.take,
         select: { course: { select: { product: true } } },
