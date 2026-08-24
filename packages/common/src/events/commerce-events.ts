@@ -17,6 +17,23 @@ export interface CommercePaymentSuccessEvent {
    */
   acceptedAmount?: number;
   voucherAmount: number;
+  /**
+   * Unused subscription term credited back on a tier upgrade.
+   *
+   * Added BACK when computing the affiliate base, so commission is a percentage
+   * of the PLAN price, not of the reduced charge. That is a deliberate business
+   * decision, not an oversight: the credit is money returned to the member for
+   * time they already paid for, and the affiliate's cut of that first term was
+   * settled when it was sold. Letting it shrink the base would claw back part of
+   * a commission that was already earned.
+   *
+   * Contrast with `voucherAmount`, which DOES reduce the base — a discount is
+   * revenue that never existed, so there is nothing to pay a percentage of.
+   *
+   * Absent on every non-upgrade order and on the store channels, where the
+   * provider reports whatever it charged and does the proration itself.
+   */
+  prorationCredit?: number;
   voucherId?: string | null;
   affiliatorId?: string | null;
   programId?: string | null;

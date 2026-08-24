@@ -149,6 +149,58 @@ describe('commerce.payment.success listener', () => {
     expect(commission?.amount).not.toBe(Math.floor(429_000 * 0.2));
   });
 
+  it('a tier-upgrade proration credit does NOT reduce the commission base', async () => {
+    // Business decision (COO 2026-08-24): commission is a percentage of the PLAN
+    // price. The credit refunds the member for term they already paid for, and
+    // the affiliate's cut of that term was settled when it was sold — letting it
+    // shrink the base would claw back commission already earned. A voucher is
+    // the opposite case and DOES reduce the base, which is why they differ.
+    const paymentId = randomUUID();
+    const transactionId = randomUUID();
+    commerceEvents.emit('commerce.payment.success', {
+      paymentId,
+      transactionId,
+      memberId,
+      productId,
+      amount: 1_499_000, // charged after the credit
+      prorationCredit: 500_000, // unused term handed back
+      voucherAmount: 0,
+      voucherId: null,
+      affiliatorId: null,
+      programId,
+    });
+    await wait(150);
+
+    const commission = await prisma.affiliateCommission.findFirst({
+      where: { buyerMemberId: memberId, paymentId },
+    });
+    // Full plan price is 1_499_000 + 500_000.
+    expect(commission?.amount).toBe(Math.floor(1_999_000 * 0.2));
+    expect(commission?.amount).not.toBe(Math.floor(1_499_000 * 0.2));
+  });
+
+  it('a voucher still DOES reduce the base — the two discounts are not the same thing', async () => {
+    const paymentId = randomUUID();
+    const transactionId = randomUUID();
+    commerceEvents.emit('commerce.payment.success', {
+      paymentId,
+      transactionId,
+      memberId,
+      productId,
+      amount: 1_499_000,
+      voucherAmount: 500_000,
+      voucherId: null,
+      affiliatorId: null,
+      programId,
+    });
+    await wait(150);
+
+    const commission = await prisma.affiliateCommission.findFirst({
+      where: { buyerMemberId: memberId, paymentId },
+    });
+    expect(commission?.amount).toBe(Math.floor(1_499_000 * 0.2)); // voucher stays deducted
+  });
+
   it('idempotent: re-emit same paymentId does not duplicate side effects', async () => {
     const paymentId = randomUUID();
     const transactionId = randomUUID();

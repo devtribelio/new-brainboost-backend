@@ -54,12 +54,20 @@ export function registerCommerceListeners(): void {
       // pre-voucher base so `computeAmount` can subtract it again (legacy
       // shape). When acceptedAmount is absent, falls back to gross (web /
       // voucher bypass behavior unchanged).
+      //
+      // A tier-upgrade proration credit is added back too, and unlike the
+      // voucher it is NOT subtracted again — commission is a percentage of the
+      // PLAN price, not of the reduced charge. The credit refunds the member for
+      // time they already paid for, and the affiliate's cut of that first term
+      // was settled when it was sold; letting it shrink the base would claw back
+      // commission already earned. A voucher is the opposite case (revenue that
+      // never existed), which is why the two are treated differently.
       const commissionBase = e.acceptedAmount ?? e.amount;
       await affiliatorService
         .commitCommissionsForPayment({
           paymentId: e.paymentId,
           productId: e.productId,
-          productPrice: commissionBase + e.voucherAmount,
+          productPrice: commissionBase + e.voucherAmount + (e.prorationCredit ?? 0),
           voucherAmount: e.voucherAmount,
           buyerMemberId: e.memberId,
           programId: e.programId ?? null,

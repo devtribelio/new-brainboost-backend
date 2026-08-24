@@ -31,6 +31,7 @@ type TransactionRow = {
   productId: string;
   amount: number;
   voucherAmount: number;
+  prorationCredit: number;
   voucherId: string | null;
   affiliatorId: string | null;
   programId: string | null;
@@ -212,6 +213,7 @@ export class PaymentService {
       productId: tx.productId,
       amount: tx.amount,
       voucherAmount: tx.voucherAmount,
+      prorationCredit: tx.prorationCredit,
       voucherId: tx.voucherId,
       affiliatorId: tx.affiliatorId,
       programId: tx.programId,

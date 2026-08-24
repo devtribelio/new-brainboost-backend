@@ -1521,7 +1521,7 @@ model SubscriptionPlan {
   periodMonths         Int      @map("period_months")
   seatCount            Int      @map("seat_count") // seat 1 = owner
   affiliateRate        Int      @map("affiliate_rate") // % flat L1 commission on first sale (40)
-  renewalAffiliateRate Int      @map("renewal_affiliate_rate") // % on renewals — placeholder 20, final number pending COO
+  renewalAffiliateRate Int      @map("renewal_affiliate_rate") // % on renewals AND tier changes (10, COO 2026-08-24); runtime-editable
   isActive             Boolean  @default(true) @map("is_active")
   sortOrder            Int      @default(0) @map("sort_order")
   createdAt            DateTime @default(now()) @map("created_at")

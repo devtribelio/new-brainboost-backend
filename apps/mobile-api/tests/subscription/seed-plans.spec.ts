@@ -55,7 +55,7 @@ describe('seedSubscriptionPlans (BE-02)', () => {
       expect(p.product.type).toBe('subscription');
       expect(p.periodMonths).toBe(12);
       expect(p.affiliateRate).toBe(40);
-      expect(p.renewalAffiliateRate).toBe(20);
+      expect(p.renewalAffiliateRate).toBe(10); // COO 2026-08-24
       expect(p.product.iosProductId).toBeTruthy();
       expect(p.product.androidProductId).toBeTruthy();
     }
@@ -99,6 +99,6 @@ describe('seedSubscriptionPlans (BE-02)', () => {
     });
     // Product kept its operator price; only the plan row was recreated.
     expect(plan?.product.price).toBe(888_000);
-    expect(plan?.renewalAffiliateRate).toBe(20);
+    expect(plan?.renewalAffiliateRate).toBe(10);
   });
 });

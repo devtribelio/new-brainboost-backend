@@ -9,6 +9,10 @@
  *   pnpm seed:subscription-plans            (apply)
  *   pnpm seed:subscription-plans --dry-run  (report only)
  *
+ * Rates: 40% on the first sale, RENEWAL_AFFILIATE_RATE on every renewal and
+ * tier change. Commission is a percentage of the PLAN price — an upgrade's
+ * proration credit does not reduce it (see the payment-success listener).
+ *
  * SKUs are placeholders until the App Store / Play Store auto-renewing
  * products exist (PRD §5 external dependency) — update the Product rows with
  * the real SKUs then. The 2 runtime settings (subscription.graceDays /
@@ -34,7 +38,10 @@ export interface SubscriptionPlanSeed {
 
 const PERIOD_MONTHS = 12;
 const AFFILIATE_RATE = 40; // % flat L1, first sale (PRD locked)
-const RENEWAL_AFFILIATE_RATE = 20; // % placeholder — final number pending COO
+// % on renewals AND tier changes. Decided by the COO 2026-08-24 (was a 20%
+// placeholder). Runtime-editable per plan via subscription_plans.renewal_affiliate_rate
+// — this constant only seeds NEW rows, it never overwrites a tuned one.
+const RENEWAL_AFFILIATE_RATE = 10;
 
 export const PLAN_SEEDS: SubscriptionPlanSeed[] = [
   {
