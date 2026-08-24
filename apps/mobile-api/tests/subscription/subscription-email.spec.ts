@@ -127,6 +127,32 @@ describe('subscription email receipts (BE-18)', () => {
     expect(await outbox('SubscriptionRenewed', subId)).toHaveLength(1);
   });
 
+  it('a tier change sends ONE receipt, carrying what the DB can no longer answer', async () => {
+    const subId = `sub-change-${uniq}`;
+    // Both events fire for a tier change, in this order.
+    subscriptionEvents.emit('subscription.renewed', {
+      ...lifecyclePayload(subId),
+      planChanged: true,
+    });
+    subscriptionEvents.emit('subscription.plan_changed', {
+      ...lifecyclePayload(subId),
+      previousPlanCode: 'FAMILY_12M',
+      previousTier: 'FAMILY',
+      evictedMemberIds: ['m1', 'm2'],
+    });
+    await settle();
+
+    const rows = await outbox('SubscriptionRenewed', subId);
+    expect(rows).toHaveLength(1); // renewed stood down for plan_changed
+    // bb-comms reads by refId, and by then plan_id already points at the NEW
+    // plan — so the previous tier can only reach it through the payload.
+    expect(rows[0].payload).toMatchObject({
+      previousTier: 'FAMILY',
+      previousPlanCode: 'FAMILY_12M',
+      evictedCount: 2,
+    });
+  });
+
   it('plan-product payment does NOT enqueue CoursePaymentSuccess; retail still does', async () => {
     const planTx = `tx-plan-${uniq}`;
     const retailTx = `tx-retail-${uniq}`;
