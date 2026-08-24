@@ -88,6 +88,19 @@ export function registerSubscriptionNotificationListener(): void {
   subscriptionEvents.on('subscription.plan_changed', async (e) => {
     if (!e.evictedMemberIds.length) return; // nothing anyone needs to be told
     try {
+      // The owner scheduled this, but that may have been months ago and they may
+      // never have picked anyone. Without this they only see a routine renewal
+      // receipt while members quietly lose access — and the first they hear of it
+      // is those members asking why they are locked out.
+      await producer.createForMember({
+        memberId: e.ownerId,
+        type: ActionLabel.SubscriptionSeatRemoved,
+        notifGroup: NotifGroup.General,
+        title: `Paket kamu sekarang ${e.tier}`,
+        body: `${e.evictedMemberIds.length} anggota keluar dari langganan karena ${e.tier} punya lebih sedikit seat. Kamu bisa mengundang lagi kapan saja selama seat masih kosong.`,
+        payload: subPayload(e),
+        dedupeKey: `subscriptionSeatsCut:${e.subscriptionId}:${e.expiresAt.toISOString()}`,
+      });
       await producer.createForMany(
         e.evictedMemberIds,
         {

@@ -46,8 +46,10 @@ const JOBS: Array<{ name: string; run: () => Promise<unknown> }> = [
   // Expire BEFORE reminders: a sub past grace must not get a renewal reminder
   // in the same tick it dies.
   { name: 'subscriptionExpire', run: () => subscriptionExpire() },
-  // ⚠️ emails require the bb-comms SubscriptionRenewalReminder template (BE-18
-  // external dependency) — do not schedule this runner on prod before it ships.
+  // Safe on prod: the bb-comms SubscriptionRenewalReminder template shipped in
+  // BB-111 (bb-comms 0b5f561, on main). This carried a "do not schedule on prod"
+  // warning long after that landed — which, if obeyed, silently costs every
+  // annual subscriber their renewal reminder.
   { name: 'subscriptionRenewalReminder', run: () => subscriptionRenewalReminder() },
   // In-app only (no comms template needed), so it is safe on prod from day one.
   // After the renewal reminder purely for log readability — the two are

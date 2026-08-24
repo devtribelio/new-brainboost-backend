@@ -23,8 +23,8 @@ const producer = new NotificationProducer();
  * Because expiresAt is part of the key, a renewal (which moves expiresAt)
  * automatically re-arms the next cycle's reminders. No cleanup needed.
  *
- * ⚠️ Do NOT enable on prod before the bb-comms SubscriptionRenewalReminder
- * template exists (outbox rows would fail at bb-comms). See tracker.
+ * The bb-comms `SubscriptionRenewalReminder` template exists and is wired
+ * (BB-111) — this is safe to schedule on prod.
  */
 export async function subscriptionRenewalReminder(
   now: Date = new Date(),

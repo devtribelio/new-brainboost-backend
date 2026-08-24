@@ -211,7 +211,7 @@ GROUP BY p.tier ORDER BY MIN(p.sort_order);
 
 | Apa | Pemilik | Status |
 |---|---|---|
-| 3 template email di bb-comms | tim bb-comms | ❌ belum — blocker jobs reminder & receipt di prod |
+| ~~3 template email di bb-comms~~ | tim bb-comms | ✅ **selesai** (BB-111, commit bb-comms `0b5f561`, sudah di `main`): `subscription_activated` / `subscription_renewed` / `subscription_renewal_reminder`, ketiganya terdaftar di `internal/handler/handler.go`. Baris ini sempat tertinggal ❌ berbulan-bulan setelah template-nya ada |
 | SKU asli App Store/Play + entitlement RC | mobile/ops | ❌ placeholder di DB |
 | Angka final `renewal_affiliate_rate` | COO | ❌ placeholder 20% |
 | Basis + rate komisi **upgrade** tier | COO | ❌ default sekarang: kredit mengurangi basis, rate = renewal |

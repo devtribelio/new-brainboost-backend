@@ -727,19 +727,40 @@ function withdrawGrace(
 }
 
 /**
- * Who survives a shrink: the owner first (they pay the bill and sit on seat 1),
- * then the members the owner explicitly marked, then whoever sits on the lowest
- * seat number. Ordering inside each group is by seat number so the result is
- * deterministic — support has to be able to explain it.
+ * Who survives a shrink: the owner, plus exactly the members the owner marked.
+ * Nobody else — an unmarked seat is vacated even when the new plan still has
+ * room for it.
+ *
+ * The obvious alternative, filling the leftover room by seat number, was tried
+ * and dropped. It *guesses*, and it guesses silently: it cuts one member and
+ * keeps another on the strength of a number that only accidentally tracks who
+ * joined first — a seat vacated by a long-standing member and re-claimed by
+ * someone new carries its low number to the newcomer, who then displaces people
+ * who had been there for years. The owner would not necessarily notice for
+ * weeks, by which point the cut member is long gone.
+ *
+ * Keeping nobody fails loudly instead. Everyone affected is told, the owner
+ * hears about it immediately, and recovery is cheap and deliberate: the seats
+ * are empty, an invite re-fills them, and a returning member keeps their
+ * progress because the enrollment row is refreshed rather than recreated.
+ * A silent wrong guess has no such undo.
+ *
+ * An owner who explicitly submits an empty selection lands here too, and that is
+ * correct — "keep nobody" and "decide nothing" deserve the same outcome, which
+ * is also why the two need not be distinguishable in the data.
  */
 function pickKeepers<T extends { seatNo: number; memberId: string | null; pendingKeep: boolean }>(
   claimed: T[],
   seatCount: number,
   ownerId: string,
 ): T[] {
-  const bySeat = [...claimed].sort((a, b) => a.seatNo - b.seatNo);
-  const rank = (s: T) => (s.memberId === ownerId ? 0 : s.pendingKeep ? 1 : 2);
-  return bySeat.sort((a, b) => rank(a) - rank(b) || a.seatNo - b.seatNo).slice(0, seatCount);
+  const owner = claimed.filter((s) => s.memberId === ownerId);
+  const marked = claimed
+    .filter((s) => s.memberId !== ownerId && s.pendingKeep)
+    .sort((a, b) => a.seatNo - b.seatNo);
+  // Slice guards a selection that predates a shrink of the target plan; the
+  // endpoint already caps it at declaration time.
+  return [...owner, ...marked].slice(0, seatCount);
 }
 
 function isUniqueViolation(e: unknown, field: string): boolean {
