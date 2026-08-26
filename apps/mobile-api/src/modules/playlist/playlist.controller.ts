@@ -4,7 +4,11 @@ import { ok, okCreated } from '@bb/common/utils/response.util';
 import { badRequest, ERROR_CODES } from '@bb/common/exceptions';
 import type { AuthenticatedRequest } from '@bb/common/interfaces/authenticated-request';
 import { ApiBody, ApiOperation, ApiResponse, ApiTags } from '@bb/common/openapi/decorators';
-import { serializePlaylist, serializePlaylistDetail } from './playlist.serializer';
+import {
+  serializePlaylist,
+  serializePlaylistDetail,
+  serializeSharedPlaylist,
+} from './playlist.serializer';
 import { PlaylistDetailDto, PlaylistDto } from './dto/playlist.dto';
 import { CreatePlaylistDto, PlaylistItemsDto, UpdatePlaylistDto } from './dto/create-playlist.dto';
 
@@ -107,5 +111,43 @@ export class PlaylistController {
     const body = req.body as PlaylistItemsDto;
     const result = await this.playlistService.reorder(req.user!.id, this.id(req), body.lessonIds);
     return ok(res, result);
+  };
+
+  @ApiOperation({ summary: 'Switch sharing on (idempotent) or rotate the link' })
+  @ApiResponse({ status: 200 })
+  share = async (req: AuthenticatedRequest, res: Response) => {
+    const rotate = req.query.rotate === 'true' || req.query.rotate === '1';
+    const result = await this.playlistService.share(req.user!.id, this.id(req), rotate);
+    return ok(res, {
+      shareToken: result.shareToken,
+      sharedAt: result.sharedAt?.toISOString() ?? null,
+    });
+  };
+
+  @ApiOperation({ summary: 'Withdraw the share link' })
+  @ApiResponse({ status: 200 })
+  unshare = async (req: AuthenticatedRequest, res: Response) => {
+    await this.playlistService.unshare(req.user!.id, this.id(req));
+    return ok(res, { shared: false });
+  };
+
+  @ApiOperation({ summary: 'Open a shared playlist (public — never answers 401)' })
+  @ApiResponse({ status: 200, type: () => PlaylistDetailDto })
+  shared = async (req: AuthenticatedRequest, res: Response) => {
+    const token = req.params.token;
+    if (!token) throw badRequest(ERROR_CODES.PLAYLIST_NOT_FOUND);
+    const view = await this.playlistService.detailByShareToken(token, req.user?.id);
+    return ok(res, serializeSharedPlaylist(view));
+  };
+
+  @ApiOperation({ summary: 'Save a shared playlist into your own library' })
+  @ApiResponse({ status: 200, type: () => PlaylistDto })
+  saveShared = async (req: AuthenticatedRequest, res: Response) => {
+    const token = req.params.token;
+    if (!token) throw badRequest(ERROR_CODES.PLAYLIST_NOT_FOUND);
+    const memberId = req.user!.id;
+    const { playlist, created } = await this.playlistService.saveFromShare(memberId, token);
+    const quota = await this.playlistService.getQuota(memberId);
+    return ok(res, serializePlaylist(playlist), { quota, created });
   };
 }

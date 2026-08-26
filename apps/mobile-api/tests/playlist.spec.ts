@@ -310,4 +310,138 @@ describe('PlaylistService (real Postgres)', () => {
       );
     });
   });
+
+  describe('share + copy', () => {
+    async function sharedPlaylist(name = 'Dibagikan') {
+      const { playlist } = await service.create(subscriber, { name, lessonIds: [lessons[0], lessons[1]] });
+      const { shareToken } = await service.share(subscriber, playlist.id);
+      return { playlist, token: shareToken };
+    }
+
+    it('mints one token and keeps returning it until asked to rotate', async () => {
+      const { playlist, token } = await sharedPlaylist();
+      const again = await service.share(subscriber, playlist.id);
+      expect(again.shareToken).toBe(token);
+
+      const rotated = await service.share(subscriber, playlist.id, true);
+      expect(rotated.shareToken).not.toBe(token);
+      // The old link dies the moment it is rotated.
+      await expect(service.detailByShareToken(token)).rejects.toMatchObject({
+        code: ERROR_CODES.PLAYLIST_NOT_FOUND,
+      });
+    });
+
+    it('refuses to share an empty playlist', async () => {
+      const { playlist } = await service.create(subscriber, { name: 'Kosong' });
+      await expect(service.share(subscriber, playlist.id)).rejects.toMatchObject({
+        code: ERROR_CODES.PLAYLIST_ITEMS_REQUIRED,
+      });
+    });
+
+    it('answers an anonymous caller — metadata visible, every audio locked', async () => {
+      const { token } = await sharedPlaylist();
+      const view = await service.detailByShareToken(token);
+      expect(view.totalItems).toBe(2);
+      expect(view.lockedItems).toBe(2);
+      expect(view.items.every((i) => i.streamUrl === null)).toBe(true);
+      expect(view.canSave).toBe(false);
+    });
+
+    it('keeps a preview lesson playable for anyone', async () => {
+      const previewLesson = await prisma.lesson.create({
+        data: { sectionId, name: 'Preview', duration: 120, isPreview: true, slidesData: audioSlides(`guid-${uid()}`) },
+      });
+      try {
+        const { playlist } = await service.create(subscriber, { name: 'Preview mix', lessonIds: [previewLesson.id] });
+        const { shareToken } = await service.share(subscriber, playlist.id);
+        const view = await service.detailByShareToken(shareToken);
+        expect(view.lockedItems).toBe(0);
+        expect(view.items[0].streamUrl).toContain('/api/member/media/stream?t=');
+      } finally {
+        await prisma.playlistItem.deleteMany({ where: { lessonId: previewLesson.id } });
+        await prisma.lesson.delete({ where: { id: previewLesson.id } });
+      }
+    });
+
+    it('unlocks the audio for a subscriber who opens the link', async () => {
+      const { token } = await sharedPlaylist();
+      const view = await service.detailByShareToken(token, subscriber);
+      expect(view.lockedItems).toBe(0);
+      expect(view.isOwner).toBe(true);
+    });
+
+    it('goes 404 once the owner withdraws the link', async () => {
+      const { playlist, token } = await sharedPlaylist();
+      await service.unshare(subscriber, playlist.id);
+      await expect(service.detailByShareToken(token)).rejects.toMatchObject({
+        code: ERROR_CODES.PLAYLIST_NOT_FOUND,
+      });
+      const row = await prisma.playlist.findUnique({ where: { id: playlist.id } });
+      expect(row?.visibility).toBe('PRIVATE');
+    });
+
+    it('goes 404 — not 403 — when ops blocks it, so the link cannot confirm it exists', async () => {
+      const { playlist, token } = await sharedPlaylist();
+      await prisma.playlist.update({ where: { id: playlist.id }, data: { isBlocked: true } });
+      await expect(service.detailByShareToken(token)).rejects.toMatchObject({
+        code: ERROR_CODES.PLAYLIST_NOT_FOUND,
+      });
+    });
+
+    it('copies every item as is, locked ones included', async () => {
+      const { token } = await sharedPlaylist();
+      // Grant the copier a subscription seat so they may write at all.
+      await prisma.subscriptionSeat.create({ data: { subscriptionId, memberId: plain, seatNo: 2 } });
+      try {
+        const { playlist: copy, created } = await service.saveFromShare(plain, token);
+        expect(created).toBe(true);
+        expect(copy.ownerId).toBe(plain);
+        expect(copy.copiedFromToken).toBe(token);
+        expect(copy.shareToken).toBeNull();
+
+        const items = await prisma.playlistItem.count({ where: { playlistId: copy.id } });
+        expect(items).toBe(2);
+      } finally {
+        await prisma.subscriptionSeat.deleteMany({ where: { subscriptionId, memberId: plain } });
+      }
+    });
+
+    it('returns the same copy when save is tapped twice', async () => {
+      const { token } = await sharedPlaylist();
+      await prisma.subscriptionSeat.create({ data: { subscriptionId, memberId: plain, seatNo: 2 } });
+      try {
+        const first = await service.saveFromShare(plain, token);
+        const second = await service.saveFromShare(plain, token);
+        expect(second.created).toBe(false);
+        expect(second.playlist.id).toBe(first.playlist.id);
+      } finally {
+        await prisma.subscriptionSeat.deleteMany({ where: { subscriptionId, memberId: plain } });
+      }
+    });
+
+    it('refuses to save for a member without a subscription', async () => {
+      const { token } = await sharedPlaylist();
+      await expect(service.saveFromShare(plain, token)).rejects.toMatchObject({
+        code: ERROR_CODES.PLAYLIST_SUBSCRIPTION_REQUIRED,
+      });
+      const view = await service.detailByShareToken(token, plain);
+      // The link still opens for them — that is the whole point — but the button
+      // becomes "subscribe to save".
+      expect(view.canSave).toBe(false);
+      expect(view.isSaved).toBe(false);
+    });
+
+    it('survives the source being deleted — a copy is not a reference', async () => {
+      const { playlist, token } = await sharedPlaylist();
+      await prisma.subscriptionSeat.create({ data: { subscriptionId, memberId: plain, seatNo: 2 } });
+      try {
+        const { playlist: copy } = await service.saveFromShare(plain, token);
+        await prisma.playlist.delete({ where: { id: playlist.id } });
+        const detail = await service.detail(copy.id, plain);
+        expect(detail.totalItems).toBe(2);
+      } finally {
+        await prisma.subscriptionSeat.deleteMany({ where: { subscriptionId, memberId: plain } });
+      }
+    });
+  });
 });

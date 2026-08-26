@@ -356,3 +356,34 @@ export const mediaDownloadRateLimiter: RequestHandler = rateLimit({
   handler: tooManyRequestsHandler,
   skip: skipInTest,
 });
+
+// --- Playlist share — the read endpoint is public and takes an opaque token,
+//     so it is the one surface where tokens could be sieved; minting/rotating is
+//     throttled separately so share links cannot be spun into a spam generator.
+export const playlistShareReadRateLimiter: RequestHandler = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => {
+    const user = (req as unknown as { user?: { id?: string } }).user;
+    return user?.id ?? clientIp(req);
+  },
+  ...storeOption('playlist-share-read'),
+  handler: tooManyRequestsHandler,
+  skip: skipInTest,
+});
+
+export const playlistShareMintRateLimiter: RequestHandler = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => {
+    const user = (req as unknown as { user?: { id?: string } }).user;
+    return user?.id ?? clientIp(req);
+  },
+  ...storeOption('playlist-share-mint'),
+  handler: tooManyRequestsHandler,
+  skip: skipInTest,
+});

@@ -24,3 +24,9 @@ export const PLAYLIST_VISIBILITY = {
   private: 'PRIVATE',
   unlisted: 'UNLISTED',
 } as const;
+
+/**
+ * Share token entropy. 16 random bytes → 22 base64url chars; far past the point
+ * where sieving the public share endpoint is worth anyone's time.
+ */
+export const SHARE_TOKEN_BYTES = 16;

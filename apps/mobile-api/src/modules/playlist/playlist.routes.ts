@@ -2,8 +2,12 @@ import { traceService } from '@bb/common/utils/trace-service';
 import { Router } from 'express';
 import { PlaylistController } from './playlist.controller';
 import { PlaylistService } from './playlist.service';
-import { authGuard } from '@bb/common/middlewares/auth.middleware';
+import { authGuard, optionalAuthGuard } from '@bb/common/middlewares/auth.middleware';
 import { validateDto } from '@bb/common/middlewares/validation.middleware';
+import {
+  playlistShareMintRateLimiter,
+  playlistShareReadRateLimiter,
+} from '@bb/common/middlewares/rate-limit.middleware';
 import { bindRoute } from '@bb/common/openapi/route-binder';
 import { CreatePlaylistDto, PlaylistItemsDto, UpdatePlaylistDto } from './dto/create-playlist.dto';
 
@@ -26,6 +30,16 @@ export function playlistRoutes(): Router {
   bindRoute({ router, controller: ctrl, method: 'post', path: '/playlist/:id/items', handlerKey: 'addItems', middlewares: [authGuard, validateDto(PlaylistItemsDto)] });
   bindRoute({ router, controller: ctrl, method: 'delete', path: '/playlist/:id/items', handlerKey: 'removeItems', middlewares: [authGuard, validateDto(PlaylistItemsDto)] });
   bindRoute({ router, controller: ctrl, method: 'put', path: '/playlist/:id/items/order', handlerKey: 'reorder', middlewares: [authGuard, validateDto(PlaylistItemsDto)] });
+
+  // Share. `/playlist/shared/:token` cannot collide with `/playlist/:id` (two
+  // segments vs one), so no ordering trick is needed. The read route carries
+  // `optionalAuthGuard`, never `authGuard`: it must answer an anonymous caller
+  // and must never 401 — the mobile interceptor attaches whatever bearer it
+  // holds, expired included, and a 401 here would trigger a forced logout.
+  bindRoute({ router, controller: ctrl, method: 'post', path: '/playlist/:id/share', handlerKey: 'share', middlewares: [authGuard, playlistShareMintRateLimiter] });
+  bindRoute({ router, controller: ctrl, method: 'delete', path: '/playlist/:id/share', handlerKey: 'unshare', middlewares: [authGuard] });
+  bindRoute({ router, controller: ctrl, method: 'post', path: '/playlist/shared/:token/save', handlerKey: 'saveShared', middlewares: [authGuard] });
+  bindRoute({ router, controller: ctrl, method: 'get', path: '/playlist/shared/:token', handlerKey: 'shared', middlewares: [optionalAuthGuard, playlistShareReadRateLimiter] });
 
   return router;
 }

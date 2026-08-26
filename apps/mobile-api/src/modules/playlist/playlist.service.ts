@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { prisma } from '@bb/db';
 import type { Playlist } from '@prisma/client';
 import { badRequest, forbidden, notFound, ERROR_CODES } from '@bb/common/exceptions';
@@ -12,6 +13,7 @@ import {
   PLAYLIST_NAME_MAX_CHARS,
   PLAYLIST_VISIBILITY,
   QUOTA_UNLIMITED,
+  SHARE_TOKEN_BYTES,
 } from './playlist.constants';
 
 /** One playable row of a playlist, already resolved against the viewer's access. */
@@ -33,6 +35,12 @@ export interface PlaylistDetailView {
   interludeStreamUrl: string | null;
   requiresSubscription: boolean;
   isOwner: boolean;
+}
+
+/** What a share link resolves to. `isSaved` drives the button copy on the FE. */
+export interface SharedPlaylistView extends PlaylistDetailView {
+  isSaved: boolean;
+  canSave: boolean;
 }
 
 export interface QuotaView {
@@ -151,17 +159,59 @@ export class PlaylistService {
     const playlist = await prisma.playlist.findUnique({ where: { id: playlistId } });
     if (!playlist || playlist.isBlocked) throw notFound(ERROR_CODES.PLAYLIST_NOT_FOUND);
     if (playlist.ownerId !== viewerId) throw forbidden(ERROR_CODES.PLAYLIST_FORBIDDEN);
+    return this.buildView(playlist, viewerId);
+  }
 
+  /**
+   * Resolve a share link. Public on purpose — the whole point of a shared
+   * playlist is to reach someone who is not a subscriber yet, and an anonymous
+   * caller must be answered, never 401'd.
+   *
+   * A revoked token, a deleted playlist and an ops-blocked one all look
+   * identical from here (404): a 403 would confirm the playlist exists.
+   */
+  async detailByShareToken(token: string, viewerId?: string): Promise<SharedPlaylistView> {
+    const playlist = await prisma.playlist.findUnique({ where: { shareToken: token } });
+    if (!playlist || playlist.isBlocked || !playlist.shareToken) {
+      throw notFound(ERROR_CODES.PLAYLIST_NOT_FOUND);
+    }
+
+    const view = await this.buildView(playlist, viewerId);
+    const isSaved = viewerId
+      ? (await prisma.playlist.count({
+          where: { ownerId: viewerId, copiedFromToken: token },
+        })) > 0
+      : false;
+
+    return {
+      ...view,
+      isSaved,
+      // Saving is a write, and every write needs a subscription. The FE turns
+      // this into "Berlangganan untuk menyimpan" rather than a dead button.
+      canSave: viewerId ? !isSaved && (await this.hasAccess(viewerId)) : false,
+    };
+  }
+
+  /**
+   * Shared item resolution. `viewerId` may be absent (anonymous share link).
+   *
+   * A preview lesson stays playable for everyone — that is the existing media
+   * rule, and re-locking it here would contradict `/media/stream`, which is the
+   * real gate.
+   */
+  private async buildView(playlist: Playlist, viewerId?: string): Promise<PlaylistDetailView> {
     const rows = await prisma.playlistItem.findMany({
       where: { playlistId: playlist.id },
       orderBy: { order: 'asc' },
       include: itemInclude,
     });
 
-    const unlocked = await this.unlockedCourseIds(
-      viewerId,
-      rows.map((r) => r.lesson.section.courseId),
-    );
+    const unlocked = viewerId
+      ? await this.unlockedCourseIds(
+          viewerId,
+          rows.map((r) => r.lesson.section.courseId),
+        )
+      : new Set<string>();
 
     const items: PlaylistItemView[] = [];
     for (const row of rows) {
@@ -170,7 +220,7 @@ export class PlaylistService {
       // beats rendering a dead row the player would choke on.
       if (!audio) continue;
       const courseId = row.lesson.section.courseId;
-      const locked = !unlocked.has(courseId);
+      const locked = !(unlocked.has(courseId) || row.lesson.isPreview);
       items.push({
         lessonId: row.lessonId,
         courseId,
@@ -189,7 +239,7 @@ export class PlaylistService {
       lockedItems: items.filter((i) => i.locked).length,
       interludeStreamUrl: await this.interludeStreamUrl(),
       requiresSubscription: await this.requiresSubscription(),
-      isOwner: playlist.ownerId === viewerId,
+      isOwner: viewerId !== undefined && playlist.ownerId === viewerId,
     };
   }
 
@@ -383,5 +433,102 @@ export class PlaylistService {
       ),
     );
     return { reordered: ordered.length };
+  }
+
+  // --- share -----------------------------------------------------------------
+
+  /**
+   * Switch sharing on, or rotate the link.
+   *
+   * The token is random, NOT derived from the id: a UUID v7 carries its own
+   * creation timestamp and — more to the point — can never be withdrawn. A
+   * separate nullable column is what makes "stop sharing" and "give me a new
+   * link" possible at all.
+   *
+   * Minting twice without `rotate` returns the same link, so the share sheet is
+   * safe to tap repeatedly.
+   */
+  async share(memberId: string, playlistId: string, rotate = false) {
+    await this.assertAccess(memberId);
+    const playlist = await this.ownedOrThrow(memberId, playlistId);
+
+    const items = await prisma.playlistItem.count({ where: { playlistId } });
+    // A link to an empty playlist is a dead end for whoever receives it.
+    if (items === 0) throw badRequest(ERROR_CODES.PLAYLIST_ITEMS_REQUIRED);
+
+    if (playlist.shareToken && !rotate) {
+      return { shareToken: playlist.shareToken, sharedAt: playlist.sharedAt };
+    }
+
+    const updated = await prisma.playlist.update({
+      where: { id: playlistId },
+      data: {
+        shareToken: randomBytes(SHARE_TOKEN_BYTES).toString('base64url'),
+        sharedAt: new Date(),
+        visibility: PLAYLIST_VISIBILITY.unlisted,
+      },
+    });
+    return { shareToken: updated.shareToken!, sharedAt: updated.sharedAt };
+  }
+
+  /** Withdraw the link. Anyone holding it gets a 404 from the next fetch on. */
+  async unshare(memberId: string, playlistId: string): Promise<void> {
+    await this.assertAccess(memberId);
+    await this.ownedOrThrow(memberId, playlistId);
+    await prisma.playlist.update({
+      where: { id: playlistId },
+      data: { shareToken: null, sharedAt: null, visibility: PLAYLIST_VISIBILITY.private },
+    });
+  }
+
+  /**
+   * Copy a shared playlist into the caller's own library.
+   *
+   * Items are copied AS IS, locked ones included. `locked` is derived per read,
+   * never stored, so an item the copier cannot play today unlocks by itself the
+   * moment they subscribe — copying only what they own would drop those items
+   * permanently, and they would never come back.
+   *
+   * Idempotent per (owner, source token): tapping save twice returns the same
+   * copy instead of littering the library.
+   */
+  async saveFromShare(memberId: string, token: string) {
+    await this.assertAccess(memberId);
+
+    const source = await prisma.playlist.findUnique({ where: { shareToken: token } });
+    if (!source || source.isBlocked || !source.shareToken) {
+      throw notFound(ERROR_CODES.PLAYLIST_NOT_FOUND);
+    }
+
+    const existing = await prisma.playlist.findFirst({
+      where: { ownerId: memberId, copiedFromToken: token },
+    });
+    if (existing) return { playlist: existing, created: false };
+
+    await this.assertQuota(memberId);
+
+    const items = await prisma.playlistItem.findMany({
+      where: { playlistId: source.id },
+      orderBy: { order: 'asc' },
+      select: { lessonId: true },
+    });
+
+    const copy = await prisma.playlist.create({
+      data: {
+        ownerId: memberId,
+        name: source.name,
+        description: source.description,
+        coverUrl: source.coverUrl,
+        visibility: PLAYLIST_VISIBILITY.private,
+        // Plain scalar, no FK: the source may be deleted or unshared later and
+        // this copy must not care.
+        copiedFromToken: token,
+        items: {
+          create: items.map((it, index) => ({ lessonId: it.lessonId, order: index + 1 })),
+        },
+      },
+    });
+
+    return { playlist: copy, created: true };
   }
 }

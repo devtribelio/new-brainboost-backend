@@ -1,5 +1,9 @@
 import type { Playlist } from '@prisma/client';
-import type { PlaylistDetailView, PlaylistItemView } from './playlist.service';
+import type {
+  PlaylistDetailView,
+  PlaylistItemView,
+  SharedPlaylistView,
+} from './playlist.service';
 
 type PlaylistWithCount = Playlist & { _count?: { items: number } };
 
@@ -40,5 +44,13 @@ export function serializePlaylistDetail(v: PlaylistDetailView): Record<string, u
     requiresSubscription: v.requiresSubscription,
     interludeStreamUrl: v.interludeStreamUrl,
     items: v.items.map(serializeItem),
+  };
+}
+
+export function serializeSharedPlaylist(v: SharedPlaylistView): Record<string, unknown> {
+  return {
+    ...serializePlaylistDetail(v),
+    isSaved: v.isSaved,
+    canSave: v.canSave,
   };
 }
