@@ -31,6 +31,21 @@ async function waitForEnrollment(memberId: string, courseId: string, tries = 25)
   return null;
 }
 
+/**
+ * The voucher redeem runs off its OWN listener, so waiting for the enrollment
+ * proves nothing about it — the two land independently and the redeem can be
+ * the slower one. Asserting the count directly made this spec fail whenever
+ * suite timing shifted.
+ */
+async function waitForRedemption(voucherId: string, tries = 25) {
+  for (let i = 0; i < tries; i++) {
+    const count = await prisma.voucherRedemption.count({ where: { voucherId } });
+    if (count > 0) return count;
+    await wait(120);
+  }
+  return 0;
+}
+
 describe('free-trial voucher', () => {
   const checkout = new CheckoutService();
   const payment = new PaymentService();
@@ -104,7 +119,7 @@ describe('free-trial voucher', () => {
     expect(days).toBeLessThan(7.1);
 
     expect(await hasActiveEnrollment(memberId, courseId)).toBe(true);
-    expect(await prisma.voucherRedemption.count({ where: { voucherId: trialVoucherId } })).toBe(1);
+    expect(await waitForRedemption(trialVoucherId)).toBe(1);
   });
 
   it('a trial course shows as owned and drops out of the not_purchased shelf', async () => {

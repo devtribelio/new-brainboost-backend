@@ -3,13 +3,21 @@ import { PlaylistService } from './playlist.service';
 import { ok, okCreated } from '@bb/common/utils/response.util';
 import { badRequest, ERROR_CODES } from '@bb/common/exceptions';
 import type { AuthenticatedRequest } from '@bb/common/interfaces/authenticated-request';
-import { ApiBody, ApiOperation, ApiResponse, ApiTags } from '@bb/common/openapi/decorators';
+import {
+  ApiBody,
+  ApiOperation,
+  ApiQuery,
+  ApiResponse,
+  ApiTags,
+} from '@bb/common/openapi/decorators';
 import {
   serializePlaylist,
   serializePlaylistDetail,
+  serializePlaylistHistory,
   serializeSharedPlaylist,
 } from './playlist.serializer';
 import { PlaylistDetailDto, PlaylistDto } from './dto/playlist.dto';
+import { PLAYLIST_TOP_RANGE_DAYS } from './playlist.constants';
 import { CreatePlaylistDto, PlaylistItemsDto, UpdatePlaylistDto } from './dto/create-playlist.dto';
 
 @ApiTags('Playlist')
@@ -22,10 +30,41 @@ export class PlaylistController {
     return id;
   }
 
-  @ApiOperation({ summary: "List the caller's playlists" })
+  @ApiOperation({ summary: "List playlists — the caller's own, recently played, or most played" })
+  @ApiQuery({
+    name: 'scope',
+    type: 'string',
+    required: false,
+    example: 'mine',
+    description: 'mine (default) | recent | top',
+  })
+  @ApiQuery({
+    name: 'range',
+    type: 'integer',
+    required: false,
+    example: 30,
+    description: 'scope=top only — window in days. Without one the ranking freezes forever.',
+  })
   @ApiResponse({ status: 200, type: () => PlaylistDto, isArray: true })
   list = async (req: AuthenticatedRequest, res: Response) => {
     const memberId = req.user!.id;
+    const scope = typeof req.query.scope === 'string' ? req.query.scope : 'mine';
+
+    if (scope === 'recent' || scope === 'top') {
+      // History only ever comes from playing, and playing needs a subscription,
+      // so there is nothing to show a lapsed member here.
+      await this.playlistService.assertAccess(memberId);
+      const rows =
+        scope === 'recent'
+          ? await this.playlistService.listRecent(memberId)
+          : await this.playlistService.listTop(memberId, this.range(req));
+      return ok(
+        res,
+        rows.map((r) => serializePlaylistHistory(r, memberId)),
+        { scope },
+      );
+    }
+
     const [rows, quota] = await Promise.all([
       this.playlistService.listMine(memberId),
       this.playlistService.getQuota(memberId),
@@ -35,9 +74,14 @@ export class PlaylistController {
     return ok(
       res,
       rows.map((r) => serializePlaylist(r)),
-      { quota, hasAccess: await this.playlistService.hasAccess(memberId) },
+      { scope: 'mine', quota, hasAccess: await this.playlistService.hasAccess(memberId) },
     );
   };
+
+  private range(req: AuthenticatedRequest): number {
+    const raw = Number.parseInt(String(req.query.range ?? ''), 10);
+    return Number.isFinite(raw) && raw > 0 ? raw : PLAYLIST_TOP_RANGE_DAYS;
+  }
 
   @ApiOperation({ summary: 'Playlist detail with playable URLs' })
   @ApiResponse({ status: 200, type: () => PlaylistDetailDto })

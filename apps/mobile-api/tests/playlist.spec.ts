@@ -1,5 +1,6 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import * as bcrypt from 'bcryptjs';
+import { randomUUID } from 'node:crypto';
 import { prisma } from '@bb/db';
 import { ERROR_CODES } from '@bb/common/exceptions';
 import { SettingsService, settingsService, SETTING_KEYS } from '@bb/common/services/settings.service';
@@ -99,6 +100,7 @@ describe('PlaylistService (real Postgres)', () => {
       await prisma.$disconnect();
       return;
     }
+    await prisma.listeningSession.deleteMany({ where: { memberId: { in: members } } });
     await prisma.playlist.deleteMany({ where: { ownerId: { in: members } } });
     if (subscriptionId) await prisma.subscriptionSeat.deleteMany({ where: { subscriptionId } });
     if (subscriptionId) await prisma.memberSubscription.deleteMany({ where: { id: subscriptionId } });
@@ -442,6 +444,99 @@ describe('PlaylistService (real Postgres)', () => {
       } finally {
         await prisma.subscriptionSeat.deleteMany({ where: { subscriptionId, memberId: plain } });
       }
+    });
+  });
+
+  describe('history — recent + top', () => {
+    /** One listening row, as the tracker would have written it. */
+    async function play(playlistId: string, listenedSec: number, minutesAgo: number) {
+      const startedAt = new Date(Date.now() - minutesAgo * 60 * 1000);
+      await prisma.listeningSession.create({
+        data: {
+          memberId: subscriber,
+          clientSessionId: randomUUID(),
+          audioId: lessons[0],
+          playlistId,
+          startedAt,
+          listenedSec,
+          completed: false,
+          localDay: new Date(startedAt.toISOString().slice(0, 10)),
+        },
+      });
+    }
+
+    async function twoPlayed() {
+      const a = (await service.create(subscriber, { name: 'A', lessonIds: [lessons[0]] })).playlist;
+      const b = (await service.create(subscriber, { name: 'B', lessonIds: [lessons[1]] })).playlist;
+      await play(a.id, 3600, 5);   // long, older
+      await play(b.id, 120, 1);    // short, newer
+      return { a, b };
+    }
+
+    afterEach(async () => {
+      await prisma.listeningSession.deleteMany({ where: { memberId: subscriber } });
+    });
+
+    it('orders recent by last play and top by seconds listened', async () => {
+      const { a, b } = await twoPlayed();
+
+      const recent = await service.listRecent(subscriber);
+      expect(recent.map((r) => r.playlist.id)).toEqual([b.id, a.id]);
+
+      const top = await service.listTop(subscriber);
+      expect(top.map((r) => r.playlist.id)).toEqual([a.id, b.id]);
+      expect(top[0].totalListenedSec).toBe(3600);
+    });
+
+    it('ignores a mis-tap below the 30-second floor', async () => {
+      const { playlist } = await service.create(subscriber, { name: 'Salah tap', lessonIds: [lessons[0]] });
+      await play(playlist.id, 5, 1);
+      expect(await service.listRecent(subscriber)).toEqual([]);
+    });
+
+    it('keeps top inside its window', async () => {
+      const { playlist } = await service.create(subscriber, { name: 'Lama', lessonIds: [lessons[0]] });
+      await play(playlist.id, 1800, 60 * 24 * 40); // 40 days ago
+      expect(await service.listTop(subscriber, 30)).toEqual([]);
+      expect((await service.listTop(subscriber, 60)).map((r) => r.playlist.id)).toEqual([playlist.id]);
+    });
+
+    it('drops a playlist that was deleted — silently, no tombstone row', async () => {
+      const { playlist } = await service.create(subscriber, { name: 'Hilang', lessonIds: [lessons[0]] });
+      await play(playlist.id, 600, 1);
+      await prisma.playlist.delete({ where: { id: playlist.id } });
+      expect(await service.listRecent(subscriber)).toEqual([]);
+    });
+
+    it("drops someone else's playlist once its link is withdrawn", async () => {
+      const { playlist } = await service.create(subscriber, { name: 'Dicabut', lessonIds: [lessons[0]] });
+      await service.share(subscriber, playlist.id);
+      // Hand it to another owner so it is no longer "mine", only "shared".
+      await prisma.playlist.update({ where: { id: playlist.id }, data: { ownerId: plain } });
+      await play(playlist.id, 600, 1);
+
+      expect((await service.listRecent(subscriber)).map((r) => r.playlist.id)).toEqual([playlist.id]);
+
+      await prisma.playlist.update({
+        where: { id: playlist.id },
+        data: { shareToken: null, sharedAt: null },
+      });
+      expect(await service.listRecent(subscriber)).toEqual([]);
+    });
+
+    it('ignores standalone listening that came from no playlist', async () => {
+      await prisma.listeningSession.create({
+        data: {
+          memberId: subscriber,
+          clientSessionId: randomUUID(),
+          audioId: lessons[0],
+          startedAt: new Date(),
+          listenedSec: 1200,
+          completed: true,
+          localDay: new Date(new Date().toISOString().slice(0, 10)),
+        },
+      });
+      expect(await service.listRecent(subscriber)).toEqual([]);
     });
   });
 });

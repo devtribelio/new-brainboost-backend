@@ -30,3 +30,21 @@ export const PLAYLIST_VISIBILITY = {
  * where sieving the public share endpoint is worth anyone's time.
  */
 export const SHARE_TOKEN_BYTES = 16;
+
+/**
+ * Seconds of actual listening before a playlist counts as "played".
+ *
+ * Small on purpose: it only exists to throw away mis-taps, and it is NOT the
+ * streak threshold (600s) — different question, different number. Raising this
+ * to the streak value would empty the recent list for anyone who samples.
+ */
+export const PLAYLIST_PLAYED_MIN_SEC = 30;
+
+/**
+ * Default window for the "top" list. Without a window the ranking freezes on
+ * whatever someone binged eight months ago and never moves again.
+ */
+export const PLAYLIST_TOP_RANGE_DAYS = 30;
+
+/** Rows returned by the derived lists unless the caller asks for fewer. */
+export const PLAYLIST_HISTORY_LIMIT = 20;

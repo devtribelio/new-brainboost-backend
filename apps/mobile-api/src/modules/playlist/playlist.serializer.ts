@@ -1,6 +1,7 @@
 import type { Playlist } from '@prisma/client';
 import type {
   PlaylistDetailView,
+  PlaylistHistoryRow,
   PlaylistItemView,
   SharedPlaylistView,
 } from './playlist.service';
@@ -52,5 +53,17 @@ export function serializeSharedPlaylist(v: SharedPlaylistView): Record<string, u
     ...serializePlaylistDetail(v),
     isSaved: v.isSaved,
     canSave: v.canSave,
+  };
+}
+
+/** Recent/top row: the playlist plus what the listening log says about it. */
+export function serializePlaylistHistory(
+  row: PlaylistHistoryRow,
+  viewerId: string,
+): Record<string, unknown> {
+  return {
+    ...serializePlaylist(row.playlist, row.playlist.ownerId === viewerId),
+    lastPlayedAt: row.lastPlayedAt?.toISOString() ?? null,
+    totalListenedSec: row.totalListenedSec,
   };
 }

@@ -12,6 +12,9 @@ import {
   PLAYLIST_MAX_PER_MEMBER_DEFAULT,
   PLAYLIST_NAME_MAX_CHARS,
   PLAYLIST_VISIBILITY,
+  PLAYLIST_HISTORY_LIMIT,
+  PLAYLIST_PLAYED_MIN_SEC,
+  PLAYLIST_TOP_RANGE_DAYS,
   QUOTA_UNLIMITED,
   SHARE_TOKEN_BYTES,
 } from './playlist.constants';
@@ -41,6 +44,13 @@ export interface PlaylistDetailView {
 export interface SharedPlaylistView extends PlaylistDetailView {
   isSaved: boolean;
   canSave: boolean;
+}
+
+/** A playlist plus what the listening log says about it, for recent/top. */
+export interface PlaylistHistoryRow {
+  playlist: Playlist & { _count?: { items: number } };
+  lastPlayedAt: Date | null;
+  totalListenedSec: number;
 }
 
 export interface QuotaView {
@@ -530,5 +540,106 @@ export class PlaylistService {
     });
 
     return { playlist: copy, created: true };
+  }
+
+  // --- history (derived, never pre-aggregated) --------------------------------
+
+  /**
+   * Recently played, most recent first.
+   *
+   * Derived from `listening_session` rather than from a "playlist opened" event:
+   * an open event is cheap to read but the number is junk — a mis-tap counts as
+   * much as an hour of listening, and "top" then ranks whoever fumbled most.
+   */
+  async listRecent(memberId: string, limit = PLAYLIST_HISTORY_LIMIT): Promise<PlaylistHistoryRow[]> {
+    const groups = await prisma.listeningSession.groupBy({
+      by: ['playlistId'],
+      where: {
+        memberId,
+        playlistId: { not: null },
+        listenedSec: { gte: PLAYLIST_PLAYED_MIN_SEC },
+      },
+      _max: { startedAt: true },
+      _sum: { listenedSec: true },
+      orderBy: { _max: { startedAt: 'desc' } },
+      // Over-fetch: some ids will be dropped as unreachable below.
+      take: limit * 3,
+    });
+    return this.hydrateHistory(memberId, groups, limit);
+  }
+
+  /**
+   * Most listened, by total seconds — not by number of opens, which is both
+   * less honest and trivially inflated by opening and closing.
+   */
+  async listTop(
+    memberId: string,
+    rangeDays = PLAYLIST_TOP_RANGE_DAYS,
+    limit = PLAYLIST_HISTORY_LIMIT,
+  ): Promise<PlaylistHistoryRow[]> {
+    const since = new Date(Date.now() - rangeDays * 24 * 3600 * 1000);
+    const groups = await prisma.listeningSession.groupBy({
+      by: ['playlistId'],
+      where: {
+        memberId,
+        playlistId: { not: null },
+        listenedSec: { gte: PLAYLIST_PLAYED_MIN_SEC },
+        startedAt: { gte: since },
+      },
+      _max: { startedAt: true },
+      _sum: { listenedSec: true },
+      orderBy: { _sum: { listenedSec: 'desc' } },
+      take: limit * 3,
+    });
+    return this.hydrateHistory(memberId, groups, limit);
+  }
+
+  /**
+   * Turn aggregated ids into playlists the member can actually open again.
+   *
+   * Ghost filtering is the whole job here. A playlist in the log may since have
+   * been deleted, unshared, or blocked; without this the member taps a card and
+   * gets a 404. Rows are dropped SILENTLY — rendering "no longer available"
+   * would leak that the playlist existed and was just withdrawn, undoing the
+   * point of withdrawing it. `listening_session.playlist_id` has no FK, so the
+   * dangling ids are expected, not a data bug.
+   */
+  private async hydrateHistory(
+    memberId: string,
+    groups: Array<{
+      playlistId: string | null;
+      _max: { startedAt: Date | null };
+      _sum: { listenedSec: number | null };
+    }>,
+    limit: number,
+  ): Promise<PlaylistHistoryRow[]> {
+    const ids = groups.map((g) => g.playlistId).filter((id): id is string => id !== null);
+    if (ids.length === 0) return [];
+
+    const rows = await prisma.playlist.findMany({
+      where: {
+        id: { in: ids },
+        isBlocked: false,
+        // Reachable = mine, or still shared. A copy the member saved is theirs
+        // and is unaffected by anything the original owner does.
+        OR: [{ ownerId: memberId }, { shareToken: { not: null } }],
+      },
+      include: { _count: { select: { items: true } } },
+    });
+    const byId = new Map(rows.map((r) => [r.id, r]));
+
+    return groups
+      .flatMap((g) => {
+        const playlist = g.playlistId ? byId.get(g.playlistId) : undefined;
+        if (!playlist) return [];
+        return [
+          {
+            playlist,
+            lastPlayedAt: g._max.startedAt,
+            totalListenedSec: g._sum.listenedSec ?? 0,
+          },
+        ];
+      })
+      .slice(0, limit);
   }
 }
