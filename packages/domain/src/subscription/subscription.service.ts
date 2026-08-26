@@ -3,7 +3,8 @@ import { prisma } from '@bb/db';
 import { logger } from '@bb/common/config/logger';
 import { BadRequestException } from '@bb/common/exceptions';
 import { settingsService, SETTING_KEYS } from '@bb/common/services/settings.service';
-import { isDowngrade } from './tier';
+import { isDowngrade, isUpgrade } from './tier';
+import { computeProration } from './proration';
 
 /** Fallback when the app_settings row is missing (seeded as 7). */
 const GRACE_DAYS_DEFAULT = 7;
@@ -53,6 +54,21 @@ export type PendingChangeOutcome =
       pendingPlan: SubscriptionPlan;
       claimedSeats: number;
     };
+
+export interface PlanQuote {
+  planCode: string;
+  tier: string;
+  seatCount: number;
+  productId: string;
+  action: 'purchase' | 'renewal' | 'upgrade' | 'downgrade';
+  price: number;
+  prorationCredit: number;
+  amount: number;
+  payableNow: boolean;
+  payableReason: 'not_scheduled' | 'term_running' | 'seated_elsewhere' | null;
+  remainingDays: number | null;
+  effectiveAt: Date | null;
+}
 
 export interface GrantResult {
   outcome: 'created' | 'extended';
@@ -430,6 +446,107 @@ export class SubscriptionService {
       select: { memberId: true },
     });
     return seats.map((s) => s.memberId as string);
+  }
+
+  /**
+   * What picking `planCode` would mean for this member right now: which action it
+   * is, what it costs, and — crucially — whether checkout would actually accept
+   * it today.
+   *
+   * Read-only on purpose. The only other way to learn an upgrade's price was to
+   * POST a checkout, which WRITES: it creates a PENDING transaction and burns an
+   * order number (the sequence counts the day's rows), so a member opening the
+   * upgrade screen and backing out left litter behind and punched a hole in the
+   * day's order codes.
+   *
+   * `payableNow` mirrors the checkout guard rather than restating it, so the two
+   * cannot drift into telling the member different things. A downgrade is quoted
+   * like any other plan — it has a real price (full, at renewal), and returning an
+   * error for it would force the caller to rank tiers itself just to know which
+   * plans it may ask about.
+   */
+  async quoteForPlan(memberId: string, planCode: string): Promise<PlanQuote> {
+    const target = await prisma.subscriptionPlan.findUnique({
+      where: { code: planCode },
+      include: { product: { select: { id: true, price: true } } },
+    });
+    if (!target || !target.isActive) throw new BadRequestException('Paket tidak ditemukan');
+
+    const base = {
+      planCode: target.code,
+      tier: target.tier,
+      seatCount: target.seatCount,
+      productId: target.product.id,
+      price: target.product.price,
+      prorationCredit: 0,
+      amount: target.product.price,
+      remainingDays: null as number | null,
+      effectiveAt: null as Date | null,
+    };
+
+    const sub = await prisma.memberSubscription.findFirst({
+      where: { ownerId: memberId, status: 'ACTIVE' },
+      include: { plan: { include: { product: { select: { price: true } } } } },
+    });
+
+    if (!sub) {
+      // Same guard checkout applies: holding a seat on someone else's live sub
+      // has to be resolved before buying your own.
+      const seatElsewhere = await prisma.subscriptionSeat.findFirst({
+        where: {
+          memberId,
+          subscription: { status: 'ACTIVE', ownerId: { not: memberId } },
+        },
+        select: { id: true },
+      });
+      return {
+        ...base,
+        action: 'purchase',
+        payableNow: !seatElsewhere,
+        payableReason: seatElsewhere ? 'seated_elsewhere' : null,
+      };
+    }
+
+    if (sub.planId === target.id) {
+      // Early renewal is allowed — renew() anchors to the existing expiry, so
+      // paying ahead stacks rather than throwing time away.
+      return { ...base, action: 'renewal', payableNow: true, payableReason: null };
+    }
+
+    const from = { seatCount: sub.plan.seatCount, price: sub.plan.product.price };
+    const to = { seatCount: target.seatCount, price: target.product.price };
+    const now = new Date();
+
+    if (isUpgrade(from, to)) {
+      const p = computeProration({
+        oldPrice: sub.plan.product.price,
+        newPrice: target.product.price,
+        expiresAt: sub.expiresAt,
+        periodMonths: sub.plan.periodMonths,
+        now,
+      });
+      return {
+        ...base,
+        action: 'upgrade',
+        prorationCredit: p.credit,
+        amount: p.charge,
+        remainingDays: p.remainingDays,
+        payableNow: true,
+        payableReason: null,
+      };
+    }
+
+    // Downgrade: full price, no credit, and only buyable once it has been
+    // scheduled AND the paid term has actually run out.
+    const scheduled = sub.pendingPlanId === target.id;
+    const termOver = now >= sub.expiresAt;
+    return {
+      ...base,
+      action: 'downgrade',
+      effectiveAt: sub.expiresAt,
+      payableNow: scheduled && termOver,
+      payableReason: !scheduled ? 'not_scheduled' : termOver ? null : 'term_running',
+    };
   }
 
   /** Drop a scheduled change. Returns false when there was nothing pending. */

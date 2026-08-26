@@ -22,6 +22,7 @@ import {
   InviteResponseDto,
   PendingChangeDto,
   PlanItemDto,
+  PlanQuoteDto,
   SeatItemDto,
   SubscriptionMeDto,
 } from './dto/subscription.dto';
@@ -83,8 +84,10 @@ export class SubscriptionController {
       include: { member: { select: { id: true, fullName: true } } },
     });
 
+    // Owner-only: a seat member gets `pendingChange: null` from the serializer,
+    // so there is nothing to look up for them either.
     let pending: PendingChangeDto | null = null;
-    if (sub.pendingPlanId) {
+    if (sub.pendingPlanId && sub.ownerId === req.user.id) {
       const pendingPlan = await prisma.subscriptionPlan.findUnique({
         where: { id: sub.pendingPlanId },
       });
@@ -94,6 +97,18 @@ export class SubscriptionController {
       }
     }
     return ok(res, serializeMe(req.user.id, sub, seats, pending));
+  };
+
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'What picking a plan would cost and whether checkout would accept it now',
+  })
+  @ApiResponse({ status: 200, type: () => PlanQuoteDto })
+  quote = async (req: AuthenticatedRequest, res: Response) => {
+    if (!req.user) throw new UnauthorizedException();
+    const planCode = String(req.query.planCode ?? '');
+    if (!planCode) throw new BadRequestException('planCode wajib diisi');
+    return ok(res, await this.subscriptionService.quoteForPlan(req.user.id, planCode));
   };
 
   @ApiBearerAuth()

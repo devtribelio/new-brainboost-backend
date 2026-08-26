@@ -43,14 +43,25 @@ type SeatWithMember = SubscriptionSeat & {
   member: { id: string; fullName: string | null } | null;
 };
 
-export function serializeSeat(seat: SeatWithMember, callerId: string): SeatItemDto {
+/**
+ * `keepOnChange` is owner-only. To a seat member `false` is ambiguous — it is
+ * both the untouched default and the value for someone the owner has decided to
+ * drop — so exposing it invites them to conclude they are being removed when the
+ * owner may simply not have opened the screen yet. They are told for certain at
+ * the moment it lands, which is the only point where the answer is true.
+ */
+export function serializeSeat(
+  seat: SeatWithMember,
+  callerId: string,
+  opts: { includeChoice: boolean } = { includeChoice: true },
+): SeatItemDto {
   return {
     id: seat.id,
     seatNo: seat.seatNo,
     claimed: seat.memberId !== null,
     memberName: seat.member?.fullName ?? null,
     isMe: seat.memberId === callerId,
-    keepOnChange: seat.pendingKeep,
+    ...(opts.includeChoice ? { keepOnChange: seat.pendingKeep } : {}),
   };
 }
 
@@ -73,6 +84,9 @@ export function serializePendingChange(
     // Apple/Google own their own schedule — offering our own revert button would
     // leave the store still switching the plan underneath us.
     canCancel: sub.pendingSource !== 'revenuecat',
+    // `renewal.productId` keeps naming the CURRENT plan (the only one checkout
+    // accepts while the term runs), so the pending product is carried here.
+    productId: pendingPlan.productId,
   };
 }
 
@@ -98,9 +112,14 @@ export function serializeMe(
   if (role === 'owner') {
     base.seats = seats.map((s) => serializeSeat(s, callerId));
   } else {
-    // A guest doesn't get the household roster — only their own seat.
+    // A guest doesn't get the household roster — only their own seat, and
+    // without the owner's pending decisions (see serializeSeat). The scheduled
+    // change itself is withheld too: a seat member can neither choose, cancel,
+    // nor pay, so the only thing the information can do is worry them with a
+    // conclusion that may turn out wrong.
+    base.pendingChange = null;
     const mine = seats.find((s) => s.memberId === callerId);
-    if (mine) base.seat = serializeSeat(mine, callerId);
+    if (mine) base.seat = serializeSeat(mine, callerId, { includeChoice: false });
   }
   return base;
 }

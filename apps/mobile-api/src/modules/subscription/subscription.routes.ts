@@ -20,6 +20,9 @@ export function subscriptionRoutes(): Router {
   bindRoute({ router, controller: ctrl, method: 'get', path: '/plans', handlerKey: 'plans' });
 
   bindRoute({ router, controller: ctrl, method: 'get', path: '/me', handlerKey: 'me', middlewares: [authGuard] });
+  // Read-only price preview. Deliberately NOT a checkout: that one writes a
+  // PENDING transaction and consumes an order number.
+  bindRoute({ router, controller: ctrl, method: 'get', path: '/quote', handlerKey: 'quote', middlewares: [authGuard] });
   bindRoute({ router, controller: ctrl, method: 'post', path: '/seats/invite', handlerKey: 'invite', middlewares: [authGuard] });
   bindRoute({ router, controller: ctrl, method: 'post', path: '/seats/claim', handlerKey: 'claim', middlewares: [authGuard, validateDto(ClaimSeatDto)] });
   bindRoute({ router, controller: ctrl, method: 'delete', path: '/seats/:seatId', handlerKey: 'removeSeat', middlewares: [authGuard] });

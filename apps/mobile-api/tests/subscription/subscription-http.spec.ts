@@ -294,6 +294,102 @@ describe('/subscription HTTP module (BE-19)', () => {
     });
   });
 
+  it('GET /quote prices every plan and says whether checkout would take it now', async () => {
+    const ownerToken = await login(ownerEmail);
+    const q = (planCode: string) =>
+      request(app)
+        .get(`/api/subscription/quote?planCode=${planCode}`)
+        .set('authorization', `Bearer ${ownerToken}`);
+
+    // Owner sits on DUO (2 seats). SOLO is 1 seat at the same price, so it ranks
+    // below on seat count — a downgrade.
+    const down = await q(`TSTH_SOLO_${uniq}`);
+    expect(down.status).toBe(200);
+    expect(down.body.data).toMatchObject({
+      action: 'downgrade',
+      prorationCredit: 0, // a downgrade credits nothing
+      payableNow: false,
+      payableReason: 'not_scheduled', // must be declared first
+    });
+    expect(down.body.data.amount).toBe(down.body.data.price);
+    expect(down.body.data.productId).toBeTruthy(); // ready to hand to checkout
+
+    // Same plan = renewal, and paying early is allowed.
+    const same = await q(`TSTH_DUO_${uniq}`);
+    expect(same.body.data).toMatchObject({ action: 'renewal', payableNow: true });
+
+    // Once scheduled, the reason moves on to "the term is still running".
+    await request(app)
+      .post('/api/subscription/pending')
+      .set('authorization', `Bearer ${ownerToken}`)
+      .send({ planCode: `TSTH_SOLO_${uniq}` });
+    const scheduled = await q(`TSTH_SOLO_${uniq}`);
+    expect(scheduled.body.data).toMatchObject({
+      payableNow: false,
+      payableReason: 'term_running',
+    });
+    expect(scheduled.body.data.effectiveAt).toBeTruthy();
+
+    // The pending change now carries the product to buy at renewal, while
+    // `renewal.productId` keeps naming the plan that is still running.
+    const me = await request(app)
+      .get('/api/subscription/me')
+      .set('authorization', `Bearer ${ownerToken}`);
+    expect(me.body.data.pendingChange.productId).toBe(scheduled.body.data.productId);
+    expect(me.body.data.renewal.productId).not.toBe(scheduled.body.data.productId);
+
+    await request(app)
+      .delete('/api/subscription/pending')
+      .set('authorization', `Bearer ${ownerToken}`);
+  });
+
+  it('a seat member is not shown the owner’s pending change or seat choices', async () => {
+    const ownerToken = await login(ownerEmail);
+    const sub = await prisma.memberSubscription.findFirstOrThrow({ where: { ownerId } });
+    await prisma.subscriptionSeat.update({
+      where: { subscriptionId_seatNo: { subscriptionId: sub.id, seatNo: 2 } },
+      data: { memberId: guestId, claimedAt: new Date() },
+    });
+    // Declare FIRST: scheduling a change clears any previous selection, since a
+    // new target is a new question.
+    await request(app)
+      .post('/api/subscription/pending')
+      .set('authorization', `Bearer ${ownerToken}`)
+      .send({ planCode: `TSTH_SOLO_${uniq}` });
+    await prisma.subscriptionSeat.update({
+      where: { subscriptionId_seatNo: { subscriptionId: sub.id, seatNo: 2 } },
+      data: { pendingKeep: true },
+    });
+
+    const guestToken = await login(guestEmail);
+    const guestMe = await request(app)
+      .get('/api/subscription/me')
+      .set('authorization', `Bearer ${guestToken}`);
+    expect(guestMe.body.data.role).toBe('member');
+    // Withheld: `false` would be indistinguishable from "the owner has not decided",
+    // so showing it invites a wrong conclusion the member cannot act on anyway.
+    expect(guestMe.body.data.pendingChange).toBeNull();
+    expect(guestMe.body.data.seat.keepOnChange).toBeUndefined();
+    expect(guestMe.body.data.seats).toBeUndefined(); // no household roster either
+
+    // The owner still sees both.
+    const ownerMe = await request(app)
+      .get('/api/subscription/me')
+      .set('authorization', `Bearer ${ownerToken}`);
+    expect(ownerMe.body.data.pendingChange).not.toBeNull();
+    expect(ownerMe.body.data.seats.find((s: { seatNo: number }) => s.seatNo === 2).keepOnChange).toBe(
+      true,
+    );
+
+    await request(app)
+      .delete('/api/subscription/pending')
+      .set('authorization', `Bearer ${ownerToken}`);
+    await prisma.subscriptionSeat.update({
+      where: { subscriptionId_seatNo: { subscriptionId: sub.id, seatNo: 2 } },
+      data: { memberId: null, claimedAt: null, pendingKeep: false },
+    });
+  });
+
   it('an upgrade is refused by the pending endpoint — it belongs to checkout', async () => {
     const guestToken = await login(guestEmail);
     // The guest owns nothing, so the same endpoint answers the no-subscription case.
