@@ -20,6 +20,10 @@ export const SETTING_KEYS = {
   affiliateCookieDays: 'affiliate.cookieDays',
   affiliateHoldDays: 'affiliate.holdDays',
   affiliateIapHoldDays: 'affiliate.iapHoldDays',
+  // Max app version (inclusive) that still SEES banners, one per platform. Empty = gate off.
+  // The client sends ?platform=&version= on /data/banner; a newer build gets an empty list.
+  bannerMaxVersionAndroid: 'banner.maxVersionAndroid',
+  bannerMaxVersionIos: 'banner.maxVersionIos',
   disbursementAutoEnabled: 'disbursement.autoEnabled',
   disbursementAutoApproveMax: 'disbursement.autoApproveMax',
   disbursementFee: 'disbursement.fee',
