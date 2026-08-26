@@ -303,11 +303,19 @@ new-system state.
     `is_deleted=1` (deactivation always propagates).
   - first ever sync (`legacySyncedAt IS NULL`) → treat as legacy-owned (overwrite).
 - **Legacy-owned fields** (subject to overwrite when untouched): `fullName`, `avatarUrl`,
-  `bio`, `gender`, `birthdate`, `isActive` (from `is_active && !is_deleted`).
-- **Never legacy-owned** (app or other syncers own these): `passwordHash`/`passwordAlgo`,
+  `bio`, `gender`, `birthdate`, `isActive` (from `is_active && !is_deleted`),
+  `passwordHash`/`passwordAlgo` (see below).
+- **Never legacy-owned** (app or other syncers own these):
   `email`/`phone`/`*Verified` (identity — touching unique cols on a live account is risky;
   leave to a deliberate later pass), all `kyc*`, all `bank*`, `affiliateCode`/`code`,
   `inviterId`/`affiliateBased` (owned by the **tree** syncer).
+- **Password (2026-08-21):** legacy still accepts registrations + resets during cutover, so
+  `member.password` rides the same touch-gate — a new-app change-password or the lazy
+  md5→bcrypt rehash on login bumps `updatedAt`, marking the row touched, after which legacy
+  never overwrites it again. A NULL/empty legacy password is a no-op (`COALESCE`), never a
+  clobber of a real hash with the social sentinel. **`passwordAlgo` is DERIVED from the hash
+  shape** (`detectPasswordAlgo`, `@bb/common/utils/password-algo.util`), never assumed — see
+  §6.1.
 - **The members syncer only WATCHES already-migrated members for changes** — it does NOT
   discover new members. It scans `member_id IN (our migrated legacyIds)` (PK-indexed,
   chunked 5000) + the `updated` watermark, NOT the whole ~700k legacy `member` table. The
@@ -331,6 +339,29 @@ new-system state.
   with a new-app placeholder (`legacyId=null`) → **adopt** it (stamp `legacyId` + profile);
   no collision → fresh create. The in-run `redirect`/`memberByLegacy` maps are mutated so
   later syncers resolve the new id; counts logged as `created/redirected/adopted`.
+
+### 6.1 `passwordAlgo` is derived from the hash, never assumed
+
+Measured on the live legacy `member` table (710k rows): **462,059 md5**, **248,328 NULL**,
+**440 bcrypt** (`$2y$10$…`, 60 chars). Legacy writes md5 in every code path we can see
+(`TBMember.php:1053`, `tribelio-admin/member.php:252`), but a few hundred rows carry a PHP
+`password_hash()` digest.
+
+Every writer used to stamp `passwordAlgo: legacyPassword ? 'legacy' : 'social'` blind.
+`'legacy'` is the **md5 alias** in `AuthService.verifyPassword`, so a bcrypt-hashed member
+gets `md5(plaintext)` compared against `$2y$…` — never a match, **permanent lockout with the
+correct password**. 57 such rows already existed in Postgres when this was found.
+
+Fix: `detectPasswordAlgo(hash)` maps shape → algo (`$2[aby]$NN$` → `bcrypt`, 40 hex →
+`sha1`, 64 hex → `sha256`, everything else including md5 → `legacy`, null/empty → `social`).
+Wired into all four creators — `ensure-member.ts`, `identity.ts`, `scripts/migrate-members.ts`,
+`scripts/migrate-from-legacy.ts` — plus the members syncer's raw UPDATE.
+
+Existing rows are repaired once by `pnpm resync:fix-password-algo [--dry-run]`: it re-derives
+the algo for every non-`social` member and rewrites only the mismatches. It deliberately does
+**not** bump `updated_at` — this corrects metadata about an unchanged hash, and a bump would
+trip the touch-gate and freeze that member's profile against legacy forever. `social` rows are
+excluded outright so a social-only account can never acquire an algo that authenticates.
 
 ### enrollments — incremental, low risk
 - Key `legacyId`; also dedupe on `@@unique([memberId, courseId])`. Upsert. Access rule

@@ -3,8 +3,17 @@
  * Members syncer — incremental, NEW-WINS-ON-TOUCH (docs/legacy-resync-plan.md §6).
  *
  * Only migrated winners (Member.legacyId set) are touched. Identity (email/phone/verified),
- * password, kyc*, bank*, affiliate* are NOT owned here — only profile fields + deactivation:
- *   fullName, avatarUrl, bio, isActive(=is_active && !is_deleted).
+ * kyc*, bank*, affiliate* are NOT owned here — only profile fields + deactivation + password:
+ *   fullName, avatarUrl, bio, isActive(=is_active && !is_deleted), passwordHash/passwordAlgo.
+ *
+ * Password: legacy still accepts registrations + resets during cutover, so the hash is
+ * propagated under the same touch-gate (a new-app change-password / lazy bcrypt rehash
+ * bumps updatedAt → the row is "touched" → legacy is ignored from then on). The algo is
+ * DERIVED from the hash shape (detectPasswordAlgo), never assumed: legacy is md5 almost
+ * everywhere but ~440 rows hold a PHP password_hash() bcrypt digest, and stamping those
+ * 'legacy' (= md5 alias in AuthService.verifyPassword) locks the member out permanently.
+ * A NULL/empty legacy password never overwrites — it would clobber a real hash with the
+ * social sentinel.
  *
  * Gate: if the app changed the row since the last resync (updatedAt > legacySyncedAt) the
  * profile is left alone (new wins) — but a legacy deactivation (is_deleted) always
@@ -18,6 +27,7 @@
  * whole ~700k legacy member table — the bulk of which it used to fetch then discard.
  */
 import type { RowDataPacket } from 'mysql2/promise';
+import { detectPasswordAlgo } from '@bb/common/utils/password-algo.util';
 import { resyncConfig } from '../config';
 import { emptyStats, type Stats, type Syncer, type SyncerCtx } from '../types';
 import { bool, maxWatermark, nonEmpty, runConcurrent, sinceBound, toDate } from '../util';
@@ -45,7 +55,7 @@ export const membersSyncer: Syncer = {
       const idChunk = legacyIds.slice(i, i + CHUNK);
       const [rows] = await ctx.legacy.query<RowDataPacket[]>(
         `SELECT member_id, name, first_name, last_name, image_url, biography,
-                is_active, is_deleted, COALESCE(\`updated\`, \`created\`) AS wm
+                password, is_active, is_deleted, COALESCE(\`updated\`, \`created\`) AS wm
            FROM member
           WHERE member_id IN (?) AND COALESCE(\`updated\`, \`created\`) > ?`,
         [idChunk, since],
@@ -69,6 +79,7 @@ export const membersSyncer: Syncer = {
         const id = ctx.memberByLegacy.get(Number(r.member_id))!; // guaranteed: member_id ∈ our set
         const cur = current.get(id);
         const isActive = bool(r.is_active) && !bool(r.is_deleted);
+        const legacyPassword = nonEmpty(r.password);
         const touched = cur?.legacySyncedAt != null && cur.updatedAt.getTime() > cur.legacySyncedAt.getTime();
 
         if (ctx.dryRun) {
@@ -84,6 +95,8 @@ export const membersSyncer: Syncer = {
             await ctx.prisma.$executeRawUnsafe(
               `UPDATE "members"
                   SET "full_name" = $1, "avatar_url" = $2, "bio" = $3, "is_active" = $4,
+                      "password_hash" = COALESCE($7, "password_hash"),
+                      "password_algo" = COALESCE($8, "password_algo"),
                       "updated_at" = $6, "legacy_synced_at" = $6
                 WHERE "id" = $5::uuid`,
               fullNameOf(r),
@@ -92,6 +105,8 @@ export const membersSyncer: Syncer = {
               isActive,
               id,
               new Date(),
+              legacyPassword,
+              legacyPassword ? detectPasswordAlgo(legacyPassword) : null,
             );
             stats.upserted += 1;
           } else if (!isActive) {
