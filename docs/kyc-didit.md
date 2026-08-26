@@ -97,6 +97,46 @@ mobile                    backend                              Didit
   EXPIRED member. This **replaces Sumsub's `resetApplicant`** call. Writes are absolute →
   webhook replays for the active session are idempotent.
 
+## Document number (`kyc_id_number` / `kyc_id_type`)
+
+Didit does not push the document number in the status webhook, so it is **pulled** with
+`getSessionDecision(sessionId)` and the number + document kind are extracted by
+`extractDocumentIdentity()` (`didit.client.ts`).
+
+The write happens on the **PENDING transition** (`markDiditPending`), not on approval.
+Reason: the decision itself is normally taken by an admin in the **backoffice**, and that
+path writes `members.kyc_*` straight over SQL (`backoffice-bb/lib/kyc-queries.ts::setKycDecision`)
+without ever re-entering this service — an approval-time write would therefore miss the
+common case. The reviewer also needs the number *before* deciding. `applyDiditReview` keeps
+a second write on `approved` as a safety net for an approval whose PENDING webhook never
+landed; the `kycStatus === newStatus` early-return means a replay can never fill a gap, so
+the backfill below is required, not optional.
+
+Rules:
+
+- **Field preference is `document_number`, then `personal_number`.** On an Indonesian KTP the
+  document number IS the NIK; `personal_number` is the optional MRZ field and is often absent.
+- **A blank never overwrites.** No decision, a liveness-only workflow, or an unreachable Didit
+  all resolve to an empty partial → the stored value (manual submit or legacy import) survives.
+- **The pull never fails the webhook.** Any provider error is logged at `warn` and the status
+  transition still applies — a non-2xx here would earn a Didit retry storm for nothing.
+- **`kyc_id_type` is stored verbatim** as Didit labels it (`Identity Card`, `Passport`, …).
+  Mapping to a `KTP|SIM|PASSPORT` enum would guess at strings not yet observed from every
+  workflow, and ops only needs to know which document the number came from.
+- **The number itself is never logged** — only which field it came from and the document type.
+
+**`kyc_source` is not a reliable "this went through Didit" marker**: a backoffice decision
+rewrites it to `MANUAL` while leaving `kyc_provider_ref` intact. Anything keyed on the Didit
+population must use **`kyc_provider_ref IS NOT NULL`**.
+
+Backfill (one-shot): `pnpm kyc:backfill-didit-id [--dry-run]` walks
+`kyc_provider_ref IS NOT NULL AND kyc_id_number IS NULL`, pulls each decision (250 ms apart)
+and fills both columns. Members whose ref was cleared by a re-KYC reset (`docs/kyc-rekyc.md`)
+cannot be backfilled — they are counted and reported, and fill in on their next attempt.
+
+Prerequisite: the published workflow must actually contain an **ID-document step**. A
+liveness-only workflow returns no `id_verifications` and this whole path yields nothing.
+
 ## Manual flow status
 
 `POST /affiliate/me/kyc` (manual submit) is **kept** as fallback; admin override columns
@@ -119,7 +159,9 @@ Empty creds (`DIDIT_API_KEY` / `DIDIT_WORKFLOW_ID`) = feature off: token endpoin
 
 ## Files
 
-- `packages/common/src/services/didit.client.ts` — `x-api-key` REST client (`createSession`, `getSessionDecision`)
+- `packages/common/src/services/didit.client.ts` — `x-api-key` REST client (`createSession`,
+  `getSessionDecision`) + `extractDocumentIdentity()` payload parsing
+- `scripts/backfill-didit-id-number.ts` — one-shot `pnpm kyc:backfill-didit-id`
 - `packages/common/src/services/didit-signature.ts` — webhook HMAC + timestamp verify
 - `packages/domain/src/affiliate/disbursement.service.ts` — `createDiditSession`,
   `markDiditPending`, `applyDiditReview`, `findMemberForDidit`
