@@ -28,6 +28,18 @@ const SETTINGS: Array<{ key: string; value: string; description: string }> = [
       'Days an IAP-channel commission stays PENDING before BALANCE (longer: covers store refund window).',
   },
   {
+    key: 'banner.maxVersionAndroid',
+    value: '',
+    description:
+      "Max Android app version (INCLUSIVE) that still sees banners on GET /api/data/banner, e.g. '3.3.0' = shown on 3.3.0 and below, hidden on 3.3.1+. Empty = gate off. Requires the client to send ?platform=android&version=; a build that sends neither always sees banners.",
+  },
+  {
+    key: 'banner.maxVersionIos',
+    value: '',
+    description:
+      "Max iOS app version (INCLUSIVE) that still sees banners on GET /api/data/banner, e.g. '3.3.0' = shown on 3.3.0 and below, hidden on 3.3.1+. Empty = gate off. Separate from Android because App Store review and Play rollout never land together.",
+  },
+  {
     key: 'disbursement.autoEnabled',
     value: 'false',
     description:
