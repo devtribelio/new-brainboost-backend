@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { prisma } from '@bb/db';
 import { SettingsService, settingsService, SETTING_KEYS } from '@bb/common/services/settings.service';
 import { TrackingService } from '@/modules/tracker/tracking.service';
+import { INTERLUDE_AUDIO_ID } from '@/modules/playlist/playlist.constants';
 
 function uid(): string {
   return Math.random().toString(36).slice(2, 12);
@@ -52,7 +53,26 @@ describe('TrackingService — interlude never counts as listening (real Postgres
     };
   }
 
-  it('drops a session whose audioId is the configured interlude', async () => {
+  it('drops the sentinel id — the one value the app can actually send', async () => {
+    // The Bunny guid never reaches the client, so this is the realistic
+    // mis-report, not the guid below.
+    await service.record(memberId, payload(INTERLUDE_AUDIO_ID), 'ios');
+    expect(await prisma.listeningSession.count({ where: { memberId } })).toBe(0);
+  });
+
+  it('drops the sentinel even with no interlude configured', async () => {
+    await settingsService.set(SETTING_KEYS.playlistInterludeAssetId, '');
+    SettingsService.clearCache();
+    try {
+      await service.record(memberId, payload(INTERLUDE_AUDIO_ID), 'ios');
+      expect(await prisma.listeningSession.count({ where: { memberId } })).toBe(0);
+    } finally {
+      await settingsService.set(SETTING_KEYS.playlistInterludeAssetId, INTERLUDE_GUID);
+      SettingsService.clearCache();
+    }
+  });
+
+  it('drops a session whose audioId is the configured interlude guid', async () => {
     await service.record(memberId, payload(INTERLUDE_GUID), 'ios');
     expect(await prisma.listeningSession.count({ where: { memberId } })).toBe(0);
   });

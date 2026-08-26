@@ -44,6 +44,7 @@ export function serializePlaylistDetail(v: PlaylistDetailView): Record<string, u
     lockedItems: v.lockedItems,
     requiresSubscription: v.requiresSubscription,
     interludeStreamUrl: v.interludeStreamUrl,
+    interludeAudioId: v.interludeAudioId,
     items: v.items.map(serializeItem),
   };
 }

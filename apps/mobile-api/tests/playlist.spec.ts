@@ -304,12 +304,15 @@ describe('PlaylistService (real Postgres)', () => {
 
     it('emits an interlude url only when the setting carries a guid', async () => {
       const { playlist } = await service.create(subscriber, { name: 'Interlude', lessonIds: [lessons[0]] });
-      expect((await service.detail(playlist.id, subscriber)).interludeStreamUrl).toBeNull();
+      const off = await service.detail(playlist.id, subscriber);
+      expect(off.interludeStreamUrl).toBeNull();
+      expect(off.interludeAudioId).toBeNull();
 
       await setSetting(SETTING_KEYS.playlistInterludeAssetId, 'interlude-guid-1');
-      expect((await service.detail(playlist.id, subscriber)).interludeStreamUrl).toContain(
-        '/api/member/media/stream?t=',
-      );
+      const withInterlude = await service.detail(playlist.id, subscriber);
+      expect(withInterlude.interludeStreamUrl).toContain('/api/member/media/stream?t=');
+      // The app never sees the guid, so it gets a sentinel id to report instead.
+      expect(withInterlude.interludeAudioId).toBe('__interlude__');
     });
   });
 

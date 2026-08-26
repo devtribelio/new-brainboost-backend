@@ -247,9 +247,24 @@ Jalur "upload MP3 ke S3 publik" **jangan diambil**: modul upload menolak semua n
 player = ambang streak 10 menit jadi bohong untuk semua member, diam-diam, dan sulit dideteksi
 berbulan-bulan kemudian.
 
-Perbaikan: ingest **membuang** sesi yang `audioId`-nya sama dengan `playlist.interludeAssetId`.
-~5 baris, dan barulah tes yang diminta PRD bisa ditulis di sisi server. Guard ini sekaligus
-menjaga riwayat playlist (§7) tetap bersih.
+Perbaikan: ingest **membuang** sesi penyisip. Yang dibandingkan ada DUA nilai, dan urutannya
+penting:
+
+1. **`INTERLUDE_AUDIO_ID` (`"__interlude__"`)** — sentinel yang ikut dikirim di response detail
+   sebagai `interludeAudioId`. Ini yang benar-benar menutup lubangnya.
+2. `playlist.interludeAssetId` (guid Bunny) — pintu kedua, untuk pemanggil yang entah bagaimana
+   tahu guid-nya.
+
+Kenapa sentinel-nya wajib: **guid tidak pernah sampai ke client** — app cuma memegang token
+stream opaque. Jadi guard yang hanya membandingkan guid tidak akan pernah menyala, sementara
+mis-report yang realistis (player mengarang `audioId` sendiri, karena dia memang tidak punya id
+untuk penyisip) lewat begitu saja. Versi pertama guard ini ditulis guid-only dan karena itu
+menjaga kasus yang praktis mustahil sambil membiarkan yang mungkin — lebih berbahaya daripada
+tidak ada guard, karena dokumennya menyatakan masalah sudah pindah ke server.
+
+Kontraknya: server mengumumkan `interludeAudioId`, dokumen mobile menyuruh app memakai nilai itu
+kalau memang melacak penyisip, dan ingest membuangnya. Guard ini sekaligus menjaga riwayat
+playlist (§7) tetap bersih.
 
 ---
 
@@ -516,6 +531,7 @@ keputusan privasi + bahan moderasi. Tiket sendiri.
   "id": "...", "name": "Pagi Fokus", "coverUrl": "...",
   "requiresSubscription": true,
   "interludeStreamUrl": "https://.../media/stream?token=...",  // null kalau setting kosong
+  "interludeAudioId": "__interlude__",                         // null kalau penyisip mati
   "totalItems": 8, "lockedItems": 0,
   "isOwner": false, "isSaved": false,
   "items": [
@@ -556,7 +572,8 @@ kurasi — termasuk UI/pengisian konten yang belum punya rumah sama sekali. Tota
 
 ## 10. Test yang wajib
 
-- Penyisip **tidak pernah** masuk `listening_session` (guard server, bukan cuma disiplin client).
+- Penyisip **tidak pernah** masuk `listening_session` — diuji lewat sentinel `__interlude__`
+  (jalur yang benar-benar bisa ditempuh app) DAN lewat guid, bukan cuma salah satu.
 - Non-subscriber: `streamUrl: null` di semua item **dan** `/media/stream` tetap 403 kalau token
   lama dipaksa; endpoint tulis 403 `SUBSCRIPTION_REQUIRED`.
 - **Member free-trial** (punya `course_enrollment` time-boxed, tanpa subscription) ditolak di
@@ -599,6 +616,7 @@ kurasi — termasuk UI/pengisian konten yang belum punya rumah sama sekali. Tota
 | Playlist kurasi vs UGC | **UGC saja** — tidak ada playlist kurasi; `ownerId` NOT NULL, `slug` dibuang | 2026-08-21 |
 | Penyisip disimpan sebagai apa | Bunny `guid` di `app_settings`, bukan URL | 2026-08-21 |
 | Penyisip masuk `ListeningSession`? | Tidak — guard di sisi server, bukan disiplin client | 2026-08-21 |
+| Bagaimana guard penyisip mengenali sesinya | Sentinel `__interlude__` yang diumumkan ke client, guid sebagai pintu kedua | 2026-08-25 |
 | Kuota playlist | Dua lapis: `app_settings` + `members.playlist_quota` (NULL = ikut global) | 2026-08-21 |
 | Copy playlist berisi item terkunci | Salin apa adanya; `locked` dihitung saat baca | 2026-08-21 |
 | Riwayat playlist | Diturunkan dari `listening_session` + kolom `playlist_id` | 2026-08-21 |

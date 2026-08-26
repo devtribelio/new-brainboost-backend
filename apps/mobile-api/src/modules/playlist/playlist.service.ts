@@ -12,6 +12,7 @@ import {
   PLAYLIST_MAX_PER_MEMBER_DEFAULT,
   PLAYLIST_NAME_MAX_CHARS,
   PLAYLIST_VISIBILITY,
+  INTERLUDE_AUDIO_ID,
   PLAYLIST_HISTORY_LIMIT,
   PLAYLIST_PLAYED_MIN_SEC,
   PLAYLIST_TOP_RANGE_DAYS,
@@ -36,6 +37,8 @@ export interface PlaylistDetailView {
   totalItems: number;
   lockedItems: number;
   interludeStreamUrl: string | null;
+  /** Sentinel audio id for the interlude; null when the interlude is off. */
+  interludeAudioId: string | null;
   requiresSubscription: boolean;
   isOwner: boolean;
 }
@@ -242,12 +245,15 @@ export class PlaylistService {
       });
     }
 
+    const interludeStreamUrl = await this.interludeStreamUrl();
+
     return {
       playlist,
       items,
       totalItems: items.length,
       lockedItems: items.filter((i) => i.locked).length,
-      interludeStreamUrl: await this.interludeStreamUrl(),
+      interludeStreamUrl,
+      interludeAudioId: interludeStreamUrl ? INTERLUDE_AUDIO_ID : null,
       requiresSubscription: await this.requiresSubscription(),
       isOwner: viewerId !== undefined && playlist.ownerId === viewerId,
     };

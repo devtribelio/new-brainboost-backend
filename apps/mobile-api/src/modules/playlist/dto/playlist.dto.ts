@@ -78,6 +78,14 @@ export class PlaylistDetailDto extends PlaylistDto {
   })
   interludeStreamUrl?: string | null;
 
+  @ApiPropertyOptional({
+    nullable: true,
+    example: '__interlude__',
+    description:
+      'audioId to use IF the app reports the interlude to the tracker. Server drops it either way. null = interlude disabled.',
+  })
+  interludeAudioId?: string | null;
+
   @ApiProperty({ type: () => [PlaylistItemDto] })
   items!: PlaylistItemDto[];
 }

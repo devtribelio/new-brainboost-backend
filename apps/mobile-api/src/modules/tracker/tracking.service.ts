@@ -1,6 +1,7 @@
 import { prisma } from '@bb/db';
 import { settingsService, SETTING_KEYS } from '@bb/common/services/settings.service';
 import { logger } from '@bb/common/config/logger';
+import { INTERLUDE_AUDIO_ID } from '@/modules/playlist/playlist.constants';
 import { toLocalDayWIB } from './tracker.time';
 import type { TrackSessionDto } from './dto/track-session.dto';
 
@@ -17,6 +18,12 @@ export class TrackingService {
    * and moves the guarantee server-side (docs/playlist-port.md §3).
    */
   private async isInterlude(audioId: string): Promise<boolean> {
+    // The sentinel is what the app can actually send: the Bunny guid never
+    // reaches the client (it only ever holds an opaque stream token), so a
+    // guid-only check would sit here never firing while a real mis-report walked
+    // straight past it. The guid stays in the check as a second door, for a
+    // caller that somehow does know it.
+    if (audioId === INTERLUDE_AUDIO_ID) return true;
     const guid = (await settingsService.get(SETTING_KEYS.playlistInterludeAssetId, '')).trim();
     return guid !== '' && audioId === guid;
   }

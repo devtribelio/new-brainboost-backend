@@ -48,3 +48,16 @@ export const PLAYLIST_TOP_RANGE_DAYS = 30;
 
 /** Rows returned by the derived lists unless the caller asks for fewer. */
 export const PLAYLIST_HISTORY_LIMIT = 20;
+
+/**
+ * The id the app reports when it tracks the interlude — a value the CLIENT can
+ * actually see, which the Bunny guid is not.
+ *
+ * The guid never leaves the server (the app only ever holds an opaque stream
+ * token), so a guard that only compares against the guid can never fire: a
+ * misbehaving player would send whatever string it happened to have, never the
+ * guid. Publishing this sentinel in the detail response gives the client one
+ * documented value to use, and gives the ingest guard something it will really
+ * see. Underscored so it can never collide with a Lesson uuid.
+ */
+export const INTERLUDE_AUDIO_ID = '__interlude__';
