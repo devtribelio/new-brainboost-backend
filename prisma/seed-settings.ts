@@ -110,6 +110,29 @@ const SETTINGS: Array<{ key: string; value: string; description: string }> = [
       'How many rows GET /member/affiliate/leaderboard returns in `top`. The aggregate table always stores the FULL ranking — this only caps the read.',
   },
   {
+    key: 'playlist.maxPerMember',
+    value: '20',
+    description:
+      'Max playlists a member may own. -1 = unlimited, 0 = may not create any (0 is NOT unlimited). members.playlist_quota overrides this per member.',
+  },
+  {
+    key: 'playlist.maxItems',
+    value: '200',
+    description: 'Max audio items in a single playlist.',
+  },
+  {
+    key: 'playlist.interludeAssetId',
+    value: '',
+    description:
+      'Bunny Stream guid of the global interlude clip played between playlist items. Empty = interlude disabled. Store the guid, never a URL.',
+  },
+  {
+    key: 'playlist.requiresSubscription',
+    value: 'true',
+    description:
+      "Kill-switch: 'true' = playlists are a subscriber-only feature (play + create). 'false' opens them to any member with content access.",
+  },
+  {
     key: 'upload.orphanTtlHours',
     value: '168',
     description:

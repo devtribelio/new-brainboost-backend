@@ -13,6 +13,7 @@ import { UploadModule } from '@/modules/upload/upload.module';
 import { BannerModule } from '@/modules/banner/banner.module';
 import { ProductModule } from '@/modules/product/product.module';
 import { MediaModule } from '@/modules/media/media.module';
+import { PlaylistModule } from '@/modules/playlist/playlist.module';
 import { BonusModule } from '@/modules/bonus/bonus.module';
 import { CommissionModule } from '@/modules/commission/commission.module';
 import { AffiliateModule } from '@/modules/affiliate/affiliate.module';
@@ -42,6 +43,7 @@ const modules: AppModule[] = [
   BannerModule,
   ProductModule,
   MediaModule,
+  PlaylistModule,
   BonusModule,
   CommissionModule,
   AffiliateModule,

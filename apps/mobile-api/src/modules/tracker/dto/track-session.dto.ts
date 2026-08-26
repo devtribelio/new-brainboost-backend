@@ -19,6 +19,16 @@ export class TrackSessionDto {
   @IsUUID()
   courseId?: string | null;
 
+  @ApiPropertyOptional({
+    format: 'uuid',
+    nullable: true,
+    description:
+      'Playlist the audio was played from, when any. Feeds the recent/top playlist lists; omit for standalone listening.',
+  })
+  @IsOptional()
+  @IsUUID()
+  playlistId?: string | null;
+
   @ApiProperty({ format: 'date-time', example: '2026-06-23T01:10:00Z' })
   @IsISO8601()
   startedAt!: string;

@@ -230,6 +230,15 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   REPORT_CATEGORY_INVALID: 'Kategori laporan tidak valid',
   REPORT_PARAMS_REQUIRED: 'Data laporan tidak lengkap',
 
+  // --- playlist ---------------------------------------------------------------
+  PLAYLIST_NOT_FOUND: 'Playlist tidak ditemukan',
+  PLAYLIST_SUBSCRIPTION_REQUIRED: 'Playlist hanya untuk member berlangganan',
+  PLAYLIST_QUOTA_EXCEEDED: 'Batas jumlah playlist tercapai',
+  PLAYLIST_ITEM_LIMIT_EXCEEDED: 'Batas jumlah audio dalam playlist tercapai',
+  PLAYLIST_NAME_REQUIRED: 'Nama playlist wajib diisi',
+  PLAYLIST_FORBIDDEN: 'Playlist ini bukan milikmu',
+  PLAYLIST_ITEMS_REQUIRED: 'Daftar audio tidak boleh kosong',
+
   // --- server-to-server: English on purpose (see file header) ----------------
   INGEST_CREDENTIAL_INVALID: 'Invalid ingestion credential',
   INGEST_EVENT_ID_REQUIRED: 'providerEventId is required',

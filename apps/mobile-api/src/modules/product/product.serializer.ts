@@ -1,5 +1,11 @@
 import type { Product } from '@prisma/client';
-import { signMediaToken, signDocumentToken } from '@/modules/media/media-token.util';
+import { signDocumentToken } from '@/modules/media/media-token.util';
+import {
+  buildDownloadUrl,
+  buildStreamUrl,
+  resolveDurationSec,
+  resolveGuid,
+} from '@/modules/media/media-asset.util';
 import { logger } from '@bb/common/config/logger';
 import { serializeBonusItem } from '@/modules/bonus/bonus.dto';
 import { env } from '@bb/common/config/env';
@@ -194,38 +200,6 @@ interface RawSlide {
 }
 
 /**
- * Pull the Bunny `libraryId` + `guid` out of a VideoTemplate `data.url` blob,
- * which wraps an `<iframe src="https://iframe.mediadelivery.net/embed/{lib}/{guid}?...">`.
- * Returns `null` for non-Bunny URLs (e.g. YouTube / external embeds) so they
- * pass through untouched.
- */
-function parseBunnyEmbed(html: string): { libraryId: string; guid: string } | null {
-  const m = /iframe\.mediadelivery\.net\/embed\/(\d+)\/([0-9a-fA-F-]{36})/.exec(html);
-  if (!m) return null;
-  return { libraryId: m[1], guid: m[2] };
-}
-
-/**
- * Build the opaque media-proxy URL that replaces the raw Bunny `guid` /
- * `videoLibraryId` in client-facing responses.
- */
-function buildStreamUrl(guid: string, courseId: string, isPreview: boolean): string {
-  const token = signMediaToken({ guid, courseId, isPreview });
-  return `/api/member/media/stream?t=${token}`;
-}
-
-/**
- * Build a long-lived signed download URL for the same Bunny asset. The opaque
- * token carries the longer download TTL so it does not expire before a slow
- * offline download finishes; the proxy endpoint then 302-redirects to a signed
- * Bunny MP4 URL.
- */
-function buildDownloadUrl(guid: string, courseId: string, isPreview: boolean): string {
-  const token = signMediaToken({ guid, courseId, isPreview }, env.media.downloadTtlSeconds);
-  return `/api/member/media/download?t=${token}`;
-}
-
-/**
  * Coerce a JSONB value to a positive int, or null. `null`/`''` must not become
  * `0` — a document of "0 bytes" reads as a broken upload, "unknown" does not.
  */
@@ -242,42 +216,6 @@ function positiveIntOrNull(raw: unknown): number | null {
  */
 function buildDocumentUrl(key: string, courseId: string, isPreview: boolean): string {
   return `/api/member/media/document?t=${signDocumentToken({ key, courseId, isPreview })}`;
-}
-
-/**
- * Scrub a single raw slide so no Bunny identifiers leak to the client.
- *
- * - AudioTemplate: replaces the whole `data.audio` Bunny object with `{ streamUrl, duration }`.
- * - VideoTemplate: drops the `data.url` iframe HTML, adds `data.streamUrl`.
- * - Any other slide type passes through unchanged.
- *
- * `courseId` (Course UUID) + `isPreview` (parent lesson) are baked into the
- * media token. Returns a shallow-cloned slide; the original JSONB is untouched.
- */
-/**
- * Resolve the Bunny `guid` from either slide shape:
- *   - lean (post-normalization):   `data.guid`
- *   - raw audio blob:              `data.audio.guid`
- *   - raw structured video:        `data.video.guid`
- *   - raw iframe video:            parsed out of `data.url`
- */
-function resolveGuid(d: NonNullable<RawSlide['data']>): string | null {
-  if (typeof d.guid === 'string') return d.guid;
-  if (d.audio && typeof d.audio.guid === 'string') return d.audio.guid;
-  if (d.video && typeof d.video.guid === 'string') return d.video.guid;
-  if (typeof d.url === 'string') return parseBunnyEmbed(d.url)?.guid ?? null;
-  return null;
-}
-
-/**
- * Real per-slide duration in seconds. Prefers the lean `data.durationSec`, then the
- * raw Bunny blob `length` (audio/video), then the legacy slide-level `duration`.
- * `Lesson.duration` is the sum of these across the lesson's media slides.
- */
-function resolveDurationSec(slide: RawSlide, d: NonNullable<RawSlide['data']>): number {
-  const raw = d.durationSec ?? d.audio?.length ?? d.video?.length ?? slide.duration;
-  const n = Number.parseInt(String(raw ?? ''), 10);
-  return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
 /**

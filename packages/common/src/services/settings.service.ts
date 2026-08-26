@@ -38,6 +38,13 @@ export const SETTING_KEYS = {
   salesAlertEmail: 'sales.alertEmail',
   affiliateLeaderboardTopN: 'affiliate.leaderboardTopN',
   uploadOrphanTtlHours: 'upload.orphanTtlHours',
+  playlistMaxPerMember: 'playlist.maxPerMember',
+  playlistMaxItems: 'playlist.maxItems',
+  // Bunny Stream guid of the single global interlude clip, NOT a URL: a raw URL
+  // would leak the CDN host + guid past the media proxy, with no rate limit and
+  // no way to revoke it. Empty = interlude disabled.
+  playlistInterludeAssetId: 'playlist.interludeAssetId',
+  playlistRequiresSubscription: 'playlist.requiresSubscription',
 } as const;
 
 export class SettingsService {

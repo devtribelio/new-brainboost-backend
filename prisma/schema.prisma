@@ -92,6 +92,11 @@ model Member {
   // docs/legacy-resync-plan.md §6.
   legacySyncedAt DateTime? @map("legacy_synced_at")
 
+  /// Per-member override for the playlist cap. NULL = follow app_settings
+  /// `playlist.maxPerMember`. -1 = unlimited, 0 = may not create any at all
+  /// (0 is NOT unlimited). Only ops writes this; there is no member-facing route.
+  playlistQuota Int? @map("playlist_quota")
+
   profile                MemberProfile?
   devices                Device[]
   refreshTokens          RefreshToken[]
@@ -101,20 +106,21 @@ model Member {
   topicSubs              TopicSubscription[]
   postLikes              PostLike[]
   commentLikes           CommentLike[]
-  inviter                Member?                 @relation("MemberInviter", fields: [inviterId], references: [id])
-  invitees               Member[]                @relation("MemberInviter")
-  memberAffiliators      MemberAffiliator[]      @relation("MemberAffiliatorMember")
-  affiliateCommissions   AffiliateCommission[]   @relation("AffiliateCommissionRecipient")
-  affiliateVisits        AffiliateVisit[]        @relation("AffiliateVisitAffiliator")
-  affiliateDisbursements AffiliateDisbursement[] @relation("MemberDisbursements")
+  inviter                Member?                       @relation("MemberInviter", fields: [inviterId], references: [id])
+  invitees               Member[]                      @relation("MemberInviter")
+  memberAffiliators      MemberAffiliator[]            @relation("MemberAffiliatorMember")
+  affiliateCommissions   AffiliateCommission[]         @relation("AffiliateCommissionRecipient")
+  affiliateVisits        AffiliateVisit[]              @relation("AffiliateVisitAffiliator")
+  affiliateDisbursements AffiliateDisbursement[]       @relation("MemberDisbursements")
   leaderboardEntries     AffiliateLeaderboardMonthly[] @relation("MemberLeaderboardEntries")
   courseEnrollments      CourseEnrollment[]
   commerceTransactions   CommerceTransaction[]
   commercePayments       CommercePayment[]
   notificationMutes      NotificationMute[]
   kycEvents              KycEvent[]
-  ownedSubscriptions     MemberSubscription[]    @relation("MemberSubscriptionOwner")
-  subscriptionSeats      SubscriptionSeat[]      @relation("SubscriptionSeatMember")
+  ownedSubscriptions     MemberSubscription[]          @relation("MemberSubscriptionOwner")
+  subscriptionSeats      SubscriptionSeat[]            @relation("SubscriptionSeatMember")
+  playlists              Playlist[]                    @relation("PlaylistOwner")
 
   @@map("members")
 }
@@ -518,7 +524,8 @@ model Lesson {
   createdAt      DateTime @default(now()) @map("created_at")
   updatedAt      DateTime @updatedAt @map("updated_at")
 
-  section CourseSection @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  section       CourseSection  @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  playlistItems PlaylistItem[]
 
   @@index([sectionId, order])
   @@map("course_lessons")
@@ -560,12 +567,77 @@ model ListeningSession {
   completed       Boolean  @default(false)
   localDay        DateTime @map("local_day") @db.Date // Asia/Jakarta (WIB) calendar day at write → trivial streak query
   source          String? // ios / android
+  // Playlist the audio was played from, when any. NULL = played standalone.
+  // No FK on purpose, same reason as `audioId`: this is an ingest log and a write
+  // must never fail because the playlist row was deleted. Feeds the recent/top
+  // playlist lists, which are derived at read time (docs/playlist-port.md §7).
+  playlistId      String?  @map("playlist_id") @db.Uuid
   createdAt       DateTime @default(now()) @map("created_at")
 
   @@unique([memberId, clientSessionId]) // dedup retry / resume re-send
   @@index([memberId, localDay])
   @@index([memberId, courseId, localDay])
+  @@index([memberId, playlistId, startedAt])
   @@map("listening_session")
+}
+
+// ============================================================================
+// Playlist (docs/playlist-port.md)
+// ============================================================================
+
+/// Member-built audio playlist. There is no curated/official variant — every row
+/// belongs to a member (`ownerId` NOT NULL); if that ever changes, dropping the
+/// NOT NULL is a trivial migration, so it is not pre-emptively nullable.
+/// Playing/creating requires an active subscription (`playlist.requiresSubscription`).
+model Playlist {
+  id              String    @id @default(uuid(7)) @db.Uuid
+  ownerId         String    @map("owner_id") @db.Uuid
+  /// PRIVATE | UNLISTED — a playlist becomes reachable by others only through a
+  /// share token its owner switched on. Free-form string, no DB enum (same posture
+  /// as `members.kyc_status`): a new value must not need a members-table DDL.
+  visibility      String    @default("PRIVATE")
+  /// Opaque random share key, minted when sharing is switched on, NULL when off,
+  /// rotatable. Deliberately NOT the id: a UUID v7 carries its creation timestamp
+  /// and can never be revoked.
+  shareToken      String?   @unique @map("share_token")
+  sharedAt        DateTime? @map("shared_at")
+  /// Share token this playlist was copied from — plain scalar, NO FK, so the source
+  /// may be deleted without breaking the copy. Feeds analytics and, later, share
+  /// commission attribution.
+  copiedFromToken String?   @map("copied_from_token")
+  name            String
+  description     String?
+  coverUrl        String?   @map("cover_url")
+  sortOrder       Int       @default(0) @map("sort_order")
+  isActive        Boolean   @default(true) @map("is_active")
+  /// Ops moderation kill-switch. A blocked playlist answers 404, never 403 — a 403
+  /// would confirm it exists.
+  isBlocked       Boolean   @default(false) @map("is_blocked")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  owner Member         @relation("PlaylistOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  items PlaylistItem[]
+
+  @@index([ownerId])
+  @@index([isActive, sortOrder])
+  @@map("playlists")
+}
+
+/// One audio in a playlist, in `order`. Cascades from Lesson on purpose: when the
+/// content team removes a lesson the item disappears and the playlist lives on.
+model PlaylistItem {
+  id         String @id @default(uuid(7)) @db.Uuid
+  playlistId String @map("playlist_id") @db.Uuid
+  lessonId   String @map("lesson_id") @db.Uuid
+  order      Int    @default(0)
+
+  playlist Playlist @relation(fields: [playlistId], references: [id], onDelete: Cascade)
+  lesson   Lesson   @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+
+  @@unique([playlistId, lessonId])
+  @@index([playlistId, order])
+  @@map("playlist_items")
 }
 
 // ============================================================================
@@ -1478,11 +1550,11 @@ model ThirdPartyCredential {
 // Per-syncer watermark + last-run stats. One row per syncer ("members",
 // "enrollments", "commissions", "kyc", "tree", "reviews", "posts").
 model SyncState {
-  syncer    String   @id // syncer name
+  syncer    String    @id // syncer name
   watermark String? // max processed COALESCE(updated, created), ISO datetime string
   lastRunAt DateTime? @map("last_run_at")
-  lastStats Json?    @map("last_stats") // { scanned, upserted, skipped, voided, errors }
-  updatedAt DateTime @updatedAt @map("updated_at")
+  lastStats Json?     @map("last_stats") // { scanned, upserted, skipped, voided, errors }
+  updatedAt DateTime  @updatedAt @map("updated_at")
 
   @@map("sync_state")
 }
