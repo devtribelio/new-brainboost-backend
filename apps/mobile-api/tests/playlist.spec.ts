@@ -10,9 +10,13 @@ function uid(): string {
   return Math.random().toString(36).slice(2, 12);
 }
 
-/** A lesson whose slides carry one Bunny audio — the only shape a playlist can play. */
-function audioSlides(guid: string) {
-  return [{ id: 's1', type: 'AudioTemplate', data: { guid, durationSec: 600 } }];
+/**
+ * A lesson slide carrying a Bunny audio. The slide id is what a playlist item
+ * points at, so every fixture needs its own — sharing one would collide on
+ * `(playlist_id, audio_id)`.
+ */
+function audioSlides(audioId: string, guid = `guid-${audioId}`) {
+  return [{ id: audioId, type: 'AudioTemplate', data: { guid, durationSec: 600 } }];
 }
 
 async function setSetting(key: string, value: string) {
@@ -32,8 +36,9 @@ describe('PlaylistService (real Postgres)', () => {
   let planId = '';
   let subscriptionId = '';
   let voucherId = '';
-  const lessons: string[] = [];
-  let inactiveLessonId = '';
+  /** Slide ids — what playlist items reference. */
+  const slides: string[] = [];
+  let inactiveSlideId = '';
 
   beforeAll(async () => {
     const pw = await bcrypt.hash('s', 4);
@@ -46,14 +51,22 @@ describe('PlaylistService (real Postgres)', () => {
     sectionId = (await prisma.courseSection.create({ data: { courseId, name: 'S1' } })).id;
 
     for (let i = 0; i < 3; i++) {
-      const l = await prisma.lesson.create({
-        data: { sectionId, name: `Audio ${i + 1}`, duration: 600, slidesData: audioSlides(`guid-${uid()}`) },
+      const audioId = `slide-${uid()}`;
+      await prisma.lesson.create({
+        data: { sectionId, name: `Audio ${i + 1}`, duration: 600, slidesData: audioSlides(audioId) },
       });
-      lessons.push(l.id);
+      slides.push(audioId);
     }
-    inactiveLessonId = (await prisma.lesson.create({
-      data: { sectionId, name: 'Archived', duration: 60, lessonStatus: 'ARCHIVED', slidesData: audioSlides(`guid-${uid()}`) },
-    })).id;
+    inactiveSlideId = `slide-${uid()}`;
+    await prisma.lesson.create({
+      data: {
+        sectionId,
+        name: 'Archived',
+        duration: 60,
+        lessonStatus: 'ARCHIVED',
+        slidesData: audioSlides(inactiveSlideId),
+      },
+    });
 
     // Subscriber: an ACTIVE subscription that has not expired.
     const planProduct = await prisma.product.create({ data: { type: 'subscription', title: 'Solo', code: `SUB-${uid()}`, price: 999_000 } });
@@ -230,40 +243,40 @@ describe('PlaylistService (real Postgres)', () => {
 
   describe('items', () => {
     it('creates with the first items in one call', async () => {
-      const res = await service.create(subscriber, { name: 'With items', lessonIds: [lessons[0], lessons[1]] });
+      const res = await service.create(subscriber, { name: 'With items', audioIds: [slides[0], slides[1]] });
       expect(res.added).toBe(2);
       const detail = await service.detail(res.playlist.id, subscriber);
-      expect(detail.items.map((i) => i.lessonId)).toEqual([lessons[0], lessons[1]]);
+      expect(detail.items.map((i) => i.audioId)).toEqual([slides[0], slides[1]]);
     });
 
     it('treats a duplicate as a no-op, not an error, and skips inactive lessons', async () => {
-      const { playlist } = await service.create(subscriber, { name: 'Dup', lessonIds: [lessons[0]] });
-      const res = await service.addItems(subscriber, playlist.id, [lessons[0], lessons[1], inactiveLessonId]);
+      const { playlist } = await service.create(subscriber, { name: 'Dup', audioIds: [slides[0]] });
+      const res = await service.addItems(subscriber, playlist.id, [slides[0], slides[1], inactiveSlideId]);
       expect(res).toMatchObject({ added: 1, alreadyPresent: 1 });
-      expect(res.skipped).toEqual([inactiveLessonId]);
+      expect(res.skipped).toEqual([inactiveSlideId]);
     });
 
     it('refuses to go past the item limit', async () => {
       await setSetting(SETTING_KEYS.playlistMaxItems, '2');
       const { playlist } = await service.create(subscriber, { name: 'Cap' });
-      await service.addItems(subscriber, playlist.id, [lessons[0], lessons[1]]);
-      await expect(service.addItems(subscriber, playlist.id, [lessons[2]])).rejects.toMatchObject({
+      await service.addItems(subscriber, playlist.id, [slides[0], slides[1]]);
+      await expect(service.addItems(subscriber, playlist.id, [slides[2]])).rejects.toMatchObject({
         code: ERROR_CODES.PLAYLIST_ITEM_LIMIT_EXCEEDED,
       });
       await setSetting(SETTING_KEYS.playlistMaxItems, '200');
     });
 
     it('rewrites the whole order from the final array', async () => {
-      const { playlist } = await service.create(subscriber, { name: 'Order', lessonIds: lessons });
-      await service.reorder(subscriber, playlist.id, [lessons[2], lessons[0], lessons[1]]);
+      const { playlist } = await service.create(subscriber, { name: 'Order', audioIds: slides });
+      await service.reorder(subscriber, playlist.id, [slides[2], slides[0], slides[1]]);
       const detail = await service.detail(playlist.id, subscriber);
-      expect(detail.items.map((i) => i.lessonId)).toEqual([lessons[2], lessons[0], lessons[1]]);
+      expect(detail.items.map((i) => i.audioId)).toEqual([slides[2], slides[0], slides[1]]);
     });
 
     it("refuses to touch someone else's playlist", async () => {
       const { playlist } = await service.create(subscriber, { name: 'Mine' });
       await setSetting(SETTING_KEYS.playlistRequiresSubscription, 'false');
-      await expect(service.addItems(plain, playlist.id, [lessons[0]])).rejects.toMatchObject({
+      await expect(service.addItems(plain, playlist.id, [slides[0]])).rejects.toMatchObject({
         code: ERROR_CODES.PLAYLIST_FORBIDDEN,
       });
     });
@@ -271,7 +284,7 @@ describe('PlaylistService (real Postgres)', () => {
 
   describe('detail', () => {
     it('unlocks every item for a subscriber and mints a stream url', async () => {
-      const { playlist } = await service.create(subscriber, { name: 'Play', lessonIds: lessons });
+      const { playlist } = await service.create(subscriber, { name: 'Play', audioIds: slides });
       const detail = await service.detail(playlist.id, subscriber);
       expect(detail.totalItems).toBe(3);
       expect(detail.lockedItems).toBe(0);
@@ -279,7 +292,7 @@ describe('PlaylistService (real Postgres)', () => {
     });
 
     it('does NOT write a lazy course_enrollment while browsing', async () => {
-      const { playlist } = await service.create(subscriber, { name: 'Browse', lessonIds: lessons });
+      const { playlist } = await service.create(subscriber, { name: 'Browse', audioIds: slides });
       await prisma.courseEnrollment.deleteMany({ where: { memberId: subscriber, courseId } });
       await service.detail(playlist.id, subscriber);
       const rows = await prisma.courseEnrollment.count({ where: { memberId: subscriber, courseId } });
@@ -288,7 +301,7 @@ describe('PlaylistService (real Postgres)', () => {
 
     it('locks items the viewer cannot play once the gate is open to everyone', async () => {
       await setSetting(SETTING_KEYS.playlistRequiresSubscription, 'false');
-      const { playlist } = await service.create(plain, { name: 'Locked', lessonIds: lessons });
+      const { playlist } = await service.create(plain, { name: 'Locked', audioIds: slides });
       const detail = await service.detail(playlist.id, plain);
       expect(detail.lockedItems).toBe(3);
       expect(detail.items.every((i) => i.streamUrl === null)).toBe(true);
@@ -296,14 +309,14 @@ describe('PlaylistService (real Postgres)', () => {
 
     it('unlocks a live trial via activeEnrollment(), not OWNED_FOR_PURCHASE', async () => {
       await setSetting(SETTING_KEYS.playlistRequiresSubscription, 'false');
-      const { playlist } = await service.create(trialMember, { name: 'Trial view', lessonIds: [lessons[0]] });
+      const { playlist } = await service.create(trialMember, { name: 'Trial view', audioIds: [slides[0]] });
       const detail = await service.detail(playlist.id, trialMember);
       expect(detail.lockedItems).toBe(0);
       expect(detail.items[0].streamUrl).toContain('/api/member/media/stream?t=');
     });
 
     it('emits an interlude url only when the setting carries a guid', async () => {
-      const { playlist } = await service.create(subscriber, { name: 'Interlude', lessonIds: [lessons[0]] });
+      const { playlist } = await service.create(subscriber, { name: 'Interlude', audioIds: [slides[0]] });
       const off = await service.detail(playlist.id, subscriber);
       expect(off.interludeStreamUrl).toBeNull();
       expect(off.interludeAudioId).toBeNull();
@@ -318,7 +331,7 @@ describe('PlaylistService (real Postgres)', () => {
 
   describe('share + copy', () => {
     async function sharedPlaylist(name = 'Dibagikan') {
-      const { playlist } = await service.create(subscriber, { name, lessonIds: [lessons[0], lessons[1]] });
+      const { playlist } = await service.create(subscriber, { name, audioIds: [slides[0], slides[1]] });
       const { shareToken } = await service.share(subscriber, playlist.id);
       return { playlist, token: shareToken };
     }
@@ -353,11 +366,18 @@ describe('PlaylistService (real Postgres)', () => {
     });
 
     it('keeps a preview lesson playable for anyone', async () => {
+      const previewSlideId = `slide-${uid()}`;
       const previewLesson = await prisma.lesson.create({
-        data: { sectionId, name: 'Preview', duration: 120, isPreview: true, slidesData: audioSlides(`guid-${uid()}`) },
+        data: {
+          sectionId,
+          name: 'Preview',
+          duration: 120,
+          isPreview: true,
+          slidesData: audioSlides(previewSlideId),
+        },
       });
       try {
-        const { playlist } = await service.create(subscriber, { name: 'Preview mix', lessonIds: [previewLesson.id] });
+        const { playlist } = await service.create(subscriber, { name: 'Preview mix', audioIds: [previewSlideId] });
         const { shareToken } = await service.share(subscriber, playlist.id);
         const view = await service.detailByShareToken(shareToken);
         expect(view.lockedItems).toBe(0);
@@ -458,7 +478,7 @@ describe('PlaylistService (real Postgres)', () => {
         data: {
           memberId: subscriber,
           clientSessionId: randomUUID(),
-          audioId: lessons[0],
+          audioId: slides[0],
           playlistId,
           startedAt,
           listenedSec,
@@ -469,8 +489,8 @@ describe('PlaylistService (real Postgres)', () => {
     }
 
     async function twoPlayed() {
-      const a = (await service.create(subscriber, { name: 'A', lessonIds: [lessons[0]] })).playlist;
-      const b = (await service.create(subscriber, { name: 'B', lessonIds: [lessons[1]] })).playlist;
+      const a = (await service.create(subscriber, { name: 'A', audioIds: [slides[0]] })).playlist;
+      const b = (await service.create(subscriber, { name: 'B', audioIds: [slides[1]] })).playlist;
       await play(a.id, 3600, 5);   // long, older
       await play(b.id, 120, 1);    // short, newer
       return { a, b };
@@ -492,27 +512,27 @@ describe('PlaylistService (real Postgres)', () => {
     });
 
     it('ignores a mis-tap below the 30-second floor', async () => {
-      const { playlist } = await service.create(subscriber, { name: 'Salah tap', lessonIds: [lessons[0]] });
+      const { playlist } = await service.create(subscriber, { name: 'Salah tap', audioIds: [slides[0]] });
       await play(playlist.id, 5, 1);
       expect(await service.listRecent(subscriber)).toEqual([]);
     });
 
     it('keeps top inside its window', async () => {
-      const { playlist } = await service.create(subscriber, { name: 'Lama', lessonIds: [lessons[0]] });
+      const { playlist } = await service.create(subscriber, { name: 'Lama', audioIds: [slides[0]] });
       await play(playlist.id, 1800, 60 * 24 * 40); // 40 days ago
       expect(await service.listTop(subscriber, 30)).toEqual([]);
       expect((await service.listTop(subscriber, 60)).map((r) => r.playlist.id)).toEqual([playlist.id]);
     });
 
     it('drops a playlist that was deleted — silently, no tombstone row', async () => {
-      const { playlist } = await service.create(subscriber, { name: 'Hilang', lessonIds: [lessons[0]] });
+      const { playlist } = await service.create(subscriber, { name: 'Hilang', audioIds: [slides[0]] });
       await play(playlist.id, 600, 1);
       await prisma.playlist.delete({ where: { id: playlist.id } });
       expect(await service.listRecent(subscriber)).toEqual([]);
     });
 
     it("drops someone else's playlist once its link is withdrawn", async () => {
-      const { playlist } = await service.create(subscriber, { name: 'Dicabut', lessonIds: [lessons[0]] });
+      const { playlist } = await service.create(subscriber, { name: 'Dicabut', audioIds: [slides[0]] });
       await service.share(subscriber, playlist.id);
       // Hand it to another owner so it is no longer "mine", only "shared".
       await prisma.playlist.update({ where: { id: playlist.id }, data: { ownerId: plain } });
@@ -532,7 +552,7 @@ describe('PlaylistService (real Postgres)', () => {
         data: {
           memberId: subscriber,
           clientSessionId: randomUUID(),
-          audioId: lessons[0],
+          audioId: slides[0],
           startedAt: new Date(),
           listenedSec: 1200,
           completed: true,

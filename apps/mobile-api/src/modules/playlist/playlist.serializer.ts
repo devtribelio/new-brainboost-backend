@@ -27,6 +27,7 @@ export function serializePlaylist(p: PlaylistWithCount, isOwner = true): Record<
 
 function serializeItem(i: PlaylistItemView): Record<string, unknown> {
   return {
+    audioId: i.audioId,
     lessonId: i.lessonId,
     courseId: i.courseId,
     name: i.name,

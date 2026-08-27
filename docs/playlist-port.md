@@ -69,13 +69,19 @@ model Playlist {
 model PlaylistItem {
   id         String @id @default(uuid(7)) @db.Uuid
   playlistId String @map("playlist_id") @db.Uuid
+  /// The slide inside `lesson.slides_data` that plays. Same name and id space as
+  /// `listening_session.audio_id` — one name for one id.
+  audioId    String @map("audio_id")
+  /// Denormalised owner of that slide: a slide id lives inside JSON and cannot
+  /// carry an FK, so this is what keeps ON DELETE CASCADE and the section → course
+  /// join (entitlement, title, duration).
   lessonId   String @map("lesson_id") @db.Uuid
   order      Int    @default(0)
 
   playlist Playlist @relation(fields: [playlistId], references: [id], onDelete: Cascade)
   lesson   Lesson   @relation(fields: [lessonId],   references: [id], onDelete: Cascade)
 
-  @@unique([playlistId, lessonId])
+  @@unique([playlistId, audioId])
   @@index([playlistId, order])
   @@map("playlist_items")
 }
@@ -223,6 +229,46 @@ saat kampanye jadi satu baris SQL, bukan deploy. Pola `disbursement.autoEnabled`
 V1 justru **menyusut**: `PlaylistService` tidak perlu resolve entitlement per item — cukup satu
 cek langganan per request, lalu mint token untuk semua item. Hilang satu query per item dan
 satu lapis logika.
+
+---
+
+## 2c. Item playlist dikunci ke `audioId`, bukan `lessonId` (2026-08-25)
+
+Diukur di `listening_session` (148.644 baris, DB dev):
+
+| `audioId` menunjuk | Distinct | Sesi |
+|---|---|---|
+| Slide `AudioTemplate` | 49 | 135.309 (91%) |
+| Slide `VideoTemplate` | 76 | 13.279 (9%) |
+| Tidak cocok apa pun | 7 | 56 |
+| **`Lesson.id`** | **0** | **0** |
+
+Komentar lama di schema menyebut `audioId` = `Lesson.id`. **Salah**, dan sempat menyesatkan
+desain V1: playlist dikunci ke `lessonId` sebagian karena komentar itu. Sudah diperbaiki di
+`prisma/schema.prisma` beserta angkanya.
+
+Konsekuensi:
+
+- **Item playlist memakai `audioId`** — nama dan ruang id yang sama dengan log dengar, jadi
+  item dan sesi yang dihasilkannya bisa di-join. Nama `audioId` memang tidak akurat (9%
+  `VideoTemplate` — "audio" di Bunny itu video gambar diam), tapi nama kedua untuk nilai yang
+  sama lebih menyesatkan daripada satu nama yang kurang tepat.
+- **`lessonId` tetap ada, didenormalisasi.** Slide id hidup di dalam JSON dan tidak bisa
+  memikul FK; kolom lesson yang memberi `ON DELETE CASCADE` dan menjadikan lookup
+  section → course (entitlement, judul, durasi) sebuah join, bukan pemindaian.
+- **`VideoTemplate` ikut diterima.** V1 hanya mencari `AudioTemplate` dan karena itu diam-diam
+  membuang 9% konten yang benar-benar didengar member.
+- **Referensi menggantung itu nyata**, bukan teori: 7 id di log sudah tidak cocok slide mana
+  pun (salah satunya `M9QIMS4V4LK09` vs `M9QIMS4V4LK09K` — beda satu karakter). Pembacaan
+  membuang item yang slidenya hilang, bukan merendernya sebagai baris mati.
+- **FE tidak perlu endpoint baru.** `scrubSlide` di product serializer sudah memancarkan
+  `slides[].id` sejak dulu; itulah nilainya.
+
+Menambah item lewat `audioId` juga memungkinkan satu lesson menyumbang lebih dari satu audio —
+hari ini belum ada (111 lesson, semuanya tepat satu slide audio), tapi tidak lagi tertutup.
+
+Migrasi: `20260825120000_playlist_item_audio_id` (terpisah; `20260824120000_playlist` tidak
+disentuh).
 
 ---
 
@@ -378,7 +424,7 @@ titik konversinya. App menahan token share melewati checkout.
 
 ### Copy playlist yang isinya tidak dimiliki penyalin: SALIN APA ADANYA
 
-`playlist_items` hanya menyimpan `lessonId`. Status `locked` **dihitung ulang tiap baca, per
+`playlist_items` hanya menyimpan `audioId` + `lessonId`. Status `locked` **dihitung ulang tiap baca, per
 member**. Baris yang sama: terkunci hari ini → terbuka setelah berlangganan → terkunci lagi saat
 langganan habis. Nol migrasi, nol job, nol state basi.
 
@@ -407,7 +453,7 @@ Aturan turunan:
 
 1. **Dari player / halaman lesson** — "Tambah ke playlist" → bottom sheet daftar playlist member +
    "Buat playlist baru" → nama → audio yang sedang diputar jadi item pertama. **Ini alasan
-   `POST /playlist` menerima `lessonIds` sekaligus:** kalau create dan add-item dipisah paksa,
+   `POST /playlist` menerima `audioIds` sekaligus:** kalau create dan add-item dipisah paksa,
    tiap alur ini jadi dua panggilan, dan gagal di panggilan kedua meninggalkan playlist kosong
    nyangkut.
 2. **Dari tab Playlist** — tombol "+", playlist kosong, isi belakangan.
@@ -416,12 +462,12 @@ Aturan turunan:
 ### Endpoint
 
 ```
-POST   /playlist                 { name, description?, coverUrl?, lessonIds?[] } → 201
+POST   /playlist                 { name, description?, coverUrl?, audioIds?[] } → 201
 PATCH  /playlist/:id             { name?, description?, coverUrl? }
 DELETE /playlist/:id
-POST   /playlist/:id/items       { lessonIds: [...] }   append di akhir
-DELETE /playlist/:id/items       { lessonIds: [...] }
-PUT    /playlist/:id/items/order { lessonIds: [...] }   urutan final, tulis ulang dalam satu tx
+POST   /playlist/:id/items       { audioIds: [...] }   append di akhir
+DELETE /playlist/:id/items       { audioIds: [...] }
+PUT    /playlist/:id/items/order { audioIds: [...] }   urutan final, tulis ulang dalam satu tx
 ```
 
 Semua `authGuard` + `assertPlaylistAccess` (§2b) + cek `ownerId === req.user.id` — pemilik saja,
@@ -439,7 +485,7 @@ memperbaikinya.
 - **Kuota** dicek **hanya** saat create (termasuk copy) — §4.
 - **Batas item per playlist**: setting `playlist.maxItems`, fallback 200. Kuota playlist saja tidak
   menutup satu playlist berisi puluhan ribu baris.
-- **Item duplikat bukan error.** `@@unique([playlistId, lessonId])` → balas 200 dengan
+- **Item duplikat bukan error.** `@@unique([playlistId, audioId])` → balas 200 dengan
   `{ added, alreadyPresent }`. Alur bottom-sheet sering mengenainya; 409 di situ terasa bug.
 - **Validasi lesson**: harus ada dan `lessonStatus = ACTIVE`. Yang tidak lolos dibuang dan
   dilaporkan (`skipped: [...]`), jangan gagalkan seluruh request karena satu id basi dari cache
@@ -535,9 +581,9 @@ keputusan privasi + bahan moderasi. Tiket sendiri.
   "totalItems": 8, "lockedItems": 0,
   "isOwner": false, "isSaved": false,
   "items": [
-    { "lessonId": "...", "courseId": "...", "name": "...", "durationSec": 612,
+    { "audioId": "M2WYRVCUV6JB5", "lessonId": "...", "courseId": "...", "name": "...", "durationSec": 612,
       "order": 1, "locked": false, "streamUrl": "https://.../media/stream?token=..." },
-    { "lessonId": "...", "courseId": "...", "name": "...", "durationSec": 480,
+    { "audioId": "M49ZYH47XRRU3", "lessonId": "...", "courseId": "...", "name": "...", "durationSec": 480,
       "order": 2, "locked": true,  "streamUrl": null }
   ]
 }
@@ -601,7 +647,7 @@ kurasi — termasuk UI/pengisian konten yang belum punya rumah sama sekali. Tota
 2. Nama pembuat di layar share: sensor (`Warda J.`), penuh, atau opt-in? Preseden repo (leaderboard
    affiliate) menyensor nama orang lain.
 3. Deferred deep link — token bertahan melewati install?
-4. Item duplikat dalam satu playlist boleh? (sekarang dilarang unique `[playlistId, lessonId]`)
+4. Item duplikat dalam satu playlist boleh? (sekarang dilarang unique `[playlistId, audioId]`)
 5. **Empty state**: tab Playlist kosong untuk semua member baru karena tidak ada konten bawaan.
    Cukup diselesaikan dengan copywriting + tombol "buat dari audio terakhir", atau produk mau
    beberapa playlist resmi sebagai contoh? (kalau ya, `ownerId` perlu dibuat nullable — migrasi
@@ -617,6 +663,7 @@ kurasi — termasuk UI/pengisian konten yang belum punya rumah sama sekali. Tota
 | Penyisip disimpan sebagai apa | Bunny `guid` di `app_settings`, bukan URL | 2026-08-21 |
 | Penyisip masuk `ListeningSession`? | Tidak — guard di sisi server, bukan disiplin client | 2026-08-21 |
 | Bagaimana guard penyisip mengenali sesinya | Sentinel `__interlude__` yang diumumkan ke client, guid sebagai pintu kedua | 2026-08-25 |
+| Item playlist menunjuk apa | `audioId` (id slide, sama dengan tracker) + `lessonId` didenormalisasi untuk FK | 2026-08-25 |
 | Kuota playlist | Dua lapis: `app_settings` + `members.playlist_quota` (NULL = ikut global) | 2026-08-21 |
 | Copy playlist berisi item terkunci | Salin apa adanya; `locked` dihitung saat baca | 2026-08-21 |
 | Riwayat playlist | Diturunkan dari `listening_session` + kolom `playlist_id` | 2026-08-21 |

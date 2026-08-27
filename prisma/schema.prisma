@@ -560,7 +560,13 @@ model ListeningSession {
   id              String   @id @default(uuid(7)) @db.Uuid
   clientSessionId String   @map("client_session_id") @db.Uuid // generated on device at play-start → idempotency key
   memberId        String   @map("member_id") @db.Uuid
-  audioId         String   @map("audio_id") // Lesson.id, opaque string (no FK — log table)
+  // The `id` of the slide inside `course_lessons.slides_data` that was played —
+  // NOT `Lesson.id`, despite what this comment claimed until 2026-08-25. Measured
+  // on 148,644 rows: 0 match a Lesson.id, 125 of 132 distinct values match a slide
+  // id (91% of sessions AudioTemplate, 9% VideoTemplate — an "audio" lesson is a
+  // video of a still image, so both are listened to). Opaque string, no FK: this
+  // is an ingest log and a write must never fail because a slide was edited away.
+  audioId         String   @map("audio_id")
   courseId        String?  @map("course_id") @db.Uuid
   startedAt       DateTime @map("started_at") // UTC
   listenedSec     Int      @map("listened_sec") // seconds actually heard (not audio duration)
@@ -629,14 +635,25 @@ model Playlist {
 model PlaylistItem {
   id         String @id @default(uuid(7)) @db.Uuid
   playlistId String @map("playlist_id") @db.Uuid
+  /// The slide inside `lesson.slides_data` that this item plays. Deliberately the
+  /// SAME name and id space as `listening_session.audio_id`, so an item and the
+  /// sessions it produced join on equal terms — one name for one id, even though
+  /// "audio" is not strictly accurate (9% of tracked slides are VideoTemplate: a
+  /// Bunny "audio" is a video of a still image). A second name for the same value
+  /// would be worse than an imprecise shared one.
+  audioId    String @map("audio_id")
+  /// Denormalised owner of that slide. Carries the FK — a slide id lives inside JSON
+  /// and cannot have one — which is what gives ON DELETE CASCADE, and what makes the
+  /// section → course join (entitlement, name, duration) a join instead of a scan.
   lessonId   String @map("lesson_id") @db.Uuid
   order      Int    @default(0)
 
   playlist Playlist @relation(fields: [playlistId], references: [id], onDelete: Cascade)
   lesson   Lesson   @relation(fields: [lessonId], references: [id], onDelete: Cascade)
 
-  @@unique([playlistId, lessonId])
+  @@unique([playlistId, audioId])
   @@index([playlistId, order])
+  @@index([lessonId])
   @@map("playlist_items")
 }
 

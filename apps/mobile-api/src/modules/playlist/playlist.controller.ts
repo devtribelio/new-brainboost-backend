@@ -131,7 +131,7 @@ export class PlaylistController {
   @ApiResponse({ status: 200 })
   addItems = async (req: AuthenticatedRequest, res: Response) => {
     const body = req.body as PlaylistItemsDto;
-    const result = await this.playlistService.addItems(req.user!.id, this.id(req), body.lessonIds);
+    const result = await this.playlistService.addItems(req.user!.id, this.id(req), body.audioIds);
     return ok(res, result);
   };
 
@@ -143,7 +143,7 @@ export class PlaylistController {
     const result = await this.playlistService.removeItems(
       req.user!.id,
       this.id(req),
-      body.lessonIds,
+      body.audioIds,
     );
     return ok(res, result);
   };
@@ -153,7 +153,7 @@ export class PlaylistController {
   @ApiResponse({ status: 200 })
   reorder = async (req: AuthenticatedRequest, res: Response) => {
     const body = req.body as PlaylistItemsDto;
-    const result = await this.playlistService.reorder(req.user!.id, this.id(req), body.lessonIds);
+    const result = await this.playlistService.reorder(req.user!.id, this.id(req), body.audioIds);
     return ok(res, result);
   };
 

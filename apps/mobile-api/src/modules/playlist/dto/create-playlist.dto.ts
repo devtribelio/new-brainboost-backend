@@ -1,4 +1,4 @@
-import { ArrayMaxSize, IsArray, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsOptional, IsString, MaxLength } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@bb/common/openapi/decorators';
 import { PLAYLIST_NAME_MAX_CHARS } from '../playlist.constants';
 
@@ -24,13 +24,13 @@ export class CreatePlaylistDto {
     type: 'array',
     itemType: 'string',
     description:
-      'Optional first items (lesson uuids). Sent together with the name so the "add to a new playlist" sheet is one call, not two.',
+      'Optional first items, as slide ids from course detail (`slides[].id`). Sent together with the name so the "add to a new playlist" sheet is one call, not two.',
   })
   @IsOptional()
   @IsArray()
   @ArrayMaxSize(100)
-  @IsUUID('all', { each: true })
-  lessonIds?: string[];
+  @IsString({ each: true })
+  audioIds?: string[];
 }
 
 /** Body of `PATCH /api/member/playlist/:id`. */
@@ -55,9 +55,13 @@ export class UpdatePlaylistDto {
 
 /** Body of the item add/remove/reorder routes. */
 export class PlaylistItemsDto {
-  @ApiProperty({ type: 'array', itemType: 'string', description: 'Lesson uuids' })
+  @ApiProperty({
+    type: 'array',
+    itemType: 'string',
+    description: 'Slide ids from course detail (`slides[].id`) — NOT lesson ids',
+  })
   @IsArray()
   @ArrayMaxSize(500)
-  @IsUUID('all', { each: true })
-  lessonIds!: string[];
+  @IsString({ each: true })
+  audioIds!: string[];
 }

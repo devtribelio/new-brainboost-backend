@@ -6,7 +6,11 @@ import { settingsService, SETTING_KEYS } from '@bb/common/services/settings.serv
 import { toPlainText } from '@bb/common/utils/plain-text.util';
 import { EntitlementService } from '@bb/domain/subscription/entitlement.service';
 import { activeEnrollment } from '@bb/domain/commerce/enrollment';
-import { buildStreamUrl, findLessonAudio } from '@/modules/media/media-asset.util';
+import {
+  PLAYABLE_SLIDE_TYPES,
+  buildStreamUrl,
+  findPlayableAudio,
+} from '@/modules/media/media-asset.util';
 import {
   PLAYLIST_MAX_ITEMS_DEFAULT,
   PLAYLIST_MAX_PER_MEMBER_DEFAULT,
@@ -22,6 +26,8 @@ import {
 
 /** One playable row of a playlist, already resolved against the viewer's access. */
 export interface PlaylistItemView {
+  /** The slide actually played — same id space as `listening_session.audioId`. */
+  audioId: string;
   lessonId: string;
   courseId: string;
   name: string;
@@ -228,13 +234,14 @@ export class PlaylistService {
 
     const items: PlaylistItemView[] = [];
     for (const row of rows) {
-      const audio = findLessonAudio(row.lesson.slidesData);
-      // A lesson with no audio slide is not playable from a playlist. Dropping it
-      // beats rendering a dead row the player would choke on.
+      const audio = findPlayableAudio(row.lesson.slidesData, row.audioId);
+      // The slide is gone — the lesson was re-saved without it, or its id changed.
+      // Dropping the row beats rendering an entry the player would choke on.
       if (!audio) continue;
       const courseId = row.lesson.section.courseId;
       const locked = !(unlocked.has(courseId) || row.lesson.isPreview);
       items.push({
+        audioId: row.audioId,
         lessonId: row.lessonId,
         courseId,
         name: row.lesson.name,
@@ -307,7 +314,7 @@ export class PlaylistService {
 
   async create(
     memberId: string,
-    dto: { name: string; description?: string; coverUrl?: string; lessonIds?: string[] },
+    dto: { name: string; description?: string; coverUrl?: string; audioIds?: string[] },
   ) {
     await this.assertAccess(memberId);
     await this.assertQuota(memberId);
@@ -326,8 +333,8 @@ export class PlaylistService {
     // Items in the same call on purpose: the "add to playlist → new playlist"
     // sheet is the main entry point, and splitting it in two leaves an empty
     // playlist stranded whenever the second call fails.
-    const added = dto.lessonIds?.length
-      ? await this.addItems(memberId, playlist.id, dto.lessonIds)
+    const added = dto.audioIds?.length
+      ? await this.addItems(memberId, playlist.id, dto.audioIds)
       : { added: 0, alreadyPresent: 0, skipped: [] as string[] };
 
     return { playlist, ...added };
@@ -357,32 +364,32 @@ export class PlaylistService {
   }
 
   /**
-   * Append lessons at the end, in the order given.
+   * Append slides at the end, in the order given.
    *
-   * A lesson already in the playlist is NOT an error: the bottom sheet hits that
-   * case constantly (the member forgot), and a 409 there reads as a bug. Unknown
-   * or inactive ids are dropped and reported rather than failing the whole call —
-   * one stale id from a client cache must not sink the request.
+   * Keyed on the SLIDE, not the lesson: that is the id the client already holds
+   * (course detail emits it on every slide) and the id the listening log speaks,
+   * so an item and the sessions it produced line up.
+   *
+   * A slide already in the playlist is NOT an error: the bottom sheet hits that
+   * case constantly (the member forgot), and a 409 there reads as a bug. Unknown,
+   * unplayable, or archived slides are dropped and reported rather than failing
+   * the whole call — one stale id from a client cache must not sink the request.
    */
-  async addItems(memberId: string, playlistId: string, lessonIds: string[]) {
+  async addItems(memberId: string, playlistId: string, audioIds: string[]) {
     await this.assertAccess(memberId);
     await this.ownedOrThrow(memberId, playlistId);
-    const requested = [...new Set(lessonIds)];
+    const requested = [...new Set(audioIds)];
     if (requested.length === 0) throw badRequest(ERROR_CODES.PLAYLIST_ITEMS_REQUIRED);
 
-    const lessons = await prisma.lesson.findMany({
-      where: { id: { in: requested }, lessonStatus: 'ACTIVE' },
-      select: { id: true },
-    });
-    const valid = new Set(lessons.map((l) => l.id));
-    const skipped = requested.filter((id) => !valid.has(id));
+    const resolved = await this.resolveAudioSlides(requested);
+    const skipped = requested.filter((id) => !resolved.has(id));
 
     const existing = await prisma.playlistItem.findMany({
       where: { playlistId },
-      select: { lessonId: true, order: true },
+      select: { audioId: true, order: true },
     });
-    const present = new Set(existing.map((e) => e.lessonId));
-    const toAdd = requested.filter((id) => valid.has(id) && !present.has(id));
+    const present = new Set(existing.map((e) => e.audioId));
+    const toAdd = requested.filter((id) => resolved.has(id) && !present.has(id));
 
     const limit = await this.maxItems();
     if (existing.length + toAdd.length > limit) {
@@ -395,7 +402,12 @@ export class PlaylistService {
     let nextOrder = existing.reduce((max, e) => Math.max(max, e.order), 0) + 1;
     if (toAdd.length > 0) {
       await prisma.playlistItem.createMany({
-        data: toAdd.map((lessonId) => ({ playlistId, lessonId, order: nextOrder++ })),
+        data: toAdd.map((audioId) => ({
+          playlistId,
+          audioId,
+          lessonId: resolved.get(audioId)!,
+          order: nextOrder++,
+        })),
         skipDuplicates: true,
       });
       await prisma.playlist.update({ where: { id: playlistId }, data: { updatedAt: new Date() } });
@@ -408,12 +420,33 @@ export class PlaylistService {
     };
   }
 
-  async removeItems(memberId: string, playlistId: string, lessonIds: string[]) {
+  /**
+   * slide id → owning lesson id, for the slides that exist and are playable.
+   *
+   * A slide id lives inside a JSON column, so there is no table to join and no
+   * index to use: this unnests `slides_data` and matches. Raw SQL because Prisma
+   * cannot express `jsonb_array_elements`. The catalogue is in the hundreds of
+   * lessons, and this runs only on writes — if it ever shows up in a profile, the
+   * fix is a generated column or a slide index table, not a cache.
+   */
+  private async resolveAudioSlides(audioIds: string[]): Promise<Map<string, string>> {
+    if (audioIds.length === 0) return new Map();
+    const rows = await prisma.$queryRaw<Array<{ lesson_id: string; audio_id: string }>>`
+      SELECT l.id AS lesson_id, s->>'id' AS audio_id
+      FROM course_lessons l, jsonb_array_elements(l.slides_data) s
+      WHERE l.lesson_status = 'ACTIVE'
+        AND s->>'type' = ANY (${PLAYABLE_SLIDE_TYPES as unknown as string[]})
+        AND s->>'id' = ANY (${audioIds})
+    `;
+    return new Map(rows.map((r) => [r.audio_id, r.lesson_id]));
+  }
+
+  async removeItems(memberId: string, playlistId: string, audioIds: string[]) {
     await this.assertAccess(memberId);
     await this.ownedOrThrow(memberId, playlistId);
-    if (lessonIds.length === 0) throw badRequest(ERROR_CODES.PLAYLIST_ITEMS_REQUIRED);
+    if (audioIds.length === 0) throw badRequest(ERROR_CODES.PLAYLIST_ITEMS_REQUIRED);
     const { count } = await prisma.playlistItem.deleteMany({
-      where: { playlistId, lessonId: { in: lessonIds } },
+      where: { playlistId, audioId: { in: audioIds } },
     });
     return { removed: count };
   }
@@ -425,25 +458,25 @@ export class PlaylistService {
    * cannot repair. Ids absent from the array keep their relative order at the
    * end, so a stale client can only misplace what it knew about.
    */
-  async reorder(memberId: string, playlistId: string, lessonIds: string[]) {
+  async reorder(memberId: string, playlistId: string, audioIds: string[]) {
     await this.assertAccess(memberId);
     await this.ownedOrThrow(memberId, playlistId);
 
     const rows = await prisma.playlistItem.findMany({
       where: { playlistId },
       orderBy: { order: 'asc' },
-      select: { id: true, lessonId: true },
+      select: { id: true, audioId: true },
     });
-    const byLesson = new Map(rows.map((r) => [r.lessonId, r.id]));
+    const byAudio = new Map(rows.map((r) => [r.audioId, r.id]));
     const ordered = [
-      ...lessonIds.filter((id) => byLesson.has(id)),
-      ...rows.map((r) => r.lessonId).filter((id) => !lessonIds.includes(id)),
+      ...audioIds.filter((id) => byAudio.has(id)),
+      ...rows.map((r) => r.audioId).filter((id) => !audioIds.includes(id)),
     ];
 
     await prisma.$transaction(
-      ordered.map((lessonId, index) =>
+      ordered.map((audioId, index) =>
         prisma.playlistItem.update({
-          where: { id: byLesson.get(lessonId)! },
+          where: { id: byAudio.get(audioId)! },
           data: { order: index + 1 },
         }),
       ),
@@ -526,7 +559,7 @@ export class PlaylistService {
     const items = await prisma.playlistItem.findMany({
       where: { playlistId: source.id },
       orderBy: { order: 'asc' },
-      select: { lessonId: true },
+      select: { audioId: true, lessonId: true },
     });
 
     const copy = await prisma.playlist.create({
@@ -540,7 +573,11 @@ export class PlaylistService {
         // this copy must not care.
         copiedFromToken: token,
         items: {
-          create: items.map((it, index) => ({ lessonId: it.lessonId, order: index + 1 })),
+          create: items.map((it, index) => ({
+            audioId: it.audioId,
+            lessonId: it.lessonId,
+            order: index + 1,
+          })),
         },
       },
     });

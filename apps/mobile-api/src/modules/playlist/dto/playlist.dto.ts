@@ -1,6 +1,12 @@
 import { ApiProperty, ApiPropertyOptional } from '@bb/common/openapi/decorators';
 
 export class PlaylistItemDto {
+  @ApiProperty({
+    example: 'M2WYRVCUV6JB5',
+    description: 'The slide that plays — same id space as tracking `audioId`',
+  })
+  audioId!: string;
+
   @ApiProperty({ format: 'uuid', example: 'lesson-uuid-1' })
   lessonId!: string;
 
