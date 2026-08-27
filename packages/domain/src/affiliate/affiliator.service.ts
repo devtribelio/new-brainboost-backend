@@ -4,15 +4,18 @@ import { badRequest, notFound, ERROR_CODES } from '@bb/common/exceptions';
 import { assignMemberAffiliateCode } from './utils/code-generator';
 import {
   AFFILIATE_BASED,
+  AFFILIATE_IAP_HOLD_DAYS,
   COMMISSION_STATUS,
   GROWTH_LEVEL_RATES,
   GROWTH_MAX_DEPTH,
   INACTIVE_RATE,
+  PENDING_TO_BALANCE_DAYS,
   type AffiliateBased,
 } from './constants';
 import { computeAmount, getPerformanceTier } from './utils/compute-amount';
 import { walkInviterChain } from './utils/walk-inviter-chain';
 import { affiliateEvents } from '@bb/common/events/affiliate-events';
+import { settingsService, SETTING_KEYS } from '@bb/common/services/settings.service';
 import { DisbursementService } from './disbursement.service';
 
 export class AffiliatorService {
@@ -67,7 +70,16 @@ export class AffiliatorService {
    * `getPerformanceSchemaPercent` query semantics).
    */
   async getSummary(memberId: string) {
-    const [agg, withdrawable, pendingAgg, voidedAgg, commisionAgg, recent] = await Promise.all([
+    const [
+      agg,
+      withdrawable,
+      pendingAgg,
+      voidedAgg,
+      commisionAgg,
+      recent,
+      androidHoldDays,
+      iosHoldDays,
+    ] = await Promise.all([
       prisma.affiliateCommission.aggregate({
         where: {
           recipientId: memberId,
@@ -101,6 +113,11 @@ export class AffiliatorService {
         orderBy: { createdAt: 'desc' },
         take: 10,
       }),
+      // Hold window (PENDING -> BALANCE) surfaced so the app can render the copy
+      // without hardcoding the number. Android reads the default window, iOS the
+      // longer IAP one (Apple settles monthly).
+      settingsService.getNumber(SETTING_KEYS.affiliateHoldDays, PENDING_TO_BALANCE_DAYS),
+      settingsService.getNumber(SETTING_KEYS.affiliateIapHoldDays, AFFILIATE_IAP_HOLD_DAYS),
     ]);
 
     const lifetimeAmount = agg._sum.amount ?? 0;
@@ -122,6 +139,7 @@ export class AffiliatorService {
       totalTransactionSales,
       total: totalCommision,
       count: commisionAgg._count,
+      holdDays: { android: androidHoldDays, ios: iosHoldDays },
       recent: recent.map((e) => ({
         id: e.id,
         amount: e.amount,

@@ -57,6 +57,23 @@ export class AffiliatorSummaryRecentEntryDto {
 }
 
 /** `GET /affiliate/me/summary` — affiliator dashboard aggregate. */
+/** Hold window (PENDING -> BALANCE) in days, per platform. */
+export class AffiliatorSummaryHoldDaysDto {
+  @ApiProperty({
+    type: 'integer',
+    example: 7,
+    description: 'Hold window for Android (app_settings `affiliate.holdDays`).',
+  })
+  android!: number;
+
+  @ApiProperty({
+    type: 'integer',
+    example: 35,
+    description: 'Hold window for iOS (app_settings `affiliate.iapHoldDays`).',
+  })
+  ios!: number;
+}
+
 export class AffiliatorSummaryDto {
   @ApiProperty({
     type: 'integer',
@@ -131,6 +148,12 @@ export class AffiliatorSummaryDto {
     description: 'Up to 10 most recent commission entries (all statuses).',
   })
   recent!: AffiliatorSummaryRecentEntryDto[];
+
+  @ApiProperty({
+    type: () => AffiliatorSummaryHoldDaysDto,
+    description: 'Days a commission stays PENDING before becoming withdrawable, per platform.',
+  })
+  holdDays!: AffiliatorSummaryHoldDaysDto;
 }
 
 /** Program summary embedded in a commission row. */

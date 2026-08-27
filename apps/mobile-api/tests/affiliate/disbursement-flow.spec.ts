@@ -312,6 +312,26 @@ describe('DisbursementService — payout flow', () => {
     }
   });
 
+  it('affiliator summary exposes holdDays per platform from app_settings', async () => {
+    const id = await member({ balance: 10_000 });
+    // no rows → fallback constants
+    let summary = await new AffiliatorService().getSummary(id);
+    expect(summary.holdDays).toEqual({ android: 7, ios: 35 });
+
+    try {
+      await settingsService.set(SETTING_KEYS.affiliateHoldDays, '5');
+      await settingsService.set(SETTING_KEYS.affiliateIapHoldDays, '40');
+      SettingsService.clearCache();
+      summary = await new AffiliatorService().getSummary(id);
+      expect(summary.holdDays).toEqual({ android: 5, ios: 40 });
+    } finally {
+      await prisma.appSetting.deleteMany({
+        where: { key: { in: [SETTING_KEYS.affiliateHoldDays, SETTING_KEYS.affiliateIapHoldDays] } },
+      });
+      SettingsService.clearCache();
+    }
+  });
+
   it('affiliator summary.balance == withdrawableBalance after a held payout (single source)', async () => {
     const id = await member({ balance: 100_000, priorPaid: true });
     await svc.requestDisbursement(id, 30_000); // AUTO → PROCESSING, holds 30k gross
