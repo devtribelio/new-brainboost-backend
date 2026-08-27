@@ -283,6 +283,13 @@ describe('PlaylistService (real Postgres)', () => {
   });
 
   describe('detail', () => {
+    it('names each item after the product, not the lesson', async () => {
+      // Product decision 2026-08-25: items of the same course therefore read alike.
+      const { playlist } = await service.create(subscriber, { name: 'Naming', audioIds: [slides[0], slides[1]] });
+      const detail = await service.detail(playlist.id, subscriber);
+      expect(detail.items.map((i) => i.name)).toEqual(['Playlist Course', 'Playlist Course']);
+    });
+
     it('unlocks every item for a subscriber and mints a stream url', async () => {
       const { playlist } = await service.create(subscriber, { name: 'Play', audioIds: slides });
       const detail = await service.detail(playlist.id, subscriber);

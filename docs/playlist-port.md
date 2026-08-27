@@ -581,9 +581,11 @@ keputusan privasi + bahan moderasi. Tiket sendiri.
   "totalItems": 8, "lockedItems": 0,
   "isOwner": false, "isSaved": false,
   "items": [
-    { "audioId": "M2WYRVCUV6JB5", "lessonId": "...", "courseId": "...", "name": "...", "durationSec": 612,
+    { "audioId": "M2WYRVCUV6JB5", "lessonId": "...", "courseId": "...",
+      "name": "BrainBoost Money Magnet", "durationSec": 612,
       "order": 1, "locked": false, "streamUrl": "https://.../media/stream?token=..." },
-    { "audioId": "M49ZYH47XRRU3", "lessonId": "...", "courseId": "...", "name": "...", "durationSec": 480,
+    { "audioId": "M49ZYH47XRRU3", "lessonId": "...", "courseId": "...",
+      "name": "BrainBoost Money Magnet", "durationSec": 480,
       "order": 2, "locked": true,  "streamUrl": null }
   ]
 }
@@ -592,6 +594,12 @@ keputusan privasi + bahan moderasi. Tiket sendiri.
 Item terkunci dikirim, tidak disembunyikan: menyembunyikan bikin jumlah item beda-beda per member,
 share link jadi tidak konsisten, dan playlist bisa menyusut jadi 1 audio. `locked` cuma petunjuk
 UI — penjagaan tetap di `/media/stream`.
+
+**`name` item = `product.title`**, bukan judul lesson maupun judul slide (keputusan produk
+2026-08-25). Konsekuensi yang sudah diketahui: beberapa item dari course yang sama tampil
+dengan nama identik — diukur, 60 dari 60 produk punya lebih dari satu lesson, dan satu produk
+punya 27. Judul yang membedakan ada di `slide.data.title` (196 dari 197 slide punya, 128 di
+antaranya berbeda dari nama lesson) kalau kelak dibutuhkan.
 
 **Token stream TTL 2 jam** (`MEDIA_SIGNED_URL_TTL_SECONDS`) → response detail tidak boleh di-cache
 FE lebih lama dari itu.
@@ -664,6 +672,7 @@ kurasi — termasuk UI/pengisian konten yang belum punya rumah sama sekali. Tota
 | Penyisip masuk `ListeningSession`? | Tidak — guard di sisi server, bukan disiplin client | 2026-08-21 |
 | Bagaimana guard penyisip mengenali sesinya | Sentinel `__interlude__` yang diumumkan ke client, guid sebagai pintu kedua | 2026-08-25 |
 | Item playlist menunjuk apa | `audioId` (id slide, sama dengan tracker) + `lessonId` didenormalisasi untuk FK | 2026-08-25 |
+| Nama item di response | `product.title` — bukan lesson/slide title; item se-course tampil kembar | 2026-08-25 |
 | Kuota playlist | Dua lapis: `app_settings` + `members.playlist_quota` (NULL = ikut global) | 2026-08-21 |
 | Copy playlist berisi item terkunci | Salin apa adanya; `locked` dihitung saat baca | 2026-08-21 |
 | Riwayat playlist | Diturunkan dari `listening_session` + kolom `playlist_id` | 2026-08-21 |

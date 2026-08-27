@@ -13,7 +13,11 @@ export class PlaylistItemDto {
   @ApiProperty({ format: 'uuid', example: 'course-uuid-1' })
   courseId!: string;
 
-  @ApiProperty({ example: 'Fokus Pagi — Sesi 1' })
+  @ApiProperty({
+    example: 'BrainBoost Money Magnet',
+    description:
+      'Product title of the course this audio belongs to — not the lesson or slide title, so items from one course read alike.',
+  })
   name!: string;
 
   @ApiProperty({ type: 'integer', example: 612 })

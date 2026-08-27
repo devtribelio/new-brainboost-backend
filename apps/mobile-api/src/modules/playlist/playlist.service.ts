@@ -71,7 +71,17 @@ export interface QuotaView {
 
 const itemInclude = {
   lesson: {
-    include: { section: { select: { courseId: true } } },
+    include: {
+      section: {
+        select: {
+          courseId: true,
+          // The item's display name is the PRODUCT title, not the lesson or slide
+          // title (product decision, 2026-08-25). Reached through the join that
+          // already runs for entitlement, so it costs no extra query.
+          course: { select: { product: { select: { title: true } } } },
+        },
+      },
+    },
   },
 } as const;
 
@@ -244,7 +254,9 @@ export class PlaylistService {
         audioId: row.audioId,
         lessonId: row.lessonId,
         courseId,
-        name: row.lesson.name,
+        // Product title. Several items of the same course therefore read alike —
+        // accepted trade-off, the lesson/slide titles are the distinguishing ones.
+        name: row.lesson.section.course?.product?.title ?? row.lesson.name,
         durationSec: audio.durationSec || row.lesson.duration,
         order: row.order,
         locked,
