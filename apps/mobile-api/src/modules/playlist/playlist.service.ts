@@ -35,10 +35,16 @@ export interface PlaylistItemView {
   order: number;
   locked: boolean;
   streamUrl: string | null;
+  /** Course artwork. Absolute URL; repeats across items of one course, by design. */
+  coverUrl: string | null;
+  /** `products.code` — what the app's course route takes. */
+  courseCode: string | null;
 }
 
 export interface PlaylistDetailView {
   playlist: Playlist;
+  /** Playlist artwork: its own, else the first item's course cover. */
+  coverUrl: string | null;
   items: PlaylistItemView[];
   totalItems: number;
   lockedItems: number;
@@ -76,9 +82,13 @@ const itemInclude = {
         select: {
           courseId: true,
           // The item's display name is the PRODUCT title, not the lesson or slide
-          // title (product decision, 2026-08-25). Reached through the join that
-          // already runs for entitlement, so it costs no extra query.
-          course: { select: { product: { select: { title: true } } } },
+          // title (product decision, 2026-08-25). `thumbnail` and `code` ride the
+          // same join: artwork cannot be resolved app-side (a locked item comes
+          // from a course the member has never listed, so it is not in their local
+          // cache), and `code` is what the course route takes.
+          course: {
+            select: { product: { select: { title: true, thumbnail: true, code: true } } },
+          },
         },
       },
     },
@@ -166,7 +176,33 @@ export class PlaylistService {
       orderBy: [{ sortOrder: 'asc' }, { createdAt: 'desc' }],
       include: { _count: { select: { items: true } } },
     });
-    return rows;
+    const covers = await this.firstItemCovers(rows.map((r) => r.id));
+    return rows.map((r) => ({ ...r, coverUrl: r.coverUrl ?? covers.get(r.id) ?? null }));
+  }
+
+  /**
+   * First item's course artwork, one row per playlist, in ONE query.
+   *
+   * `DISTINCT ON` rather than loading every item and picking the head: a playlist
+   * holds up to 200 items and the list shows twenty playlists, so the naive
+   * version reads thousands of rows to use twenty of them. Raw SQL because Prisma
+   * has no DISTINCT ON.
+   */
+  private async firstItemCovers(playlistIds: string[]): Promise<Map<string, string>> {
+    if (playlistIds.length === 0) return new Map();
+    const rows = await prisma.$queryRaw<Array<{ playlist_id: string; thumbnail: string | null }>>`
+      SELECT DISTINCT ON (pi.playlist_id) pi.playlist_id, p.thumbnail
+      FROM playlist_items pi
+      JOIN course_lessons l ON l.id = pi.lesson_id
+      JOIN course_sections s ON s.id = l.section_id
+      JOIN courses c ON c.id = s.course_id
+      JOIN products p ON p.id = c.product_id
+      WHERE pi.playlist_id = ANY (${playlistIds}::uuid[])
+      ORDER BY pi.playlist_id, pi."order" ASC
+    `;
+    return new Map(
+      rows.filter((r) => r.thumbnail).map((r) => [r.playlist_id, r.thumbnail as string]),
+    );
   }
 
   private async ownedOrThrow(memberId: string, playlistId: string): Promise<Playlist> {
@@ -257,6 +293,8 @@ export class PlaylistService {
         // Product title. Several items of the same course therefore read alike —
         // accepted trade-off, the lesson/slide titles are the distinguishing ones.
         name: row.lesson.section.course?.product?.title ?? row.lesson.name,
+        coverUrl: row.lesson.section.course?.product?.thumbnail ?? null,
+        courseCode: row.lesson.section.course?.product?.code ?? null,
         durationSec: audio.durationSec || row.lesson.duration,
         order: row.order,
         locked,
@@ -268,6 +306,11 @@ export class PlaylistService {
 
     return {
       playlist,
+      // A member never sets a cover — there is no UI for it — so an unset one falls
+      // back to the first item's course artwork instead of a grey placeholder. Kept
+      // derived, never stored: storing it goes stale the moment the first item
+      // changes (docs/playlist-port.md §6b).
+      coverUrl: playlist.coverUrl ?? items.find((i) => i.coverUrl)?.coverUrl ?? null,
       items,
       totalItems: items.length,
       lockedItems: items.filter((i) => i.locked).length,

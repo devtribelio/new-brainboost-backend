@@ -583,6 +583,7 @@ keputusan privasi + bahan moderasi. Tiket sendiri.
   "items": [
     { "audioId": "M2WYRVCUV6JB5", "lessonId": "...", "courseId": "...",
       "name": "BrainBoost Money Magnet", "durationSec": 612,
+      "coverUrl": "https://…/course-thumb.jpg", "courseCode": "zb22segg",
       "order": 1, "locked": false, "streamUrl": "https://.../media/stream?token=..." },
     { "audioId": "M49ZYH47XRRU3", "lessonId": "...", "courseId": "...",
       "name": "BrainBoost Money Magnet", "durationSec": 480,
@@ -594,6 +595,21 @@ keputusan privasi + bahan moderasi. Tiket sendiri.
 Item terkunci dikirim, tidak disembunyikan: menyembunyikan bikin jumlah item beda-beda per member,
 share link jadi tidak konsisten, dan playlist bisa menyusut jadi 1 audio. `locked` cuma petunjuk
 UI — penjagaan tetap di `/media/stream`.
+
+**`coverUrl` + `courseCode` per item** (permintaan mobile, 2026-08-25). Keduanya ikut di join
+yang sudah jalan untuk `title`, jadi nol query tambahan. Alasannya tidak bisa diselesaikan di
+app: item `locked` datang dari course yang tidak pernah masuk daftar member, jadi cache lokal
+mereka kosong untuk itu; sampul yang muncul-kadang-tidak lebih buruk daripada satu field.
+Dikirim juga untuk item terkunci dan ke penonton anonim di halaman share — sampul katalog
+memang publik, dan itu yang membuat halaman share menjual. `courseCode` = `products.code`
+(`zb22segg`); kalau route app ternyata memakai bentuk terbaca (`brainboost-bela-diri-1`) itu
+`products.slug`, kolom lain.
+
+**`playlist.coverUrl` diturunkan** dari cover course item pertama saat kosong — di detail DAN
+di list. Member tidak punya UI untuk mengisi cover, jadi tanpa ini seluruh tab Playlist abu-abu.
+Tetap tidak pernah disimpan (§6b): begitu item pertama berganti, nilai tersimpan jadi basi.
+Di list dipakai satu query `DISTINCT ON` — versi naifnya membaca ribuan baris item untuk
+memakai dua puluh.
 
 **`name` item = `product.title`**, bukan judul lesson maupun judul slide (keputusan produk
 2026-08-25). Konsekuensi yang sudah diketahui: beberapa item dari course yang sama tampil
@@ -673,6 +689,8 @@ kurasi — termasuk UI/pengisian konten yang belum punya rumah sama sekali. Tota
 | Bagaimana guard penyisip mengenali sesinya | Sentinel `__interlude__` yang diumumkan ke client, guid sebagai pintu kedua | 2026-08-25 |
 | Item playlist menunjuk apa | `audioId` (id slide, sama dengan tracker) + `lessonId` didenormalisasi untuk FK | 2026-08-25 |
 | Nama item di response | `product.title` — bukan lesson/slide title; item se-course tampil kembar | 2026-08-25 |
+| Sampul + kode course di item | `coverUrl` (`products.thumbnail`) + `courseCode` (`products.code`), nol query tambahan | 2026-08-25 |
+| Cover playlist kosong | Diturunkan dari item pertama saat baca, tidak pernah disimpan | 2026-08-25 |
 | Kuota playlist | Dua lapis: `app_settings` + `members.playlist_quota` (NULL = ikut global) | 2026-08-21 |
 | Copy playlist berisi item terkunci | Salin apa adanya; `locked` dihitung saat baca | 2026-08-21 |
 | Riwayat playlist | Diturunkan dari `listening_session` + kolom `playlist_id` | 2026-08-21 |

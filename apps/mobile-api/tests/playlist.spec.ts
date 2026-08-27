@@ -290,6 +290,43 @@ describe('PlaylistService (real Postgres)', () => {
       expect(detail.items.map((i) => i.name)).toEqual(['Playlist Course', 'Playlist Course']);
     });
 
+    it('carries the course artwork and code on every item, locked or not', async () => {
+      await prisma.product.update({
+        where: { id: productId },
+        data: { thumbnail: 'https://cdn.test/cover.jpg', code: 'plcode1' },
+      });
+      const { playlist } = await service.create(subscriber, { name: 'Art', audioIds: [slides[0]] });
+      const detail = await service.detail(playlist.id, subscriber);
+      expect(detail.items[0].coverUrl).toBe('https://cdn.test/cover.jpg');
+      expect(detail.items[0].courseCode).toBe('plcode1');
+    });
+
+    it("falls back to the first item's artwork when the playlist has no cover", async () => {
+      await prisma.product.update({
+        where: { id: productId },
+        data: { thumbnail: 'https://cdn.test/cover.jpg' },
+      });
+      const { playlist } = await service.create(subscriber, { name: 'No cover', audioIds: [slides[0]] });
+
+      // Detail: derived, and never written back to the row.
+      const detail = await service.detail(playlist.id, subscriber);
+      expect(detail.coverUrl).toBe('https://cdn.test/cover.jpg');
+      expect((await prisma.playlist.findUnique({ where: { id: playlist.id } }))?.coverUrl).toBeNull();
+
+      // List: same fallback, so no grey placeholder on the playlist tab either.
+      const listed = (await service.listMine(subscriber)).find((r) => r.id === playlist.id);
+      expect(listed?.coverUrl).toBe('https://cdn.test/cover.jpg');
+    });
+
+    it('keeps an explicit playlist cover over the derived one', async () => {
+      const { playlist } = await service.create(subscriber, {
+        name: 'Own cover',
+        coverUrl: 'https://cdn.test/mine.jpg',
+        audioIds: [slides[0]],
+      });
+      expect((await service.detail(playlist.id, subscriber)).coverUrl).toBe('https://cdn.test/mine.jpg');
+    });
+
     it('unlocks every item for a subscriber and mints a stream url', async () => {
       const { playlist } = await service.create(subscriber, { name: 'Play', audioIds: slides });
       const detail = await service.detail(playlist.id, subscriber);

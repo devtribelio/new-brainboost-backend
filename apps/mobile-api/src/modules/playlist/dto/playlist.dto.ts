@@ -39,6 +39,22 @@ export class PlaylistItemDto {
     description: 'null when locked. TTL 2h — do not cache the response longer than that.',
   })
   streamUrl?: string | null;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    example: 'https://cdn.brainboost.id/course-thumb.jpg',
+    description:
+      "Course artwork, absolute URL. Repeats across items of one course by design. Sent for locked items too — it is public catalogue art, and it is what makes a shared playlist sell.",
+  })
+  coverUrl?: string | null;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    example: 'zb22segg',
+    description:
+      "`products.code`. If the app's course route expects the human-readable form (`brainboost-bela-diri-1`) that is `products.slug`, a different column — say so and it is a one-line addition.",
+  })
+  courseCode?: string | null;
 }
 
 export class PlaylistDto {
@@ -51,7 +67,12 @@ export class PlaylistDto {
   @ApiPropertyOptional({ nullable: true, example: 'Rangkaian audio untuk memulai hari' })
   description?: string | null;
 
-  @ApiPropertyOptional({ nullable: true, example: 'https://cdn.brainboost.id/cover.webp' })
+  @ApiPropertyOptional({
+    nullable: true,
+    example: 'https://cdn.brainboost.id/cover.webp',
+    description:
+      "The playlist's own cover, or the first item's course artwork when unset — members have no UI to set one, so an unset cover would otherwise render grey everywhere.",
+  })
   coverUrl?: string | null;
 
   @ApiProperty({ example: 'PRIVATE', description: 'PRIVATE | UNLISTED' })

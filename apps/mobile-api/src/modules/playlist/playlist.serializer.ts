@@ -6,7 +6,7 @@ import type {
   SharedPlaylistView,
 } from './playlist.service';
 
-type PlaylistWithCount = Playlist & { _count?: { items: number } };
+type PlaylistWithCount = Playlist & { _count?: { items: number }; coverUrl: string | null };
 
 export function serializePlaylist(p: PlaylistWithCount, isOwner = true): Record<string, unknown> {
   return {
@@ -35,12 +35,16 @@ function serializeItem(i: PlaylistItemView): Record<string, unknown> {
     order: i.order,
     locked: i.locked,
     streamUrl: i.streamUrl,
+    coverUrl: i.coverUrl,
+    courseCode: i.courseCode,
   };
 }
 
 export function serializePlaylistDetail(v: PlaylistDetailView): Record<string, unknown> {
   return {
     ...serializePlaylist(v.playlist, v.isOwner),
+    // Derived: the playlist's own cover, else the first item's course artwork.
+    coverUrl: v.coverUrl,
     totalItems: v.totalItems,
     lockedItems: v.lockedItems,
     requiresSubscription: v.requiresSubscription,
