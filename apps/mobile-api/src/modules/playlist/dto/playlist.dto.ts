@@ -75,6 +75,14 @@ export class PlaylistDto {
   })
   coverUrl?: string | null;
 
+  @ApiProperty({
+    type: 'array',
+    itemType: 'string',
+    description:
+      'Up to 4 DISTINCT course covers, in order of first appearance, for a mosaic tile. Empty for an empty playlist; a single-course playlist yields one url, not four copies. `coverUrl` stays the single tile for the mini player and lock screen.',
+  })
+  coverUrls!: string[];
+
   @ApiProperty({ example: 'PRIVATE', description: 'PRIVATE | UNLISTED' })
   visibility!: string;
 

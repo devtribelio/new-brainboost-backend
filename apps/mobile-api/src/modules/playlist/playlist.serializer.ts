@@ -6,7 +6,11 @@ import type {
   SharedPlaylistView,
 } from './playlist.service';
 
-type PlaylistWithCount = Playlist & { _count?: { items: number }; coverUrl: string | null };
+type PlaylistWithCount = Playlist & {
+  _count?: { items: number };
+  coverUrl: string | null;
+  coverUrls?: string[];
+};
 
 export function serializePlaylist(p: PlaylistWithCount, isOwner = true): Record<string, unknown> {
   return {
@@ -14,6 +18,7 @@ export function serializePlaylist(p: PlaylistWithCount, isOwner = true): Record<
     name: p.name,
     description: p.description,
     coverUrl: p.coverUrl,
+    coverUrls: p.coverUrls ?? [],
     visibility: p.visibility,
     totalItems: p._count?.items ?? 0,
     // Not computed on the list: it would cost one entitlement resolution per
@@ -45,6 +50,7 @@ export function serializePlaylistDetail(v: PlaylistDetailView): Record<string, u
     ...serializePlaylist(v.playlist, v.isOwner),
     // Derived: the playlist's own cover, else the first item's course artwork.
     coverUrl: v.coverUrl,
+    coverUrls: v.coverUrls,
     totalItems: v.totalItems,
     lockedItems: v.lockedItems,
     requiresSubscription: v.requiresSubscription,

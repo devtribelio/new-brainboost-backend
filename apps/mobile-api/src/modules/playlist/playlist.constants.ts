@@ -61,3 +61,9 @@ export const PLAYLIST_HISTORY_LIMIT = 20;
  * see. Underscored so it can never collide with a Lesson uuid.
  */
 export const INTERLUDE_AUDIO_ID = '__interlude__';
+
+/**
+ * How many distinct course covers a playlist reports for its mosaic tile. Four is
+ * what the app's 1/2/3/4 layouts can draw; more would be sent and thrown away.
+ */
+export const PLAYLIST_COVER_MAX = 4;

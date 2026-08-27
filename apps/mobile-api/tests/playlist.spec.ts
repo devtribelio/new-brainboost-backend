@@ -327,6 +327,49 @@ describe('PlaylistService (real Postgres)', () => {
       expect((await service.detail(playlist.id, subscriber)).coverUrl).toBe('https://cdn.test/mine.jpg');
     });
 
+    it('reports up to four DISTINCT covers, in order of first appearance', async () => {
+      // Second course so the playlist spans two artworks.
+      const p2 = await prisma.product.create({
+        data: { type: 'course', title: 'Second Course', code: `PL2-${uid()}`, thumbnail: 'https://cdn.test/b.jpg' },
+      });
+      const c2 = await prisma.course.create({ data: { productId: p2.id, programDays: 30 } });
+      const s2 = await prisma.courseSection.create({ data: { courseId: c2.id, name: 'S2' } });
+      const otherSlide = `slide-${uid()}`;
+      await prisma.lesson.create({
+        data: { sectionId: s2.id, name: 'Other', duration: 300, slidesData: audioSlides(otherSlide) },
+      });
+      await prisma.product.update({ where: { id: productId }, data: { thumbnail: 'https://cdn.test/a.jpg' } });
+
+      try {
+        // slides[0] and slides[1] share one course — its art must appear ONCE.
+        const { playlist } = await service.create(subscriber, {
+          name: 'Mosaic',
+          audioIds: [slides[0], slides[1], otherSlide],
+        });
+
+        const detail = await service.detail(playlist.id, subscriber);
+        expect(detail.coverUrls).toEqual(['https://cdn.test/a.jpg', 'https://cdn.test/b.jpg']);
+        expect(detail.coverUrl).toBe('https://cdn.test/a.jpg');
+
+        // The list derives the same shape, without returning items[].
+        const listed = (await service.listMine(subscriber)).find((r) => r.id === playlist.id);
+        expect(listed?.coverUrls).toEqual(['https://cdn.test/a.jpg', 'https://cdn.test/b.jpg']);
+      } finally {
+        await prisma.playlist.deleteMany({ where: { ownerId: subscriber } });
+        await prisma.lesson.deleteMany({ where: { sectionId: s2.id } });
+        await prisma.courseSection.delete({ where: { id: s2.id } });
+        await prisma.course.delete({ where: { id: c2.id } });
+        await prisma.product.delete({ where: { id: p2.id } });
+      }
+    });
+
+    it('gives an empty playlist no covers at all', async () => {
+      const { playlist } = await service.create(subscriber, { name: 'Kosong' });
+      const detail = await service.detail(playlist.id, subscriber);
+      expect(detail.coverUrls).toEqual([]);
+      expect(detail.coverUrl).toBeNull();
+    });
+
     it('unlocks every item for a subscriber and mints a stream url', async () => {
       const { playlist } = await service.create(subscriber, { name: 'Play', audioIds: slides });
       const detail = await service.detail(playlist.id, subscriber);

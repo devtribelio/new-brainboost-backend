@@ -17,6 +17,7 @@ import {
   PLAYLIST_NAME_MAX_CHARS,
   PLAYLIST_VISIBILITY,
   INTERLUDE_AUDIO_ID,
+  PLAYLIST_COVER_MAX,
   PLAYLIST_HISTORY_LIMIT,
   PLAYLIST_PLAYED_MIN_SEC,
   PLAYLIST_TOP_RANGE_DAYS,
@@ -45,6 +46,8 @@ export interface PlaylistDetailView {
   playlist: Playlist;
   /** Playlist artwork: its own, else the first item's course cover. */
   coverUrl: string | null;
+  /** Up to PLAYLIST_COVER_MAX distinct course covers, for the mosaic tile. */
+  coverUrls: string[];
   items: PlaylistItemView[];
   totalItems: number;
   lockedItems: number;
@@ -176,33 +179,63 @@ export class PlaylistService {
       orderBy: [{ sortOrder: 'asc' }, { createdAt: 'desc' }],
       include: { _count: { select: { items: true } } },
     });
-    const covers = await this.firstItemCovers(rows.map((r) => r.id));
-    return rows.map((r) => ({ ...r, coverUrl: r.coverUrl ?? covers.get(r.id) ?? null }));
+    const covers = await this.itemCovers(rows.map((r) => r.id));
+    return rows.map((r) => {
+      const coverUrls = covers.get(r.id) ?? [];
+      // `coverUrl` stays the single tile the mini player and the lock screen use;
+      // `coverUrls` is the mosaic source. One derivation feeds both.
+      return { ...r, coverUrl: r.coverUrl ?? coverUrls[0] ?? null, coverUrls };
+    });
   }
 
   /**
-   * First item's course artwork, one row per playlist, in ONE query.
+   * Course artwork for the playlist tiles: up to `PLAYLIST_COVER_MAX` distinct
+   * thumbnails per playlist, in order of first appearance, for the whole page in
+   * ONE query.
    *
-   * `DISTINCT ON` rather than loading every item and picking the head: a playlist
-   * holds up to 200 items and the list shows twenty playlists, so the naive
-   * version reads thousands of rows to use twenty of them. Raw SQL because Prisma
-   * has no DISTINCT ON.
+   * `GROUP BY` does the de-duplication and `MIN(order)` keeps first-appearance
+   * order — a playlist drawn from a single course must yield ONE url, not four
+   * copies of it, because four identical tiles read as a rendering fault rather
+   * than a collage.
+   *
+   * Raw SQL because Prisma has neither window functions nor DISTINCT ON. The
+   * alternative — loading every item and picking heads in JS — reads a playlist's
+   * full 200 rows to use four of them, twenty times over.
+   *
+   * Known and accepted: this counts an item whose slide has since vanished from
+   * `slides_data`, which `detail()` drops. Catching that means scanning the JSON
+   * per item inside the query, far more expensive than one stale tile.
    */
-  private async firstItemCovers(playlistIds: string[]): Promise<Map<string, string>> {
+  private async itemCovers(playlistIds: string[]): Promise<Map<string, string[]>> {
     if (playlistIds.length === 0) return new Map();
-    const rows = await prisma.$queryRaw<Array<{ playlist_id: string; thumbnail: string | null }>>`
-      SELECT DISTINCT ON (pi.playlist_id) pi.playlist_id, p.thumbnail
-      FROM playlist_items pi
-      JOIN course_lessons l ON l.id = pi.lesson_id
-      JOIN course_sections s ON s.id = l.section_id
-      JOIN courses c ON c.id = s.course_id
-      JOIN products p ON p.id = c.product_id
-      WHERE pi.playlist_id = ANY (${playlistIds}::uuid[])
-      ORDER BY pi.playlist_id, pi."order" ASC
+    const rows = await prisma.$queryRaw<Array<{ playlist_id: string; thumbnail: string }>>`
+      WITH ranked AS (
+        SELECT pi.playlist_id, p.thumbnail, MIN(pi."order") AS first_order
+        FROM playlist_items pi
+        JOIN course_lessons l ON l.id = pi.lesson_id
+        JOIN course_sections s ON s.id = l.section_id
+        JOIN courses c ON c.id = s.course_id
+        JOIN products p ON p.id = c.product_id
+        WHERE pi.playlist_id = ANY (${playlistIds}::uuid[])
+          AND p.thumbnail IS NOT NULL
+        GROUP BY pi.playlist_id, p.thumbnail
+      ), numbered AS (
+        SELECT playlist_id, thumbnail,
+               ROW_NUMBER() OVER (PARTITION BY playlist_id ORDER BY first_order) AS rn
+        FROM ranked
+      )
+      SELECT playlist_id, thumbnail
+      FROM numbered
+      WHERE rn <= ${PLAYLIST_COVER_MAX}
+      ORDER BY playlist_id, rn
     `;
-    return new Map(
-      rows.filter((r) => r.thumbnail).map((r) => [r.playlist_id, r.thumbnail as string]),
-    );
+    const out = new Map<string, string[]>();
+    for (const r of rows) {
+      const list = out.get(r.playlist_id) ?? [];
+      list.push(r.thumbnail);
+      out.set(r.playlist_id, list);
+    }
+    return out;
   }
 
   private async ownedOrThrow(memberId: string, playlistId: string): Promise<Playlist> {
@@ -304,13 +337,21 @@ export class PlaylistService {
 
     const interludeStreamUrl = await this.interludeStreamUrl();
 
+    const coverUrls = [
+      ...new Set(items.map((i) => i.coverUrl).filter((u): u is string => !!u)),
+    ].slice(0, PLAYLIST_COVER_MAX);
+
     return {
       playlist,
       // A member never sets a cover — there is no UI for it — so an unset one falls
       // back to the first item's course artwork instead of a grey placeholder. Kept
       // derived, never stored: storing it goes stale the moment the first item
       // changes (docs/playlist-port.md §6b).
-      coverUrl: playlist.coverUrl ?? items.find((i) => i.coverUrl)?.coverUrl ?? null,
+      coverUrl: playlist.coverUrl ?? coverUrls[0] ?? null,
+      // Same field as the list, so the app reads one shape everywhere instead of
+      // composing the mosaic itself on one screen and reading it on the other.
+      // Free here: the items are already in memory.
+      coverUrls,
       items,
       totalItems: items.length,
       lockedItems: items.filter((i) => i.locked).length,

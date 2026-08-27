@@ -605,6 +605,20 @@ memang publik, dan itu yang membuat halaman share menjual. `courseCode` = `produ
 (`zb22segg`); kalau route app ternyata memakai bentuk terbaca (`brainboost-bela-diri-1`) itu
 `products.slug`, kolom lain.
 
+**`coverUrls` — s.d. 4 sampul course distinct** per playlist (permintaan mobile 2026-08-25),
+urut kemunculan pertama, untuk ubin mosaik di layar pustaka. Dedup itu inti permintaannya:
+playlist yang seluruh itemnya satu course harus menghasilkan SATU url, bukan empat salinan —
+empat ubin identik terbaca sebagai bug render, bukan kolase. Di list diturunkan lewat satu
+query window function (`GROUP BY` untuk dedup, `MIN(order)` untuk urutan, `ROW_NUMBER() <= 4`
+untuk potong); di detail diturunkan dari `items[]` yang sudah dimuat, nol query. Dikirim di
+kedua endpoint supaya app membaca satu bentuk, bukan menyusun sendiri di satu layar dan membaca
+di layar lain. `coverUrl` tidak berubah — tetap ubin tunggal untuk mini player dan lock screen,
+dan sekarang isinya `coverUrls[0]`.
+
+Diketahui dan diterima: query list menghitung item yang slide-nya sudah lenyap, yang justru
+dibuang `detail()`. Menangkapnya berarti memindai `slides_data` di dalam SQL per item — jauh
+lebih mahal daripada satu ubin basi.
+
 **`playlist.coverUrl` diturunkan** dari cover course item pertama saat kosong — di detail DAN
 di list. Member tidak punya UI untuk mengisi cover, jadi tanpa ini seluruh tab Playlist abu-abu.
 Tetap tidak pernah disimpan (§6b): begitu item pertama berganti, nilai tersimpan jadi basi.
@@ -691,6 +705,7 @@ kurasi — termasuk UI/pengisian konten yang belum punya rumah sama sekali. Tota
 | Nama item di response | `product.title` — bukan lesson/slide title; item se-course tampil kembar | 2026-08-25 |
 | Sampul + kode course di item | `coverUrl` (`products.thumbnail`) + `courseCode` (`products.code`), nol query tambahan | 2026-08-25 |
 | Cover playlist kosong | Diturunkan dari item pertama saat baca, tidak pernah disimpan | 2026-08-25 |
+| Mosaik pustaka | `coverUrls` s.d. 4 distinct, urut kemunculan; satu course = satu url | 2026-08-25 |
 | Kuota playlist | Dua lapis: `app_settings` + `members.playlist_quota` (NULL = ikut global) | 2026-08-21 |
 | Copy playlist berisi item terkunci | Salin apa adanya; `locked` dihitung saat baca | 2026-08-21 |
 | Riwayat playlist | Diturunkan dari `listening_session` + kolom `playlist_id` | 2026-08-21 |
