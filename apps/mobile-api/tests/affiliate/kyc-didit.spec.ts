@@ -15,12 +15,24 @@ import {
   SETTING_KEYS,
 } from '@bb/common/services/settings.service';
 
-// Mock the Didit client BEFORE the service imports it.
-const { createSessionMock } = vi.hoisted(() => ({ createSessionMock: vi.fn() }));
-vi.mock('@bb/common/services/didit.client', () => ({
+// Mock the Didit client BEFORE the service imports it. Only the two network calls
+// are stubbed — extractDocumentIdentity is pure payload parsing and stays real, so
+// these tests exercise the actual field-picking rules.
+const { createSessionMock, getSessionDecisionMock } = vi.hoisted(() => ({
+  createSessionMock: vi.fn(),
+  getSessionDecisionMock: vi.fn(),
+}));
+vi.mock('@bb/common/services/didit.client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@bb/common/services/didit.client')>()),
   isDiditConfigured: () => true,
   createSession: createSessionMock,
+  getSessionDecision: getSessionDecisionMock,
 }));
+
+/** A decision payload carrying one ID document. */
+function decisionWith(fields: Record<string, unknown>) {
+  return { session_id: 'x', status: 'In Review', id_verifications: [fields] };
+}
 
 import { prisma } from '@bb/db';
 import { DisbursementService } from '@bb/domain/affiliate/disbursement.service';
@@ -178,6 +190,96 @@ describe('POST /api/webhook/didit', () => {
       select: { kycStatus: true },
     });
     expect(row?.kycStatus).toBe('EXPIRED');
+  });
+
+  it('captures the document number + type on the PENDING transition', async () => {
+    const sessionId = `sess-doc-${randomUUID()}`;
+    const memberId = await makeMember('NONE', sessionId);
+    getSessionDecisionMock.mockResolvedValueOnce(
+      decisionWith({ document_type: 'Identity Card', document_number: '3210123456780001' }),
+    );
+
+    const res = await postWebhook({ status: 'In Review', session_id: sessionId, vendor_data: memberId });
+    expect(res.status).toBe(200);
+
+    const row = await prisma.member.findUnique({
+      where: { id: memberId },
+      select: { kycIdNumber: true, kycIdType: true },
+    });
+    expect(row?.kycIdNumber).toBe('3210123456780001');
+    expect(row?.kycIdType).toBe('Identity Card');
+  });
+
+  it('falls back to personal_number when document_number is blank', async () => {
+    const sessionId = `sess-pn-${randomUUID()}`;
+    const memberId = await makeMember('NONE', sessionId);
+    getSessionDecisionMock.mockResolvedValueOnce(
+      decisionWith({ document_type: 'Passport', document_number: '  ', personal_number: 'NIK-999' }),
+    );
+
+    await postWebhook({ status: 'In Review', session_id: sessionId, vendor_data: memberId });
+
+    const row = await prisma.member.findUnique({
+      where: { id: memberId },
+      select: { kycIdNumber: true, kycIdType: true },
+    });
+    expect(row?.kycIdNumber).toBe('NIK-999');
+    expect(row?.kycIdType).toBe('Passport');
+  });
+
+  it('fills the number on "Approved" when the PENDING webhook never carried it', async () => {
+    const sessionId = `sess-late-${randomUUID()}`;
+    const memberId = await makeMember('PENDING', sessionId);
+    getSessionDecisionMock.mockResolvedValueOnce(
+      decisionWith({ document_type: 'Identity Card', document_number: '1122334455667788' }),
+    );
+
+    const res = await postWebhook({ status: 'Approved', session_id: sessionId, vendor_data: memberId });
+    expect(res.body).toMatchObject({ handled: true, kycStatus: 'APPROVED' });
+
+    const row = await prisma.member.findUnique({
+      where: { id: memberId },
+      select: { kycIdNumber: true },
+    });
+    expect(row?.kycIdNumber).toBe('1122334455667788');
+  });
+
+  it('never clears an existing number when Didit returns none', async () => {
+    const sessionId = `sess-keep-${randomUUID()}`;
+    const memberId = await makeMember('PENDING', sessionId);
+    await prisma.member.update({
+      where: { id: memberId },
+      data: { kycIdNumber: 'MANUAL-4321', kycIdType: 'KTP' },
+    });
+    // Liveness-only workflow: a decision with no id_verifications block at all.
+    getSessionDecisionMock.mockResolvedValueOnce({ session_id: sessionId, status: 'Approved' });
+
+    await postWebhook({ status: 'Approved', session_id: sessionId, vendor_data: memberId });
+
+    const row = await prisma.member.findUnique({
+      where: { id: memberId },
+      select: { kycIdNumber: true, kycIdType: true, kycStatus: true },
+    });
+    expect(row?.kycIdNumber).toBe('MANUAL-4321');
+    expect(row?.kycIdType).toBe('KTP');
+    expect(row?.kycStatus).toBe('APPROVED');
+  });
+
+  it('still applies the status when the decision pull fails', async () => {
+    const sessionId = `sess-boom-${randomUUID()}`;
+    const memberId = await makeMember('PENDING', sessionId);
+    getSessionDecisionMock.mockRejectedValueOnce(new Error('Didit down (HTTP 503)'));
+
+    const res = await postWebhook({ status: 'Approved', session_id: sessionId, vendor_data: memberId });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ handled: true, kycStatus: 'APPROVED' });
+
+    const row = await prisma.member.findUnique({
+      where: { id: memberId },
+      select: { kycStatus: true, kycIdNumber: true },
+    });
+    expect(row?.kycStatus).toBe('APPROVED');
+    expect(row?.kycIdNumber).toBeNull();
   });
 
   it('acks unknown sessions and ignored statuses with 200', async () => {

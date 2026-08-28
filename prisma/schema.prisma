@@ -69,6 +69,12 @@ model Member {
   // MANUAL (admin-reviewed manual flow) | DIDIT (driven by Didit webhook).
   kycSource         String    @default("NONE") @map("kyc_source")
   kycIdNumber       String?   @map("kyc_id_number")
+  // Document kind behind kycIdNumber, stored VERBATIM as the provider labels it
+  // ("Identity Card" / "Passport" / "Driver's License" / ...). Free-form on purpose:
+  // mapping to a KTP|SIM|PASSPORT enum would guess at strings we have not seen from
+  // every Didit workflow, and ops only needs to know which document the number is from.
+  // null = unknown (manual submit, legacy import, or a decision without id_verifications).
+  kycIdType         String?   @map("kyc_id_type")
   kycIdCardUrl      String?   @map("kyc_id_card_url")
   kycSelfieUrl      String?   @map("kyc_selfie_url")
   kycSubmittedAt    DateTime? @map("kyc_submitted_at")

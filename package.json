@@ -56,6 +56,7 @@
     "migrate:course-lessons": "tsx scripts/migrate-course-lessons.ts",
     "backfill:product-selling-points": "tsx scripts/backfill-product-selling-points.ts",
     "backfill:affiliate-program-product": "tsx scripts/backfill-affiliate-program-product.ts",
+    "kyc:backfill-didit-id": "tsx scripts/backfill-didit-id-number.ts",
     "normalize:slides-data": "tsx scripts/normalize-slides-data.ts",
     "seed:settings": "tsx prisma/seed-settings.ts",
     "seed:app-version": "tsx prisma/seed-app-version.ts",

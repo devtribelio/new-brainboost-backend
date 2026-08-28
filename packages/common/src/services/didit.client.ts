@@ -78,7 +78,12 @@ export interface DiditDecision {
   session_id: string;
   status: string;
   vendor_data?: string;
+  /** Verification blocks (id_verifications / liveness_checks / face_matches) sit
+   *  at the top level of the pulled decision, but nested under `decision` in a
+   *  webhook body — extractDocumentIdentity() accepts either. */
   decision?: Record<string, unknown>;
+  id_verifications?: unknown;
+  [key: string]: unknown;
 }
 
 /**
@@ -90,4 +95,56 @@ export async function getSessionDecision(sessionId: string): Promise<DiditDecisi
     'GET',
     `/v3/session/${encodeURIComponent(sessionId)}/decision/`,
   );
+}
+
+export interface DiditDocumentIdentity {
+  /** The document number as printed (for an Indonesian KTP: the NIK). */
+  idNumber: string;
+  /** Provider's own label for the document kind — stored verbatim, never mapped. */
+  idType: string | null;
+  /** Which payload field the number came from. Logged for provenance; the VALUE never is. */
+  field: 'document_number' | 'personal_number';
+}
+
+function str(v: unknown): string | null {
+  if (typeof v !== 'string') return null;
+  const t = v.trim();
+  return t === '' || t.toUpperCase() === 'N/A' ? null : t;
+}
+
+/**
+ * Pull the document number + kind out of a Didit decision.
+ *
+ * Accepts the pulled decision (`id_verifications` at the top level) or a webhook
+ * body (same block nested under `decision`), and tolerates the block being a bare
+ * object instead of an array — the shape differs per workflow and we only ever
+ * read it defensively.
+ *
+ * `document_number` wins over `personal_number`: on an Indonesian KTP the document
+ * number IS the NIK, while `personal_number` is the optional MRZ field that is
+ * frequently absent or a different identifier altogether. Returns null when the
+ * workflow carries no ID-document step (liveness-only) or the number is missing —
+ * callers must treat that as "leave the stored value alone", never as "clear it".
+ */
+export function extractDocumentIdentity(payload: unknown): DiditDocumentIdentity | null {
+  if (!payload || typeof payload !== 'object') return null;
+  const root = payload as Record<string, unknown>;
+  const nested = root.decision as Record<string, unknown> | undefined;
+  const block = root.id_verifications ?? (nested ? nested.id_verifications : undefined);
+  const entries = Array.isArray(block) ? block : block ? [block] : [];
+
+  for (const entry of entries) {
+    if (!entry || typeof entry !== 'object') continue;
+    const e = entry as Record<string, unknown>;
+    const documentNumber = str(e.document_number);
+    const personalNumber = str(e.personal_number);
+    const idNumber = documentNumber ?? personalNumber;
+    if (!idNumber) continue;
+    return {
+      idNumber,
+      idType: str(e.document_type),
+      field: documentNumber ? 'document_number' : 'personal_number',
+    };
+  }
+  return null;
 }
