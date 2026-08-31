@@ -241,6 +241,9 @@ export const ERROR_CODES = {
   NOTIFICATION_SCOPE_REQUIRED: 'NOTIFICATION_SCOPE_REQUIRED',
   NOTIFICATION_SCOPE_INVALID: 'NOTIFICATION_SCOPE_INVALID',
 
+  // --- listening tracker -----------------------------------------------------
+  TRACKING_STARTED_AT_IN_FUTURE: 'TRACKING_STARTED_AT_IN_FUTURE',
+
   // --- report ----------------------------------------------------------------
   REPORT_SELF_FORBIDDEN: 'REPORT_SELF_FORBIDDEN',
   REPORT_CATEGORY_INVALID: 'REPORT_CATEGORY_INVALID',

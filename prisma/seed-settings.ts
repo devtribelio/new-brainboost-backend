@@ -99,6 +99,36 @@ const SETTINGS: Array<{ key: string; value: string; description: string }> = [
       'Hour of day (0-23, Asia/Jakarta) the topic digest is sent. The job runs on the hourly cron tick and only acts on this hour, so changing this value moves the send time with no redeploy.',
   },
   {
+    key: 'streak.graceDays',
+    value: '1',
+    description:
+      'Listening days a member may miss without the streak resetting to 0, counted back from today (so an old gap is never forgiven retroactively). 0 = strict, no grace. Changing this changes the streak number every shipped app build already displays, so treat it as a product switch, not a tuning knob.',
+  },
+  {
+    key: 'streak.atRiskEnabled',
+    value: 'false',
+    description:
+      "Evening push telling a member their streak is not safe yet. 'true' to enable. Ships disabled — a new outbound message class to the whole active base. Independent of streak.dimmedEnabled.",
+  },
+  {
+    key: 'streak.dimmedEnabled',
+    value: 'false',
+    description:
+      "Morning push telling a member their streak went dim and can still be revived today. 'true' to enable. Independent of streak.atRiskEnabled, and silent regardless while streak.graceDays = 0, since no member can be in the dimmed state then.",
+  },
+  {
+    key: 'streak.atRiskHour',
+    value: '21',
+    description:
+      'Hour (0-23, Asia/Jakarta) the "streak not safe yet" push fires. NOTE: at 21:00 most of the night\'s listening has not started (the histogram peaks at 23:00), so this hour may be too early to carry any signal — check what share of members who eventually qualify have already started by this hour before trusting it.',
+  },
+  {
+    key: 'streak.dimmedHour',
+    value: '9',
+    description:
+      'Hour (0-23, Asia/Jakarta) the "streak dimmed, revive it today" push fires, the morning after a missed day. Only ever has candidates while streak.graceDays > 0.',
+  },
+  {
     key: 'sales.alertEmail',
     value: '',
     description:

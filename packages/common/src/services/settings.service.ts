@@ -38,6 +38,17 @@ export const SETTING_KEYS = {
   notificationDigestEnabled: 'notification.digestEnabled',
   notificationDigestHour: 'notification.digestHour',
   salesAlertEmail: 'sales.alertEmail',
+  // Listening days a member may miss before the streak resets to 0. The window is
+  // measured from today, so only a recent gap is forgiven — see tracker.constants.ts.
+  streakGraceDays: 'streak.graceDays',
+  // Streak reminder push. One switch PER SEND, not one for both: the two answer
+  // different moments (an evening nudge vs a morning second chance) and ops must be
+  // able to silence one without losing the other. The job runs on the hourly cron
+  // tick and only acts on its hour, so moving a send time needs no redeploy.
+  streakAtRiskEnabled: 'streak.atRiskEnabled',
+  streakDimmedEnabled: 'streak.dimmedEnabled',
+  streakAtRiskHour: 'streak.atRiskHour',
+  streakDimmedHour: 'streak.dimmedHour',
 } as const;
 
 export class SettingsService {

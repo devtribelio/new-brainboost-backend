@@ -552,8 +552,8 @@ model ListeningSession {
   startedAt       DateTime @map("started_at") // UTC
   listenedSec     Int      @map("listened_sec") // seconds actually heard (not audio duration)
   completed       Boolean  @default(false)
-  localDay        DateTime @map("local_day") @db.Date // Asia/Jakarta (WIB) calendar day at write → trivial streak query
-  source          String? // ios / android
+  localDay        DateTime @map("local_day") @db.Date // LISTENING day (04:00 WIB boundary, not midnight) at write → trivial streak query
+  source          String? // "ios" / "android/3.3.1+412" from x-platform, or synthetic "backfill:*" / "goodwill:*"
   createdAt       DateTime @default(now()) @map("created_at")
 
   @@unique([memberId, clientSessionId]) // dedup retry / resume re-send

@@ -70,9 +70,12 @@ module.exports = {
       name: 'bb-cron',
       cwd: root,
       script: 'apps/mobile-api/dist/jobs-runner.js',
-      // topicDigest last, and safe on every tick: it no-ops unless the current WIB
-      // hour matches `notification.digestHour`, so it can never delay the money jobs.
-      args: 'affiliatePendingToBalance expirePendingPayments topicDigest',
+      // topicDigest and streakReminder last, and safe on every tick: each no-ops
+      // unless the current WIB hour matches its configured hour, so neither can
+      // delay the money jobs. streakReminder owns two hours (streak.atRiskHour /
+      // streak.dimmedHour) and is additionally gated by its own on/off settings,
+      // both of which ship false.
+      args: 'affiliatePendingToBalance expirePendingPayments topicDigest streakReminder',
       exec_mode: 'fork',
       instances: 1,
       autorestart: false,
