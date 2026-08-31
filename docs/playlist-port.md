@@ -524,8 +524,13 @@ dijawab sama sekali.
 
 Definisi yang dikunci:
 
-- **Terhitung diputar** = ada `listening_session` dengan `playlistId` itu dan `listenedSec >= 30`.
-  Ambang kecil membuang salah tap. (Beda tujuan dengan ambang streak 600 detik — jangan disamakan.)
+- **Terhitung diputar** = ada `listening_session` dengan `playlistId` itu dan `listenedSec >= 1`.
+  Diturunkan dari 30 ke 1 detik (2026-08-31): playlist dari link share biasanya dicicipi beberapa
+  detik dulu, dan di ambang 30 sampel itu tak berbekas — playlist tak pernah masuk recent, jadi
+  tak ada jalan kembali selain link aslinya. Penemuan dimenangkan atas kebersihan salah tap.
+  Ongkosnya di `recent`, yang urut `max(startedAt)`: salah tap kini merebut slot teratas. `top`
+  tidak berubah peringkatnya (menjumlah detik), cuma ekornya jadi berisik. (Beda tujuan dengan
+  ambang streak 600 detik — jangan disamakan.)
 - **Recent** = urut `max(startedAt)` per playlist, turun. **Daftar saja, tanpa posisi terakhir** —
   resume dititipkan ke lokal app. Resume lintas device ditunda dan sebaiknya digabung polanya
   dengan progres video BB-127, bukan dua bentuk berbeda untuk masalah yang sama.

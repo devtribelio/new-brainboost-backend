@@ -617,9 +617,17 @@ describe('PlaylistService (real Postgres)', () => {
       }
     });
 
-    it('ignores a mis-tap below the 30-second floor', async () => {
-      const { playlist } = await service.create(subscriber, { name: 'Salah tap', audioIds: [slides[0]] });
+    it('counts a few-seconds sample — the floor only drops zero-second rows', async () => {
+      // Lowered from 30s: a shared playlist is sampled briefly before the member
+      // decides, and at 30 that sample left no way back to the playlist.
+      const { playlist } = await service.create(subscriber, { name: 'Dicicipi', audioIds: [slides[0]] });
       await play(playlist.id, 5, 1);
+      expect((await service.listRecent(subscriber)).map((r) => r.playlist.id)).toEqual([playlist.id]);
+    });
+
+    it('still ignores a zero-second row', async () => {
+      const { playlist } = await service.create(subscriber, { name: 'Nol', audioIds: [slides[0]] });
+      await play(playlist.id, 0, 1);
       expect(await service.listRecent(subscriber)).toEqual([]);
     });
 

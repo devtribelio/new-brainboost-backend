@@ -34,11 +34,23 @@ export const SHARE_TOKEN_BYTES = 16;
 /**
  * Seconds of actual listening before a playlist counts as "played".
  *
- * Small on purpose: it only exists to throw away mis-taps, and it is NOT the
- * streak threshold (600s) — different question, different number. Raising this
- * to the streak value would empty the recent list for anyone who samples.
+ * Effectively "anything but a zero-second row" (product decision, 2026-08-31,
+ * lowered from 30). A shared playlist opened from a link is usually sampled for
+ * a few seconds before the member decides, and at 30 that sample left no trace
+ * — the playlist never reached the recent list, so there was no way back to it
+ * short of the original link. Discovery beats mis-tap hygiene here.
+ *
+ * The cost is paid in `recent`, which orders by `max(startedAt)`: a mis-tap now
+ * takes the top slot. `top` is unaffected in ranking — it sums seconds, and one
+ * second is worth one second — it only grows a noisier tail.
+ *
+ * NOT the streak threshold (600s, `MIN_QUALIFY_SEC`) nor the lifetime
+ * `sessionsPlayed` floor (30s, `MIN_SESSION_SEC`) — three different questions.
+ *
+ * Read-time filter, so a change is retroactive: every short session already in
+ * `listening_session` starts counting the moment this ships.
  */
-export const PLAYLIST_PLAYED_MIN_SEC = 30;
+export const PLAYLIST_PLAYED_MIN_SEC = 1;
 
 /**
  * Default window for the "top" list. Without a window the ranking freezes on
