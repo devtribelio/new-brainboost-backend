@@ -256,8 +256,43 @@ export class PlaylistService {
   async detail(playlistId: string, viewerId: string): Promise<PlaylistDetailView> {
     const playlist = await prisma.playlist.findUnique({ where: { id: playlistId } });
     if (!playlist || playlist.isBlocked) throw notFound(ERROR_CODES.PLAYLIST_NOT_FOUND);
-    if (playlist.ownerId !== viewerId) throw forbidden(ERROR_CODES.PLAYLIST_FORBIDDEN);
+    if (playlist.ownerId !== viewerId && !(await this.playedFromHistory(playlist, viewerId))) {
+      throw forbidden(ERROR_CODES.PLAYLIST_FORBIDDEN);
+    }
     return this.buildView(playlist, viewerId);
+  }
+
+  /**
+   * Can this non-owner reopen the playlist by id?
+   *
+   * Only if it is still shared AND they already played it — the exact predicate
+   * `hydrateHistory` uses to decide the card is reachable, so what recent/top
+   * shows can also be opened. Without this the history card is dead: `id` is the
+   * only handle those rows carry (`shareToken` deliberately never leaves the API
+   * except to its owner), and `/playlist/shared/:token` needs a token the member
+   * may no longer hold — the link was in a chat, the app was reinstalled.
+   *
+   * The listening row is the whole point: it is proof the member reached the
+   * playlist legitimately at some earlier moment, so nothing new is granted here.
+   * A bare id is not enough — ids ride in tracking payloads and logs, tokens do
+   * not, and treating the id as the capability would quietly demote the share
+   * token to decoration.
+   *
+   * Rotating the token does NOT cut this member off; `unshare` does. Same as the
+   * recent list, which has kept showing rotated playlists since it shipped —
+   * rotation retires a link, withdrawal retires the access.
+   */
+  private async playedFromHistory(playlist: Playlist, viewerId: string): Promise<boolean> {
+    if (!playlist.shareToken) return false;
+    const played = await prisma.listeningSession.findFirst({
+      where: {
+        memberId: viewerId,
+        playlistId: playlist.id,
+        listenedSec: { gte: PLAYLIST_PLAYED_MIN_SEC },
+      },
+      select: { id: true },
+    });
+    return played !== null;
   }
 
   /**

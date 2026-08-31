@@ -625,6 +625,44 @@ describe('PlaylistService (real Postgres)', () => {
       expect((await service.listRecent(subscriber)).map((r) => r.playlist.id)).toEqual([playlist.id]);
     });
 
+    it('lets a non-owner reopen a played playlist by id, without saving it', async () => {
+      // The history card carries only `id` — `shareToken` never leaves the API
+      // except to its owner — so without this the card is dead.
+      const { playlist } = await service.create(subscriber, { name: 'Dibagikan', audioIds: [slides[0]] });
+      await service.share(subscriber, playlist.id);
+      await prisma.playlist.update({ where: { id: playlist.id }, data: { ownerId: plain } });
+      await play(playlist.id, 600, 1);
+
+      const view = await service.detail(playlist.id, subscriber);
+      expect(view.playlist.id).toBe(playlist.id);
+      expect(view.isOwner).toBe(false);
+    });
+
+    it('refuses a non-owner who never played it', async () => {
+      const { playlist } = await service.create(subscriber, { name: 'Tak pernah diputar', audioIds: [slides[0]] });
+      await service.share(subscriber, playlist.id);
+      await prisma.playlist.update({ where: { id: playlist.id }, data: { ownerId: plain } });
+
+      await expect(service.detail(playlist.id, subscriber)).rejects.toMatchObject({
+        code: ERROR_CODES.PLAYLIST_FORBIDDEN,
+      });
+    });
+
+    it('refuses a non-owner once the link is withdrawn, even with history', async () => {
+      const { playlist } = await service.create(subscriber, { name: 'Dicabut lagi', audioIds: [slides[0]] });
+      await service.share(subscriber, playlist.id);
+      await prisma.playlist.update({ where: { id: playlist.id }, data: { ownerId: plain } });
+      await play(playlist.id, 600, 1);
+      await prisma.playlist.update({
+        where: { id: playlist.id },
+        data: { shareToken: null, sharedAt: null },
+      });
+
+      await expect(service.detail(playlist.id, subscriber)).rejects.toMatchObject({
+        code: ERROR_CODES.PLAYLIST_FORBIDDEN,
+      });
+    });
+
     it('still ignores a zero-second row', async () => {
       const { playlist } = await service.create(subscriber, { name: 'Nol', audioIds: [slides[0]] });
       await play(playlist.id, 0, 1);
