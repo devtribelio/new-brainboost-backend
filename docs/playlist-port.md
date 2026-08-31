@@ -531,16 +531,22 @@ Definisi yang dikunci:
   Ongkosnya di `recent`, yang urut `max(startedAt)`: salah tap kini merebut slot teratas. `top`
   tidak berubah peringkatnya (menjumlah detik), cuma ekornya jadi berisik. (Beda tujuan dengan
   ambang streak 600 detik — jangan disamakan.)
-- **Membuka kembali dari riwayat**: kartu riwayat cuma membawa `id` — `shareToken` tak pernah
-  keluar dari API kecuali ke pemiliknya — jadi `GET /playlist/:id` melayani non-owner **kalau**
+- **Membuka kembali dari riwayat**: kartu riwayat cuma membawa `id`, jadi `GET /playlist/:id`
+  melayani non-owner **kalau**
   playlist masih dishare DAN pemanggil punya `listening_session` yang lolos ambang untuk playlist
   itu (predikat yang sama dengan filter reachable di atas: yang terlihat di recent bisa dibuka).
   Tanpa ini kartunya mati: 403 lewat `/playlist/:id`, dan `/playlist/shared/:token` butuh token
   yang mungkin sudah tak dipegang member (link ada di chat, app di-install ulang). Baris listening
   itu buktinya: member pernah sampai ke playlist ini secara sah, jadi tak ada akses baru yang
   diberikan. `id` telanjang tidak cukup — id ikut di payload tracking dan log, token tidak, dan
-  memperlakukan id sebagai kapabilitas akan menurunkan share token jadi hiasan. **Rotate token
-  tidak memutus member ini, `unshare` yang memutus** — sama dengan daftar recent yang sejak rilis
+  memperlakukan id sebagai kapabilitas akan menurunkan share token jadi hiasan.
+  Response detail-nya **menyertakan `shareToken`** khusus untuk non-owner yang belum menyimpan
+  playlist itu (owner mendapatkannya lewat `POST /:id/share`; yang sudah punya salinan tak
+  membutuhkannya) — supaya app bisa meresolusi ulang lewat `/playlist/shared/:token` di device
+  lain atau setelah install ulang, tanpa menyuruh member mengorek link lama dari chat. Ini
+  kapabilitas yang bisa diteruskan, dan yang diberikan selalu token **saat ini**, jadi rotate
+  membagikannya lagi ke semua yang pernah memutar. **Rotate token tidak memutus member ini,
+  `unshare` yang memutus** — sama dengan daftar recent yang sejak rilis
   memang tetap menampilkan playlist yang tokennya dirotasi.
 - **Recent** = urut `max(startedAt)` per playlist, turun. **Daftar saja, tanpa posisi terakhir** —
   resume dititipkan ke lokal app. Resume lintas device ditunda dan sebaiknya digabung polanya

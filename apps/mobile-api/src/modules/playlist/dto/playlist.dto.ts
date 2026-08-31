@@ -125,6 +125,14 @@ export class PlaylistDetailDto extends PlaylistDto {
   })
   interludeAudioId?: string | null;
 
+  @ApiPropertyOptional({
+    nullable: true,
+    example: 'k7Qm2xR9vTb0LpAe3ZsYdw',
+    description:
+      'Share token, present ONLY for a non-owner who has not saved this playlist — the handle to re-resolve it via /playlist/shared/{token}. null for the owner and for a viewer who already holds a copy.',
+  })
+  shareToken?: string | null;
+
   @ApiProperty({ type: () => [PlaylistItemDto] })
   items!: PlaylistItemDto[];
 }

@@ -54,6 +54,9 @@ export function serializePlaylistDetail(v: PlaylistDetailView): Record<string, u
     totalItems: v.totalItems,
     lockedItems: v.lockedItems,
     requiresSubscription: v.requiresSubscription,
+    // Present only for a non-owner who has not saved it — the handle they need
+    // to reach the playlist again through /playlist/shared/:token.
+    shareToken: v.shareToken,
     interludeStreamUrl: v.interludeStreamUrl,
     interludeAudioId: v.interludeAudioId,
     items: v.items.map(serializeItem),

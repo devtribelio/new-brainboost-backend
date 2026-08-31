@@ -636,6 +636,22 @@ describe('PlaylistService (real Postgres)', () => {
       const view = await service.detail(playlist.id, subscriber);
       expect(view.playlist.id).toBe(playlist.id);
       expect(view.isOwner).toBe(false);
+      // The token rides along so the app can re-resolve it on another device.
+      expect(view.shareToken).toBe(
+        (await prisma.playlist.findUnique({ where: { id: playlist.id } }))!.shareToken,
+      );
+    });
+
+    it('withholds the token from the owner and from a viewer who saved a copy', async () => {
+      const { playlist } = await service.create(subscriber, { name: 'Sudah disimpan', audioIds: [slides[0]] });
+      const { shareToken } = await service.share(subscriber, playlist.id);
+      expect((await service.detail(playlist.id, subscriber)).shareToken).toBeNull();
+
+      await prisma.playlist.update({ where: { id: playlist.id }, data: { ownerId: plain } });
+      await play(playlist.id, 600, 1);
+      await service.saveFromShare(subscriber, shareToken!);
+
+      expect((await service.detail(playlist.id, subscriber)).shareToken).toBeNull();
     });
 
     it('refuses a non-owner who never played it', async () => {

@@ -56,6 +56,21 @@ export interface PlaylistDetailView {
   interludeAudioId: string | null;
   requiresSubscription: boolean;
   isOwner: boolean;
+  /**
+   * The live share token, but ONLY for a non-owner viewing a playlist they have
+   * not saved. Null for the owner (who mints it through `POST /:id/share`) and
+   * null once the viewer holds their own copy, which needs no token.
+   *
+   * It is handed over so the app can re-resolve the playlist through
+   * `/playlist/shared/:token` — deep link, another device, an app reinstall —
+   * without asking the member to dig the original link out of a chat.
+   *
+   * Consequence to keep in mind: this is a forwardable capability, and it is
+   * always the CURRENT token, so rotating the link re-issues it to everyone who
+   * ever played the playlist. Rotation is not the revocation tool here;
+   * `unshare` is (product decision, 2026-08-31).
+   */
+  shareToken: string | null;
 }
 
 /** What a share link resolves to. `isSaved` drives the button copy on the FE. */
@@ -256,10 +271,27 @@ export class PlaylistService {
   async detail(playlistId: string, viewerId: string): Promise<PlaylistDetailView> {
     const playlist = await prisma.playlist.findUnique({ where: { id: playlistId } });
     if (!playlist || playlist.isBlocked) throw notFound(ERROR_CODES.PLAYLIST_NOT_FOUND);
-    if (playlist.ownerId !== viewerId && !(await this.playedFromHistory(playlist, viewerId))) {
+    const isOwner = playlist.ownerId === viewerId;
+    if (!isOwner && !(await this.playedFromHistory(playlist, viewerId))) {
       throw forbidden(ERROR_CODES.PLAYLIST_FORBIDDEN);
     }
-    return this.buildView(playlist, viewerId);
+
+    const view = await this.buildView(playlist, viewerId);
+    if (isOwner || !playlist.shareToken) return view;
+
+    // Non-owner: hand the token over unless they already hold a copy, which is
+    // reachable by its own id and needs none.
+    const saved = await this.hasCopyOf(viewerId, playlist.shareToken);
+    return { ...view, shareToken: saved ? null : playlist.shareToken };
+  }
+
+  /** Does this member already own a copy made from that share token? */
+  private async hasCopyOf(memberId: string, token: string): Promise<boolean> {
+    const copy = await prisma.playlist.findFirst({
+      where: { ownerId: memberId, copiedFromToken: token },
+      select: { id: true },
+    });
+    return copy !== null;
   }
 
   /**
@@ -310,14 +342,14 @@ export class PlaylistService {
     }
 
     const view = await this.buildView(playlist, viewerId);
-    const isSaved = viewerId
-      ? (await prisma.playlist.count({
-          where: { ownerId: viewerId, copiedFromToken: token },
-        })) > 0
-      : false;
+    const isSaved = viewerId ? await this.hasCopyOf(viewerId, token) : false;
 
     return {
       ...view,
+      // Same rule as `detail()`: the token rides along for a non-owner who has
+      // no copy. They already hold it — they got here with it — so this only
+      // keeps the two responses one shape.
+      shareToken: view.isOwner || isSaved ? null : playlist.shareToken,
       isSaved,
       // Saving is a write, and every write needs a subscription. The FE turns
       // this into "Berlangganan untuk menyimpan" rather than a dead button.
@@ -394,6 +426,9 @@ export class PlaylistService {
       interludeAudioId: interludeStreamUrl ? INTERLUDE_AUDIO_ID : null,
       requiresSubscription: await this.requiresSubscription(),
       isOwner: viewerId !== undefined && playlist.ownerId === viewerId,
+      // Callers that may hand the token over set it themselves; the default is
+      // to keep it in, so a new caller cannot leak it by forgetting.
+      shareToken: null,
     };
   }
 
