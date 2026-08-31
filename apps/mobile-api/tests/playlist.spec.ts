@@ -679,6 +679,52 @@ describe('PlaylistService (real Postgres)', () => {
       });
     });
 
+    it('folds the source plays into the copy — one card, not two', async () => {
+      const { playlist } = await service.create(subscriber, { name: 'Digabung', audioIds: [slides[0]] });
+      const { shareToken } = await service.share(subscriber, playlist.id);
+      await prisma.playlist.update({ where: { id: playlist.id }, data: { ownerId: plain } });
+      await play(playlist.id, 600, 120); // played from the share, before saving
+
+      const { playlist: copy } = await service.saveFromShare(subscriber, shareToken!);
+      await play(copy.id, 120, 1); // and again, from the copy
+
+      const recent = await service.listRecent(subscriber);
+      expect(recent.map((r) => r.playlist.id)).toEqual([copy.id]);
+      expect(recent[0].totalListenedSec).toBe(720);
+      expect(recent[0].playlist.ownerId).toBe(subscriber);
+
+      const top = await service.listTop(subscriber);
+      expect(top.map((r) => r.playlist.id)).toEqual([copy.id]);
+      expect(top[0].totalListenedSec).toBe(720);
+    });
+
+    it('keeps the merged card after the source is unshared or deleted', async () => {
+      const { playlist } = await service.create(subscriber, { name: 'Sumber hilang', audioIds: [slides[0]] });
+      const { shareToken } = await service.share(subscriber, playlist.id);
+      await prisma.playlist.update({ where: { id: playlist.id }, data: { ownerId: plain } });
+      await play(playlist.id, 600, 120);
+      const { playlist: copy } = await service.saveFromShare(subscriber, shareToken!);
+
+      // The token link dies here; the stored source id is what keeps the merge.
+      await prisma.playlist.delete({ where: { id: playlist.id } });
+
+      const recent = await service.listRecent(subscriber);
+      expect(recent.map((r) => r.playlist.id)).toEqual([copy.id]);
+      expect(recent[0].totalListenedSec).toBe(600);
+    });
+
+    it('surfaces a copy that was only ever played before saving', async () => {
+      // The copy has no listening row of its own; without the fold it would be
+      // invisible in recent even though the member just listened to it.
+      const { playlist } = await service.create(subscriber, { name: 'Belum diputar ulang', audioIds: [slides[0]] });
+      const { shareToken } = await service.share(subscriber, playlist.id);
+      await prisma.playlist.update({ where: { id: playlist.id }, data: { ownerId: plain } });
+      await play(playlist.id, 600, 5);
+      const { playlist: copy } = await service.saveFromShare(subscriber, shareToken!);
+
+      expect((await service.listRecent(subscriber)).map((r) => r.playlist.id)).toEqual([copy.id]);
+    });
+
     it('still ignores a zero-second row', async () => {
       const { playlist } = await service.create(subscriber, { name: 'Nol', audioIds: [slides[0]] });
       await play(playlist.id, 0, 1);

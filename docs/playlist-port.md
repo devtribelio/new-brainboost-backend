@@ -548,6 +548,17 @@ Definisi yang dikunci:
   membagikannya lagi ke semua yang pernah memutar. **Rotate token tidak memutus member ini,
   `unshare` yang memutus** — sama dengan daftar recent yang sejak rilis
   memang tetap menampilkan playlist yang tokennya dirotasi.
+- **Salinan menyerap riwayat sumbernya.** Playlist share yang diputar lalu disimpan tidak boleh
+  jadi dua kartu bernama sama: baris `listening_session` ada di **id sumber** (salinan belum lahir
+  saat itu) sementara kepemilikan ada di salinan. `hydrateHistory` melipat statistik sumber ke
+  salinan — detik dijumlah, `lastPlayedAt` diambil yang terbaru — dan mengeluarkan satu baris
+  memakai salinan, karena salinan yang bertahan saat sumber di-unshare atau dihapus. Urutan
+  dihitung ulang di JS setelah lipatan itu, sebab kedua kunci urut SQL berubah.
+  Tautannya kolom baru `playlists.copied_from_playlist_id` (nullable, **tanpa FK**), diisi saat
+  save. `copied_from_token` tidak bisa dipakai: unshare mengosongkan token dan rotate menggantinya,
+  jadi salinan kemarin tak lagi menemukan sumbernya hari ini. Migrasi `20260831120000_playlist_copy_source`
+  mem-backfill salinan lama yang tokennya kebetulan masih cocok; sisanya tetap NULL dan tetap
+  terbelah — tautan yang dibutuhkan memang tak pernah disimpan.
 - **Recent** = urut `max(startedAt)` per playlist, turun. **Daftar saja, tanpa posisi terakhir** —
   resume dititipkan ke lokal app. Resume lintas device ditunda dan sebaiknya digabung polanya
   dengan progres video BB-127, bukan dua bentuk berbeda untuk masalah yang sama.

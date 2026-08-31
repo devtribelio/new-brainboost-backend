@@ -611,6 +611,13 @@ model Playlist {
   /// may be deleted without breaking the copy. Feeds analytics and, later, share
   /// commission attribution.
   copiedFromToken String?   @map("copied_from_token")
+  /// Playlist this one was copied from — plain scalar, NO FK, same posture as
+  /// `copiedFromToken`. It exists BESIDE the token because the token is not a stable
+  /// handle: unshare clears it and rotate replaces it, so a copy made yesterday can no
+  /// longer find its source today. The history merge needs a link that survives both,
+  /// otherwise a saved playlist splits into two cards — the source carrying the plays,
+  /// the copy carrying the ownership.
+  copiedFromPlaylistId String? @map("copied_from_playlist_id") @db.Uuid
   name            String
   description     String?
   coverUrl        String?   @map("cover_url")

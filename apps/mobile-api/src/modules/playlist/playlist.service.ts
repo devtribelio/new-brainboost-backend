@@ -738,6 +738,11 @@ export class PlaylistService {
         // Plain scalar, no FK: the source may be deleted or unshared later and
         // this copy must not care.
         copiedFromToken: token,
+        // The token above is NOT a stable handle — unshare clears it, rotate
+        // replaces it — so the source id is stored too. Without it the history
+        // merge loses the source the moment the owner touches sharing, and the
+        // playlist splits back into two cards.
+        copiedFromPlaylistId: source.id,
         items: {
           create: items.map((it, index) => ({
             audioId: it.audioId,
@@ -771,10 +776,11 @@ export class PlaylistService {
       _max: { startedAt: true },
       _sum: { listenedSec: true },
       orderBy: { _max: { startedAt: 'desc' } },
-      // Over-fetch: some ids will be dropped as unreachable below.
+      // Over-fetch: some ids will be dropped as unreachable, others folded into
+      // a copy, below.
       take: limit * 3,
     });
-    return this.hydrateHistory(memberId, groups, limit);
+    return this.hydrateHistory(memberId, groups, limit, 'recent');
   }
 
   /**
@@ -800,7 +806,7 @@ export class PlaylistService {
       orderBy: { _sum: { listenedSec: 'desc' } },
       take: limit * 3,
     });
-    return this.hydrateHistory(memberId, groups, limit);
+    return this.hydrateHistory(memberId, groups, limit, 'top');
   }
 
   /**
@@ -821,13 +827,40 @@ export class PlaylistService {
       _sum: { listenedSec: number | null };
     }>,
     limit: number,
+    sortBy: 'recent' | 'top',
   ): Promise<PlaylistHistoryRow[]> {
     const ids = groups.map((g) => g.playlistId).filter((id): id is string => id !== null);
     if (ids.length === 0) return [];
 
+    // Saving a shared playlist must not split it in two. The plays sit on the
+    // SOURCE id (the copy did not exist yet) while ownership sits on the copy, so
+    // without this fold the member sees the same playlist twice under one name —
+    // once as someone else's, once as theirs. Everything is re-attributed to the
+    // copy: it is owned, so it survives the source being unshared or deleted.
+    const copies = await prisma.playlist.findMany({
+      where: { ownerId: memberId, copiedFromPlaylistId: { in: ids } },
+      select: { id: true, copiedFromPlaylistId: true },
+    });
+    const copyOf = new Map(copies.map((c) => [c.copiedFromPlaylistId!, c.id]));
+
+    const merged = new Map<string, { lastPlayedAt: Date | null; totalListenedSec: number }>();
+    for (const g of groups) {
+      if (!g.playlistId) continue;
+      const target = copyOf.get(g.playlistId) ?? g.playlistId;
+      const acc = merged.get(target) ?? { lastPlayedAt: null, totalListenedSec: 0 };
+      const startedAt = g._max.startedAt;
+      merged.set(target, {
+        lastPlayedAt:
+          acc.lastPlayedAt && startedAt
+            ? new Date(Math.max(acc.lastPlayedAt.getTime(), startedAt.getTime()))
+            : (acc.lastPlayedAt ?? startedAt),
+        totalListenedSec: acc.totalListenedSec + (g._sum.listenedSec ?? 0),
+      });
+    }
+
     const rows = await prisma.playlist.findMany({
       where: {
-        id: { in: ids },
+        id: { in: [...merged.keys()] },
         isBlocked: false,
         // Reachable = mine, or still shared. A copy the member saved is theirs
         // and is unaffected by anything the original owner does.
@@ -837,18 +870,18 @@ export class PlaylistService {
     });
     const byId = new Map(rows.map((r) => [r.id, r]));
 
-    const picked = groups
-      .flatMap((g) => {
-        const playlist = g.playlistId ? byId.get(g.playlistId) : undefined;
-        if (!playlist) return [];
-        return [
-          {
-            playlist,
-            lastPlayedAt: g._max.startedAt,
-            totalListenedSec: g._sum.listenedSec ?? 0,
-          },
-        ];
+    // Re-sorted here, not left to the SQL order: the fold changes both keys it
+    // ordered by, and a merged row must rank on its combined total.
+    const picked = [...merged.entries()]
+      .flatMap(([id, stats]) => {
+        const playlist = byId.get(id);
+        return playlist ? [{ playlist, ...stats }] : [];
       })
+      .sort((a, b) =>
+        sortBy === 'top'
+          ? b.totalListenedSec - a.totalListenedSec
+          : (b.lastPlayedAt?.getTime() ?? 0) - (a.lastPlayedAt?.getTime() ?? 0),
+      )
       .slice(0, limit);
 
     // Same mosaic derivation as `listMine`: without it a history card renders a
