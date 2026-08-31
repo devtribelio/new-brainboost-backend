@@ -598,6 +598,25 @@ describe('PlaylistService (real Postgres)', () => {
       expect(top[0].totalListenedSec).toBe(3600);
     });
 
+    it('carries the mosaic covers, same shape as scope=mine', async () => {
+      // A history card renders a grey tile without this: `playlists.cover_url` is
+      // never set (no UI for it), so the artwork can only come from the items.
+      await prisma.product.update({
+        where: { id: productId },
+        data: { thumbnail: 'https://cdn.test/hist.jpg' },
+      });
+      const { playlist } = await service.create(subscriber, {
+        name: 'Bersampul',
+        audioIds: [slides[0]],
+      });
+      await play(playlist.id, 600, 1);
+
+      for (const rows of [await service.listRecent(subscriber), await service.listTop(subscriber)]) {
+        expect(rows[0].playlist.coverUrls).toEqual(['https://cdn.test/hist.jpg']);
+        expect(rows[0].playlist.coverUrl).toBe('https://cdn.test/hist.jpg');
+      }
+    });
+
     it('ignores a mis-tap below the 30-second floor', async () => {
       const { playlist } = await service.create(subscriber, { name: 'Salah tap', audioIds: [slides[0]] });
       await play(playlist.id, 5, 1);

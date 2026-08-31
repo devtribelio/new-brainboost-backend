@@ -66,7 +66,7 @@ export interface SharedPlaylistView extends PlaylistDetailView {
 
 /** A playlist plus what the listening log says about it, for recent/top. */
 export interface PlaylistHistoryRow {
-  playlist: Playlist & { _count?: { items: number } };
+  playlist: Playlist & { _count?: { items: number }; coverUrls?: string[] };
   lastPlayedAt: Date | null;
   totalListenedSec: number;
 }
@@ -767,7 +767,7 @@ export class PlaylistService {
     });
     const byId = new Map(rows.map((r) => [r.id, r]));
 
-    return groups
+    const picked = groups
       .flatMap((g) => {
         const playlist = g.playlistId ? byId.get(g.playlistId) : undefined;
         if (!playlist) return [];
@@ -780,5 +780,22 @@ export class PlaylistService {
         ];
       })
       .slice(0, limit);
+
+    // Same mosaic derivation as `listMine`: without it a history card renders a
+    // grey tile, since `playlists.cover_url` is never set (there is no UI for it)
+    // and the artwork only ever comes from the items' courses. Fetched AFTER the
+    // slice so the over-fetched and ghost-filtered ids cost nothing.
+    const covers = await this.itemCovers(picked.map((r) => r.playlist.id));
+    return picked.map((r) => {
+      const coverUrls = covers.get(r.playlist.id) ?? [];
+      return {
+        ...r,
+        playlist: {
+          ...r.playlist,
+          coverUrl: r.playlist.coverUrl ?? coverUrls[0] ?? null,
+          coverUrls,
+        },
+      };
+    });
   }
 }
