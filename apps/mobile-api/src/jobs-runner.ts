@@ -6,6 +6,7 @@ import { affiliatePendingToBalance } from '@bb/domain/jobs/affiliate-pending-to-
 import { executeApprovedDisbursements } from '@bb/domain/jobs/execute-approved-disbursements';
 import { expirePendingPayments } from '@bb/domain/jobs/expire-pending-payments';
 import { topicDigest } from '@bb/domain/jobs/topic-digest';
+import { streakReminder } from './modules/tracker/streak-reminder.job';
 
 /**
  * Standalone scheduled-jobs entrypoint. Runs the registered jobs ONCE, then exits.
@@ -37,6 +38,10 @@ const JOBS: Array<{ name: string; run: () => Promise<unknown> }> = [
   // Safe on every hourly tick: the job no-ops unless the current WIB hour matches
   // `notification.digestHour`, which is what keeps the send time editable from the DB.
   { name: 'topicDigest', run: () => topicDigest() },
+  // Same hourly-tick contract as the digest: the job owns its two WIB hours, so the
+  // send times stay editable in `app_settings`. No-ops while `streak.reminderEnabled`
+  // is false, which is how it ships.
+  { name: 'streakReminder', run: () => streakReminder() },
 ];
 
 const requested = process.argv.slice(2);

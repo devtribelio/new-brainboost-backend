@@ -1,7 +1,14 @@
 import { prisma } from '@bb/db';
-import { MIN_SESSION_SEC, MIN_QUALIFY_SEC, WEEKLY_DAYS_TARGET } from './tracker.constants';
-import { toLocalDayWIB, weekStartMondayWIB } from './tracker.time';
-import { computeStreak } from './tracker.streak';
+import { settingsService, SETTING_KEYS } from '@bb/common/services/settings.service';
+import {
+  DAY_BOUNDARY_HOURS,
+  GRACE_DAYS_DEFAULT,
+  MIN_SESSION_SEC,
+  MIN_QUALIFY_SEC,
+  WEEKLY_DAYS_TARGET,
+} from './tracker.constants';
+import { listeningDayEndsAt, toListeningDayWIB, weekStartMondayWIB } from './tracker.time';
+import { computeStreak, computeStreakState } from './tracker.streak';
 import type { StatsHomeDto } from './dto/stats-home.dto';
 
 const WEEK_MS = 7 * 86_400_000;
@@ -14,9 +21,20 @@ function qualifyingDays(groups: { localDay: Date; _sum: { listenedSec: number | 
 }
 
 export class StatsService {
-  /** All home-screen metrics, computed at read-time (spec §5.2 / §6). */
+  /**
+   * All home-screen metrics, computed at read-time (spec §5.2 / §6).
+   *
+   * Every day here is a LISTENING day (04:00 WIB boundary), including the "today"
+   * anchor: at 02:00 WIB the member is still inside yesterday's day, so the streak
+   * must not look broken while they are literally listening.
+   */
   async home(memberId: string): Promise<StatsHomeDto> {
-    const todayWIB = toLocalDayWIB(new Date());
+    const todayWIB = toListeningDayWIB(new Date());
+
+    const graceDays = await settingsService.getNumber(
+      SETTING_KEYS.streakGraceDays,
+      GRACE_DAYS_DEFAULT,
+    );
 
     const [sessionsPlayed, totalAgg, dayGroups, enrollments, member] = await Promise.all([
       prisma.listeningSession.count({
@@ -49,7 +67,8 @@ export class StatsService {
     const totalListenSec = totalAgg._sum.listenedSec ?? 0;
 
     // ---- Global streak --------------------------------------------------
-    const streakDays = computeStreak(qualifyingDays(dayGroups), todayWIB);
+    const streak = computeStreakState(qualifyingDays(dayGroups), todayWIB, graceDays);
+    const streakDays = streak.days;
 
     // ---- Per-program challenges (one grouped query, then bucket) --------
     const courseIds = enrollments.map((e) => e.courseId);
@@ -73,12 +92,12 @@ export class StatsService {
       courseId: e.courseId,
       code: e.course.product.code,
       title: e.course.product.title,
-      day: computeStreak(qualifyingDays(byCourse.get(e.courseId) ?? []), todayWIB),
+      day: computeStreak(qualifyingDays(byCourse.get(e.courseId) ?? []), todayWIB, graceDays),
       target: e.course.programDays,
     }));
 
     // ---- Weekly recap (current WIB Mon..today window) -------------------
-    const joinWeekStart = weekStartMondayWIB(toLocalDayWIB(member.createdAt));
+    const joinWeekStart = weekStartMondayWIB(toListeningDayWIB(member.createdAt));
     const currentWeekStart = weekStartMondayWIB(todayWIB);
     const weekNumber =
       Math.floor((currentWeekStart.getTime() - joinWeekStart.getTime()) / WEEK_MS) + 1;
@@ -91,6 +110,14 @@ export class StatsService {
       streakDays,
       sessionsPlayed,
       totalListenSec,
+      streak: {
+        days: streak.days,
+        state: streak.state,
+        // Only a dimmed streak has something to beat; the others would render a
+        // countdown the member has no reason to act on.
+        restoreDeadline: streak.state === 'dimmed' ? listeningDayEndsAt(todayWIB) : null,
+        dayBoundaryHour: DAY_BOUNDARY_HOURS,
+      },
       challenges,
       weeklyRecap: {
         weekNumber,

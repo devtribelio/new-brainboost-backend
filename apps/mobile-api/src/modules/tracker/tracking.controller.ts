@@ -13,11 +13,23 @@ import {
 import { GenericOkDto } from '@bb/common/openapi/common.dto';
 import { TrackSessionDto } from './dto/track-session.dto';
 
-/** Read the client platform from the `x-platform` header (ios/android), else null. */
+/**
+ * Provenance of a session row, from the `x-platform` header.
+ *
+ * Accepts a bare platform (`ios`) or a platform + build (`android/3.3.1+412`).
+ * The build matters: without it a report of "streak broke after the update" cannot
+ * be checked against the data at all, which is exactly what happened in Aug 2026.
+ *
+ * Anything else becomes null rather than being stored — `source` also carries
+ * synthetic markers (`backfill:*`, `goodwill:*`) that must never be forgeable from
+ * a request header.
+ */
+const SOURCE_PATTERN = /^(ios|android)(\/[\w.+-]{1,32})?$/;
+
 function platformFrom(req: AuthenticatedRequest): string | null {
   const raw = req.headers['x-platform'];
-  const value = Array.isArray(raw) ? raw[0] : raw;
-  return value === 'ios' || value === 'android' ? value : null;
+  const value = (Array.isArray(raw) ? raw[0] : raw)?.trim();
+  return value && SOURCE_PATTERN.test(value) ? value : null;
 }
 
 @ApiTags('Tracker')

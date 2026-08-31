@@ -290,7 +290,9 @@ export class BbEcsStack extends cdk.Stack {
     // lane mana pun tidak akan pernah jalan, tanpa error. Jaga daftar ini sinkron
     // dengan lane PM2 di ecosystem.config.js.
     //  - Cron (hourly): affiliate PENDING->BALANCE + expire stale payments +
-    //    topic digest (aman tiap jam: no-op kecuali jam WIB == notification.digestHour).
+    //    topic digest (aman tiap jam: no-op kecuali jam WIB == notification.digestHour)
+    //    + streak reminder (dua jam sendiri: streak.atRiskHour / streak.dimmedHour,
+    //    plus saklar streak.atRiskEnabled / streak.dimmedEnabled yang ship false).
     //  - CronDisburse (tiap 5 mnt): sweep payout yang sudah di-approve backoffice ke
     //    Xendit, biar approval MANUAL nggak nunggu sampai jam berikutnya. Idempotent —
     //    cuma ambil row PENDING dengan approvedAt terisi, overlap antar lane aman.
@@ -316,6 +318,7 @@ export class BbEcsStack extends cdk.Stack {
           'affiliatePendingToBalance',
           'expirePendingPayments',
           'topicDigest',
+          'streakReminder',
         ]),
       },
     });
