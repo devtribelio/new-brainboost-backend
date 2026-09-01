@@ -69,6 +69,12 @@ model Member {
   // MANUAL (admin-reviewed manual flow) | DIDIT (driven by Didit webhook).
   kycSource         String    @default("NONE") @map("kyc_source")
   kycIdNumber       String?   @map("kyc_id_number")
+  // Document kind behind kycIdNumber, stored VERBATIM as the provider labels it
+  // ("Identity Card" / "Passport" / "Driver's License" / ...). Free-form on purpose:
+  // mapping to a KTP|SIM|PASSPORT enum would guess at strings we have not seen from
+  // every Didit workflow, and ops only needs to know which document the number is from.
+  // null = unknown (manual submit, legacy import, or a decision without id_verifications).
+  kycIdType         String?   @map("kyc_id_type")
   kycIdCardUrl      String?   @map("kyc_id_card_url")
   kycSelfieUrl      String?   @map("kyc_selfie_url")
   kycSubmittedAt    DateTime? @map("kyc_submitted_at")
@@ -571,8 +577,8 @@ model ListeningSession {
   startedAt       DateTime @map("started_at") // UTC
   listenedSec     Int      @map("listened_sec") // seconds actually heard (not audio duration)
   completed       Boolean  @default(false)
-  localDay        DateTime @map("local_day") @db.Date // Asia/Jakarta (WIB) calendar day at write → trivial streak query
-  source          String? // ios / android
+  localDay        DateTime @map("local_day") @db.Date // LISTENING day (04:00 WIB boundary, not midnight) at write → trivial streak query
+  source          String? // "ios" / "android/3.3.1+412" from x-platform, or synthetic "backfill:*" / "goodwill:*"
   // Playlist the audio was played from, when any. NULL = played standalone.
   // No FK on purpose, same reason as `audioId`: this is an ingest log and a write
   // must never fail because the playlist row was deleted. Feeds the recent/top

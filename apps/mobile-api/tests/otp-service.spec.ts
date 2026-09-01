@@ -6,13 +6,22 @@ import { otpService, OTP_RESEND_COOLDOWN_SECONDS } from '@bb/common/services/otp
 // which no-ops in test (Qontak unconfigured) — no network, no email.
 const PHONE = '628000000999';
 
+// Email target for the canonicalization cases. Issued/verified in several
+// spellings; every row must land on the lowercase form.
+const EMAIL = 'case.otp@example.com';
+const EMAIL_MIXED = '  Case.OTP@Example.COM ';
+const EMAIL_UPPER = 'CASE.OTP@EXAMPLE.COM';
+
 // Most cases here send several OTPs in a row, which the cooldown exists to
 // block. Opting out isolates the behaviour under test; the cooldown itself is
 // covered by its own cases below.
 const NO_COOLDOWN = { resendCooldownSeconds: 0 } as const;
 
 async function cleanup() {
-  await prisma.otpCode.deleteMany({ where: { target: PHONE } });
+  await prisma.otpCode.deleteMany({
+    where: { target: { in: [PHONE, EMAIL, EMAIL_MIXED, EMAIL_MIXED.trim(), EMAIL_UPPER] } },
+  });
+  await prisma.notificationOutbox.deleteMany({ where: { recipient: EMAIL } });
 }
 
 describe('otpService phone OTP parity', () => {
@@ -196,5 +205,47 @@ describe('otpService send cap', () => {
     ).rejects.toMatchObject({
       details: { retryAfterSeconds: expect.any(Number) },
     });
+  });
+});
+
+describe('otpService email target canonicalization', () => {
+  beforeEach(cleanup);
+  afterAll(cleanup);
+
+  it('stores the target lowercased and trimmed', async () => {
+    const { id } = await otpService.issue({ target: EMAIL_MIXED, purpose: 'forgot-password' });
+    const row = await prisma.otpCode.findUnique({ where: { id } });
+    expect(row?.target).toBe(EMAIL);
+  });
+
+  it('verifies a code issued in another spelling of the same address', async () => {
+    // The reported bug: an OTP issued against the canonical address was
+    // OTP_NOT_FOUND when the user re-typed their email with capitals.
+    const { code } = await otpService.issue({ target: EMAIL, purpose: 'forgot-password' });
+    await expect(
+      otpService.verify(EMAIL_UPPER, code, 'forgot-password'),
+    ).resolves.toBeUndefined();
+  });
+
+  it('consumes across spellings, and the code is spent afterwards', async () => {
+    const { code } = await otpService.issue({ target: EMAIL_MIXED, purpose: 'forgot-password' });
+    await otpService.consume(EMAIL, code, 'forgot-password');
+    await expect(otpService.verify(EMAIL, code, 'forgot-password')).rejects.toMatchObject({
+      code: 'OTP_NOT_FOUND',
+    });
+  });
+
+  it('shares one cooldown budget across spellings', async () => {
+    // Two casings must not be two independent send budgets.
+    await otpService.issue({ target: EMAIL, purpose: 'forgot-password' });
+    await expect(
+      otpService.issue({ target: EMAIL_UPPER, purpose: 'forgot-password' }),
+    ).rejects.toMatchObject({ code: 'OTP_RESEND_TOO_SOON' });
+  });
+
+  it('leaves phone targets untouched', async () => {
+    const { id } = await otpService.issue({ target: PHONE, purpose: 'verify-phone' });
+    const row = await prisma.otpCode.findUnique({ where: { id } });
+    expect(row?.target).toBe(PHONE);
   });
 });

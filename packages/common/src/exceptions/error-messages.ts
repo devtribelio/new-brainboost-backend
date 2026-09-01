@@ -225,6 +225,9 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   NOTIFICATION_SCOPE_REQUIRED: 'Data notifikasi tidak lengkap',
   NOTIFICATION_SCOPE_INVALID: 'Jenis notifikasi tidak valid',
 
+  // --- listening tracker -----------------------------------------------------
+  TRACKING_STARTED_AT_IN_FUTURE: 'Waktu mulai sesi tidak valid, periksa jam perangkat',
+
   // --- report ----------------------------------------------------------------
   REPORT_SELF_FORBIDDEN: 'Tidak dapat melaporkan akun sendiri',
   REPORT_CATEGORY_INVALID: 'Kategori laporan tidak valid',

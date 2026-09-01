@@ -1,29 +1,77 @@
 import { addDays, dayKey } from './tracker.time';
 
 /**
- * Strict consecutive-day streak (spec §6/§8).
+ * Where a member's streak stands right now (spec `docs/tracker-streak.md` §5.2).
  *
- * Given the set of WIB days that "qualify" (per-day listened ≥ MIN_QUALIFY_SEC),
- * count consecutive qualifying days walking backward from today (WIB). If today
- * has not qualified *yet*, start from yesterday — the streak is not considered
- * broken until the day actually rolls over. Any earlier gap resets to 0.
- *
- * Used for both the global streak and per-program challenge `day` (caller pre-
- * filters `qualifyingDays` to a single course for the per-program case).
- *
- * @param qualifyingDays UTC-midnight WIB day Dates that met the threshold.
- * @param todayWIB       today's WIB day as a UTC-midnight Date (`toLocalDayWIB(now)`).
+ * - `burning`  — this listening day already qualifies.
+ * - `at_risk`  — not yet today, but yesterday qualified. The number still stands.
+ * - `dimmed`   — yesterday did NOT qualify and grace is carrying the streak; the
+ *                member can revive it by listening 10 minutes before the day closes.
+ * - `none`     — no streak.
  */
-export function computeStreak(qualifyingDays: Date[], todayWIB: Date): number {
+export type StreakState = 'burning' | 'at_risk' | 'dimmed' | 'none';
+
+export interface StreakResult {
+  days: number;
+  state: StreakState;
+  /** Missed days grace forgave. Shown ❄️ in the weekly calendar; never counted in `days`. */
+  forgivenDays: Date[];
+}
+
+/**
+ * Consecutive-day streak over listening days (04:00 WIB boundary), with an optional
+ * grace window.
+ *
+ * Walk backward from today. If today has not qualified *yet*, start from yesterday —
+ * the streak is not broken until the day actually rolls over.
+ *
+ * A non-qualifying day is forgiven only while it sits within `graceDays` listening
+ * days of TODAY; anything older ends the walk. Anchoring the window on today rather
+ * than on the gap is the whole safety property: the streak is recomputed from raw
+ * sessions on every read, so a gap-relative rule would forgive every single-day gap
+ * in the member's entire history the moment grace is switched on. `graceDays = 0`
+ * forgives nothing and reproduces the original strict walk exactly.
+ *
+ * Used for the global streak and for the per-program challenge `day` (the caller
+ * pre-filters `qualifyingDays` to one course for the latter).
+ *
+ * @param qualifyingDays UTC-midnight listening-day Dates that met the threshold.
+ * @param todayWIB       today's listening day (`toListeningDayWIB(now)`).
+ * @param graceDays      size of the grace window in listening days; 0 = strict.
+ */
+export function computeStreakState(
+  qualifyingDays: Date[],
+  todayWIB: Date,
+  graceDays = 0,
+): StreakResult {
   const set = new Set(qualifyingDays.map(dayKey));
+  const qualifiedToday = set.has(dayKey(todayWIB));
+  const forgivenDays: Date[] = [];
 
-  // Anchor: today if it already qualifies, else yesterday (grace until rollover).
-  let cursor = set.has(dayKey(todayWIB)) ? todayWIB : addDays(todayWIB, -1);
+  let cursor = qualifiedToday ? todayWIB : addDays(todayWIB, -1);
+  let days = 0;
 
-  let streak = 0;
-  while (set.has(dayKey(cursor))) {
-    streak += 1;
+  for (;;) {
+    if (set.has(dayKey(cursor))) {
+      days += 1;
+    } else if ((todayWIB.getTime() - cursor.getTime()) / 86_400_000 <= graceDays) {
+      forgivenDays.push(cursor);
+    } else {
+      break;
+    }
     cursor = addDays(cursor, -1);
   }
-  return streak;
+
+  let state: StreakState;
+  if (days === 0) state = 'none';
+  else if (qualifiedToday) state = 'burning';
+  else if (set.has(dayKey(addDays(todayWIB, -1)))) state = 'at_risk';
+  else state = 'dimmed';
+
+  return { days, state, forgivenDays };
+}
+
+/** Streak length only — the shape callers that don't care about state still use. */
+export function computeStreak(qualifyingDays: Date[], todayWIB: Date, graceDays = 0): number {
+  return computeStreakState(qualifyingDays, todayWIB, graceDays).days;
 }

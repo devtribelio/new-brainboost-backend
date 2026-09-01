@@ -34,6 +34,15 @@ export const ActionLabel = {
   // Sent to the member whose seat was taken when the smaller tier landed.
   SubscriptionSeatRemoved: 'subscriptionSeatRemoved',
   CommissionEarned: 'commissionEarned',
+  // Listening-streak reminders (docs/tracker-streak.md §5.4). Deliberately NOT in
+  // PUSH_LIMIT_EXEMPT: that list is money — a member must hear about a payment
+  // whatever their app habits — while a streak nudge is engagement, and the member
+  // who forgot to listen for days is exactly the one already past the unopened-push
+  // budget. Exempting it would make the streak the last thing still buzzing at
+  // someone who stopped opening the app, which is how notifications get turned off.
+  // FROZEN once shipped, same rule as the digest values above.
+  StreakAtRisk: 'streakAtRisk',
+  StreakDimmed: 'streakDimmed',
 } as const;
 
 export type ActionLabel = (typeof ActionLabel)[keyof typeof ActionLabel];

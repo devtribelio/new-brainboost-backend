@@ -56,6 +56,43 @@ describe('email case canonicalization', () => {
     }
   });
 
+  it('validateOtp accepts a target typed in another case', async () => {
+    // Regression: /auth/validateOtp passed req.body.target through verbatim, so
+    // an OTP issued against the canonical address answered OTP_NOT_FOUND when
+    // the user re-typed their email with capitals.
+    const app = buildApp();
+
+    const reg = await request(app).post('/api/member/auth/register').send({
+      email: EMAIL,
+      password: 'secret123',
+      fullName: 'Case Tester',
+    });
+    const verifyOtp = await prisma.notificationOutbox.findFirst({
+      where: { recipient: EMAIL, type: 'otp' },
+      orderBy: { createdAt: 'desc' },
+    });
+    await request(app).post('/api/member/auth/validateOtpEmail').send({
+      memberId: String(reg.body.data.member_id),
+      verifyCode: (verifyOtp!.payload as { code: string }).code,
+    });
+
+    await request(app)
+      .post('/api/member/auth/requestForgotPassword')
+      .send({ email: EMAIL })
+      .expect(200);
+    const forgotOtp = await prisma.notificationOutbox.findFirst({
+      where: { recipient: EMAIL, type: 'otp' },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const res = await request(app).post('/api/member/auth/validateOtp').send({
+      target: 'MiXeD.Case@Example.COM',
+      code: (forgotOtp!.payload as { code: string }).code,
+      purpose: 'forgot_password',
+    });
+    expect(res.status).toBe(200);
+  });
+
   it('forgot password finds the member regardless of input case', async () => {
     const app = buildApp();
 

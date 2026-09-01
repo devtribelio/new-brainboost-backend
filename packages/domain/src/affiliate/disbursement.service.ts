@@ -15,7 +15,12 @@ import {
   type CreateDisbursementResult,
 } from '@bb/common/services/xendit.client';
 import { generateExternalId } from '@bb/common/services/xendit-signature';
-import { createSession, isDiditConfigured } from '@bb/common/services/didit.client';
+import {
+  createSession,
+  extractDocumentIdentity,
+  getSessionDecision,
+  isDiditConfigured,
+} from '@bb/common/services/didit.client';
 import {
   COMMISSION_STATUS,
   DISBURSEMENT_STATUS,
@@ -542,6 +547,50 @@ export class DisbursementService {
   // ---- KYC via Didit ---------------------------------------------------------
 
   /**
+   * Document number + kind for a Didit session, shaped as a partial Prisma update.
+   *
+   * Written on the PENDING transition (documents are in and extracted by then) rather
+   * than on approval, because the decision itself is usually taken by an admin in the
+   * backoffice — that path writes members.kyc_* directly and never comes back through
+   * this service, so an approval-time write would miss the common case. The reviewer
+   * also needs the number BEFORE deciding, not after.
+   *
+   * Best-effort by construction: any provider failure, a liveness-only workflow, or a
+   * decision without a number all yield `{}` — an empty spread leaves the stored value
+   * untouched, so a Didit blank can never wipe a number captured manually or migrated
+   * from legacy. Never fails the webhook: an unreachable Didit must not make us answer
+   * non-2xx and earn a retry storm on a status transition we already know how to apply.
+   */
+  private async loadDiditIdentity(
+    sessionId: string,
+    memberId: string,
+  ): Promise<{ kycIdNumber?: string; kycIdType?: string }> {
+    if (!isDiditConfigured()) return {};
+    try {
+      const identity = extractDocumentIdentity(await getSessionDecision(sessionId));
+      if (!identity) {
+        logger.debug({ memberId, sessionId }, '[kyc] didit decision carries no document number');
+        return {};
+      }
+      // Log the field it came from, never the number itself.
+      logger.info(
+        { memberId, sessionId, field: identity.field, idType: identity.idType },
+        '[kyc] didit document number captured',
+      );
+      return {
+        kycIdNumber: identity.idNumber,
+        ...(identity.idType ? { kycIdType: identity.idType } : {}),
+      };
+    } catch (e) {
+      logger.warn(
+        { memberId, sessionId, err: (e as Error).message },
+        '[kyc] failed to pull didit decision for document number',
+      );
+      return {};
+    }
+  }
+
+  /**
    * Start a Didit KYC session: mint a fresh verification session (Didit is
    * session-per-attempt — no persistent applicant) and store its session_id as
    * the member's ACTIVE kycProviderRef. Returns the session token + hosted URL;
@@ -586,6 +635,7 @@ export class DisbursementService {
     if (!member) return { handled: false, reason: 'member not found' };
     if (member.kycProviderRef !== sessionId) return { handled: false, reason: 'stale session' };
     if (member.kycStatus === 'APPROVED') return { handled: false, reason: 'already approved' };
+    const identity = await this.loadDiditIdentity(sessionId, member.id);
     await prisma.$transaction([
       prisma.member.update({
         where: { id: member.id },
@@ -597,6 +647,7 @@ export class DisbursementService {
           kycReviewedAt: null,
           kycReviewedBy: null,
           kycRejectedReason: null,
+          ...identity,
         },
       }),
       // Skip the audit row on a webhook replay (already PENDING) to keep it idempotent.
@@ -646,6 +697,10 @@ export class DisbursementService {
       // via update-status) can't overwrite kycSource/kycReviewedBy provenance.
       return { handled: true, memberId: member.id, kycStatus: newStatus };
     }
+    // Safety net for an approval whose PENDING webhook never arrived (or predates
+    // this capture): only on approve — a rejected applicant's number, if any, was
+    // already stored at PENDING and re-pulling it here buys nothing.
+    const identity = approved ? await this.loadDiditIdentity(input.sessionId, member.id) : {};
     await prisma.$transaction([
       prisma.member.update({
         where: { id: member.id },
@@ -656,6 +711,7 @@ export class DisbursementService {
           kycReviewedAt: new Date(),
           kycReviewedBy: null, // reviewed by Didit, not an admin
           kycRejectedReason: rejectedReason,
+          ...identity,
         },
       }),
       prisma.kycEvent.create({
