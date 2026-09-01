@@ -585,6 +585,7 @@ describe('PlaylistService (real Postgres)', () => {
 
     afterEach(async () => {
       await prisma.listeningSession.deleteMany({ where: { memberId: subscriber } });
+      await prisma.playlistHistoryDismissal.deleteMany({ where: { memberId: subscriber } });
     });
 
     it('orders recent by last play and top by seconds listened', async () => {
@@ -723,6 +724,97 @@ describe('PlaylistService (real Postgres)', () => {
       const { playlist: copy } = await service.saveFromShare(subscriber, shareToken!);
 
       expect((await service.listRecent(subscriber)).map((r) => r.playlist.id)).toEqual([copy.id]);
+    });
+
+    it('drops the card when the saved copy is deleted, source and all', async () => {
+      // Without the dismissal the source simply re-appears: the plays live on its
+      // id and its owner is still sharing it, so the delete reads as a no-op.
+      const { playlist } = await service.create(subscriber, { name: 'Dihapus', audioIds: [slides[0]] });
+      const { shareToken } = await service.share(subscriber, playlist.id);
+      await prisma.playlist.update({ where: { id: playlist.id }, data: { ownerId: plain } });
+      await play(playlist.id, 600, 120);
+      const { playlist: copy } = await service.saveFromShare(subscriber, shareToken!);
+      await play(copy.id, 120, 10);
+
+      await service.remove(subscriber, copy.id);
+
+      expect(await service.listRecent(subscriber)).toEqual([]);
+      expect(await service.listTop(subscriber)).toEqual([]);
+    });
+
+    it('brings the card back when the member plays the share again after deleting', async () => {
+      // A delete hides what happened up to that point; it is not a permanent block
+      // on someone else's playlist.
+      const { playlist } = await service.create(subscriber, { name: 'Diputar lagi', audioIds: [slides[0]] });
+      const { shareToken } = await service.share(subscriber, playlist.id);
+      await prisma.playlist.update({ where: { id: playlist.id }, data: { ownerId: plain } });
+      await play(playlist.id, 600, 120);
+      const { playlist: copy } = await service.saveFromShare(subscriber, shareToken!);
+      await service.remove(subscriber, copy.id);
+      expect(await service.listRecent(subscriber)).toEqual([]);
+
+      await play(playlist.id, 300, 0);
+
+      const recent = await service.listRecent(subscriber);
+      expect(recent.map((r) => r.playlist.id)).toEqual([playlist.id]);
+      // The pre-delete seconds stay hidden — only the group's newest play decides,
+      // and the whole group rides along once it wins.
+      expect(recent[0].totalListenedSec).toBe(900);
+    });
+
+    it('leaves a plain owned playlist alone — no dismissal, nothing to hand back', async () => {
+      const { playlist } = await service.create(subscriber, { name: 'Milik sendiri', audioIds: [slides[0]] });
+      await play(playlist.id, 600, 1);
+      await service.remove(subscriber, playlist.id);
+
+      expect(await service.listRecent(subscriber)).toEqual([]);
+      expect(
+        await prisma.playlistHistoryDismissal.count({
+          where: { memberId: subscriber, playlistId: playlist.id },
+        }),
+      ).toBe(0);
+    });
+
+    it("drops a shared playlist that was never saved — nobody can delete that row", async () => {
+      const { playlist } = await service.create(subscriber, { name: 'Numpang dengar', audioIds: [slides[0]] });
+      await service.share(subscriber, playlist.id);
+      await prisma.playlist.update({ where: { id: playlist.id }, data: { ownerId: plain } });
+      await play(playlist.id, 600, 1);
+      expect((await service.listRecent(subscriber)).map((r) => r.playlist.id)).toEqual([playlist.id]);
+
+      // Same endpoint as deleting your own: nothing is deleted, the card goes.
+      expect(await service.remove(subscriber, playlist.id)).toEqual({ deleted: false });
+      expect(await prisma.playlist.count({ where: { id: playlist.id } })).toBe(1);
+
+      expect(await service.listRecent(subscriber)).toEqual([]);
+      // The owner's own history is untouched — a dismissal is per member.
+      await prisma.listeningSession.create({
+        data: {
+          memberId: plain,
+          clientSessionId: randomUUID(),
+          audioId: slides[0],
+          playlistId: playlist.id,
+          startedAt: new Date(),
+          listenedSec: 600,
+          completed: false,
+          localDay: new Date(new Date().toISOString().slice(0, 10)),
+        },
+      });
+      expect((await service.listRecent(plain)).map((r) => r.playlist.id)).toEqual([playlist.id]);
+      await prisma.listeningSession.deleteMany({ where: { memberId: plain } });
+    });
+
+    it('brings a dismissed shared playlist back when it is played again', async () => {
+      const { playlist } = await service.create(subscriber, { name: 'Balik lagi', audioIds: [slides[0]] });
+      await service.share(subscriber, playlist.id);
+      await prisma.playlist.update({ where: { id: playlist.id }, data: { ownerId: plain } });
+      await play(playlist.id, 600, 120);
+      await service.remove(subscriber, playlist.id);
+      expect(await service.listRecent(subscriber)).toEqual([]);
+
+      await play(playlist.id, 300, 0);
+
+      expect((await service.listRecent(subscriber)).map((r) => r.playlist.id)).toEqual([playlist.id]);
     });
 
     it('still ignores a zero-second row', async () => {

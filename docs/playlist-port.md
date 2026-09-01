@@ -464,7 +464,8 @@ Aturan turunan:
 ```
 POST   /playlist                 { name, description?, coverUrl?, audioIds?[] } → 201
 PATCH  /playlist/:id             { name?, description?, coverUrl? }
-DELETE /playlist/:id
+DELETE /playlist/:id              milik sendiri → hapus row; milik orang lain → buang dari
+                                  recent/top pemanggil saja (`deleted: false`)
 POST   /playlist/:id/items       { audioIds: [...] }   append di akhir
 DELETE /playlist/:id/items       { audioIds: [...] }
 PUT    /playlist/:id/items/order { audioIds: [...] }   urutan final, tulis ulang dalam satu tx
@@ -559,6 +560,26 @@ Definisi yang dikunci:
   jadi salinan kemarin tak lagi menemukan sumbernya hari ini. Migrasi `20260831120000_playlist_copy_source`
   mem-backfill salinan lama yang tokennya kebetulan masih cocok; sisanya tetap NULL dan tetap
   terbelah — tautan yang dibutuhkan memang tak pernah disimpan.
+- **Hapus salinan = hapus dari riwayat.** Menghapus playlist hasil save tidak boleh mengembalikan
+  kartunya: baris play-nya ada di **id sumber** dan sumber masih dishare pemiliknya, jadi tanpa
+  penanganan khusus lipatan sekadar berhenti dan sumber muncul lagi sendiri — terbaca sebagai
+  delete yang gagal. `remove()` karena itu menulis baris `playlist_history_dismissals`
+  `(member_id, playlist_id=sumber, dismissed_at)` di transaksi yang sama, dan `hydrateHistory`
+  membuang grup yang `max(startedAt)`-nya **tidak lebih baru** dari `dismissed_at`.
+  Bukan `DELETE` baris `listening_session`: tabel itu juga sumber streak dan hitungan lifetime,
+  jadi merapikan satu daftar akan menggeser angka yang tak ada hubungannya dengan playlist.
+  `dismissed_at` yang membuatnya bukan blokir permanen — **memutar sumbernya lagi setelah dihapus
+  memunculkan kartunya kembali**, dan seluruh grup ikut terbawa (jadi detik sebelum penghapusan
+  ikut terhitung lagi). Save-lalu-hapus berulang menggeser `dismissed_at` maju lewat upsert.
+- **`DELETE /playlist/:id` menangani dua-duanya.** Playlist sendiri → row dihapus
+  (`deleted: true`). Playlist orang lain yang dibuka dari link share lalu diputar tanpa pernah
+  disimpan → tak ada yang dihapus (memang tak ada row milik member) dan kartunya dibuang dari
+  recent/top pemanggil (`deleted: false`). Satu endpoint karena niatnya satu — member tak bisa
+  ditanya kartu ini jenis yang mana, dan app sudah tahu dari `isOwner` kalau mau membedakan kalimat
+  konfirmasinya. Dulu jalur non-owner 403; sekarang tidak, tapi tak ada data pemilik asli yang
+  tersentuh — dismissal hanya menyembunyikan baris milik penulisnya sendiri. Id yang tak ada atau
+  diblokir **tetap 404**, bukan dilaporkan sebagai dismissal, supaya client yang salah id tak
+  diberi tahu bahwa operasinya berhasil.
 - **Recent** = urut `max(startedAt)` per playlist, turun. **Daftar saja, tanpa posisi terakhir** —
   resume dititipkan ke lokal app. Resume lintas device ditunda dan sebaiknya digabung polanya
   dengan progres video BB-127, bukan dua bentuk berbeda untuk masalah yang sama.

@@ -637,6 +637,28 @@ model Playlist {
   @@map("playlists")
 }
 
+/// "I deleted this, stop showing it to me." Written when a member deletes a playlist
+/// they had SAVED from a share, naming the SOURCE playlist — deleting the copy alone
+/// would hand the card straight back, because the plays that put it in the history
+/// sit on the source id and the source is still shared by its owner.
+///
+/// A row here, not a DELETE of the listening sessions: `listening_session` also feeds
+/// streak and lifetime counters, so erasing rows to tidy one list would quietly move
+/// numbers that have nothing to do with playlists.
+///
+/// `dismissedAt` is what keeps this from being a permanent block — a play newer than
+/// it wins, so a member who goes back to the share link sees the playlist again. No FK
+/// on `playlistId`: the source may be deleted later, and a dangling row simply matches
+/// nothing.
+model PlaylistHistoryDismissal {
+  memberId    String   @map("member_id") @db.Uuid
+  playlistId  String   @map("playlist_id") @db.Uuid
+  dismissedAt DateTime @default(now()) @map("dismissed_at")
+
+  @@id([memberId, playlistId])
+  @@map("playlist_history_dismissals")
+}
+
 /// One audio in a playlist, in `order`. Cascades from Lesson on purpose: when the
 /// content team removes a lesson the item disappears and the playlist lives on.
 model PlaylistItem {

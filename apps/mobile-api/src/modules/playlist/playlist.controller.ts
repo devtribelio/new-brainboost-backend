@@ -119,11 +119,15 @@ export class PlaylistController {
     return ok(res, serializePlaylist(row));
   };
 
-  @ApiOperation({ summary: 'Delete a playlist' })
+  @ApiOperation({
+    summary: 'Delete a playlist, or drop someone else\'s from your history',
+    description:
+      "Own playlist: the row is deleted (`deleted: true`). A playlist reached through a share link and played without saving it: nothing is deleted — there is no row of yours — and it is removed from your recent/top instead (`deleted: false`). It comes back if you play it again.",
+  })
   @ApiResponse({ status: 200 })
   remove = async (req: AuthenticatedRequest, res: Response) => {
-    await this.playlistService.remove(req.user!.id, this.id(req));
-    return ok(res, { deleted: true });
+    const result = await this.playlistService.remove(req.user!.id, this.id(req));
+    return ok(res, result);
   };
 
   @ApiOperation({ summary: 'Append audio to a playlist' })

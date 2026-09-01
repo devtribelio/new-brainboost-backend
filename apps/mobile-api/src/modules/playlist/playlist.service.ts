@@ -523,10 +523,55 @@ export class PlaylistService {
     });
   }
 
-  async remove(memberId: string, playlistId: string): Promise<void> {
+  /**
+   * "Get this off my screen", for both kinds of card the member can be looking at.
+   *
+   * Owned playlist → the row is deleted. Someone else's, reached through a share
+   * link and played without ever being saved → nothing is deleted (there is no row
+   * of theirs to delete, and 403 would be a dead end) and it is dropped from their
+   * recent/top instead. One endpoint because it is one intent: the member cannot
+   * be asked which of the two a card happens to be, and the app already knows from
+   * `isOwner` if it wants to word the confirmation differently.
+   *
+   * A missing or ops-blocked id still 404s rather than reporting a dismissal, so a
+   * client passing the wrong id is not told it succeeded.
+   */
+  async remove(memberId: string, playlistId: string): Promise<{ deleted: boolean }> {
     await this.assertAccess(memberId);
-    await this.ownedOrThrow(memberId, playlistId);
-    await prisma.playlist.delete({ where: { id: playlistId } });
+    const row = await prisma.playlist.findUnique({ where: { id: playlistId } });
+    if (!row || row.isBlocked) throw notFound(ERROR_CODES.PLAYLIST_NOT_FOUND);
+
+    if (row.ownerId !== memberId) {
+      await this.dismiss(memberId, playlistId);
+      return { deleted: false };
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.playlist.delete({ where: { id: playlistId } });
+      // Deleting a saved copy must not hand the card straight back. The plays
+      // that put it in recent sit on the SOURCE id — the copy did not exist yet
+      // — and the source is still shared, so without this the merge just stops
+      // and the source re-appears on its own, which reads as a failed delete.
+      if (row.copiedFromPlaylistId) {
+        await this.dismiss(memberId, row.copiedFromPlaylistId, tx);
+      }
+    });
+    return { deleted: true };
+  }
+
+  /** Write (or move forward) the "stop showing me this" line for one playlist. */
+  private async dismiss(
+    memberId: string,
+    playlistId: string,
+    client: Pick<typeof prisma, 'playlistHistoryDismissal'> = prisma,
+  ): Promise<void> {
+    await client.playlistHistoryDismissal.upsert({
+      where: { memberId_playlistId: { memberId, playlistId } },
+      create: { memberId, playlistId },
+      // Playing again and dismissing again moves the line, so the second dismissal
+      // also covers what was collected in between.
+      update: { dismissedAt: new Date() },
+    });
   }
 
   /**
@@ -843,9 +888,21 @@ export class PlaylistService {
     });
     const copyOf = new Map(copies.map((c) => [c.copiedFromPlaylistId!, c.id]));
 
+    // "I deleted this" beats the log — but only up to the moment of the delete:
+    // a newer play means the member went back to the share link deliberately, and
+    // hiding that would turn a delete into a permanent block on someone else's
+    // playlist.
+    const dismissals = await prisma.playlistHistoryDismissal.findMany({
+      where: { memberId, playlistId: { in: ids } },
+      select: { playlistId: true, dismissedAt: true },
+    });
+    const dismissedAt = new Map(dismissals.map((d) => [d.playlistId, d.dismissedAt]));
+
     const merged = new Map<string, { lastPlayedAt: Date | null; totalListenedSec: number }>();
     for (const g of groups) {
       if (!g.playlistId) continue;
+      const cutoff = dismissedAt.get(g.playlistId);
+      if (cutoff && (!g._max.startedAt || g._max.startedAt <= cutoff)) continue;
       const target = copyOf.get(g.playlistId) ?? g.playlistId;
       const acc = merged.get(target) ?? { lastPlayedAt: null, totalListenedSec: 0 };
       const startedAt = g._max.startedAt;
