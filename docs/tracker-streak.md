@@ -333,6 +333,51 @@ Backfill §3.4 dan migrasi §4.3 **harus selesai sebelum** fitur ini tampil, sup
 - [ ] Streak N, satu hari kosong, qualify hari berikutnya → N+1, hari kosong tampil ❄️; dua hari kosong → 0.
 - [ ] Client lama (tanpa field `streak.state`) tetap menampilkan `streakDays` yang benar.
 
+## 8b. Bug terpisah yang ditemukan saat verifikasi (2026-08-31)
+
+Dua-duanya **bukan** akibat perubahan batas hari — muncul identik sebelum dan sesudah migrasi pada `GET /api/user/stats/home`. Dicatat di sini karena ketemunya saat memverifikasi response ketiga member insiden, dan belum ada tempat lain yang mencatatnya.
+
+### BUG-1 · `listening_session.course_id` berisi `products.id`, bukan `courses.id` — challenge per program selalu 0
+
+**Gejala.** Ketiga member insiden punya streak global 10–12 tapi **setiap** `challenges[].day` bernilai `0`, di kedua skenario bucketing.
+
+**Bukti (prod, 2026-08-31).**
+
+```
+Giska — ENROLLMENT (courses.id)      019f7ea6-71dd-…  Money Magnet
+                                     019f7ea6-734e-…  Let Go of the Past
+Giska — SESI (listening_session)     019f7ea6-7344-…  rows=41
+                                     019f7ea6-71d4-…  rows=1
+                                     → nol yang cocok di tabel `courses`
+                                     → dua-duanya cocok di tabel `products`
+
+Populasi:  total baris                171.087
+           tidak cocok ke courses.id  171.087  (100 %)
+           cocok ke products.id       171.084  (99,998 %)
+```
+
+**Mekanisme.** `stats.service.ts` mem-filter sesi dengan `courseId IN (enrollment.courseId)`, dan `courseEnrollment.courseId` adalah `courses.id` yang asli. Karena kolom di `listening_session` menyimpan `products.id`, join itu **tidak pernah cocok untuk siapa pun** — challenge per program menampilkan 0 sejak fitur ini hidup. Streak global tidak terpengaruh (tidak difilter `courseId`).
+
+**Yang harus dipastikan dulu:** apakah `courseId` di `TrackSessionDto` memang dimaksud *product* id oleh klien. Kalau iya, yang salah adalah nama kolom + join-nya, bukan data yang dikirim.
+
+**Opsi perbaikan:**
+
+| Opsi | Konsekuensi |
+|---|---|
+| Klien kirim `courses.id` | butuh rilis mobile, dan 171 k baris lama tetap rusak |
+| **BE resolve `products.id` → `courses.id` saat tulis** | satu lookup di `tracking.service`, plus `UPDATE` backfill 171 k baris. **Disarankan** — jalur baca tetap `groupBy` sederhana |
+| BE resolve saat baca | tanpa backfill, tapi menambah join di endpoint yang dipanggil setiap buka app |
+
+`courses.product_id` unik, jadi pemetaannya satu-satu ke dua arah — backfill-nya deterministik.
+
+### BUG-2 · `weeklyRecap` bisa nol di pagi hari Senin
+
+**Gejala.** Giska (diuji Senin 31 Agu): `daysActive` 1 → 0 dan `listenSec` 3568 → 0 setelah migrasi, sementara `streakDays` 12.
+
+**Bukan kesalahan hitung.** Sesinya mulai jam 01.00 Senin, yang di batas 04.00 masuk **hari dengar Minggu** — minggu sebelumnya. Minggu berjalan memang belum punya isi.
+
+**Konsekuensi.** Setiap Senin pagi, member yang mendengarkan lewat tengah malam melihat `streakDays: 12` bersanding dengan `daysActive: 0/7`. Benar menurut aturan, janggal kalau FE menaruh keduanya berdampingan. Perlu disampaikan ke mobile; tidak ada perubahan BE yang diusulkan.
+
 ## Lampiran A — export BigQuery untuk deteksi & backfill
 
 Dijalankan **sekali per insiden** oleh siapa pun yang punya akses BigQuery (bukan tugas BE). Hasilnya = CSV input untuk `pnpm tracker:backfill` (§3.4). Biaya: dihitung per byte terpindai, filter `event_date` membuat rentang 9 hari hanya beberapa ratus MB (1 TB/bulan pertama gratis).

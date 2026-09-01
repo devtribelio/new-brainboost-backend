@@ -36,13 +36,25 @@ export class WeeklyRecapDto {
   listenSec!: number;
 }
 
-/** One day of the current-week streak strip (spec §1 / BB-112). */
+/**
+ * One day of the current-week streak strip (spec §1 / BB-112).
+ *
+ * `state` uses the SAME vocabulary as the headline `streak.state`, so the client
+ * writes one state→presentation mapping and calls it for both. Two invariants the
+ * type cannot express: the headline never sends `future` (only a day can be in the
+ * future), and at most one entry is `at_risk` — always today's.
+ */
 export class WeeklyStreakEntryDto {
-  @ApiProperty({ example: '2026-07-20', description: 'Calendar day (YYYY-MM-DD) in WIB' })
+  @ApiProperty({ example: '2026-07-20', description: 'Listening day (YYYY-MM-DD) in WIB' })
   date!: string;
 
-  @ApiProperty({ type: 'boolean', example: true, description: 'True when audio listened that day ≥ qualifyThresholdSec' })
-  qualified!: boolean;
+  @ApiProperty({
+    example: 'burning',
+    description:
+      'burning = listened ≥ qualifyThresholdSec that day · at_risk = today, not there yet · ' +
+      'dimmed = missed but forgiven by grace · none = missed · future = has not happened yet',
+  })
+  state!: string;
 }
 
 /**

@@ -76,7 +76,7 @@ describe('StatsService.courseStats — per-course listening stats (real Postgres
     expect(a.totalListenSec).toBe(isMonday ? 700 : 1400);
     expect(a.lastListenedAt).not.toBeNull();
     // today qualifies for A
-    expect(a.weeklyStreak.find((e) => e.date === dayKey(today))!.qualified).toBe(true);
+    expect(a.weeklyStreak.find((e) => e.date === dayKey(today))!.state).toBe('burning');
     expect(a.weeklyStreak).toHaveLength(7);
   });
 
@@ -85,7 +85,7 @@ describe('StatsService.courseStats — per-course listening stats (real Postgres
     expect(b.streak).toBe(0);
     expect(b.totalListenSec).toBe(100); // total is raw seconds, not gated
     expect(b.lastListenedAt).not.toBeNull();
-    expect(b.weeklyStreak.every((e) => e.qualified === false)).toBe(true);
+    expect(b.weeklyStreak.every((e) => e.state !== 'burning')).toBe(true);
   });
 
   it('returns zeros/null for a never-listened course (not an error)', async () => {
@@ -97,6 +97,6 @@ describe('StatsService.courseStats — per-course listening stats (real Postgres
       lastListenedAt: null,
     });
     expect(c.weeklyStreak).toHaveLength(7);
-    expect(c.weeklyStreak.every((e) => e.qualified === false)).toBe(true);
+    expect(c.weeklyStreak.every((e) => e.state !== 'burning')).toBe(true);
   });
 });

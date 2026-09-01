@@ -21,12 +21,41 @@ function qualifyingDays(groups: { localDay: Date; _sum: { listenedSec: number | 
     .map((g) => g.localDay);
 }
 
-/** Build the Mon→Sun (WIB) 7-entry streak strip from a set of qualifying day keys. */
-function buildWeeklyStreak(qualifyingKeys: Set<string>, todayWIB: Date): WeeklyStreakEntryDto[] {
+/**
+ * Build the Mon→Sun (WIB) 7-entry streak strip, one `state` per day.
+ *
+ * The state is resolved HERE, not in the client: deciding "future" means comparing a
+ * date against today, and a client that does its own date arithmetic against the
+ * device clock is the exact failure this whole workstream removes. The server already
+ * knows which listening day it is; it should say so.
+ *
+ * Order of the branches is load-bearing. A day that qualified is `burning` even when
+ * it is today (otherwise today would report `at_risk` after the member had already
+ * listened), and `future` is decided before the today-check so tomorrow never reads as
+ * a miss. `at_risk` is today-only and carries no claim about the streak's length — a
+ * member on zero still gets it, meaning "today is still open".
+ */
+function buildWeeklyStreak(
+  qualifyingKeys: Set<string>,
+  forgivenKeys: Set<string>,
+  todayWIB: Date,
+): WeeklyStreakEntryDto[] {
   const weekStart = weekStartMondayWIB(todayWIB);
+  const todayKey = dayKey(todayWIB);
+
   return Array.from({ length: 7 }, (_, i) => {
-    const key = dayKey(addDays(weekStart, i));
-    return { date: key, qualified: qualifyingKeys.has(key) };
+    const date = dayKey(addDays(weekStart, i));
+    // YYYY-MM-DD compares lexicographically, which is why the keys are strings.
+    const state = qualifyingKeys.has(date)
+      ? 'burning'
+      : date > todayKey
+        ? 'future'
+        : date === todayKey
+          ? 'at_risk'
+          : forgivenKeys.has(date)
+            ? 'dimmed'
+            : 'none';
+    return { date, state };
   });
 }
 
@@ -118,10 +147,14 @@ export class StatsService {
 
     // ---- Weekly streak strip (Mon..Sun of the current WIB week) ---------
     // Always exactly 7 entries. A day qualifies when its total audio ≥
-    // MIN_QUALIFY_SEC (global, all courses). Future days have no sessions, so
-    // they fall out naturally as `qualified: false` — the client renders the
-    // "future" vs "missed" distinction from `date` vs `today`.
-    const weeklyStreak = buildWeeklyStreak(new Set(qualifyingDays(dayGroups).map(dayKey)), todayWIB);
+    // MIN_QUALIFY_SEC (global, all courses). `forgivenDays` comes from the same
+    // grace walk that produced the headline state, so a dimmed flame and a dimmed
+    // circle can never disagree about which night was let off.
+    const weeklyStreak = buildWeeklyStreak(
+      new Set(qualifyingDays(dayGroups).map(dayKey)),
+      new Set(streak.forgivenDays.map(dayKey)),
+      todayWIB,
+    );
 
     return {
       streakDays,
@@ -175,11 +208,22 @@ export class StatsService {
       }),
     ]);
 
+    // Same grace as the home screen. Without it this endpoint and `challenges[].day`
+    // would report two different numbers for the same course on two screens.
+    const graceDays = await settingsService.getNumber(
+      SETTING_KEYS.streakGraceDays,
+      GRACE_DAYS_DEFAULT,
+    );
     const qualifying = qualifyingDays(dayGroups);
+    const courseStreak = computeStreakState(qualifying, todayWIB, graceDays);
     return {
       courseId,
-      streak: computeStreak(qualifying, todayWIB),
-      weeklyStreak: buildWeeklyStreak(new Set(qualifying.map(dayKey)), todayWIB),
+      streak: courseStreak.days,
+      weeklyStreak: buildWeeklyStreak(
+        new Set(qualifying.map(dayKey)),
+        new Set(courseStreak.forgivenDays.map(dayKey)),
+        todayWIB,
+      ),
       totalListenSec: totalAgg._sum.listenedSec ?? 0,
       lastListenedAt: last?.startedAt.toISOString() ?? null,
     };
