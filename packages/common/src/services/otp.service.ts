@@ -99,6 +99,22 @@ function isEmail(target: string): boolean {
   return target.includes('@');
 }
 
+/**
+ * Canonical form of an OTP target. Email is case-insensitive by RFC, but every
+ * lookup here is an exact string match on `otp_codes.target`, so `John@x.com`
+ * and `john@x.com` are two unrelated targets: the code issued against one is
+ * OTP_NOT_FOUND against the other, and each gets its own cooldown + 24h cap
+ * budget. Normalising in the service (rather than at each DTO) covers callers
+ * that pass a target straight from the request — `/auth/validateOtp` did, and
+ * that is where users hit this — as well as those passing `member.email`
+ * verbatim from a legacy row. Phone targets pass through untouched: they are
+ * already canonicalised to E.164 by `otpPhoneTarget()`.
+ */
+function canonicalTarget(target: string): string {
+  const t = target.trim();
+  return isEmail(t) ? t.toLowerCase() : t;
+}
+
 class OtpService {
   /**
    * A tester target is matched (case-insensitively) against the env whitelist.
@@ -123,7 +139,8 @@ class OtpService {
     return this.isTestTarget(target) && code === testAccountConfig().code;
   }
 
-  async issue(input: IssueOtpInput): Promise<{ id: string; code: string; expiresAt: Date }> {
+  async issue(rawInput: IssueOtpInput): Promise<{ id: string; code: string; expiresAt: Date }> {
+    const input = { ...rawInput, target: canonicalTarget(rawInput.target) };
     const now = new Date();
 
     // Tester account (e.g. Apple App Review): no real OTP is generated, stored,
@@ -266,7 +283,8 @@ class OtpService {
    * requestVerification* / forgot-password family) keep using issue(), so the
    * user is told to wait rather than silently handed a stale expiry.
    */
-  async issueOrReuse(input: IssueOtpInput): Promise<{ expiresAt: Date; reused: boolean }> {
+  async issueOrReuse(rawInput: IssueOtpInput): Promise<{ expiresAt: Date; reused: boolean }> {
+    const input = { ...rawInput, target: canonicalTarget(rawInput.target) };
     const cooldownSeconds = input.resendCooldownSeconds ?? OTP_RESEND_COOLDOWN_SECONDS;
     if (cooldownSeconds > 0) {
       const now = new Date();
@@ -359,12 +377,14 @@ class OtpService {
     return false;
   }
 
-  async verify(target: string, code: string, purpose: OtpPurpose): Promise<void> {
+  async verify(rawTarget: string, code: string, purpose: OtpPurpose): Promise<void> {
+    const target = canonicalTarget(rawTarget);
     if (this.isTestBypass(target, code)) return;
     await this.resolveAndMatch(target, code, purpose);
   }
 
-  async consume(target: string, code: string, purpose: OtpPurpose): Promise<void> {
+  async consume(rawTarget: string, code: string, purpose: OtpPurpose): Promise<void> {
+    const target = canonicalTarget(rawTarget);
     if (this.isTestBypass(target, code)) {
       // A tester normally has no stored OTP (issue() is bypassed), but clear any
       // stray outstanding code so state stays clean and re-usable.

@@ -36,6 +36,37 @@ export class WeeklyRecapDto {
   listenSec!: number;
 }
 
+/**
+ * Streak block (spec `docs/tracker-streak.md` §5.5). Additive: the root
+ * `streakDays` stays, so a client that predates this object keeps working.
+ */
+export class StreakDto {
+  @ApiProperty({ type: 'integer', example: 6, description: 'Same value as the root `streakDays`' })
+  days!: number;
+
+  @ApiProperty({
+    example: 'burning',
+    description:
+      'burning = today already qualifies · at_risk = not yet today, yesterday did · ' +
+      'dimmed = carried by grace, revivable before the day closes · none = no streak',
+  })
+  state!: string;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    example: '2026-08-29T03:59:59+07:00',
+    description: 'When the grace window closes. Present only while `state` is `dimmed`.',
+  })
+  restoreDeadline!: string | null;
+
+  @ApiProperty({
+    type: 'integer',
+    example: 4,
+    description: 'Hour (WIB) the listening day rolls over — for the "berganti jam 04.00" copy',
+  })
+  dayBoundaryHour!: number;
+}
+
 /** Response payload (inner `data`) for `GET /api/user/stats/home` (spec §5.2). */
 export class StatsHomeDto {
   @ApiProperty({ type: 'integer', example: 7 })
@@ -46,6 +77,9 @@ export class StatsHomeDto {
 
   @ApiProperty({ type: 'integer', example: 22500, description: 'Lifetime total seconds listened' })
   totalListenSec!: number;
+
+  @ApiProperty({ type: () => StreakDto })
+  streak!: StreakDto;
 
   @ApiProperty({ type: 'array', itemType: () => ChallengeDto })
   challenges!: ChallengeDto[];
