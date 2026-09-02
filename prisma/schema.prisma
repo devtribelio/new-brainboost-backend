@@ -1146,6 +1146,19 @@ model CommerceTransaction {
   // Commission idempotency key (B-2): stable across re-settles (Apple original_transaction_id).
   // Audit/forensics + lets the cleanup job map a stray commission back to its purchase.
   attributionKey               String?                   @map("attribution_key")
+  // Tracking-link attribution (shop web). Snapshot of the visitor's `bb_attr`
+  // cookie at checkout, FROZEN — never updated. The cookie is last-touch, so a
+  // report joining shop_visits by guest_id would retro-move a paid order to a
+  // later campaign. Reporting-only: these NEVER feed commission (that stays
+  // `attributedAffiliatorMemberId` + AffiliateVisit). NULL = no source; the
+  // report renders "direct", the column does not store it, so "FE never sent
+  // it" stays distinguishable from "genuinely direct".
+  utmSource                    String?                   @map("utm_source")
+  utmMedium                    String?                   @map("utm_medium")
+  utmCampaign                  String?                   @map("utm_campaign")
+  utmContent                   String?                   @map("utm_content")
+  utmTerm                      String?                   @map("utm_term")
+  guestId                      String?                   @map("guest_id")
   status                       CommerceTransactionStatus @default(PENDING)
   paidAt                       DateTime?                 @map("paid_at")
   canceledAt                   DateTime?                 @map("canceled_at")
@@ -1164,6 +1177,7 @@ model CommerceTransaction {
   @@index([memberId, createdAt])
   @@index([status])
   @@index([expiredAt])
+  @@index([utmSource, utmCampaign, createdAt]) // Sumber Traffic report
   @@map("commerce_transactions")
 }
 
@@ -1396,11 +1410,11 @@ model ThirdPartyCredential {
 // Per-syncer watermark + last-run stats. One row per syncer ("members",
 // "enrollments", "commissions", "kyc", "tree", "reviews", "posts").
 model SyncState {
-  syncer    String   @id // syncer name
+  syncer    String    @id // syncer name
   watermark String? // max processed COALESCE(updated, created), ISO datetime string
   lastRunAt DateTime? @map("last_run_at")
-  lastStats Json?    @map("last_stats") // { scanned, upserted, skipped, voided, errors }
-  updatedAt DateTime @updatedAt @map("updated_at")
+  lastStats Json?     @map("last_stats") // { scanned, upserted, skipped, voided, errors }
+  updatedAt DateTime  @updatedAt @map("updated_at")
 
   @@map("sync_state")
 }
@@ -1415,4 +1429,36 @@ model MemberRedirect {
 
   @@index([winnerLegacyId])
   @@map("member_redirect")
+}
+
+/// Tracking-link visit on the shop web (`brainboost-marketplace`).
+/// Deliberately NOT AffiliateVisit: that table requires an affiliator
+/// (`affiliator_member_id` NOT NULL) and is read by the commission resolver, so
+/// a UTM-only webinar click cannot be written there and loosening it would put
+/// non-payout rows in the payout path. Reporting-only table; no FK to Member or
+/// Product so a delete on either can never block a visit write.
+model ShopVisit {
+  id            String   @id @default(uuid(7)) @db.Uuid
+  guestId       String   @map("guest_id")
+  memberId      String?  @map("member_id") @db.Uuid
+  productId     String?  @map("product_id") @db.Uuid
+  utmSource     String?  @map("utm_source")
+  utmMedium     String?  @map("utm_medium")
+  utmCampaign   String?  @map("utm_campaign")
+  utmContent    String?  @map("utm_content")
+  utmTerm       String?  @map("utm_term")
+  referer       String?
+  ipAddress     String?  @map("ip_address")
+  userAgent     String?  @map("user_agent")
+  /// Client-generated per-send id. Dedupes RETRIES, not visits: a refresh sends
+  /// a new id and must produce a new row (Kunjungan counts rows, Pengunjung unik
+  /// counts distinct guest_id).
+  clientEventId String?  @unique @map("client_event_id")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@index([guestId, createdAt])
+  @@index([memberId])
+  @@index([utmSource, utmCampaign, createdAt])
+  @@index([createdAt])
+  @@map("shop_visits")
 }
