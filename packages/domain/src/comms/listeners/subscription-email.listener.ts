@@ -1,5 +1,6 @@
 import { logger } from '@bb/common/config/logger';
 import { subscriptionEvents } from '@bb/common/events/subscription-events';
+import { prisma } from '@bb/db';
 import { enqueueComms } from '@bb/common/services/comms-outbox';
 
 /**
@@ -57,6 +58,27 @@ export function registerSubscriptionEmailListeners(): void {
     }
   });
 
+  // Losing a seat, all three ways it happens. One message type discriminated by
+  // `reason` rather than three types: to the person receiving it these are the
+  // same event — the seat they were using is gone — and the copy has to stay
+  // parallel anyway. Addressed by `recipient`, since bb-comms resolves refId to
+  // the subscription's OWNER and these go to a member of it.
+  subscriptionEvents.on('subscription.seat_removed', async (e) => {
+    await enqueueSeatEnded([e.memberId], e.subscriptionId, 'removed');
+  });
+
+  subscriptionEvents.on('subscription.plan_changed', async (e) => {
+    if (e.evictedMemberIds.length) {
+      await enqueueSeatEnded(e.evictedMemberIds, e.subscriptionId, 'tier_change');
+    }
+  });
+
+  subscriptionEvents.on('subscription.expired', async (e) => {
+    if (e.seatMemberIds.length) {
+      await enqueueSeatEnded(e.seatMemberIds, e.subscriptionId, 'expired');
+    }
+  });
+
   subscriptionEvents.on('subscription.plan_changed', async (e) => {
     try {
       await enqueueComms({
@@ -79,4 +101,40 @@ export function registerSubscriptionEmailListeners(): void {
       );
     }
   });
+}
+
+/**
+ * Look the members up rather than threading emails through the events: an email
+ * on an event payload goes stale the moment someone changes theirs, and every
+ * emitter would have to remember to include it.
+ *
+ * A member with no email is skipped silently — they still got the push, and
+ * every one of these paths already told them there.
+ */
+async function enqueueSeatEnded(
+  memberIds: string[],
+  subscriptionId: string,
+  reason: 'removed' | 'tier_change' | 'expired',
+): Promise<void> {
+  try {
+    const members = await prisma.member.findMany({
+      where: { id: { in: memberIds }, email: { not: null } },
+      select: { email: true, fullName: true },
+    });
+    for (const m of members) {
+      await enqueueComms({
+        type: 'SubscriptionSeatEnded',
+        channel: 'email',
+        priority: 'normal',
+        refId: subscriptionId, // bb-comms reads the plan/tier from here
+        recipient: m.email as string, // …but sends to the seat member, not the owner
+        payload: { reason, memberName: m.fullName ?? '' },
+      });
+    }
+  } catch (err) {
+    logger.error(
+      { err, subscriptionId, reason },
+      '[comms-email] failed to enqueue SubscriptionSeatEnded',
+    );
+  }
 }

@@ -138,7 +138,9 @@ describe('subscription email receipts (BE-18)', () => {
       ...lifecyclePayload(subId),
       previousPlanCode: 'FAMILY_12M',
       previousTier: 'FAMILY',
-      evictedMemberIds: ['m1', 'm2'],
+      // Real ids: the seat-ended listener looks these up, and members.id is
+      // @db.Uuid — a placeholder string makes Prisma throw on the query.
+      evictedMemberIds: [memberId],
     });
     await settle();
 
@@ -149,8 +151,48 @@ describe('subscription email receipts (BE-18)', () => {
     expect(rows[0].payload).toMatchObject({
       previousTier: 'FAMILY',
       previousPlanCode: 'FAMILY_12M',
-      evictedCount: 2,
+      evictedCount: 1,
     });
+  });
+
+  it('a seat member gets one email per way of losing the seat, addressed to them', async () => {
+    const subId = `sub-seat-${uniq}`;
+    const seatMember = await prisma.member.create({
+      data: {
+        email: `seat-ended-${uniq}@test.local`,
+        fullName: 'Seat Member',
+        passwordHash: 'x',
+        isActive: true,
+      },
+    });
+
+    subscriptionEvents.emit('subscription.seat_removed', {
+      ...lifecyclePayload(subId),
+      memberId: seatMember.id,
+    });
+    subscriptionEvents.emit('subscription.plan_changed', {
+      ...lifecyclePayload(subId),
+      previousPlanCode: 'FAMILY_12M',
+      previousTier: 'FAMILY',
+      evictedMemberIds: [seatMember.id],
+    });
+    subscriptionEvents.emit('subscription.expired', {
+      ...lifecyclePayload(subId),
+      seatMemberIds: [seatMember.id],
+    });
+    await settle();
+
+    const rows = await outbox('SubscriptionSeatEnded', subId);
+    expect(rows).toHaveLength(3);
+    // Addressed to the seat member — bb-comms resolves refId to the OWNER, so
+    // without this the owner would receive all three.
+    expect(rows.every((r) => r.recipient === seatMember.email)).toBe(true);
+    expect(rows.map((r) => (r.payload as { reason: string }).reason).sort()).toEqual(
+      ['expired', 'removed', 'tier_change'],
+    );
+
+    await prisma.notificationOutbox.deleteMany({ where: { refId: subId } });
+    await prisma.member.delete({ where: { id: seatMember.id } });
   });
 
   it('plan-product payment does NOT enqueue CoursePaymentSuccess; retail still does', async () => {
