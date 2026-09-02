@@ -1,4 +1,9 @@
-import { Prisma, type SubscriptionSeat } from '@prisma/client';
+import {
+  Prisma,
+  type MemberSubscription,
+  type SubscriptionPlan,
+  type SubscriptionSeat,
+} from '@prisma/client';
 import { randomInt } from 'node:crypto';
 import { prisma } from '@bb/db';
 import { logger } from '@bb/common/config/logger';
@@ -11,6 +16,12 @@ import {
 // Shared manually (WA/chat) — no ambiguous chars (0/O/1/I).
 const INVITE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 const INVITE_LENGTH = 10;
+
+export interface RemovedSeat {
+  /** The member who just lost the seat. */
+  memberId: string;
+  subscription: MemberSubscription & { plan: SubscriptionPlan };
+}
 
 export interface InviteResult {
   inviteCode: string;
@@ -168,11 +179,19 @@ export class SeatService {
     );
   }
 
-  /** Owner kicks a member off a seat. Seat 1 (the owner) can't be removed. */
-  async removeSeat(ownerId: string, seatId: string): Promise<void> {
+  /**
+   * Owner kicks a member off a seat. Seat 1 (the owner) can't be removed.
+   *
+   * Returns who was removed and on which subscription so the caller can announce
+   * it — losing access this way used to be the only silent one of the three
+   * (tier change and expiry both notify), and it is the most personal of them.
+   * Emission stays with the caller, matching the rest of the module: services
+   * commit, callers announce.
+   */
+  async removeSeat(ownerId: string, seatId: string): Promise<RemovedSeat> {
     const seat = await prisma.subscriptionSeat.findUnique({
       where: { id: seatId },
-      include: { subscription: true },
+      include: { subscription: { include: { plan: true } } },
     });
     if (!seat) throw new NotFoundException('Seat tidak ditemukan');
     if (seat.subscription.ownerId !== ownerId) {
@@ -186,6 +205,7 @@ export class SeatService {
       { ownerId, seatId, removedMemberId: seat.memberId },
       '[subscription] seat removed by owner',
     );
+    return { memberId: seat.memberId, subscription: seat.subscription };
   }
 
   /** Member walks away from their seat. The owner's exit path is cancel, not leave. */

@@ -198,7 +198,20 @@ export class SubscriptionController {
   @ApiResponse({ status: 200 })
   removeSeat = async (req: AuthenticatedRequest, res: Response) => {
     if (!req.user) throw new UnauthorizedException();
-    await this.seatService.removeSeat(req.user.id, req.params.seatId);
+    const { memberId, subscription: sub } = await this.seatService.removeSeat(
+      req.user.id,
+      req.params.seatId,
+    );
+    subscriptionEvents.emit('subscription.seat_removed', {
+      subscriptionId: sub.id,
+      ownerId: sub.ownerId,
+      planId: sub.plan.id,
+      planCode: sub.plan.code,
+      tier: sub.plan.tier,
+      expiresAt: sub.expiresAt,
+      source: sub.source,
+      memberId,
+    });
     return ok(res, { removed: true });
   };
 

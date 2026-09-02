@@ -137,6 +137,32 @@ export function registerSubscriptionNotificationListener(): void {
     }
   });
 
+  subscriptionEvents.on('subscription.seat_removed', async (e) => {
+    try {
+      await producer.createForMember({
+        memberId: e.memberId,
+        type: ActionLabel.SubscriptionSeatRemoved,
+        notifGroup: NotifGroup.General,
+        title: 'Akses langganan berakhir',
+        // States the fact without narrating a motive we do not know, and without
+        // blaming the plan — the tier did not change, a person decided. The
+        // second sentence is the only actionable part: who can undo it.
+        body: `Kamu sudah tidak tergabung di langganan ${e.tier}, jadi akses ke programnya berhenti. Hubungi pemilik langganan kalau ini tidak disengaja.`,
+        payload: subPayload(e),
+        // No dedupeKey on purpose. The other subscription notifications guard
+        // against webhook redelivery and repeated cron ticks; this one is a
+        // direct HTTP call the owner made once, with no path that replays it.
+        // And re-inviting then removing the same member again IS a new event
+        // they should hear about, which any stable key would swallow.
+      });
+    } catch (err) {
+      logger.error(
+        { err, subscriptionId: e.subscriptionId, memberId: e.memberId },
+        '[notification] seat removed by owner failed',
+      );
+    }
+  });
+
   subscriptionEvents.on('subscription.canceled', async (e) => {
     if (e.reason === 'refund') return; // commerce refund notification covers it
     try {

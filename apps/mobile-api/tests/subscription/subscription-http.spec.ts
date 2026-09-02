@@ -81,6 +81,7 @@ async function cleanup() {
   const memberIds = (
     await prisma.member.findMany({ where: { email: { contains: uniq } }, select: { id: true } })
   ).map((m) => m.id);
+  await prisma.notification.deleteMany({ where: { memberId: { in: memberIds } } });
   await prisma.refreshToken.deleteMany({ where: { memberId: { in: memberIds } } });
   await prisma.device.deleteMany({ where: { memberId: { in: memberIds } } });
   const subs = await prisma.memberSubscription.findMany({
@@ -225,6 +226,17 @@ describe('/subscription HTTP module (BE-19)', () => {
     expect(
       (await prisma.subscriptionSeat.findUniqueOrThrow({ where: { id: seat.id } })).memberId,
     ).toBeNull();
+
+    // Being removed by hand used to be the one way of losing a seat that told
+    // the member nothing — tier change and expiry both notify.
+    await new Promise((r) => setTimeout(r, 250));
+    const notifs = await prisma.notification.findMany({
+      where: { memberId: guestId, type: 'subscriptionSeatRemoved' },
+    });
+    expect(notifs).toHaveLength(1);
+    // Must not blame the plan: the tier did not change, a person decided.
+    expect(notifs[0].body).toContain('tidak tergabung');
+    expect(notifs[0].body).not.toContain('berubah jadi');
   });
 
   it('declare → /me shows it → choose seats → cancel, all answering the /me shape', async () => {

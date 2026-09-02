@@ -63,6 +63,18 @@ export interface SubscriptionPendingChangeEvent extends SubscriptionEventBase {
   effectiveAt: Date;
 }
 
+/**
+ * The owner removed one member from a seat by hand.
+ *
+ * Separate from the eviction carried on `subscription.plan_changed`: that one is
+ * the tier shrinking and takes a list, this one is a person deciding about
+ * another person and takes exactly one member. The copy differs accordingly —
+ * blaming "paket berubah" for a manual removal would be a lie.
+ */
+export interface SubscriptionSeatRemovedEvent extends SubscriptionEventBase {
+  memberId: string;
+}
+
 /** The scheduled change landed: `planCode`/`tier` are the NEW plan. */
 export interface SubscriptionPlanChangedEvent extends SubscriptionEventBase {
   previousPlanCode: string;
@@ -78,6 +90,7 @@ export type SubscriptionEventMap = {
   'subscription.canceled': SubscriptionCanceledEvent;
   'subscription.pending_change': SubscriptionPendingChangeEvent;
   'subscription.plan_changed': SubscriptionPlanChangedEvent;
+  'subscription.seat_removed': SubscriptionSeatRemovedEvent;
 };
 
 class TypedEmitter {
