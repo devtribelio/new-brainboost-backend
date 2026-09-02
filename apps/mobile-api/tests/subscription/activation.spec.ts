@@ -276,6 +276,54 @@ describe('SubscriptionService.activateFromPayment', () => {
     expect(seats.map((s) => s.memberId)).toEqual([ownerId, member2]); // empty seat 3 dropped
   });
 
+  it('an upgrade restarts the term today — the credited remainder is not handed back twice', async () => {
+    const first = await activate({ productId: soloProductId }); // 2 seats
+    const oldExpiry = new Date(Date.now() + 180 * DAY_MS); // mid-term
+    await prisma.memberSubscription.update({
+      where: { id: first.subscription!.id },
+      data: { expiresAt: oldExpiry },
+    });
+
+    const res = await activate({ productId: duoProductId }); // 3 seats — upgrade
+    expect(res.outcome).toBe('plan_change');
+
+    // Checkout already credited the unused Solo term back and charged the full
+    // Duo price on the understanding that the term restarts now. Anchoring to the
+    // old expiry would refund that remainder AND keep it — 18 months for 12.
+    const expected = addMonths(new Date(), 12);
+    expect(
+      Math.abs(res.subscription!.expiresAt.getTime() - expected.getTime()),
+    ).toBeLessThan(60_000);
+    expect(res.subscription!.expiresAt.getTime()).toBeLessThan(
+      addMonths(oldExpiry, 12).getTime(),
+    );
+  });
+
+  it('a downgrade keeps the old anchor — nothing was credited, so nothing is discarded', async () => {
+    const first = await activate({ productId: duoProductId }); // 3 seats
+    const oldExpiry = new Date(Date.now() + 180 * DAY_MS);
+    await prisma.memberSubscription.update({
+      where: { id: first.subscription!.id },
+      data: { expiresAt: oldExpiry },
+    });
+
+    const res = await activate({ productId: soloProductId }); // 2 seats — downgrade
+    expect(res.outcome).toBe('plan_change');
+    expect(res.subscription!.expiresAt.getTime()).toBe(addMonths(oldExpiry, 12).getTime());
+  });
+
+  it('provider expiry still wins over both anchors (store path)', async () => {
+    const first = await activate({ productId: soloProductId });
+    await prisma.memberSubscription.update({
+      where: { id: first.subscription!.id },
+      data: { expiresAt: new Date(Date.now() + 180 * DAY_MS) },
+    });
+
+    const providerExpiresAt = new Date(Date.now() + 400 * DAY_MS);
+    const res = await activate({ productId: duoProductId, providerExpiresAt });
+    expect(res.subscription!.expiresAt.getTime()).toBe(providerExpiresAt.getTime());
+  });
+
   it('shrinking below the household evicts, honouring the owner’s choice', async () => {
     const keeper = await makeMember('keeper');
     const loser = await makeMember('loser');
@@ -433,3 +481,10 @@ describe('SubscriptionService.activateFromPayment', () => {
     expect(seats.every((s) => s.memberId === null)).toBe(true); // seat 1 left empty
   });
 });
+
+/** Mirrors the service's own month arithmetic. */
+function addMonths(d: Date, months: number): Date {
+  const out = new Date(d);
+  out.setMonth(out.getMonth() + months);
+  return out;
+}

@@ -101,7 +101,12 @@ interface ActivationMeta {
  */
 export class SubscriptionService {
   async activateFromPayment(input: ActivateFromPaymentInput): Promise<ActivationResult> {
-    const plan = await prisma.subscriptionPlan.findUnique({ where: { productId: input.productId } });
+    const plan = await prisma.subscriptionPlan.findUnique({
+      where: { productId: input.productId },
+      // Price comes along so a tier change can tell up from down — the two
+      // anchor their new expiry differently (see changePlan).
+      include: { product: { select: { price: true } } },
+    });
     if (!plan) return { outcome: 'noop', subscription: null, plan: null, noopReason: 'no-plan' };
 
     const graceDays = await this.getGraceDays();
@@ -681,14 +686,43 @@ export class SubscriptionService {
   private async changePlan(
     tx: Prisma.TransactionClient,
     sub: MemberSubscription,
-    plan: { id: string; periodMonths: number; seatCount: number },
+    plan: { id: string; periodMonths: number; seatCount: number; product: { price: number } },
     graceDays: number,
     meta: ActivationMeta,
   ): Promise<{ sub: MemberSubscription; evictedMemberIds: string[] }> {
-    // Same expiry anchor as renew() (BB-79 amendment) — RC sends providerExpiresAt
-    // in practice, so this local math is a fallback only.
+    // Where the new term starts depends on the DIRECTION, and the two are not
+    // interchangeable — this is the one place in the service where the renewal
+    // anchor (BB-79) must NOT be reused.
+    //
+    // An UPGRADE was already paid for by discarding the old term: checkout
+    // credits the unused portion back (`computeProration`) and charges the new
+    // plan's full price on the understanding that the term restarts today.
+    // Anchoring it to the old expiry hands that time back a second time — the
+    // member is refunded for the remainder AND keeps it. Upgrading at the
+    // midpoint of an annual plan bought 18 months of the bigger tier for 12,
+    // and upgrading on day one bought nearly 24.
+    //
+    // A DOWNGRADE credits nothing (full price at renewal), so the old expiry is
+    // the honest anchor there, exactly like a plain renewal.
+    //
+    // `providerExpiresAt` still wins outright: on the store path Apple does its
+    // own proration and its expiry is the authority. That is also why this went
+    // unnoticed — the comment here used to call the local math a fallback "since
+    // RC sends providerExpiresAt in practice", forgetting that web and Android
+    // never send it and therefore ALWAYS take this branch.
+    const oldPlan = await tx.subscriptionPlan.findUnique({
+      where: { id: sub.planId },
+      include: { product: { select: { price: true } } },
+    });
+    const upgrading =
+      oldPlan != null &&
+      isUpgrade(
+        { seatCount: oldPlan.seatCount, price: oldPlan.product.price },
+        { seatCount: plan.seatCount, price: plan.product.price },
+      );
+    const anchor = upgrading ? new Date() : sub.expiresAt;
     const expiresAt =
-      meta.providerExpiresAt ?? addMonths(sub.expiresAt, meta.months ?? plan.periodMonths);
+      meta.providerExpiresAt ?? addMonths(anchor, meta.months ?? plan.periodMonths);
 
     const updated = await tx.memberSubscription.update({
       where: { id: sub.id },
