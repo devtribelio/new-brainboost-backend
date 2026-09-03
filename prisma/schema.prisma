@@ -1146,6 +1146,19 @@ model CommerceTransaction {
   // Commission idempotency key (B-2): stable across re-settles (Apple original_transaction_id).
   // Audit/forensics + lets the cleanup job map a stray commission back to its purchase.
   attributionKey               String?                   @map("attribution_key")
+  // Tracking-link attribution (shop web). Snapshot of the visitor's `bb_attr`
+  // cookie at checkout, FROZEN — never updated. The cookie is last-touch, so a
+  // report joining shop_visits by guest_id would retro-move a paid order to a
+  // later campaign. Reporting-only: these NEVER feed commission (that stays
+  // `attributedAffiliatorMemberId` + AffiliateVisit). NULL = no source; the
+  // report renders "direct", the column does not store it, so "FE never sent
+  // it" stays distinguishable from "genuinely direct".
+  utmSource                    String?                   @map("utm_source")
+  utmMedium                    String?                   @map("utm_medium")
+  utmCampaign                  String?                   @map("utm_campaign")
+  utmContent                   String?                   @map("utm_content")
+  utmTerm                      String?                   @map("utm_term")
+  guestId                      String?                   @map("guest_id")
   status                       CommerceTransactionStatus @default(PENDING)
   paidAt                       DateTime?                 @map("paid_at")
   canceledAt                   DateTime?                 @map("canceled_at")
@@ -1164,6 +1177,7 @@ model CommerceTransaction {
   @@index([memberId, createdAt])
   @@index([status])
   @@index([expiredAt])
+  @@index([utmSource, utmCampaign, createdAt]) // Sumber Traffic report
   @@map("commerce_transactions")
 }
 
@@ -1396,11 +1410,11 @@ model ThirdPartyCredential {
 // Per-syncer watermark + last-run stats. One row per syncer ("members",
 // "enrollments", "commissions", "kyc", "tree", "reviews", "posts").
 model SyncState {
-  syncer    String   @id // syncer name
+  syncer    String    @id // syncer name
   watermark String? // max processed COALESCE(updated, created), ISO datetime string
   lastRunAt DateTime? @map("last_run_at")
-  lastStats Json?    @map("last_stats") // { scanned, upserted, skipped, voided, errors }
-  updatedAt DateTime @updatedAt @map("updated_at")
+  lastStats Json?     @map("last_stats") // { scanned, upserted, skipped, voided, errors }
+  updatedAt DateTime  @updatedAt @map("updated_at")
 
   @@map("sync_state")
 }
@@ -1415,4 +1429,127 @@ model MemberRedirect {
 
   @@index([winnerLegacyId])
   @@map("member_redirect")
+}
+
+/// Tracking-link visit on the shop web (`brainboost-marketplace`).
+/// Deliberately NOT AffiliateVisit: that table requires an affiliator
+/// (`affiliator_member_id` NOT NULL) and is read by the commission resolver, so
+/// a UTM-only webinar click cannot be written there and loosening it would put
+/// non-payout rows in the payout path. Reporting-only table; no FK to Member or
+/// Product so a delete on either can never block a visit write.
+model ShopVisit {
+  id            String   @id @default(uuid(7)) @db.Uuid
+  guestId       String   @map("guest_id")
+  memberId      String?  @map("member_id") @db.Uuid
+  productId     String?  @map("product_id") @db.Uuid
+  utmSource     String?  @map("utm_source")
+  utmMedium     String?  @map("utm_medium")
+  utmCampaign   String?  @map("utm_campaign")
+  utmContent    String?  @map("utm_content")
+  utmTerm       String?  @map("utm_term")
+  referer       String?
+  ipAddress     String?  @map("ip_address")
+  userAgent     String?  @map("user_agent")
+  /// Client-generated per-send id. Dedupes RETRIES, not visits: a refresh sends
+  /// a new id and must produce a new row (Kunjungan counts rows, Pengunjung unik
+  /// counts distinct guest_id).
+  clientEventId String?  @unique @map("client_event_id")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@index([guestId, createdAt])
+  @@index([memberId])
+  @@index([utmSource, utmCampaign, createdAt])
+  @@index([createdAt])
+  @@map("shop_visits")
+}
+
+/// Named tracking link for a shop product page ("Webinar 17 September"),
+/// authored in the backoffice and copied into a broadcast by hand.
+///
+/// Legacy had this feature as `product_custom_url` (Studio > Product > Tracking):
+/// name, slug, all five UTM columns, and two shortlinks from an in-house
+/// shortener. The Consolidated report still reads its remains today — the
+/// "Webinar" channel bucket means `product_custom_url.name LIKE 'Webinar%'`.
+///
+/// NOTHING in this app reads these rows today: there is no shortlink redirect
+/// yet, and order attribution is frozen from the shop cookie at checkout, not
+/// from here. It lives in Prisma anyway because the schema is the single source
+/// of truth for every table in this database, and because the redirect, when it
+/// is built, belongs on this side (`GET /s/:slug`) — the alternative was a
+/// `bo_`-prefixed table that a Prisma app would later have to reach into with
+/// $queryRaw.
+///
+/// Writer today is the backoffice, over plain SQL. Two consequences: `id` must
+/// be supplied by the writer (`@default(uuid(7))` is generated by Prisma Client,
+/// not by Postgres), and `updatedAt` must be written explicitly for the same
+/// reason.
+model TrackingLink {
+  id           String   @id @default(uuid(7)) @db.Uuid
+  /// Operator-facing label. Shown on the Sumber Traffic report in place of the
+  /// raw UTM pair; never part of the grouping key.
+  name         String
+  /// Shortlink path segment, served by `GET /s/:slug`. UNIQUE globally, unlike
+  /// `utmCampaign` which is only unique per source — `webinar/limitless` and
+  /// `email/limitless` are both legal campaigns but cannot share a slug.
+  slug         String   @unique
+  /// Scalar, no relation and no FK — deliberately, exactly like AffiliateVisit
+  /// and ShopVisit: a campaign that happened is a record, and deleting a product
+  /// must neither fail nor erase the link's history.
+  productId    String   @map("product_id") @db.Uuid
+  utmSource    String   @map("utm_source")
+  utmMedium    String?  @map("utm_medium")
+  /// The report groups on (utmSource, utmCampaign), so the pair is UNIQUE: two
+  /// links sharing it would silently merge into one row and mix their numbers,
+  /// with nothing on screen to say it happened. Inactive links are included in
+  /// the constraint — their traffic stays in the report, so their campaign must
+  /// never be reused.
+  utmCampaign  String   @map("utm_campaign")
+  utmContent   String?  @map("utm_content")
+  utmTerm      String?  @map("utm_term")
+  /// Appended as `?voucher=` on the built URL.
+  voucherCode  String?  @map("voucher_code")
+  note         String?
+  isActive     Boolean  @default(true) @map("is_active")
+  /// `bo_users.id` — a backoffice-owned table, so no FK can point at it from
+  /// here. The email is kept alongside so an audit still reads correctly after
+  /// that user is deleted.
+  createdBy    String?  @map("created_by") @db.Uuid
+  createdEmail String?  @map("created_email")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  clicks TrackingLinkClick[]
+
+  @@unique([utmSource, utmCampaign])
+  @@index([productId])
+  @@index([createdAt])
+  @@map("tracking_links")
+}
+
+/// Shortlink clicks, aggregated per link per day.
+///
+/// A row per click would be the obvious shape and the wrong one: nothing reads an
+/// individual click, the volume is unbounded during a broadcast, and there is no
+/// prune job to trim it. One upserted counter per (link, day) answers every
+/// question the report asks — the total, and the shape over time — at a fixed row
+/// count. Mirrors legacy `product_custom_url_tracking.count_visit`.
+///
+/// Days are WIB (computed at write time), matching how every date on the report is
+/// rendered: a click at 01:00 WIB belongs to that night, not to the day before.
+///
+/// Clicks are NOT visits. A click that never reaches the shop (connection dropped,
+/// or a scanner that follows the redirect but runs no JS) never becomes a
+/// `shop_visits` row, so the gap between the two columns is real information and
+/// the two are never merged.
+model TrackingLinkClick {
+  linkId String   @map("link_id") @db.Uuid
+  /// Calendar day in WIB.
+  day    DateTime @db.Date
+  count  Int      @default(0)
+
+  link TrackingLink @relation(fields: [linkId], references: [id], onDelete: Cascade)
+
+  @@id([linkId, day])
+  @@index([day])
+  @@map("tracking_link_clicks")
 }

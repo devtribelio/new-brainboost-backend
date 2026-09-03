@@ -38,6 +38,11 @@ export const SETTING_KEYS = {
   notificationDigestEnabled: 'notification.digestEnabled',
   notificationDigestHour: 'notification.digestHour',
   salesAlertEmail: 'sales.alertEmail',
+  // Origin of the web shop, used to build the target of a shortlink redirect and
+  // the URLs shown on the backoffice Tracking Link page. ONE row read by both
+  // apps: a second copy in backoffice config is how the redirect starts pointing
+  // somewhere the operator never sees.
+  shopBaseUrl: 'shop.baseUrl',
   // Listening days a member may miss before the streak resets to 0. The window is
   // measured from today, so only a recent gap is forgiven — see tracker.constants.ts.
   streakGraceDays: 'streak.graceDays',
