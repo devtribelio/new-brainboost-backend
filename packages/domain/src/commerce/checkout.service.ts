@@ -20,6 +20,22 @@ export interface StartCheckoutInput {
   voucherCode?: string;
   /** Affiliate code of the link used for THIS purchase (per-purchase commission override). */
   affiliatorCode?: string;
+  /**
+   * Tracking-link source, snapshotted from the shop's `bb_attr` / `bb_gid`
+   * cookies at submit. Frozen on the order and REPORTING ONLY — never an input
+   * to commission, which stays `affiliatorCode` + AffiliateVisit. Absent means
+   * no source: the column stays NULL and the report renders "direct".
+   */
+  source?: TrackingSource;
+}
+
+export interface TrackingSource {
+  guestId?: string;
+  utmSource?: string;
+  utmMedium?: string;
+  utmCampaign?: string;
+  utmContent?: string;
+  utmTerm?: string;
 }
 
 export interface StartCheckoutResult {
@@ -153,6 +169,15 @@ export class CheckoutService {
         affiliatorId: attribution.affiliatorId,
         programId: attribution.programId,
         attributedAffiliatorMemberId,
+        // Frozen at creation, never updated: the shop cookie is last-touch, so
+        // reading the source back through shop_visits would retro-move a paid
+        // order onto whatever campaign the buyer clicked next.
+        guestId: input.source?.guestId,
+        utmSource: input.source?.utmSource,
+        utmMedium: input.source?.utmMedium,
+        utmCampaign: input.source?.utmCampaign,
+        utmContent: input.source?.utmContent,
+        utmTerm: input.source?.utmTerm,
         status: 'PENDING',
         expiredAt,
       },

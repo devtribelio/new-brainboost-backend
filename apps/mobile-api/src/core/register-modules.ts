@@ -31,6 +31,7 @@ import { WebhookModule } from '@/modules/webhook/webhook.module';
 import { IngestModule } from '@/modules/ingest/ingest.module';
 import { TrackingModule } from '@/modules/tracker/tracking.module';
 import { StatsModule } from '@/modules/tracker/stats.module';
+import { ShopModule } from '@/modules/shop/shop.module';
 
 const modules: AppModule[] = [
   AppVersionModule,
@@ -61,6 +62,7 @@ const modules: AppModule[] = [
   IngestModule,
   TrackingModule,
   StatsModule,
+  ShopModule,
 ];
 
 export function registerModules(): Router {

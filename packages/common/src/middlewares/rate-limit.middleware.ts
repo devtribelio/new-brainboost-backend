@@ -4,7 +4,7 @@ import type { Request, RequestHandler } from 'express';
 import type { IncrementResponse, Options, Store } from 'express-rate-limit';
 import { RedisStore, type RedisReply } from 'rate-limit-redis';
 import { Redis } from 'ioredis';
-import { fail } from '@bb/common/utils/response.util';
+import { fail, ok } from '@bb/common/utils/response.util';
 import { ERROR_CODES, messageFor } from '@bb/common/exceptions';
 import { env } from '@bb/common/config/env';
 import { logger } from '@bb/common/config/logger';
@@ -385,5 +385,24 @@ export const playlistShareMintRateLimiter: RequestHandler = rateLimit({
   },
   ...storeOption('playlist-share-mint'),
   handler: tooManyRequestsHandler,
+  skip: skipInTest,
+});
+
+// --- Shop tracking-link visit — PUBLIC and unauthenticated, so keyed per-IP
+//     (there is no account to key on). Deliberately does NOT use the shared 429
+//     handler: this endpoint's contract is that it never answers 4xx/5xx, since
+//     a marketing link that errors loses the click it exists to measure. Over
+//     budget therefore answers 200 with `status: "error"` — the caller ignores
+//     the value and the row is simply not written.
+export const shopVisitRateLimiter: RequestHandler = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: clientIp,
+  ...storeOption('shop-visit'),
+  handler: (_req, res) => {
+    ok(res, { status: 'error' });
+  },
   skip: skipInTest,
 });
