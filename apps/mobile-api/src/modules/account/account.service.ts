@@ -4,7 +4,7 @@ import { prisma } from '@bb/db';
 import { badRequest, unauthorized, notFound, ERROR_CODES } from '@bb/common/exceptions';
 import { otpService } from '@bb/common/services/otp.service';
 import { isReusableUnverifiedMember } from '@bb/common/utils/member-state.util';
-import { otpPhoneTarget } from '@bb/common/utils/phone.util';
+import { normalizePhonePair, otpPhoneTarget } from '@bb/common/utils/phone.util';
 import type { PreRegistrationDto } from './dto/pre-registration.dto';
 import type { LogoutDto } from './dto/logout.dto';
 import type { ChangePasswordDto } from './dto/change-password.dto';
@@ -76,11 +76,16 @@ export class AccountService {
       throw badRequest(ERROR_CODES.PASSWORD_CONFIRMATION_MISMATCH);
     }
 
+    // Match the STORED phone form: `members.phone` is national-form (no dial
+    // code), so a client sending E.164 ('+62811…') matched nothing here and the
+    // conflict only surfaced later, as a unique violation on the register insert.
+    const { phone } = normalizePhonePair(dto.phone, dto.phoneCode);
+
     // Reusable unverified placeholders (abandoned-at-OTP registers) must not
     // block a fresh pre-registration — the register step will reuse their row.
     const existing = await prisma.member.findMany({
       where: {
-        OR: [{ email: dto.email }, { phone: dto.phone }],
+        OR: [{ email: dto.email }, { phone }],
       },
       select: {
         legacyId: true,
