@@ -153,11 +153,19 @@ export class AuthService {
   }
 
   async register(dto: RegisterDto) {
+    // Canonical phone BEFORE the conflict lookup. `members.phone` is stored
+    // national-form (no dial code), so matching the raw E.164 the client sends
+    // ('+6287875439433') found nothing while the row held '87875439433' — the
+    // register fell through to the insert and the unique violation surfaced as
+    // a bare 409 CONFLICT instead of PHONE_ALREADY_REGISTERED.
+    const normalizedPhone = dto.phone ? normalizePhonePair(dto.phone, dto.phoneCode ?? '') : null;
+    const phone = normalizedPhone?.phone ?? dto.phone;
+
     const conflicts = await prisma.member.findMany({
       where: {
         OR: [
           { email: dto.email },
-          dto.phone ? { phone: dto.phone } : undefined,
+          phone ? { phone } : undefined,
           dto.username ? { username: dto.username } : undefined,
         ].filter((c): c is NonNullable<typeof c> => c !== undefined),
       },
@@ -179,7 +187,7 @@ export class AuthService {
     for (const row of conflicts) {
       if (isReusableUnverifiedMember(row)) continue;
       if (row.email === dto.email) throw badRequest(ERROR_CODES.EMAIL_ALREADY_REGISTERED);
-      if (dto.phone && row.phone === dto.phone) {
+      if (phone && row.phone === phone) {
         throw badRequest(ERROR_CODES.PHONE_ALREADY_REGISTERED);
       }
       if (dto.username && row.username === dto.username) {
@@ -193,12 +201,12 @@ export class AuthService {
     // the create/update below can't hit P2002.
     const reuseRow =
       conflicts.find((r) => r.email === dto.email) ??
-      conflicts.find((r) => dto.phone && r.phone === dto.phone) ??
+      conflicts.find((r) => phone && r.phone === phone) ??
       null;
     for (const row of conflicts) {
       if (row.id === reuseRow?.id) continue;
       const release: { phone?: null; username?: null } = {};
-      if (dto.phone && row.phone === dto.phone) release.phone = null;
+      if (phone && row.phone === phone) release.phone = null;
       if (dto.username && row.username === dto.username) release.username = null;
       if (Object.keys(release).length === 0) continue;
       await prisma.member.update({ where: { id: row.id }, data: release });
@@ -249,6 +257,7 @@ export class AuthService {
           OR: [
             dto.email ? { email: dto.email } : undefined,
             dto.phone ? { phone: dto.phone } : undefined,
+            phone && phone !== dto.phone ? { phone } : undefined,
           ].filter((c): c is NonNullable<typeof c> => c !== undefined),
         },
         orderBy: { createdAt: 'desc' },
@@ -272,7 +281,8 @@ export class AuthService {
 
     // Same canonical phone forms as registerByPhone (the DTO even documents
     // E.164 in `phone` — strip the duplicated dial code before storing).
-    const normalizedPhone = dto.phone ? normalizePhonePair(dto.phone, dto.phoneCode ?? '') : null;
+    // `normalizedPhone` is computed at the top of this method, before the
+    // conflict lookup that has to match on the stored form.
     if (normalizedPhone && normalizedPhone.phone.length < 6) {
       throw badRequest(ERROR_CODES.PHONE_INVALID);
     }
@@ -285,7 +295,7 @@ export class AuthService {
       passwordHash,
       passwordAlgo: 'bcrypt',
       fullName: dto.fullName,
-      phone: normalizedPhone?.phone ?? dto.phone,
+      phone,
       phoneCode: normalizedPhone ? normalizedPhone.phoneCode || null : dto.phoneCode,
       username: dto.username,
       gender: dto.gender,
