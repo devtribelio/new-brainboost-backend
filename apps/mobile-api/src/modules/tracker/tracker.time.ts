@@ -44,6 +44,23 @@ export function dayKey(day: Date): string {
   return day.toISOString().slice(0, 10);
 }
 
+/** Calendar-month key for a UTC-midnight day Date (e.g. `2026-06`). */
+export function monthKey(day: Date): string {
+  return dayKey(day).slice(0, 7);
+}
+
+/**
+ * First and last day of a `YYYY-MM` month, as UTC-midnight day Dates.
+ *
+ * `Date.UTC(y, m, 0)` is day zero of the FOLLOWING month, i.e. the last day of this
+ * one — which is how February and the 30/31-day split are handled without a table.
+ * The shape is validated at the route edge, so this trusts it.
+ */
+export function monthBounds(month: string): { start: Date; end: Date } {
+  const [y, m] = month.split('-').map(Number);
+  return { start: new Date(Date.UTC(y, m - 1, 1)), end: new Date(Date.UTC(y, m, 0)) };
+}
+
 /** Shift a UTC-midnight day Date by `n` whole days (negative = earlier). */
 export function addDays(day: Date, n: number): Date {
   return new Date(day.getTime() + n * 86_400_000);

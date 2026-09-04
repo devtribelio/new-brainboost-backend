@@ -7,10 +7,19 @@ import {
   MIN_QUALIFY_SEC,
   WEEKLY_DAYS_TARGET,
 } from './tracker.constants';
-import { addDays, dayKey, listeningDayEndsAt, toListeningDayWIB, weekStartMondayWIB } from './tracker.time';
+import {
+  addDays,
+  dayKey,
+  listeningDayEndsAt,
+  monthBounds,
+  monthKey,
+  toListeningDayWIB,
+  weekStartMondayWIB,
+} from './tracker.time';
 import { computeStreak, computeStreakState } from './tracker.streak';
 import type { StatsHomeDto, WeeklyStreakEntryDto } from './dto/stats-home.dto';
 import type { CourseStatsDto } from './dto/course-stats.dto';
+import type { StreakCalendarDayDto, StreakCalendarDto } from './dto/streak-calendar.dto';
 
 const WEEK_MS = 7 * 86_400_000;
 
@@ -22,18 +31,43 @@ function qualifyingDays(groups: { localDay: Date; _sum: { listenedSec: number | 
 }
 
 /**
+ * The verdict for one day. The single place a date becomes a state, shared by the
+ * weekly strip and the monthly calendar — two surfaces resolving this independently
+ * is exactly how a dialog ends up arguing with the tile that opened it.
+ *
+ * Branch order is load-bearing. A day that qualified is `burning` even when it is
+ * today (otherwise today would report `at_risk` after the member had already
+ * listened), and `future` is decided before the today-check so tomorrow never reads
+ * as a miss. `at_risk` is today-only and carries no claim about the streak's length —
+ * a member on zero still gets it, meaning "today is still open".
+ *
+ * The calendar never asks about a day past `today`, so it never sees `future`.
+ */
+function dayState(
+  date: string,
+  todayKey: string,
+  qualifyingKeys: Set<string>,
+  forgivenKeys: Set<string>,
+): string {
+  // YYYY-MM-DD compares lexicographically, which is why the keys are strings.
+  return qualifyingKeys.has(date)
+    ? 'burning'
+    : date > todayKey
+      ? 'future'
+      : date === todayKey
+        ? 'at_risk'
+        : forgivenKeys.has(date)
+          ? 'dimmed'
+          : 'none';
+}
+
+/**
  * Build the Mon→Sun (WIB) 7-entry streak strip, one `state` per day.
  *
  * The state is resolved HERE, not in the client: deciding "future" means comparing a
  * date against today, and a client that does its own date arithmetic against the
  * device clock is the exact failure this whole workstream removes. The server already
- * knows which listening day it is; it should say so.
- *
- * Order of the branches is load-bearing. A day that qualified is `burning` even when
- * it is today (otherwise today would report `at_risk` after the member had already
- * listened), and `future` is decided before the today-check so tomorrow never reads as
- * a miss. `at_risk` is today-only and carries no claim about the streak's length — a
- * member on zero still gets it, meaning "today is still open".
+ * knows which listening day it is; it should say so. See `dayState` for the rules.
  */
 function buildWeeklyStreak(
   qualifyingKeys: Set<string>,
@@ -45,18 +79,30 @@ function buildWeeklyStreak(
 
   return Array.from({ length: 7 }, (_, i) => {
     const date = dayKey(addDays(weekStart, i));
-    // YYYY-MM-DD compares lexicographically, which is why the keys are strings.
-    const state = qualifyingKeys.has(date)
-      ? 'burning'
-      : date > todayKey
-        ? 'future'
-        : date === todayKey
-          ? 'at_risk'
-          : forgivenKeys.has(date)
-            ? 'dimmed'
-            : 'none';
-    return { date, state };
+    return { date, state: dayState(date, todayKey, qualifyingKeys, forgivenKeys) };
   });
+}
+
+/**
+ * Longest consecutive qualifying run inside one month's already-built day list.
+ *
+ * A `dimmed` day neither breaks the run nor counts toward it — the same treatment the
+ * streak walk gives it, so the figure under the calendar cannot contradict the streak
+ * number above it. `days` is contiguous by construction (dates are only ever omitted
+ * at the two ends of the month), so walking it in order is enough.
+ */
+function longestRunIn(days: StreakCalendarDayDto[]): number {
+  let run = 0;
+  let best = 0;
+  for (const d of days) {
+    if (d.state === 'burning') {
+      run += 1;
+      if (run > best) best = run;
+    } else if (d.state !== 'dimmed') {
+      run = 0;
+    }
+  }
+  return best;
 }
 
 export class StatsService {
@@ -179,6 +225,75 @@ export class StatsService {
       weeklyStreak,
       today: dayKey(todayWIB),
       qualifyThresholdSec: MIN_QUALIFY_SEC,
+    };
+  }
+
+  /**
+   * One month of the streak calendar (`docs/tracker-streak.md` §5.6).
+   *
+   * ONE unbounded `groupBy` answers every field. Scoping it to the month would not be
+   * cheaper: `currentStreak` and `earliestMonth` need the whole history anyway, so a
+   * month filter buys a second query rather than a smaller one. Indexed on
+   * `(member_id, local_day)`; a member with two years of listening is ~700 rows.
+   *
+   * Dates are LISTENING days here exactly as everywhere else — a session started
+   * 01:00 on the 5th belongs to the 4th. If the calendar and the streak number
+   * bucketed differently, the dialog would become an argument against the tile that
+   * opened it.
+   */
+  async streakCalendar(memberId: string, month?: string): Promise<StreakCalendarDto> {
+    const todayWIB = toListeningDayWIB(new Date());
+    const todayKey = dayKey(todayWIB);
+    const targetMonth = month ?? monthKey(todayWIB);
+
+    const graceDays = await settingsService.getNumber(
+      SETTING_KEYS.streakGraceDays,
+      GRACE_DAYS_DEFAULT,
+    );
+
+    const dayGroups = await prisma.listeningSession.groupBy({
+      by: ['localDay'],
+      where: { memberId },
+      _sum: { listenedSec: true },
+    });
+
+    const qualifying = qualifyingDays(dayGroups);
+    const streak = computeStreakState(qualifying, todayWIB, graceDays);
+    const qualifyingKeys = new Set(qualifying.map(dayKey));
+    const forgivenKeys = new Set(streak.forgivenDays.map(dayKey));
+
+    // First TRACKED day, not first qualifying day: a five-minute first session is
+    // still a day the member could have listened on, so it shows as `none` rather
+    // than being omitted as "before you joined".
+    const trackedKeys = dayGroups.map((g) => dayKey(g.localDay)).sort();
+    const firstTrackedKey = trackedKeys[0] ?? null;
+
+    // Only days the member could have listened on appear. Omitting covers both ends
+    // with one rule — nothing before their first tracked day, nothing after today —
+    // and is why `future` is never sent: the client draws an omitted date as a plain
+    // number, so a member who joined in August opening June sees an empty calendar
+    // rather than thirty missed days.
+    const { start, end } = monthBounds(targetMonth);
+    const days: StreakCalendarDayDto[] = [];
+    for (let d = start; d.getTime() <= end.getTime(); d = addDays(d, 1)) {
+      const date = dayKey(d);
+      if (!firstTrackedKey || date < firstTrackedKey || date > todayKey) continue;
+      days.push({ date, state: dayState(date, todayKey, qualifyingKeys, forgivenKeys) });
+    }
+
+    return {
+      month: targetMonth,
+      today: todayKey,
+      days,
+      qualifiedDays: days.filter((d) => d.state === 'burning').length,
+      longestRun: longestRunIn(days),
+      // Member-level facts, returned whatever month was asked for: the client pages
+      // months and decides from the month on screen whether an arrow is live, so a
+      // March response missing `earliestMonth` would strand it with no way back.
+      currentStreak: streak.days,
+      earliestMonth: firstTrackedKey ? firstTrackedKey.slice(0, 7) : null,
+      qualifyThresholdSec: MIN_QUALIFY_SEC,
+      dayBoundaryHour: DAY_BOUNDARY_HOURS,
     };
   }
 

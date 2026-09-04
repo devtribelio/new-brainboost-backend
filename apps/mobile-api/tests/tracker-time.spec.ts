@@ -6,6 +6,8 @@ import {
   listeningDayEndsAt,
   addDays,
   dayKey,
+  monthKey,
+  monthBounds,
 } from '@/modules/tracker/tracker.time';
 
 describe('toLocalDayWIB', () => {
@@ -102,5 +104,34 @@ describe('listeningDayEndsAt', () => {
     expect(listeningDayEndsAt(toListeningDayWIB(new Date('2026-08-28T05:00:00Z')))).toBe(
       '2026-08-29T03:59:59+07:00',
     );
+  });
+});
+
+describe('monthKey / monthBounds', () => {
+  it('derives the month key from a listening day', () => {
+    expect(monthKey(toListeningDayWIB(new Date('2026-09-04T05:00:00Z')))).toBe('2026-09');
+    // 00:30 WIB on the 1st still belongs to the previous listening day — and so to
+    // the previous MONTH. The calendar pages on this, so getting it wrong would hide
+    // a night of listening from both months.
+    expect(monthKey(toListeningDayWIB(new Date('2026-09-30T17:30:00Z')))).toBe('2026-09');
+  });
+
+  it('spans a 30-day month, a 31-day month and December', () => {
+    expect(dayKey(monthBounds('2026-09').start)).toBe('2026-09-01');
+    expect(dayKey(monthBounds('2026-09').end)).toBe('2026-09-30');
+    expect(dayKey(monthBounds('2026-01').end)).toBe('2026-01-31');
+    expect(dayKey(monthBounds('2026-12').end)).toBe('2026-12-31'); // must not roll into 2027
+  });
+
+  it('gets February right in a common and a leap year', () => {
+    expect(dayKey(monthBounds('2026-02').end)).toBe('2026-02-28');
+    expect(dayKey(monthBounds('2028-02').end)).toBe('2028-02-29');
+  });
+
+  it('produces a range that walks with addDays and closes on the last day', () => {
+    const { start, end } = monthBounds('2026-02');
+    let n = 0;
+    for (let d = start; d.getTime() <= end.getTime(); d = addDays(d, 1)) n += 1;
+    expect(n).toBe(28);
   });
 });
