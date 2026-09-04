@@ -65,6 +65,8 @@ describe('computeStreakState with grace', () => {
     const r = computeStreakState(days, today, GRACE);
     expect(r.days).toBe(0);
     expect(r.state).toBe('none');
+    // Nothing was carried, so nothing was forgiven — the 22nd is a plain miss.
+    expect(r.forgivenDays).toEqual([]);
   });
 
   it('does NOT forgive an old gap — grace is anchored on today, not on the gap', () => {
@@ -89,5 +91,77 @@ describe('computeStreakState with grace', () => {
     const r = computeStreakState(days, today, GRACE);
     expect(r.days).toBe(2);
     expect(r.state).toBe('at_risk');
+  });
+});
+
+/**
+ * A forgiven day is a BRIDGE, not a verdict of its own: it only means anything when
+ * the streak it was carrying actually exists on the far side of it. Without this, a
+ * member whose streak died days ago — or who has never listened at all — is shown a
+ * frozen day in the weekly strip, forgiving a streak that was never there.
+ */
+describe('computeStreakState only forgives a day that bridges the streak', () => {
+  const GRACE = 1;
+  const keys = (r: { forgivenDays: Date[] }) => r.forgivenDays.map((d) => d.toISOString().slice(0, 10));
+
+  it('forgives yesterday when a qualifying day lies beyond it', () => {
+    // 21st burning · 22nd missed · 23rd (today) burning → the 22nd joins the two.
+    const r = computeStreakState(['2026-06-21', '2026-06-23'].map(day), today, GRACE);
+    expect(r.days).toBe(2);
+    expect(r.state).toBe('burning');
+    expect(keys(r)).toEqual(['2026-06-22']);
+  });
+
+  it('does NOT forgive yesterday when the walk breaks right after it', () => {
+    // Only today qualifies. The 22nd would be inside the grace window, but the 21st
+    // is a miss, so the 22nd bridges today to nothing.
+    const r = computeStreakState([day('2026-06-23')], today, GRACE);
+    expect(r.days).toBe(1);
+    expect(r.state).toBe('burning');
+    expect(keys(r)).toEqual([]);
+  });
+
+  it('forgives nothing for a member who has never listened', () => {
+    const r = computeStreakState([], today, GRACE);
+    expect(r.days).toBe(0);
+    expect(r.state).toBe('none');
+    expect(keys(r)).toEqual([]);
+  });
+
+  it('forgives nothing once the streak is already dead', () => {
+    // Burning through the 20th, then the 21st/22nd/23rd all missed: the streak died
+    // at the 21st, so the 22nd sitting inside the grace window forgives nothing.
+    const r = computeStreakState(['2026-06-19', '2026-06-20'].map(day), today, GRACE);
+    expect(r.days).toBe(0);
+    expect(keys(r)).toEqual([]);
+  });
+
+  it('still counts a real bridge that the streak survived', () => {
+    // 20th, 21st burning · 22nd missed · today not listened yet → grace carries it.
+    const r = computeStreakState(['2026-06-20', '2026-06-21'].map(day), today, GRACE);
+    expect(r.days).toBe(2);
+    expect(r.state).toBe('dimmed');
+    expect(keys(r)).toEqual(['2026-06-22']);
+  });
+
+  it('never reports a forgiven day when the streak is zero, at any grace size', () => {
+    for (const grace of [0, 1, 2, 3, 7]) {
+      const r = computeStreakState([], today, grace);
+      expect(r.days).toBe(0);
+      expect(r.forgivenDays).toEqual([]);
+    }
+  });
+
+  it('forgives a run of gaps only when the walk reaches a qualifying day beyond them', () => {
+    const GRACE_2 = 2;
+    // 20th burning · 21st + 22nd missed · today burning → both gaps are bridged.
+    const bridged = computeStreakState(['2026-06-20', '2026-06-23'].map(day), today, GRACE_2);
+    expect(bridged.days).toBe(2);
+    expect(keys(bridged)).toEqual(['2026-06-22', '2026-06-21']);
+
+    // Same two gaps, but nothing qualifying beyond them → neither is forgiven.
+    const unbridged = computeStreakState([day('2026-06-23')], today, GRACE_2);
+    expect(unbridged.days).toBe(1);
+    expect(keys(unbridged)).toEqual([]);
   });
 });

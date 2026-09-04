@@ -14,7 +14,13 @@ export type StreakState = 'burning' | 'at_risk' | 'dimmed' | 'none';
 export interface StreakResult {
   days: number;
   state: StreakState;
-  /** Missed days grace forgave. Shown ❄️ in the weekly calendar; never counted in `days`. */
+  /**
+   * Missed days grace forgave. Shown ❄️ in the weekly calendar; never counted in `days`.
+   *
+   * Only days that BRIDGE the streak appear here — there is always a qualifying day
+   * further back that the walk went on to count. A gap the walk broke on forgave
+   * nothing and is reported as a plain miss instead.
+   */
   forgivenDays: Date[];
 }
 
@@ -47,6 +53,7 @@ export function computeStreakState(
   const set = new Set(qualifyingDays.map(dayKey));
   const qualifiedToday = set.has(dayKey(todayWIB));
   const forgivenDays: Date[] = [];
+  const pendingForgiven: Date[] = [];
 
   let cursor = qualifiedToday ? todayWIB : addDays(todayWIB, -1);
   let days = 0;
@@ -54,13 +61,21 @@ export function computeStreakState(
   for (;;) {
     if (set.has(dayKey(cursor))) {
       days += 1;
+      // The walk got past the gap, so those days really did bridge two qualifying
+      // days. Only now are they forgiven.
+      forgivenDays.push(...pendingForgiven);
+      pendingForgiven.length = 0;
     } else if ((todayWIB.getTime() - cursor.getTime()) / 86_400_000 <= graceDays) {
-      forgivenDays.push(cursor);
+      pendingForgiven.push(cursor);
     } else {
       break;
     }
     cursor = addDays(cursor, -1);
   }
+  // Anything still pending is dropped on purpose: the walk broke right after it, so
+  // it joined a qualifying day to nothing. A member who has never listened, or whose
+  // streak died days ago, must not be shown a frozen day forgiving a streak that was
+  // not there — `days === 0 ⇒ forgivenDays === []` falls out of this, no special case.
 
   let state: StreakState;
   if (days === 0) state = 'none';
