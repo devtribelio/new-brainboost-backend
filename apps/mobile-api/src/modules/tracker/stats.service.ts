@@ -3,8 +3,8 @@ import { settingsService, SETTING_KEYS } from '@bb/common/services/settings.serv
 import {
   DAY_BOUNDARY_HOURS,
   GRACE_DAYS_DEFAULT,
-  MIN_SESSION_SEC,
-  MIN_QUALIFY_SEC,
+  MIN_SESSION_SEC_DEFAULT,
+  MIN_QUALIFY_SEC_DEFAULT,
   WEEKLY_DAYS_TARGET,
 } from './tracker.constants';
 import {
@@ -23,10 +23,19 @@ import type { StreakCalendarDayDto, StreakCalendarDto } from './dto/streak-calen
 
 const WEEK_MS = 7 * 86_400_000;
 
-/** Sum the qualifying-day filter once. */
-function qualifyingDays(groups: { localDay: Date; _sum: { listenedSec: number | null } }[]): Date[] {
+/**
+ * Sum the qualifying-day filter once.
+ *
+ * `minQualifySec` is passed in rather than read from the constant: it is runtime
+ * configurable (`tracker.qualifySec`), and a helper that reached for the default
+ * would quietly ignore whatever ops set while the caller reported the new number.
+ */
+function qualifyingDays(
+  groups: { localDay: Date; _sum: { listenedSec: number | null } }[],
+  minQualifySec: number,
+): Date[] {
   return groups
-    .filter((g) => (g._sum.listenedSec ?? 0) >= MIN_QUALIFY_SEC)
+    .filter((g) => (g._sum.listenedSec ?? 0) >= minQualifySec)
     .map((g) => g.localDay);
 }
 
@@ -116,14 +125,15 @@ export class StatsService {
   async home(memberId: string): Promise<StatsHomeDto> {
     const todayWIB = toListeningDayWIB(new Date());
 
-    const graceDays = await settingsService.getNumber(
-      SETTING_KEYS.streakGraceDays,
-      GRACE_DAYS_DEFAULT,
-    );
+    const [graceDays, minSessionSec, minQualifySec] = await Promise.all([
+      settingsService.getNumber(SETTING_KEYS.streakGraceDays, GRACE_DAYS_DEFAULT),
+      settingsService.getNumber(SETTING_KEYS.trackerMinSessionSec, MIN_SESSION_SEC_DEFAULT),
+      settingsService.getNumber(SETTING_KEYS.trackerQualifySec, MIN_QUALIFY_SEC_DEFAULT),
+    ]);
 
     const [sessionsPlayed, totalAgg, dayGroups, enrollments, member] = await Promise.all([
       prisma.listeningSession.count({
-        where: { memberId, listenedSec: { gte: MIN_SESSION_SEC } },
+        where: { memberId, listenedSec: { gte: minSessionSec } },
       }),
       prisma.listeningSession.aggregate({
         where: { memberId },
@@ -139,7 +149,12 @@ export class StatsService {
         select: {
           courseId: true,
           course: {
-            select: { programDays: true, product: { select: { code: true, title: true } } },
+            select: {
+              programDays: true,
+              // `id` is needed only as a join key for the session rows — see the
+              // two-id map below. It is never emitted.
+              product: { select: { id: true, code: true, title: true } },
+            },
           },
         },
       }),
@@ -152,15 +167,29 @@ export class StatsService {
     const totalListenSec = totalAgg._sum.listenedSec ?? 0;
 
     // ---- Global streak --------------------------------------------------
-    const streak = computeStreakState(qualifyingDays(dayGroups), todayWIB, graceDays);
+    const streak = computeStreakState(qualifyingDays(dayGroups, minQualifySec), todayWIB, graceDays);
     const streakDays = streak.days;
 
     // ---- Per-program challenges (one grouped query, then bucket) --------
-    const courseIds = enrollments.map((e) => e.courseId);
-    const perCourseDay = courseIds.length
+    // One enrollment answers to TWO ids. `listening_session.course_id` has always
+    // held a `products.id` — the client sends the wrong field, while every id this
+    // API hands it for the purpose is a real course id (docs/tracker-streak.md §8b).
+    // Filtering on the enrollment's `courseId` alone therefore matched nothing for
+    // anybody, and every challenge card read 0 from the day the feature shipped.
+    //
+    // Accepting both id spaces fixes the existing rows with no backfill AND keeps
+    // working if the client is ever corrected, so the two can ship in either order.
+    // `courses.product_id` is unique, so neither id can name two enrollments.
+    const idToCourse = new Map<string, string>();
+    for (const e of enrollments) {
+      idToCourse.set(e.courseId, e.courseId);
+      idToCourse.set(e.course.product.id, e.courseId);
+    }
+
+    const perCourseDay = idToCourse.size
       ? await prisma.listeningSession.groupBy({
           by: ['courseId', 'localDay'],
-          where: { memberId, courseId: { in: courseIds } },
+          where: { memberId, courseId: { in: [...idToCourse.keys()] } },
           _sum: { listenedSec: true },
         })
       : [];
@@ -168,16 +197,18 @@ export class StatsService {
     const byCourse = new Map<string, { localDay: Date; _sum: { listenedSec: number | null } }[]>();
     for (const row of perCourseDay) {
       if (!row.courseId) continue;
-      const list = byCourse.get(row.courseId) ?? [];
+      const key = idToCourse.get(row.courseId);
+      if (!key) continue;
+      const list = byCourse.get(key) ?? [];
       list.push({ localDay: row.localDay, _sum: row._sum });
-      byCourse.set(row.courseId, list);
+      byCourse.set(key, list);
     }
 
     const challenges = enrollments.map((e) => ({
       courseId: e.courseId,
       code: e.course.product.code,
       title: e.course.product.title,
-      day: computeStreak(qualifyingDays(byCourse.get(e.courseId) ?? []), todayWIB, graceDays),
+      day: computeStreak(qualifyingDays(byCourse.get(e.courseId) ?? [], minQualifySec), todayWIB, graceDays),
       target: e.course.programDays,
     }));
 
@@ -189,7 +220,7 @@ export class StatsService {
 
     const weekGroups = dayGroups.filter((g) => g.localDay.getTime() >= currentWeekStart.getTime());
     const listenSec = weekGroups.reduce((s, g) => s + (g._sum.listenedSec ?? 0), 0);
-    const daysActive = qualifyingDays(weekGroups).length;
+    const daysActive = qualifyingDays(weekGroups, minQualifySec).length;
 
     // ---- Weekly streak strip (Mon..Sun of the current WIB week) ---------
     // Always exactly 7 entries. A day qualifies when its total audio ≥
@@ -197,7 +228,7 @@ export class StatsService {
     // grace walk that produced the headline state, so a dimmed flame and a dimmed
     // circle can never disagree about which night was let off.
     const weeklyStreak = buildWeeklyStreak(
-      new Set(qualifyingDays(dayGroups).map(dayKey)),
+      new Set(qualifyingDays(dayGroups, minQualifySec).map(dayKey)),
       new Set(streak.forgivenDays.map(dayKey)),
       todayWIB,
     );
@@ -224,7 +255,10 @@ export class StatsService {
       },
       weeklyStreak,
       today: dayKey(todayWIB),
-      qualifyThresholdSec: MIN_QUALIFY_SEC,
+      // The value actually in force, not the constant — the client renders this as
+      // "Dengarkan 10 menit untuk menjaga streak", so a changed setting must change
+      // the copy too, or the app tells members a rule the backend no longer applies.
+      qualifyThresholdSec: minQualifySec,
     };
   }
 
@@ -246,10 +280,10 @@ export class StatsService {
     const todayKey = dayKey(todayWIB);
     const targetMonth = month ?? monthKey(todayWIB);
 
-    const graceDays = await settingsService.getNumber(
-      SETTING_KEYS.streakGraceDays,
-      GRACE_DAYS_DEFAULT,
-    );
+    const [graceDays, minQualifySec] = await Promise.all([
+      settingsService.getNumber(SETTING_KEYS.streakGraceDays, GRACE_DAYS_DEFAULT),
+      settingsService.getNumber(SETTING_KEYS.trackerQualifySec, MIN_QUALIFY_SEC_DEFAULT),
+    ]);
 
     const dayGroups = await prisma.listeningSession.groupBy({
       by: ['localDay'],
@@ -257,7 +291,7 @@ export class StatsService {
       _sum: { listenedSec: true },
     });
 
-    const qualifying = qualifyingDays(dayGroups);
+    const qualifying = qualifyingDays(dayGroups, minQualifySec);
     const streak = computeStreakState(qualifying, todayWIB, graceDays);
     const qualifyingKeys = new Set(qualifying.map(dayKey));
     const forgivenKeys = new Set(streak.forgivenDays.map(dayKey));
@@ -292,7 +326,7 @@ export class StatsService {
       // March response missing `earliestMonth` would strand it with no way back.
       currentStreak: streak.days,
       earliestMonth: firstTrackedKey ? firstTrackedKey.slice(0, 7) : null,
-      qualifyThresholdSec: MIN_QUALIFY_SEC,
+      qualifyThresholdSec: minQualifySec,
       dayBoundaryHour: DAY_BOUNDARY_HOURS,
     };
   }
@@ -306,34 +340,54 @@ export class StatsService {
   async courseStats(memberId: string, courseId: string): Promise<CourseStatsDto> {
     const todayWIB = toListeningDayWIB(new Date());
 
+    // The route takes a `courses.id` — that is what the product payload hands the
+    // client (`product.dto.ts`) — but the session rows hold a `products.id`. Match
+    // on both, for the same reason `home()` does. One lookup, and only on the course
+    // detail screen rather than on every app open.
+    const course = await prisma.course.findUnique({
+      where: { id: courseId },
+      select: { productId: true },
+    });
+    const courseIds = course ? [courseId, course.productId] : [courseId];
+
     const [dayGroups, totalAgg, last] = await Promise.all([
       prisma.listeningSession.groupBy({
         by: ['localDay'],
-        where: { memberId, courseId },
+        where: { memberId, courseId: { in: courseIds } },
         _sum: { listenedSec: true },
       }),
       prisma.listeningSession.aggregate({
-        where: { memberId, courseId },
+        where: { memberId, courseId: { in: courseIds } },
         _sum: { listenedSec: true },
       }),
       prisma.listeningSession.findFirst({
-        where: { memberId, courseId },
+        where: { memberId, courseId: { in: courseIds } },
         orderBy: { startedAt: 'desc' },
         select: { startedAt: true },
       }),
     ]);
 
-    // Same grace as the home screen. Without it this endpoint and `challenges[].day`
-    // would report two different numbers for the same course on two screens.
-    const graceDays = await settingsService.getNumber(
-      SETTING_KEYS.streakGraceDays,
-      GRACE_DAYS_DEFAULT,
-    );
-    const qualifying = qualifyingDays(dayGroups);
+    // The walk still runs even though the streak NUMBER is no longer returned: the
+    // weekly strip needs `forgivenDays` to mark a day dimmed, and that only comes out
+    // of the grace walk. Same grace as the home screen, so this strip and the one on
+    // `/stats/home` can never disagree about which night was let off.
+    const [graceDays, minQualifySec] = await Promise.all([
+      settingsService.getNumber(SETTING_KEYS.streakGraceDays, GRACE_DAYS_DEFAULT),
+      settingsService.getNumber(SETTING_KEYS.trackerQualifySec, MIN_QUALIFY_SEC_DEFAULT),
+    ]);
+    const qualifying = qualifyingDays(dayGroups, minQualifySec);
     const courseStreak = computeStreakState(qualifying, todayWIB, graceDays);
     return {
       courseId,
-      streak: courseStreak.days,
+      // Days that met the 10-minute bar for THIS course. Free: `qualifying` is already
+      // built for the grace walk below, so this costs no extra query.
+      //
+      // Deliberately the per-DAY sum rule, not a per-session one. MIN_QUALIFY_SEC is
+      // defined over `sum(listenedSec)` grouped by listening day, so gating individual
+      // sessions on it would quietly change the question to "sittings of 10+ minutes"
+      // — and a member who listened 3x4 min would read as 0 here while their streak
+      // counted the night. Two numbers on one screen contradicting each other.
+      daysListened: qualifying.length,
       weeklyStreak: buildWeeklyStreak(
         new Set(qualifying.map(dayKey)),
         new Set(courseStreak.forgivenDays.map(dayKey)),
