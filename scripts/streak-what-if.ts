@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';
-import { MIN_QUALIFY_SEC } from '../apps/mobile-api/src/modules/tracker/tracker.constants';
+import { MIN_QUALIFY_SEC_DEFAULT } from '../apps/mobile-api/src/modules/tracker/tracker.constants';
 import {
   addDays,
   dayKey,
@@ -75,10 +75,33 @@ function longestRun(days: Date[]): { len: number; from: string; to: string } {
 
 const qualifying = (totals: Map<string, number>): Date[] =>
   [...totals.entries()]
-    .filter(([, sec]) => sec >= MIN_QUALIFY_SEC)
+    .filter(([, sec]) => sec >= minQualifySec)
     .map(([k]) => new Date(`${k}T00:00:00.000Z`));
 
+
+/**
+ * The thresholds are runtime-configurable (`app_settings`), so reading the constant
+ * here would silently analyse a different rule than the API applies. Read once at
+ * startup and echo what was resolved, so the output can never be misread later.
+ */
+let minQualifySec = MIN_QUALIFY_SEC_DEFAULT;
+
+async function loadThresholds(): Promise<void> {
+  const rows = await prisma.appSetting.findMany({
+    where: { key: { in: ['tracker.qualifySec', 'tracker.minSessionSec'] } },
+    select: { key: true, value: true },
+  });
+  for (const r of rows) {
+    const n = Number(r.value);
+    if (!Number.isFinite(n) || n < 0) continue;
+    if (r.key === 'tracker.qualifySec') minQualifySec = n;
+  }
+  console.log(`thresholds qualify=${minQualifySec}s`);
+}
+
 async function main() {
+  await loadThresholds();
+
   if (idents.length === 0) {
     throw new Error('usage: pnpm streak:whatif <email|uuid> [more...] [--grace=1] [--days=21]');
   }
@@ -132,7 +155,7 @@ async function main() {
       const a = stored.get(d) ?? 0;
       const b = listening.get(d) ?? 0;
       if (a === 0 && b === 0) continue;
-      const mark = (n: number) => `${String(n).padStart(6)}s ${n >= MIN_QUALIFY_SEC ? '*' : ' '}`;
+      const mark = (n: number) => `${String(n).padStart(6)}s ${n >= minQualifySec ? '*' : ' '}`;
       const moved = a !== b ? '  <- pindah' : '';
       console.log(`  ${d}   ${mark(a)}    ${mark(b)}${moved}`);
     }
@@ -141,7 +164,7 @@ async function main() {
     const micro = sessions.filter((s) => {
       const hour = new Date(s.startedAt.getTime() + 7 * 3_600_000).getUTCHours();
       const day = dayKey(toListeningDayWIB(s.startedAt));
-      return (listening.get(day) ?? 0) < MIN_QUALIFY_SEC && (hour >= 21 || hour < 4);
+      return (listening.get(day) ?? 0) < minQualifySec && (hour >= 21 || hour < 4);
     });
     if (micro.length) {
       console.log(`\n  sesi mikro di jam tidur pada hari yang tidak qualify: ${micro.length}`);

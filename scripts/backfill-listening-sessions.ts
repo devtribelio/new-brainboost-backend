@@ -3,8 +3,8 @@ import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { PrismaClient } from '@prisma/client';
 import {
-  MIN_QUALIFY_SEC,
-  MIN_SESSION_SEC,
+  MIN_QUALIFY_SEC_DEFAULT,
+  MIN_SESSION_SEC_DEFAULT,
 } from '../apps/mobile-api/src/modules/tracker/tracker.constants';
 import {
   addDays,
@@ -212,7 +212,7 @@ function dayTotals(sessions: Existing[]): Map<string, number> {
 
 function qualifyingDaysOf(totals: Map<string, number>): Date[] {
   return [...totals.entries()]
-    .filter(([, sec]) => sec >= MIN_QUALIFY_SEC)
+    .filter(([, sec]) => sec >= minQualifySec)
     .map(([k]) => new Date(`${k}T00:00:00.000Z`));
 }
 
@@ -225,7 +225,32 @@ function overlaps(span: Span, e: Existing): boolean {
   return aStart < bEnd + slack && bStart < aEnd + slack;
 }
 
+
+/**
+ * The thresholds are runtime-configurable (`app_settings`), so reading the constant
+ * here would silently analyse a different rule than the API applies. Read once at
+ * startup and echo what was resolved, so the output can never be misread later.
+ */
+let minQualifySec = MIN_QUALIFY_SEC_DEFAULT;
+let minSessionSec = MIN_SESSION_SEC_DEFAULT;
+
+async function loadThresholds(): Promise<void> {
+  const rows = await prisma.appSetting.findMany({
+    where: { key: { in: ['tracker.qualifySec', 'tracker.minSessionSec'] } },
+    select: { key: true, value: true },
+  });
+  for (const r of rows) {
+    const n = Number(r.value);
+    if (!Number.isFinite(n) || n < 0) continue;
+    if (r.key === 'tracker.qualifySec') minQualifySec = n;
+    if (r.key === 'tracker.minSessionSec') minSessionSec = n;
+  }
+  log(`thresholds qualify=${minQualifySec}s session=${minSessionSec}s`);
+}
+
 async function main() {
+  await loadThresholds();
+
   if (!CSV_PATH) throw new Error('usage: pnpm tracker:backfill <csv> [--dry-run] [--source=...]');
 
   const rows = parseCsv(readFileSync(CSV_PATH, 'utf8'));
@@ -250,7 +275,7 @@ async function main() {
 
     const startedAt = parseTimestamp(r.started_at_utc);
     const listenedSec = Number(r.listened_sec);
-    if (!startedAt || !Number.isFinite(listenedSec) || listenedSec < MIN_SESSION_SEC || !r.audio_id) {
+    if (!startedAt || !Number.isFinite(listenedSec) || listenedSec < minSessionSec || !r.audio_id) {
       unusable++;
       continue;
     }
@@ -295,10 +320,10 @@ async function main() {
     const backendSec = dayTotals(rowsFor).get(day) ?? 0;
 
     // Already qualifying → the day was never broken. Also what makes a re-run a no-op.
-    if (backendSec >= MIN_QUALIFY_SEC) { skippedDayOk += daySpans.length; continue; }
+    if (backendSec >= minQualifySec) { skippedDayOk += daySpans.length; continue; }
     // Firebase does not prove 10 minutes either → nothing to restore, and inserting
     // would only inflate lifetime totals without ever fixing a streak.
-    if (daySpans.reduce((n, s) => n + s.listenedSec, 0) < MIN_QUALIFY_SEC) {
+    if (daySpans.reduce((n, s) => n + s.listenedSec, 0) < minQualifySec) {
       skippedDayUnproven += daySpans.length;
       continue;
     }
@@ -310,7 +335,7 @@ async function main() {
       // day total at Firebase's own number instead of double-counting it.
       const covered = rowsFor.filter((e) => overlaps(span, e)).reduce((n, e) => n + e.listenedSec, 0);
       const listenedSec = span.listenedSec - covered;
-      if (listenedSec < MIN_SESSION_SEC) { skippedCovered++; continue; }
+      if (listenedSec < minSessionSec) { skippedCovered++; continue; }
       if (covered > 0) trimmed++;
       keep.push({ ...span, listenedSec });
     }
@@ -340,7 +365,7 @@ async function main() {
     const streakBefore = computeStreak(qualifyingDaysOf(before), today);
     const streakAfter = computeStreak(qualifyingDaysOf(after), today);
     const newDays = [...after.keys()].filter(
-      (k) => (after.get(k) ?? 0) >= MIN_QUALIFY_SEC && (before.get(k) ?? 0) < MIN_QUALIFY_SEC,
+      (k) => (after.get(k) ?? 0) >= minQualifySec && (before.get(k) ?? 0) < MIN_QUALIFY_SEC_DEFAULT,
     );
     if (streakAfter > streakBefore) improved++;
     log(

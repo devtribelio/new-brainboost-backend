@@ -54,6 +54,12 @@ export const SETTING_KEYS = {
   // apps: a second copy in backoffice config is how the redirect starts pointing
   // somewhere the operator never sees.
   shopBaseUrl: 'shop.baseUrl',
+  // Listening-tracker thresholds. Grouped under `tracker.` rather than `streak.` so
+  // ops finds both together: `qualifySec` is the streak bar, `minSessionSec` is the
+  // floor below which a play is a mis-tap rather than a session. Two different
+  // questions, and moving either without the other is a legitimate thing to want.
+  trackerMinSessionSec: 'tracker.minSessionSec',
+  trackerQualifySec: 'tracker.qualifySec',
   // Listening days a member may miss before the streak resets to 0. The window is
   // measured from today, so only a recent gap is forgiven — see tracker.constants.ts.
   streakGraceDays: 'streak.graceDays',

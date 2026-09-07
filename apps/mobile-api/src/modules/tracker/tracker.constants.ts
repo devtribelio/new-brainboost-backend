@@ -3,15 +3,32 @@
  * Kept in code (not env/DB) — these are product rules, not deployment config.
  */
 
-/** Min seconds for a session to count toward `sessionsPlayed` (lifetime). */
-export const MIN_SESSION_SEC = 30;
+/**
+ * Min seconds for a session to count toward `sessionsPlayed` (lifetime) — the
+ * DEFAULT, overridable at runtime via `app_settings` key `tracker.minSessionSec`
+ * (`SETTING_KEYS.trackerMinSessionSec`).
+ *
+ * Read it through the setting, never this constant: a caller that imports the
+ * constant silently ignores whatever ops set, and the two bars then disagree about
+ * what counts as a session on two different screens.
+ */
+export const MIN_SESSION_SEC_DEFAULT = 30;
 
 /**
  * Min total seconds listened in a single WIB day for that day to "qualify"
- * toward streak & challenge (10 minutes). Evaluated over the per-day SUM,
- * not per-session — several short sessions may accumulate.
+ * toward streak & challenge (10 minutes) — the DEFAULT, overridable at runtime via
+ * `app_settings` key `tracker.qualifySec` (`SETTING_KEYS.trackerQualifySec`).
+ *
+ * Evaluated over the per-day SUM, not per-session — several short sessions may
+ * accumulate (5+3+2 min qualifies). Gating individual sessions on this number would
+ * quietly change the question to "one unbroken sitting of 10 minutes", and a member
+ * who listened in three short bursts would read as 0 while their streak counted the
+ * same night.
+ *
+ * Treat a change to it as a PRODUCT SWITCH, not a knob: it moves `streakDays`, which
+ * every shipped app build already displays.
  */
-export const MIN_QUALIFY_SEC = 600;
+export const MIN_QUALIFY_SEC_DEFAULT = 600;
 
 /** Day-boundary timezone. Indonesia (WIB) is UTC+7 with no DST. */
 export const TZ = 'Asia/Jakarta';

@@ -110,6 +110,18 @@ const SETTINGS: Array<{ key: string; value: string; description: string }> = [
       'Hour of day (0-23, Asia/Jakarta) the topic digest is sent. The job runs on the hourly cron tick and only acts on this hour, so changing this value moves the send time with no redeploy.',
   },
   {
+    key: 'tracker.minSessionSec',
+    value: '30',
+    description:
+      'Minimum seconds a single session must reach to count toward `sessionsPlayed`. Below this a play is a mis-tap, not a session. Per SESSION, unlike tracker.qualifySec which is a per-day sum. Does not affect the streak.',
+  },
+  {
+    key: 'tracker.qualifySec',
+    value: '600',
+    description:
+      "Seconds of audio a member must accumulate in one listening day (04:00-03:59 WIB) for that day to qualify toward the streak, the per-program challenge and the course's daysListened. CUMULATIVE across the day, not one unbroken sitting: 5+3+2 min qualifies. Returned to the app as `qualifyThresholdSec`, which renders as the '10 menit' copy, so changing it changes what members are told. Treat as a product switch, not a knob: it moves the streak number every shipped build displays.",
+  },
+  {
     key: 'streak.graceDays',
     value: '1',
     description:

@@ -3,7 +3,7 @@ import { logger } from '@bb/common/config/logger';
 import { settingsService, SETTING_KEYS } from '@bb/common/services/settings.service';
 import { NotificationProducer } from '@bb/domain/notification/notification.producer';
 import { ActionLabel } from '@bb/domain/notification/action-labels';
-import { GRACE_DAYS_DEFAULT, MIN_QUALIFY_SEC, WIB_OFFSET_MS } from './tracker.constants';
+import { GRACE_DAYS_DEFAULT, MIN_QUALIFY_SEC_DEFAULT, WIB_OFFSET_MS } from './tracker.constants';
 import { addDays, dayKey, toListeningDayWIB } from './tracker.time';
 import { computeStreakState, type StreakState } from './tracker.streak';
 
@@ -70,10 +70,13 @@ interface DayGroup {
 const chunk = <T,>(xs: T[], n: number): T[][] =>
   Array.from({ length: Math.ceil(xs.length / n) }, (_, i) => xs.slice(i * n, i * n + n));
 
-function qualifyingDaysByMember(groups: DayGroup[]): Map<string, Date[]> {
+// `minQualifySec` is threaded in, not imported: it is runtime configurable
+// (`tracker.qualifySec`), and a job reading the default while the API read the
+// setting would nudge members whose streak the API considers safe.
+function qualifyingDaysByMember(groups: DayGroup[], minQualifySec: number): Map<string, Date[]> {
   const byMember = new Map<string, Date[]>();
   for (const g of groups) {
-    if ((g._sum.listenedSec ?? 0) < MIN_QUALIFY_SEC) continue;
+    if ((g._sum.listenedSec ?? 0) < minQualifySec) continue;
     byMember.set(g.memberId, [...(byMember.get(g.memberId) ?? []), g.localDay]);
   }
   return byMember;
@@ -114,6 +117,12 @@ export async function collectStreakReminders(
   now: Date,
   onlyMemberId?: string,
 ): Promise<Array<{ memberId: string; days: number }>> {
+  // Read here rather than taken as a parameter: this function owns the qualifying
+  // rule, and its signature is public (the specs call it directly).
+  const minQualifySec = await settingsService.getNumber(
+    SETTING_KEYS.trackerQualifySec,
+    MIN_QUALIFY_SEC_DEFAULT,
+  );
   const today = toListeningDayWIB(now);
   const todayKey = dayKey(today);
   const yesterdayKey = dayKey(addDays(today, -1));
@@ -127,7 +136,7 @@ export async function collectStreakReminders(
     _sum: { listenedSec: true },
   });
 
-  const recentQualifying = qualifyingDaysByMember(recent);
+  const recentQualifying = qualifyingDaysByMember(recent, minQualifySec);
   const candidateIds: string[] = [];
 
   for (const [memberId, days] of recentQualifying) {
@@ -150,7 +159,7 @@ export async function collectStreakReminders(
   }
 
   const plan: Array<{ memberId: string; days: number }> = [];
-  for (const [memberId, days] of qualifyingDaysByMember(full)) {
+  for (const [memberId, days] of qualifyingDaysByMember(full, minQualifySec)) {
     const streak = computeStreakState(days, today, graceDays);
     if (streak.state !== mode) continue;
     if (mode === 'at_risk' && streak.days < MIN_STREAK_FOR_AT_RISK) continue;
