@@ -58,6 +58,8 @@
     "backfill:affiliate-program-product": "tsx scripts/backfill-affiliate-program-product.ts",
     "kyc:backfill-didit-id": "tsx scripts/backfill-didit-id-number.ts",
     "tracker:backfill": "tsx scripts/backfill-listening-sessions.ts",
+    "streak:read": "tsx --conditions=development scripts/read-streak.ts",
+    "backfill:listening-course-id": "tsx scripts/backfill-listening-course-id.ts",
     "streak:whatif": "tsx scripts/streak-what-if.ts",
     "normalize:slides-data": "tsx scripts/normalize-slides-data.ts",
     "seed:settings": "tsx prisma/seed-settings.ts",

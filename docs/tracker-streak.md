@@ -358,15 +358,74 @@ Populasi:  total baris                171.087
 
 **Mekanisme.** `stats.service.ts` mem-filter sesi dengan `courseId IN (enrollment.courseId)`, dan `courseEnrollment.courseId` adalah `courses.id` yang asli. Karena kolom di `listening_session` menyimpan `products.id`, join itu **tidak pernah cocok untuk siapa pun** — challenge per program menampilkan 0 sejak fitur ini hidup. Streak global tidak terpengaruh (tidak difilter `courseId`).
 
-**Yang harus dipastikan dulu:** apakah `courseId` di `TrackSessionDto` memang dimaksud *product* id oleh klien. Kalau iya, yang salah adalah nama kolom + join-nya, bukan data yang dikirim.
+**Pertanyaan terbuka itu sudah terjawab (2026-09-04): klien mengirim field yang salah.** Setiap id yang API ini serahkan ke klien untuk keperluan tersebut adalah `courses.id` asli — `product/dto/product.dto.ts` mendokumentasikan `courseId` sebagai *Course UUID (distinct from `id`, which is the Product UUID)* dan menyuruh klien memakainya untuk `GET /user/stats/course/:courseId` (diisi `courseUuid` di `product.serializer.ts`), dan `playlist.serializer.ts` memancarkan `lesson.section.courseId`. Jadi **nama kolom dan join-nya benar; datanya yang salah** — klien kemungkinan mengambil `product.id` alih-alih `product.courseId` dari payload yang sama.
 
-**Opsi perbaikan:**
+**Gejala kedua yang belum tercatat: `courseStats` ikut mati.** `stats.courseStats()` memfilter `listening_session.courseId` dengan param URL, dan `product.dto.ts` menyuruh klien mengirim `courses.id` ke situ. Jadi `GET /user/stats/course/:courseId` mengembalikan `streak: 0`, `totalListenSec: 0`, `lastListenedAt: null` untuk **semua** member — akar yang sama, permukaan kedua.
 
-| Opsi | Konsekuensi |
-|---|---|
-| Klien kirim `courses.id` | butuh rilis mobile, dan 171 k baris lama tetap rusak |
-| **BE resolve `products.id` → `courses.id` saat tulis** | satu lookup di `tracking.service`, plus `UPDATE` backfill 171 k baris. **Disarankan** — jalur baca tetap `groupBy` sederhana |
-| BE resolve saat baca | tanpa backfill, tapi menambah join di endpoint yang dipanggil setiap buka app |
+**Kenapa tidak ada test yang menangkap.** `tracker-course-stats.spec.ts` menulis sesi dan membacanya dengan id yang sama, jadi konsisten pada dirinya sendiri dan struktural buta terhadap ketidakcocokan ini. Bug-nya hidup sepenuhnya di apa yang dikirim klien asli.
+
+### Perbaikan terpasang (2026-09-04) — peta dua-id di sisi baca
+
+Diambil opsi paling minim: **satu enrollment menjawab DUA id.** `home()` sudah query enrollment+product, jadi `product.id` didapat gratis dengan menambah satu kolom di `select` yang sudah jalan — nol query tambahan. `courseStats()` menambah satu `findUnique` untuk memetakan `courses.id` → `products.id`, dan hanya di endpoint detail kursus, bukan di jalur yang dipanggil tiap buka app.
+
+```ts
+const idToCourse = new Map<string, string>();
+for (const e of enrollments) {
+  idToCourse.set(e.courseId, e.courseId);
+  idToCourse.set(e.course.product.id, e.courseId);
+}
+```
+
+Menerima kedua ruang id sekaligus, bukan menerjemahkan satu arah, adalah intinya: 171 k baris lama langsung benar **tanpa backfill**, dan kalau klien nanti dibetulkan kirimannya tetap terbucket — jadi BE dan mobile boleh rilis dalam urutan apa pun, dan baris campur selama transisi tetap benar. `courses.product_id` unik, jadi tidak ada id yang bisa menamai dua enrollment. `challenges[].courseId` yang dikeluarkan **tidak berubah** (tetap `courses.id`); product id murni jadi kunci join dan tidak pernah dipancarkan.
+
+Ditutup `tests/tracker-course-id-mismatch.spec.ts`, yang menulis sesi memakai `products.id` (seperti klien asli) lalu membaca lewat `home()` + `courseStats()` memakai `courses.id` (seperti yang diberikan ke klien). Diverifikasi merah sebelum perbaikan (`expected +0 to be 2`, di kedua permukaan).
+
+### Normalisasi saat tulis (2026-09-07) — sumbernya ditutup
+
+Peta dua-id menyelamatkan baris lama, tapi klien tetap menulis id yang salah setiap sesi. `TrackingService.resolveCourseId()` sekarang menerjemahkan `products.id` → `courses.id` **sebelum** upsert, jadi baris baru berhenti salah dan kolomnya menyempit sendiri ke satu ruang id.
+
+Konteks yang bikin ini rapi: script `tracker:backfill` (`resolveCourses`) **sudah** menyimpan `p.course.id`, jadi baris hasil backfill Firebase selama ini benar. Write klien adalah penghasil terakhir id yang salah — ditutup, tinggal stok lama.
+
+```ts
+const rows = await prisma.course.findMany({
+  where: { OR: [{ id: input }, { productId: input }] },
+  select: { id: true }, take: 2,
+});
+return rows.find((r) => r.id === input)?.id ?? rows[0]?.id ?? input;
+```
+
+Kecocokan `id` menang atas `productId`: keduanya ruang uuid terpisah, jadi OR yang diselesaikan `findFirst` akan bergantung urutan seandainya satu nilai pernah ada di dua-duanya.
+
+**Dua mode gagal, dua-duanya "simpan apa yang klien kirim".** ① Tidak cocok ke tabel mana pun — ini ingest log; menulis `null` menghapus satu-satunya bukti apa yang klien kirim, dan pembacaan toleran sudah mengabaikan id tak dikenal. ② Lookup melempar — membuang sesi nyata karena lookup kosmetik kena kedipan DB persis kegagalan yang seluruh workstream ini ada untuk mencegahnya.
+
+Satu round-trip ter-index (`courses.id` PK, `product_id` unik), dan **hanya** kalau `courseId` ada — dengar standalone/playlist tidak mengirimnya sama sekali. Tanpa cache untuk sekarang; course sedikit dan hampir statis, jadi cache in-memory bikin ini nyaris gratis, tapi baru pantas ditambah kalau `db.op` menunjukkan biayanya nyata. Cabang `update` di upsert sengaja tidak menyentuh `courseId` — cabang `create` sudah menormalisasi, dan re-send tidak boleh menimpanya kembali dengan nilai mentah.
+
+Ditutup `tests/tracker-course-id-normalise.spec.ts` (5 test: product id → course id, course id → tidak berubah, yatim → verbatim, null → null, re-send mempertahankan hasil normalisasi). Diverifikasi merah dulu di dua kasus product-id.
+
+**Pembacaan toleran TIDAK boleh dicabut** sampai backfill jalan — 171 k baris lama masih `products.id`. Blok ID SHAPE di `pnpm streak:read` adalah alat pantaunya: hitungan `courses.id` naik, `products.id` beku. Begitu yang beku jadi satu-satunya sisa, backfill adalah pekerjaan terakhir.
+
+### Backfill — `pnpm backfill:listening-course-id` (ditulis 2026-09-07, BELUM dijalankan)
+
+```
+pnpm backfill:listening-course-id                        # DRY RUN, seluruh tabel
+pnpm backfill:listening-course-id --member=<uuid|email>  # DRY RUN, satu member
+pnpm backfill:listening-course-id --member=<…> --apply   # tulis, satu member (canary)
+pnpm backfill:listening-course-id --apply                # tulis, SELURUH TABEL
+```
+
+**Dry run adalah default di sini**, beda dari `backfill:*` lain. Yang lain memperbaiki kolom yang tidak ditulis siapa pun; ini menulis ulang ~171 k baris ingest log di tabel hidup, jadi tulisnya opt-in dan `--member` memberi canary dulu.
+
+Bekerja per **id distinct**, bukan per baris: satu `updateMany` per `products.id` yang dipakai — puluhan statement, bukan 171 k. Id yang sudah `courses.id` dilewati (termasuk kalau kebetulan juga jadi `product_id` course lain — presedensi sama dengan resolver write path, dan itu satu-satunya pembacaan yang menjaga idempotensi). **Yatim dilaporkan dan dibiarkan**, aturan sama dengan write path.
+
+Diverifikasi di data campur (5 baris salah, 2 sudah benar, 1 yatim): dry-run mengklasifikasi ketiganya benar, apply memindahkan tepat 5, run kedua menemukan nol.
+
+**Jalankan SETELAH fix write ter-deploy** — kalau tidak, klien terus menambah baris salah di belakang update yang sedang jalan. Tidak merusak (bisa diulang), tapi tidak akan sampai nol.
+
+**Reversal tidak bersih.** Baris hasil konversi jadi tak terbedakan dari baris yang memang selalu benar (`tracker:backfill` Firebase menulis `courses.id` sejak dulu), jadi reverse borongan akan ikut merusak yang itu. Kalau butuh jalur rollback, ambil snapshot tabel dulu — script ini sengaja tidak menulis file undo berisi 171 k id.
+
+**Belum dijalankan.** Perlu: akses DB (`.env` di mesin dev migrasinya tertinggal — `members.playlist_quota` tidak ada), ukur ulang populasi (angka 171 087 dari 2026-08-31), dan konfirmasi fix write sudah ter-deploy.
+
+**Yang belum dibeli.** Sampai backfill benar-benar dijalankan, stok 171 k baris lama masih `products.id`, jadi nama kolomnya masih bohong, pembacaan toleran belum boleh dicabut, dan setiap pembaca baru harus tahu. Normalisasi saat tulis + backfill tetap pembersihan yang benar untuk menghapus jebakannya; peta dua-id membuat backfill itu bisa dijalankan kapan saja tanpa koordinasi. Perlu diputuskan juga: **3 baris** yang tidak cocok ke `courses` maupun `products` (biarkan `null`), dan apakah klien tetap dirilis perbaikan agar utang ini tidak permanen. Populasi 171 087 diukur 2026-08-31 — verifikasi ulang sebelum backfill apa pun.
 
 `courses.product_id` unik, jadi pemetaannya satu-satu ke dua arah — backfill-nya deterministik.
 
@@ -377,6 +436,56 @@ Populasi:  total baris                171.087
 **Bukan kesalahan hitung.** Sesinya mulai jam 01.00 Senin, yang di batas 04.00 masuk **hari dengar Minggu** — minggu sebelumnya. Minggu berjalan memang belum punya isi.
 
 **Konsekuensi.** Setiap Senin pagi, member yang mendengarkan lewat tengah malam melihat `streakDays: 12` bersanding dengan `daysActive: 0/7`. Benar menurut aturan, janggal kalau FE menaruh keduanya berdampingan. Perlu disampaikan ke mobile; tidak ada perubahan BE yang diusulkan.
+
+## 8c. `GET /user/stats/course/:courseId` — `streak` diganti `daysListened` (2026-09-07)
+
+Permintaan produk: endpoint ini tidak lagi menampilkan streak per-course, tapi **berapa banyak member itu benar-benar mendengarkan course tersebut**, memakai aturan 10 menit.
+
+```diff
+- "streak": 12,          // streak konsekutif per-course
++ "daysListened": 12,    // hari yang qualify (≥10 mnt) khusus course ini
+```
+
+`qualifying.length` — **nol query tambahan**, karena `qualifying` sudah dibangun untuk jalan grace di bawahnya.
+
+**Aturan per-HARI, bukan per-sesi — ini yang load-bearing.** `MIN_QUALIFY_SEC` didefinisikan atas `sum(listenedSec)` yang di-`groupBy` hari dengar, jadi menggerbang sesi individual dengan angka itu diam-diam mengubah pertanyaannya jadi "sekali duduk ≥10 menit". Member yang dengar 3×4 menit akan terbaca **0** di sini sementara streaknya menghitung malam itu — dua angka di satu layar saling bantah. Kumulatif: 5+3+2 menit = qualify. Batas hari 04:00 WIB, jadi sesi 23:50 dan 00:10 masuk hari yang sama.
+
+Dijumlah **khusus course itu**, jadi 5 menit di course A + 5 menit di course B membuat streak global qualify tapi `daysListened` kedua course tetap 0. Beda pertanyaan, bukan bug.
+
+`totalListenSec` tetap detik mentah, tidak digerbang — dua angka itu memang menjawab hal berbeda.
+
+**Semua field di payload ini milik member yang memanggil.** `sessionsPlayed` = "berapa kali SAYA dengar course ini", bukan berapa orang yang mendengarkannya.
+
+**`weeklyStreak` sengaja DIPERTAHANKAN** — tidak diminta dibuang, dan menghapusnya breaking change yang jauh lebih besar. Konsekuensinya jalan grace **tetap dijalankan** walau angkanya tidak lagi dikeluarkan: strip mingguan butuh `forgivenDays` untuk menandai hari `dimmed`, dan itu hanya keluar dari walk tersebut.
+
+Query-nya member-scoped dan sudah ada (`dayGroups`), jadi ditangani penuh oleh `@@index([memberId, courseId, localDay])` — **tidak perlu migrasi, tidak ada query tambahan**. Kalau yang diminta jumlah ORANG per course, itu cerita lain: keempat index `listening_session` berawalan `member_id`, Postgres tidak punya skip-scan, jadi hitungan lintas-member akan menyeret seluruh tabel dan butuh `@@index([courseId])`.
+
+Filter `courseId` memakai array dua-id (§8b), jadi hitungannya benar untuk baris lama maupun baru.
+
+**Breaking untuk klien yang membaca `streak`** di endpoint ini. `challenges[].day` di `/stats/home` **tidak disentuh** — kalau produk juga tidak mau streak per-course di sana, itu keputusan terpisah yang belum diambil.
+
+## 8d. Ambang jadi runtime-configurable (2026-09-07)
+
+`MIN_SESSION_SEC` dan `MIN_QUALIFY_SEC` bukan lagi konstanta mati. Keduanya jadi **default**, nilainya dibaca dari `app_settings`:
+
+| Key | Default | Cakupan |
+|---|---|---|
+| `tracker.minSessionSec` | 30 | **per SESI** — lantai `sessionsPlayed`. Tidak menyentuh streak. |
+| `tracker.qualifySec` | 600 | **jumlah per HARI** — streak, `challenges[].day`, `daysListened`, kalender |
+
+Konstantanya di-rename jadi `MIN_SESSION_SEC_DEFAULT` / `MIN_QUALIFY_SEC_DEFAULT`. Rename-nya bukan kosmetik: nama lama membuat call-site yang mengimpornya terlihat benar padahal diam-diam mengabaikan apa yang ops set — kelas kesalahan yang sama dengan `course_id` yang berisi product id. Nama `_DEFAULT` memaksa pembaca sadar itu fallback.
+
+`qualifyingDays(groups, minQualifySec)` sekarang menerima ambangnya sebagai parameter, bukan mengimpor — helper yang meraih default akan melaporkan angka lama sementara pemanggilnya melaporkan yang baru.
+
+**`qualifyThresholdSec` di response sekarang mengembalikan nilai yang benar-benar berlaku**, bukan konstanta. Klien merender itu sebagai "Dengarkan 10 menit untuk menjaga streak", jadi kalau setting berubah tapi field-nya tidak, app memberi tahu member aturan yang backend sudah tidak pakai.
+
+Ikut membaca setting: `stats.service` (home / courseStats / streakCalendar), `streak-reminder.job` (di dalam `collectStreakReminders` — fungsi itu pemilik aturannya, dan signature publiknya dipakai spec), serta dua script ops (`tracker:backfill`, `streak:whatif`) yang memuatnya sekali di awal `main()` dan mencetak nilai yang terpakai. Script yang membaca konstanta akan menganalisis aturan berbeda dari yang API terapkan tanpa ada yang tahu.
+
+Di-seed lewat `pnpm seed:settings`. Cache setting 30 detik, jadi perubahan berlaku dalam setengah menit tanpa redeploy.
+
+⚠️ **`tracker.qualifySec` adalah product switch, bukan knob.** Dia menggerakkan `streakDays` yang sudah dirender setiap build app yang beredar, dan mengubah copy "10 menit" yang dilihat member.
+
+Dikunci `tests/tracker-thresholds-setting.spec.ts` (5 test). Diverifikasi lewat mutasi: mengembalikan satu call-site ke konstanta bikin test merah.
 
 ## Lampiran A — export BigQuery untuk deteksi & backfill
 
