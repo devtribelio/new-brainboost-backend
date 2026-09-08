@@ -13,7 +13,12 @@ function uid(): string {
 
 /** Noon WIB (05:00Z) instant for a UTC-midnight listening day — safely inside it. */
 function noonWibOf(day: Date): Date {
-  return new Date(day.getTime() + 5 * 3_600_000);
+  // Clamped to now. Noon WIB of TODAY is in the future for any run before midday, and
+  // `TrackingService.record` rejects a `startedAt` more than MAX_CLOCK_SKEW_SEC ahead
+  // — so without this the whole tracker suite is red every morning and green every
+  // afternoon. Past days are unaffected; only today's noon can be ahead of the clock.
+  const noon = day.getTime() + 5 * 3_600_000;
+  return new Date(Math.min(noon, Date.now()));
 }
 
 /** Shift a `YYYY-MM` key by whole months. */

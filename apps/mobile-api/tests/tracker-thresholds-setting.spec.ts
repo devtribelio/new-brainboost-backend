@@ -10,6 +10,11 @@ function uid(): string {
   return Math.random().toString(36).slice(2, 12);
 }
 
+/** Noon WIB of a listening day, clamped to now — see tracker-weekly-streak.spec.ts. */
+function noonWibOf(day: Date): Date {
+  return new Date(Math.min(day.getTime() + 5 * 3_600_000, Date.now()));
+}
+
 async function setThreshold(key: string, value: string | null): Promise<void> {
   if (value === null) await prisma.appSetting.deleteMany({ where: { key } });
   else await settingsService.set(key, value);
@@ -43,7 +48,7 @@ describe('tracker thresholds come from app_settings (real Postgres)', () => {
     // 300s today on the course: under the 600s default, over a lowered 120s bar.
     await tracking.record(
       memberId,
-      { clientSessionId: crypto.randomUUID(), audioId: crypto.randomUUID(), courseId, startedAt: new Date(today.getTime() + 5 * 3_600_000).toISOString(), listenedSec: 300, completed: false },
+      { clientSessionId: crypto.randomUUID(), audioId: crypto.randomUUID(), courseId, startedAt: noonWibOf(today).toISOString(), listenedSec: 300, completed: false },
       'ios',
     );
   });

@@ -11,7 +11,12 @@ function uid(): string {
 
 /** Noon WIB (05:00Z) of a UTC-midnight WIB day — always inside that WIB day. */
 function noonWibOf(day: Date): Date {
-  return new Date(day.getTime() + 5 * 3_600_000);
+  // Clamped to now. Noon WIB of TODAY is in the future for any run before midday, and
+  // `TrackingService.record` rejects a `startedAt` more than MAX_CLOCK_SKEW_SEC ahead
+  // — so without this the whole tracker suite is red every morning and green every
+  // afternoon. Past days are unaffected; only today's noon can be ahead of the clock.
+  const noon = day.getTime() + 5 * 3_600_000;
+  return new Date(Math.min(noon, Date.now()));
 }
 
 describe('StatsService.courseStats — per-course listening stats (real Postgres)', () => {
