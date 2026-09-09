@@ -1598,6 +1598,25 @@ model Event {
   /// time, never stored, because the slug is still editable while no ticket has
   /// sold and a stored absolute URL would rot into a 404 without a sound.
   noticeLinkUrl   String?   @map("notice_link_url")
+  /// Per-event overrides for the ticket email an attendee receives. Plain text,
+  /// each optional and falling back FIELD BY FIELD to the standard copy — an
+  /// operator may replace the subject and leave the rest alone.
+  ///
+  /// Text, never HTML: bb-comms renders with html/template, which escapes by
+  /// default, so accepting HTML would mean deliberately marking operator input
+  /// safe — the one move that turns this into an XSS hole, and email HTML breaks
+  /// layouts besides. Blank lines in the body become paragraphs.
+  ///
+  /// Scoped to the TICKET email, not the payer's summary: a receipt should be
+  /// predictable, and free copy above a table of amounts invites a sentence that
+  /// contradicts the numbers under it.
+  emailSubject    String?   @map("email_subject")
+  emailBody       String?   @map("email_body")
+  emailFooter     String?   @map("email_footer")
+  /// Call to action rendered as a button — the Zoom or WhatsApp-group link an
+  /// attendee actually needs. Shown only when BOTH label and URL are set.
+  emailCtaLabel   String?   @map("email_cta_label")
+  emailCtaUrl     String?   @map("email_cta_url")
   /// `bo_users.id` — a backoffice-owned table, so no FK can point at it from
   /// here (same as `tracking_links.created_by`).
   createdBy       String?   @map("created_by") @db.Uuid
