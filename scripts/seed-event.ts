@@ -34,6 +34,14 @@ function arg(name: string): string | undefined {
 
 const DAY = 24 * 3600 * 1000;
 
+/** Same shape the backoffice mints: 8 lowercase alphanumerics. */
+function randomProductCode(): string {
+  const alphabet = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  let out = '';
+  for (let i = 0; i < 8; i++) out += alphabet[Math.floor(Math.random() * alphabet.length)];
+  return out;
+}
+
 async function remove(slug: string) {
   const event = await prisma.event.findUnique({
     where: { slug },
@@ -107,6 +115,10 @@ async function main() {
     const product = await prisma.product.create({
       data: {
         type: 'event_ticket',
+        // Every product carries a short code, and a ticket is no exception: it
+        // is the reference a tracking link points at, so a seeded event without
+        // one cannot get a sales channel in the backoffice.
+        code: randomProductCode(),
         title: `Webinar: Tidur Berkualitas — ${tier.name}`,
         price: tier.price,
         isActive: true,
