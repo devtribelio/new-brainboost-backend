@@ -70,6 +70,21 @@ export class EventListItemDto {
     description: 'Seats left across every type. `null` if any type is unlimited.',
   })
   remainingQuota!: number | null;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    example: 'Bisa reservasi tiket dulu buat ketemu ENHYPEN!',
+    description: 'Announcement strip. Plain text, never markup. `null` means no strip.',
+  })
+  noticeText!: string | null;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    example: 'Reservasi Tiket Kamu di Sini',
+    description:
+      'Clickable part of the strip. `null` = text only. The target is not exposed; point it at `/event/<slug>`.',
+  })
+  noticeLinkLabel!: string | null;
 }
 
 export class EventListResultDto {

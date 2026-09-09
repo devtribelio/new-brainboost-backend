@@ -181,6 +181,38 @@ describe('GET /api/event/on-sale', () => {
     expect(item.remainingQuota).toBe(10);
   });
 
+  it('carries the announcement strip so the shop home can render it', async () => {
+    const event = await createEvent({});
+    await addTicketType(event.id, {});
+    await prisma.event.update({
+      where: { id: event.id },
+      data: {
+        noticeText: 'Bisa reservasi tiket dulu!',
+        noticeLinkLabel: 'Reservasi di sini',
+        noticeLinkUrl: 'https://example.test/reserve',
+      },
+    });
+
+    const res = await request(app).get('/api/event/on-sale').expect(200);
+    const item = res.body.data.items.find((i: { slug: string }) => i.slug === event.slug);
+
+    expect(item.noticeText).toBe('Bisa reservasi tiket dulu!');
+    expect(item.noticeLinkLabel).toBe('Reservasi di sini');
+    // Same rule as the detail endpoint: the target is not part of the contract.
+    expect(item).not.toHaveProperty('noticeLinkUrl');
+  });
+
+  it('reports no strip as null on the swiper card too', async () => {
+    const event = await createEvent({});
+    await addTicketType(event.id, {});
+
+    const res = await request(app).get('/api/event/on-sale').expect(200);
+    const item = res.body.data.items.find((i: { slug: string }) => i.slug === event.slug);
+
+    expect(item.noticeText).toBeNull();
+    expect(item.noticeLinkLabel).toBeNull();
+  });
+
   it('omits a DRAFT, CLOSED or CANCELED event', async () => {
     for (const status of ['DRAFT', 'CLOSED', 'CANCELED']) {
       const event = await createEvent({ status });

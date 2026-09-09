@@ -26,6 +26,9 @@ export interface EventListItemView {
   location: string | null;
   lowestPrice: number;
   remainingQuota: number | null;
+  /** Announcement strip — same two fields the detail endpoint exposes. */
+  noticeText: string | null;
+  noticeLinkLabel: string | null;
 }
 
 export interface EventOrderView {
@@ -95,6 +98,12 @@ export class EventService {
         startsAt: true,
         endsAt: true,
         location: true,
+        // Carried here too: the strip renders on the shop home, above the
+        // catalog, where only this endpoint's payload is available. Same two
+        // fields as the detail endpoint — `noticeLinkUrl` stays unexposed, so a
+        // client points the label at the event page it already has the slug for.
+        noticeText: true,
+        noticeLinkLabel: true,
         ticketTypes: {
           where: { isActive: true },
           orderBy: { sortOrder: 'asc' },
@@ -128,6 +137,8 @@ export class EventService {
         startsAt: event.startsAt,
         endsAt: event.endsAt,
         location: event.location,
+        noticeText: event.noticeText,
+        noticeLinkLabel: event.noticeLinkLabel,
         lowestPrice: Math.min(...sellable.map((t) => t.price)),
         // Aggregate across every type. One unlimited type makes the whole event
         // unlimited — a partial sum would read as a seat count and be wrong.
