@@ -19,6 +19,7 @@ import {
 import { assertUuid } from '@bb/common/utils/uuid.util';
 import { normalizePhonePair, otpPhoneTarget } from '@bb/common/utils/phone.util';
 import { isReusableUnverifiedMember } from '@bb/common/utils/member-state.util';
+import { claimTicketsByEmail } from '@bb/domain/event/claim';
 import { otpService } from '@bb/common/services/otp.service';
 import type { GoogleIdTokenPayload } from './social/google-verifier';
 import { verifyAppleIdentityToken } from './social/apple-verifier';
@@ -1356,6 +1357,15 @@ export class AuthService {
         ...(member.scheduledDeletionAt === null ? { isActive: true } : {}),
       },
     });
+
+    // This mailbox is now proven, so hand over any event ticket addressed to it.
+    // Only here, never on the phone-verification path: that one proves a phone
+    // number, and the email on such an account is still just something someone
+    // typed. Best-effort — a failure must not turn a successful verification
+    // into an error, and the tickets stay claimable on the next one.
+    await claimTicketsByEmail(member.id, member.email).catch((err) =>
+      logger.error({ err, memberId: member.id }, '[auth] ticket claim failed'),
+    );
 
     return { member_id: member.legacyId ?? member.id, verified: true };
   }

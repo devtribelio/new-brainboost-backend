@@ -182,6 +182,11 @@ const byRegisterTarget = byIdentifier('register', (b) => {
 });
 // Pre-registration: the email the OTP will be mailed to.
 const byEmail = byIdentifier('email', (b) => str(b.email)?.toLowerCase());
+// Event checkout: the payer's email, which sits one level down in the body.
+const byBuyerEmail = byIdentifier('buyer', (b) => {
+  const buyer = b.buyer as Record<string, unknown> | undefined;
+  return buyer ? str(buyer.email)?.toLowerCase() : undefined;
+});
 // Forgot-password: email, or a digits-normalized phone (no phoneCode field here).
 const byEmailOrPhone = byIdentifier('reset', (b) => {
   const email = str(b.email)?.toLowerCase();
@@ -206,6 +211,7 @@ export const _keyers = {
   byPhoneTarget,
   byRegisterTarget,
   byEmailOrPhone,
+  byBuyerEmail,
 };
 
 /**
@@ -305,6 +311,19 @@ export const registerByPhoneRateLimiter: RequestHandler = makeRateLimiter({
   name: 'register-phone',
   limit: 15,
   keyGenerator: byPhoneTarget,
+});
+
+// --- Event checkout — UNAUTHENTICATED and expensive: it writes a member row
+//     and calls Xendit to mint an invoice. Two buckets, both must pass: one per
+//     payer email (a single person retrying a card), one per IP (a script). ---
+export const eventCheckoutEmailRateLimiter: RequestHandler = makeRateLimiter({
+  name: 'event-checkout-email',
+  limit: 10,
+  keyGenerator: byBuyerEmail,
+});
+export const eventCheckoutIpRateLimiter: RequestHandler = makeRateLimiter({
+  name: 'event-checkout-ip',
+  limit: 30,
 });
 
 // --- Login — keyed per-account (username); only FAILED attempts count, so a

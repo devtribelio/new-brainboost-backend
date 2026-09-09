@@ -152,6 +152,10 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   PRODUCT_CODE_REQUIRED: 'Kode produk wajib diisi',
   PRODUCT_ALREADY_PURCHASED: 'Kelas ini sudah kamu miliki',
   VOUCHER_INVALID: 'Voucher tidak dapat digunakan',
+  EVENT_NOT_ON_SALE: 'Penjualan tiket untuk event ini sudah ditutup',
+  EVENT_TICKET_SOLD_OUT: 'Tiket sudah habis',
+  EVENT_TICKET_QTY_INVALID: 'Jumlah tiket tidak valid',
+  EVENT_ATTENDEE_INVALID: 'Data peserta tidak lengkap atau tidak valid',
   VOUCHER_EXHAUSTED: 'Kuota voucher sudah habis',
   VOUCHER_TRIAL_ALREADY_USED: 'Voucher uji coba ini sudah pernah kamu pakai',
 

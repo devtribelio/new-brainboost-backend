@@ -118,6 +118,8 @@ model Member {
   commercePayments       CommercePayment[]
   notificationMutes      NotificationMute[]
   kycEvents              KycEvent[]
+  eventTicketsBought     EventTicket[]           @relation("EventTicketBuyer")
+  eventTicketsClaimed    EventTicket[]           @relation("EventTicketAttendee")
 
   @@map("members")
 }
@@ -402,6 +404,7 @@ model Product {
   affiliateCommissions AffiliateCommission[]
   commerceTransactions CommerceTransaction[]
   voucherProducts      VoucherProduct[]
+  eventTicketType      EventTicketType?
 
   @@map("products")
 }
@@ -1166,12 +1169,13 @@ model CommerceTransaction {
   createdAt                    DateTime                  @default(now()) @map("created_at")
   updatedAt                    DateTime                  @updatedAt @map("updated_at")
 
-  member     Member            @relation(fields: [memberId], references: [id])
-  product    Product           @relation(fields: [productId], references: [id])
-  affiliator MemberAffiliator? @relation(fields: [affiliatorId], references: [id])
-  program    AffiliateProgram? @relation(fields: [programId], references: [id])
-  voucher    Voucher?          @relation(fields: [voucherId], references: [id])
-  payments   CommercePayment[]
+  member       Member            @relation(fields: [memberId], references: [id])
+  product      Product           @relation(fields: [productId], references: [id])
+  affiliator   MemberAffiliator? @relation(fields: [affiliatorId], references: [id])
+  program      AffiliateProgram? @relation(fields: [programId], references: [id])
+  voucher      Voucher?          @relation(fields: [voucherId], references: [id])
+  payments     CommercePayment[]
+  eventTickets EventTicket[]
 
   @@unique([provider, providerEventId]) // idempotent ingest; both null for web (NULLs distinct in PG)
   @@index([memberId, createdAt])
@@ -1552,4 +1556,135 @@ model TrackingLinkClick {
   @@id([linkId, day])
   @@index([day])
   @@map("tracking_link_clicks")
+}
+
+/// A sellable event (webinar, workshop, kopdar). Sold on the marketplace as one
+/// or more `EventTicketType`, never on its own — the event carries the story
+/// (title, cover, when, where), the ticket type carries the price and the quota.
+///
+/// There is no index page: events appear as a swiper on the shop home and are
+/// otherwise reached by slug, because there is not always one running.
+/// See docs/event-ticketing.md.
+model Event {
+  id          String    @id @default(uuid(7)) @db.Uuid
+  /// Public URL segment: `shop.brainboost.id/event/<slug>`.
+  slug        String    @unique
+  title       String
+  /// HTML from the backoffice editor.
+  description String?
+  coverUrl    String?   @map("cover_url")
+  /// Stored UTC, rendered WIB everywhere (same rule as every other date here).
+  startsAt    DateTime  @map("starts_at")
+  endsAt      DateTime? @map("ends_at")
+  /// Optional: an online event has no address (P1).
+  location    String?
+  /// Maps link for an offline event. A Zoom link is NOT put here — it is sent to
+  /// ticket holders, not published on a page anyone can open.
+  locationUrl String?   @map("location_url")
+  /// DRAFT | ON_SALE | CLOSED | CANCELED. Free-form string, not a DB enum: the
+  /// set is likely to grow (postponed, sold out as a state) and every other
+  /// lifecycle column in this schema that grew regretted the enum.
+  status      String    @default("DRAFT")
+  /// `bo_users.id` — a backoffice-owned table, so no FK can point at it from
+  /// here (same as `tracking_links.created_by`).
+  createdBy   String?   @map("created_by") @db.Uuid
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  ticketTypes EventTicketType[]
+
+  @@index([status, startsAt])
+  @@map("events")
+}
+
+/// One sellable ticket kind of an event: "Online", "Offline", "Early Bird" —
+/// each with its own price, quota and sale window.
+///
+/// 1:1 with a `products` row of `type='event_ticket'`. That is the load-bearing
+/// decision of this whole feature: checkout, voucher whitelist, tracking links,
+/// the Sumber Traffic report and (if it ever arrives) commission all key on
+/// `product_id`. Without it, every one of those layers would have to be taught
+/// what a ticket is. Price is READ FROM THE PRODUCT, never copied here, so
+/// there is one source of truth for what the buyer is charged.
+///
+/// Consequence of one `product_id` per `commerce_transactions` row: one order
+/// buys one ticket type. Online + offline in one payment is out of scope (P7).
+model EventTicketType {
+  id           String    @id @default(uuid(7)) @db.Uuid
+  eventId      String    @map("event_id") @db.Uuid
+  /// The `products` row this ticket sells as. Price lives THERE.
+  productId    String    @unique @map("product_id") @db.Uuid
+  name         String
+  /// ONLINE | OFFLINE — drives an icon and a filter, nothing in the money path.
+  kind         String
+  /// null = unlimited. Seats taken = `event_tickets` in RESERVED or ISSUED for
+  /// this type; seats come back when the sweeper expires an abandoned order.
+  quota        Int?
+  maxPerOrder  Int       @default(10) @map("max_per_order")
+  saleStartsAt DateTime? @map("sale_starts_at")
+  saleEndsAt   DateTime? @map("sale_ends_at")
+  sortOrder    Int       @default(0) @map("sort_order")
+  isActive     Boolean   @default(true) @map("is_active")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  event   Event         @relation(fields: [eventId], references: [id])
+  product Product       @relation(fields: [productId], references: [id])
+  tickets EventTicket[]
+
+  @@index([eventId])
+  @@map("event_ticket_types")
+}
+
+/// One seat, one attendee, one code. N of these hang off a single order
+/// (`commerce_transactions.qty` = N).
+///
+/// Unlike `affiliate_visits` / `shop_visits` / `tracking_links`, this table DOES
+/// carry foreign keys: those three are written by public endpoints that must
+/// never fail (or point at backoffice-owned tables), while every row here is
+/// written by our own service inside the order's transaction. Integrity is free,
+/// so take it.
+///
+/// `status` is load-bearing, not decoration: the quota query reads it directly.
+/// RESERVED is claimed at checkout and released by `expirePendingTransactions`
+/// when the order expires or is canceled — nothing else gives the seat back.
+model EventTicket {
+  id            String    @id @default(uuid(7)) @db.Uuid
+  /// `BBT-XXXXXX`, alphabet [A-Z2-9] (no 0/O/1/I). Minted at RESERVED so it can
+  /// be shown on the "waiting for payment" page; only VALID once ISSUED. Wide
+  /// enough to become a QR payload later without a migration.
+  code          String    @unique
+  ticketTypeId  String    @map("ticket_type_id") @db.Uuid
+  transactionId String    @map("transaction_id") @db.Uuid
+  /// Whoever paid — a real account when logged in, otherwise the placeholder
+  /// member created from the payer's email (§4.2). Never null: every listener on
+  /// `commerce.payment.success` assumes an order has a member.
+  buyerMemberId String    @map("buyer_member_id") @db.Uuid
+  attendeeName  String    @map("attendee_name")
+  /// Normalised lowercase. The same email may hold several tickets (P5), so this
+  /// is indexed, not unique.
+  attendeeEmail String    @map("attendee_email")
+  /// Filled when the ATTENDEE claims the ticket by verifying that email — not
+  /// the payer. Buying for someone else does not make you the ticket's owner.
+  /// Known gap: only `validateOtpEmail` claims today, so a member who signed up
+  /// with Google or by phone never passes through it and this stays NULL. See
+  /// docs/event-ticketing.md K-3 before relying on it.
+  memberId      String?   @map("member_id") @db.Uuid
+  /// RESERVED | ISSUED | EXPIRED | VOID.
+  status        String    @default("RESERVED")
+  issuedAt      DateTime? @map("issued_at")
+  emailSentAt   DateTime? @map("email_sent_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  ticketType  EventTicketType     @relation(fields: [ticketTypeId], references: [id])
+  transaction CommerceTransaction @relation(fields: [transactionId], references: [id])
+  buyer       Member              @relation("EventTicketBuyer", fields: [buyerMemberId], references: [id])
+  attendee    Member?             @relation("EventTicketAttendee", fields: [memberId], references: [id])
+
+  @@index([transactionId])
+  @@index([attendeeEmail])
+  /// Quota count: seats taken per ticket type.
+  @@index([ticketTypeId, status])
+  @@map("event_tickets")
 }

@@ -317,6 +317,7 @@ export class BbEcsStack extends cdk.Stack {
         taskDefinition: makeCronLane('Cron', 'cron', [
           'affiliatePendingToBalance',
           'expirePendingPayments',
+          'expireEventTicketOrders',
           'topicDigest',
           'streakReminder',
         ]),
