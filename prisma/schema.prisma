@@ -1566,30 +1566,43 @@ model TrackingLinkClick {
 /// otherwise reached by slug, because there is not always one running.
 /// See docs/event-ticketing.md.
 model Event {
-  id          String    @id @default(uuid(7)) @db.Uuid
+  id              String    @id @default(uuid(7)) @db.Uuid
   /// Public URL segment: `shop.brainboost.id/event/<slug>`.
-  slug        String    @unique
-  title       String
+  slug            String    @unique
+  title           String
   /// HTML from the backoffice editor.
-  description String?
-  coverUrl    String?   @map("cover_url")
+  description     String?
+  coverUrl        String?   @map("cover_url")
   /// Stored UTC, rendered WIB everywhere (same rule as every other date here).
-  startsAt    DateTime  @map("starts_at")
-  endsAt      DateTime? @map("ends_at")
+  startsAt        DateTime  @map("starts_at")
+  endsAt          DateTime? @map("ends_at")
   /// Optional: an online event has no address (P1).
-  location    String?
+  location        String?
   /// Maps link for an offline event. A Zoom link is NOT put here — it is sent to
   /// ticket holders, not published on a page anyone can open.
-  locationUrl String?   @map("location_url")
+  locationUrl     String?   @map("location_url")
   /// DRAFT | ON_SALE | CLOSED | CANCELED. Free-form string, not a DB enum: the
   /// set is likely to grow (postponed, sold out as a state) and every other
   /// lifecycle column in this schema that grew regretted the enum.
-  status      String    @default("DRAFT")
+  status          String    @default("DRAFT")
+  /// Announcement strip shown alongside the event ("Bisa reservasi tiket dulu…").
+  /// Three plain-text columns rather than one HTML blob on purpose: the operator
+  /// would otherwise author the `<a href>` themselves, which puts a `javascript:`
+  /// URL one paste away from a public page. Nothing here is markup, so nothing
+  /// here can become markup.
+  noticeText      String?   @map("notice_text")
+  /// Clickable part of the strip. The link renders only when a label exists —
+  /// a URL with no label has nothing to press.
+  noticeLinkLabel String?   @map("notice_link_label")
+  /// Where the label points. NULL means the event's own page: resolved at read
+  /// time, never stored, because the slug is still editable while no ticket has
+  /// sold and a stored absolute URL would rot into a 404 without a sound.
+  noticeLinkUrl   String?   @map("notice_link_url")
   /// `bo_users.id` — a backoffice-owned table, so no FK can point at it from
   /// here (same as `tracking_links.created_by`).
-  createdBy   String?   @map("created_by") @db.Uuid
-  createdAt   DateTime  @default(now()) @map("created_at")
-  updatedAt   DateTime  @updatedAt @map("updated_at")
+  createdBy       String?   @map("created_by") @db.Uuid
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
 
   ticketTypes EventTicketType[]
 

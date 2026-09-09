@@ -105,6 +105,22 @@ export class EventDetailDto {
   @ApiProperty({ enum: ['DRAFT', 'ON_SALE', 'CLOSED', 'CANCELED'], example: 'ON_SALE' })
   status!: string;
 
+  @ApiPropertyOptional({
+    nullable: true,
+    example: 'Bisa reservasi tiket dulu buat ketemu ENHYPEN!',
+    description:
+      'Announcement strip. Plain text, never markup — render it as text. `null` means no strip.',
+  })
+  noticeText!: string | null;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    example: 'Reservasi Tiket Kamu di Sini',
+    description:
+      'Clickable part of the strip. `null` = render the text without a link. The target is not exposed yet; point it at this event page.',
+  })
+  noticeLinkLabel!: string | null;
+
   @ApiProperty({
     example: true,
     description:

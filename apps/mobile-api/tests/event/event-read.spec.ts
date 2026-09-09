@@ -261,6 +261,37 @@ describe('GET /api/event/:slug', () => {
     expect(data.ticketTypes[0].maxPerOrder).toBe(10);
   });
 
+  it('returns the announcement strip text and label, but not its target', async () => {
+    const event = await createEvent({});
+    await addTicketType(event.id, {});
+    await prisma.event.update({
+      where: { id: event.id },
+      data: {
+        noticeText: 'Bisa reservasi tiket dulu!',
+        noticeLinkLabel: 'Reservasi di sini',
+        noticeLinkUrl: 'https://example.test/reserve',
+      },
+    });
+
+    const res = await request(app).get(`/api/event/${event.slug}`).expect(200);
+
+    expect(res.body.data.noticeText).toBe('Bisa reservasi tiket dulu!');
+    expect(res.body.data.noticeLinkLabel).toBe('Reservasi di sini');
+    // The target is not part of the contract yet — an unused field in a public
+    // payload is one more thing a client can start depending on too early.
+    expect(res.body.data).not.toHaveProperty('noticeLinkUrl');
+  });
+
+  it('reports no strip as null rather than omitting the fields', async () => {
+    const event = await createEvent({});
+    await addTicketType(event.id, {});
+
+    const res = await request(app).get(`/api/event/${event.slug}`).expect(200);
+
+    expect(res.body.data.noticeText).toBeNull();
+    expect(res.body.data.noticeLinkLabel).toBeNull();
+  });
+
   it('404s a DRAFT event', async () => {
     const event = await createEvent({ status: 'DRAFT' });
     await addTicketType(event.id, {});

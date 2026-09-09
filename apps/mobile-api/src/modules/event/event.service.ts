@@ -55,6 +55,10 @@ export interface EventDetailView {
   location: string | null;
   locationUrl: string | null;
   status: string;
+  /** Announcement strip. Plain text — never markup, so it can never become any. */
+  noticeText: string | null;
+  /** Clickable part of the strip; null means the strip renders as text only. */
+  noticeLinkLabel: string | null;
   canBuy: boolean;
   ticketTypes: TicketTypeView[];
 }
@@ -156,6 +160,11 @@ export class EventService {
         location: true,
         locationUrl: true,
         status: true,
+        noticeText: true,
+        noticeLinkLabel: true,
+        // `noticeLinkUrl` is deliberately NOT selected: nothing renders it yet,
+        // and an unused field in a public payload is one more thing a client can
+        // start depending on before its meaning is settled.
         ticketTypes: {
           where: { isActive: true },
           orderBy: { sortOrder: 'asc' },
@@ -187,6 +196,8 @@ export class EventService {
       location: event.location,
       locationUrl: event.locationUrl,
       status: event.status,
+      noticeText: event.noticeText,
+      noticeLinkLabel: event.noticeLinkLabel,
       // Folded into one boolean on purpose: the FE must not reassemble this
       // from `status` + dates + quota, because every client that tries gets a
       // different answer.
