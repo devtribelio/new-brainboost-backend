@@ -3,16 +3,20 @@ import { ok, okCreated } from '@bb/common/utils/response.util';
 import { ApiBody, ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@bb/common/openapi/decorators';
 import type { AuthenticatedRequest } from '@bb/common/interfaces/authenticated-request';
 import { EventCheckoutService } from '@bb/domain/event/event-checkout.service';
+import { EventVisitService } from '@bb/domain/event/visit.service';
+import { clientIp } from '@bb/common/utils/client-ip.util';
 import { EventService } from './event.service';
 import { EventDetailDto, EventListResultDto } from './dto/event.dto';
 import { EventCheckoutDto, EventCheckoutResultDto } from './dto/event-checkout.dto';
 import { EventOrderResultDto } from './dto/event-order.dto';
+import { LogEventVisitDto, EventVisitResultDto } from './dto/event-visit.dto';
 
 @ApiTags('Event')
 export class EventController {
   constructor(
     private readonly eventService: EventService,
     private readonly checkoutService: EventCheckoutService,
+    private readonly visitService: EventVisitService,
   ) {}
 
   @ApiOperation({
@@ -73,5 +77,38 @@ export class EventController {
       String((req.query as { email?: string }).email ?? ''),
     );
     return ok(res, order);
+  };
+
+  @ApiOperation({
+    summary: 'Log an event-page visit (public)',
+    description:
+      'Always answers 200 — a marketing link that returns 4xx loses the click it exists to measure, so bad input, an unknown slug and an exhausted rate limiter all come back as a `status` string. Stored apart from shop visits so an event\'s traffic never surfaces on the product Marketing pages.',
+  })
+  @ApiBody({ type: () => LogEventVisitDto })
+  @ApiResponse({ status: 200, type: () => EventVisitResultDto })
+  logVisit = async (req: Request, res: Response) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const str = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined);
+
+    const result = await this.visitService.logVisit({
+      guestId: str(body.guestId),
+      eventSlug: str(body.eventSlug),
+      // The shop calls this before login; a bearer is never attached. memberId
+      // is filled later by /shop/visits/claim, which binds both stores.
+      memberId: null,
+      utmSource: str(body.utmSource),
+      utmMedium: str(body.utmMedium),
+      utmCampaign: str(body.utmCampaign),
+      utmContent: str(body.utmContent),
+      utmTerm: str(body.utmTerm),
+      // Body wins over the header: the shop is a same-origin SPA, so its own
+      // Referer is the event page, not the link the visitor arrived from.
+      referer: str(body.referer) ?? str(req.headers.referer),
+      ipAddress: clientIp(req),
+      userAgent: str(req.headers['user-agent']),
+      clientEventId: str(body.clientEventId),
+    });
+
+    return ok(res, result);
   };
 }

@@ -1717,3 +1717,39 @@ model EventTicket {
   @@index([ticketTypeId, status])
   @@map("event_tickets")
 }
+
+/// Visits to an event page, kept OUT of `shop_visits` on purpose.
+///
+/// Not a nullable `event_id` on the shop table: isolation there would hold only
+/// because nothing reads `shop_visits` today, and the first marketing report
+/// built on it would sweep event rows in unless its author remembered to filter.
+/// A separate table makes the mixing impossible rather than merely absent.
+///
+/// No FK to Event or Member — same rule as ShopVisit and AffiliateVisit: it is
+/// written by a public unauthenticated endpoint that must never fail, and a FK
+/// violation there turns a marketing click into a lost row. An unknown slug is
+/// stored with a null `eventId`, because the UTM on it is still worth having.
+model EventVisit {
+  id            String   @id @default(uuid(7)) @db.Uuid
+  guestId       String   @map("guest_id")
+  memberId      String?  @map("member_id") @db.Uuid
+  eventId       String?  @map("event_id") @db.Uuid
+  utmSource     String?  @map("utm_source")
+  utmMedium     String?  @map("utm_medium")
+  utmCampaign   String?  @map("utm_campaign")
+  utmContent    String?  @map("utm_content")
+  utmTerm       String?  @map("utm_term")
+  referer       String?
+  ipAddress     String?  @map("ip_address")
+  userAgent     String?  @map("user_agent")
+  /// Dedupes a RETRY, never a visit: a refresh must send a new id and produce a
+  /// new row, else "Kunjungan" collapses onto "Pengunjung unik".
+  clientEventId String?  @unique @map("client_event_id")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@index([guestId, createdAt])
+  @@index([memberId])
+  @@index([eventId, createdAt])
+  @@index([utmSource, utmCampaign, createdAt])
+  @@map("event_visits")
+}

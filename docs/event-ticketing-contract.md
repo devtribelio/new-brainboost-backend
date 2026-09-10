@@ -51,6 +51,7 @@ all** by someone who just closed the Xendit tab.
         │
   [FE]  │ 2. home: GET /api/event/on-sale        → swiper (hidden when empty)
   [FE]  │ 3. event page: GET /api/event/<slug>   → ticket type cards
+  [FE]  │    and POST /api/event/visits          ──► event_visits (funnel)
         │
         │ 4. pick ticket type + quantity → fill payer form + N attendees
         │
@@ -365,6 +366,73 @@ that is the first question a buyer purchasing for other people will ask.
 
 ---
 
+## 5. `POST /api/event/visits` — log an event-page visit
+
+**Public. No `Authorization`.** Call it once when the event page renders.
+
+### What it is for
+
+It is what turns the campaign report from "orders" into a funnel: click →
+**visit** → order. Without it, a channel that brings a thousand people and sells
+nothing looks identical to one nobody ever opened.
+
+Event visits are stored **apart from shop visits**, in their own table, so an
+event's traffic never appears on the product Marketing pages. That separation is
+invisible to you — it changes nothing about how you call this.
+
+### Request
+
+```jsonc
+{
+  "guestId": "0190a4d1-....",       // REQUIRED — contents of cookie bb_gid
+  "eventSlug": "mt-mountain",       // optional; an unknown slug is still logged
+  "utmSource": "instagram",         // optional — from cookie bb_attr
+  "utmMedium": "social",
+  "utmCampaign": "mt-mountain-instagram-denny",
+  "utmContent": "story-1",
+  "utmTerm": null,
+  "referer": "https://t.co/...",    // optional
+  "clientEventId": "0190a4d2-...."  // optional — see below
+}
+```
+
+### Response — **always 200**
+
+```jsonc
+{ "success": true, "data": { "status": "logged" }, "meta": null, "error": null }
+```
+
+| `status` | Meaning | What you do |
+|---|---|---|
+| `logged` | Stored | Nothing |
+| `duplicate` | This `clientEventId` was already logged | Nothing — your retry worked the first time |
+| `invalid` | No `guestId`, or the caller looks like a bot/unfurler | Nothing |
+| `error` | Write failed | Nothing |
+
+**It never answers 4xx or 5xx** — not for bad input, not for an unknown slug, not
+when the rate limiter is out of budget. A marketing link that returns an error
+loses the click it exists to measure. So: do not surface failures to the visitor,
+do not block rendering on it, and do not retry on a non-200 beyond your normal
+network retry.
+
+### The two rules that decide whether the numbers are right
+
+**1. `clientEventId` dedupes a RETRY, never a visit.** Generate a fresh id per
+page view and reuse it only when re-sending *that same* view after a network
+failure. A refresh is a new view and must send a new id — a deterministic key
+(say `hash(guestId + eventSlug)`) would collapse "Kunjungan" onto "Pengunjung
+unik" and the two columns would forever be equal.
+
+**2. Send it once per page view, not per render.** React strict mode, a resize,
+a state change — none of those are visits. Guard it so a remount does not log
+again.
+
+### Login
+
+There is no separate claim call for events. `POST /api/shop/visits/claim` — the
+one you already call after any successful auth — binds this guest's event visits
+too, in the same request.
+
 ## Register / login for buyers who want an account
 
 There are no new auth endpoints. A buyer who chooses to log in uses the existing
@@ -392,7 +460,7 @@ for the FE to make.
 | Page | Calls | Notes |
 |---|---|---|
 | Shop home | `GET /api/event/on-sale` | Block disappears entirely when `items` is empty |
-| `/event/[slug]` | `GET /api/event/:slug` | `canBuy` drives the button; sold-out types stay visible |
+| `/event/[slug]` | `GET /api/event/:slug` + `POST /api/event/visits` | `canBuy` drives the button; sold-out types stay visible. Log the visit once per page view |
 | `/event/[slug]/checkout` | data from that same call, submit to `POST /api/event/checkout` | Must send `source` from cookies |
 | `/event/order/[code]` | `GET /api/event/order/:code?email=` | Poll every 3s, 20 times |
 
@@ -404,3 +472,5 @@ Easiest things to get wrong, most frequent first:
 3. `EVENT_TICKET_SOLD_OUT` auto-retried → the buyer sees the error repeatedly.
 4. Account status inferred from the checkout response → account-existence leak.
 5. Ticket codes from the checkout response presented as valid before `PAID`.
+6. A deterministic `clientEventId`, or logging a visit on every render → the
+   visit count collapses onto the unique-visitor count.

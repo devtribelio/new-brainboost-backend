@@ -6,8 +6,10 @@ import { validateDto } from '@bb/common/middlewares/validation.middleware';
 import {
   eventCheckoutEmailRateLimiter,
   eventCheckoutIpRateLimiter,
+  shopVisitRateLimiter,
 } from '@bb/common/middlewares/rate-limit.middleware';
 import { EventCheckoutService } from '@bb/domain/event/event-checkout.service';
+import { EventVisitService } from '@bb/domain/event/visit.service';
 import { EventController } from './event.controller';
 import { EventService } from './event.service';
 import { EventCheckoutDto } from './dto/event-checkout.dto';
@@ -18,6 +20,7 @@ export function eventRoutes(): Router {
   const ctrl = new EventController(
     traceService(new EventService()),
     traceService(new EventCheckoutService()),
+    traceService(new EventVisitService()),
   );
 
   // Both routes are deliberately public — an event page is marketing, reached
@@ -28,6 +31,18 @@ export function eventRoutes(): Router {
     method: 'get',
     path: '/on-sale',
     handlerKey: 'listOnSale',
+  });
+
+  // Public and unvalidated by design: no validateDto, and the limiter lets a
+  // visitor through un-counted rather than answering 429 — the same contract as
+  // POST /api/shop/visits, whose limiter this reuses.
+  bindRoute({
+    router,
+    controller: ctrl,
+    method: 'post',
+    path: '/visits',
+    handlerKey: 'logVisit',
+    middlewares: [shopVisitRateLimiter],
   });
 
   // Auth OPTIONAL: a guest may buy, and a logged-in buyer gets their account.
