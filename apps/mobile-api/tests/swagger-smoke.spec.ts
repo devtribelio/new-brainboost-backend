@@ -61,4 +61,28 @@ describe('OpenAPI / Swagger', () => {
     expect(oauthToken).toBeTruthy();
     expect(oauthToken.security).toBeUndefined();
   });
+
+  // `type: () => [Dto]` used to fall through every branch of `toJsonSchemaType`
+  // and emit `{ type: 'string' }`, so every nested list in the event module was
+  // documented as a string and its item schema was never registered. A reader of
+  // the spec could not tell what to put in `attendees`.
+  it('documents an array-of-DTO property as an array of $ref', async () => {
+    const r = await request(app).get('/api/docs.json');
+    const schemas = r.body.components.schemas;
+
+    expect(schemas.EventCheckoutDto.properties.attendees).toMatchObject({
+      type: 'array',
+      items: { $ref: '#/components/schemas/EventAttendeeDto' },
+    });
+    // The item schema must also exist — a $ref to nothing renders as an empty box.
+    expect(schemas.EventAttendeeDto).toBeTruthy();
+    expect(Object.keys(schemas.EventAttendeeDto.properties)).toEqual(
+      expect.arrayContaining(['name', 'email']),
+    );
+    // Same form on a response, to prove it is the mechanism and not one call site.
+    expect(schemas.EventOrderResultDto.properties.tickets).toMatchObject({
+      type: 'array',
+      items: { $ref: '#/components/schemas/EventOrderTicketDto' },
+    });
+  });
 });
