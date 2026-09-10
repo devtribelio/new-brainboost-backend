@@ -1,11 +1,32 @@
-import { IsEmail } from 'class-validator';
+import { IsEmail, IsOptional, IsString } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@bb/common/openapi/decorators';
 
-/** Query of `GET /event/order/:code`. The payer's email stands in for a session. */
+/**
+ * Query of `GET /event/order/:code`. Three credentials are accepted and any ONE
+ * suffices: a bearer token (the order's own member), `t` (the signed token an event
+ * invoice's redirect carries), or `email` (the payer's — what the summary email
+ * link uses).
+ *
+ * Both fields are optional HERE and the "at least one" rule lives in the service,
+ * because the bearer is not in the query at all: a DTO-level one-of cannot see it
+ * and would reject a perfectly authenticated request.
+ */
 export class EventOrderQueryDto {
-  @ApiProperty({ example: 'rina@example.com', description: "Payer's email. A mismatch is 404, not 403." })
+  @ApiPropertyOptional({
+    example: 'rina@example.com',
+    description: "Payer's email. A mismatch is 404, not 403.",
+  })
+  @IsOptional()
   @IsEmail()
-  email!: string;
+  email?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Opaque signed token from the post-payment redirect. Scoped to this one order, ~24h. Treat as a credential: strip it from the URL after reading it.',
+  })
+  @IsOptional()
+  @IsString()
+  t?: string;
 }
 
 export class EventOrderTicketDto {

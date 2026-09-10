@@ -1,6 +1,8 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import request from 'supertest';
+import bcrypt from 'bcryptjs';
 import { prisma } from '@bb/db';
+import { SETTING_KEYS, SettingsService } from '@bb/common/services/settings.service';
 import type { XenditGateway } from '@bb/common/services/xendit-gateway';
 import type { CreateInvoiceRequest, Invoice } from 'xendit-node/invoice/models';
 import { PaymentService } from '@bb/domain/commerce/payment.service';
@@ -519,7 +521,7 @@ describe('GET /api/event/order/:code', () => {
       .expect(404);
   });
 
-  it('rejects a request with no email at all', async () => {
+  it('rejects a request carrying no credential at all', async () => {
     await request(app).get('/api/event/order/BB-00000000-9999').expect(400);
   });
 
@@ -541,5 +543,158 @@ describe('GET /api/event/order/:code', () => {
 
     expect(res.body.data.status).toBe('PAID');
     expect(res.body.data.invoiceUrl).toBeNull();
+  });
+});
+
+describe('event invoice redirect', () => {
+  /** Same fake gateway, but it keeps what was sent so the redirect can be asserted. */
+  function capturing() {
+    const invoices: CreateInvoiceRequest[] = [];
+    const base = mockGateway();
+    const gateway: XenditGateway = {
+      createInvoice: async (params) => {
+        invoices.push(params);
+        return base.createInvoice(params);
+      },
+      expireInvoice: base.expireInvoice,
+    };
+    return {
+      svc: new EventCheckoutService(new CheckoutService(), new PaymentService(gateway)),
+      invoices,
+    };
+  }
+
+  async function buyOne() {
+    const { type } = await createTicketType({ price: 150000 });
+    const email = `redirect-${Date.now()}-${Math.floor(Math.random() * 10000)}@test.local`;
+    const { svc, invoices } = capturing();
+    const checkout = await svc.start({
+      ticketTypeId: type.id,
+      buyer: { name: 'Rina', email },
+      attendees: [attendee(1)],
+    });
+    track((await prisma.member.findUnique({ where: { email } }))!.id);
+    return { checkout, invoice: invoices[0], email };
+  }
+
+  /** The `t` value out of a redirect URL. */
+  function tokenOf(url: string): string {
+    return new URL(url).searchParams.get('t') ?? '';
+  }
+
+  it('points both redirects at the order page with a signed token', async () => {
+    const { checkout, invoice } = await buyOne();
+
+    // Success and failure are the SAME page: it already renders EXPIRED/CANCELED
+    // and re-offers the invoice while PENDING.
+    expect(invoice.successRedirectUrl).toBe(invoice.failureRedirectUrl);
+    expect(invoice.successRedirectUrl).toContain(`/event/order/${checkout.transactionCode}?t=`);
+    // The old generic redirect leaked the transaction UUID and carried no code.
+    expect(invoice.successRedirectUrl).not.toContain('transactionId=');
+    expect(tokenOf(invoice.successRedirectUrl!)).not.toBe('');
+  });
+
+  it('opens the order with only the token from that redirect', async () => {
+    const { checkout, invoice } = await buyOne();
+
+    const res = await request(app)
+      .get(`/api/event/order/${checkout.transactionCode}`)
+      .query({ t: tokenOf(invoice.successRedirectUrl!) })
+      .expect(200);
+
+    expect(res.body.data.transactionCode).toBe(checkout.transactionCode);
+    expect(res.body.data.tickets).toHaveLength(1);
+  });
+
+  it('404s a tampered token', async () => {
+    const { checkout, invoice } = await buyOne();
+    const token = tokenOf(invoice.successRedirectUrl!);
+
+    await request(app)
+      .get(`/api/event/order/${checkout.transactionCode}`)
+      .query({ t: `${token.slice(0, -2)}xy` })
+      .expect(404);
+  });
+
+  it("404s a token minted for a different order", async () => {
+    const mine = await buyOne();
+    const other = await buyOne();
+
+    await request(app)
+      .get(`/api/event/order/${mine.checkout.transactionCode}`)
+      .query({ t: tokenOf(other.invoice.successRedirectUrl!) })
+      .expect(404);
+  });
+
+  it('follows app_settings when the order path moves', async () => {
+    await prisma.appSetting.upsert({
+      where: { key: SETTING_KEYS.eventOrderPath },
+      create: { key: SETTING_KEYS.eventOrderPath, value: '/ticket' },
+      update: { value: '/ticket' },
+    });
+    SettingsService.clearCache();
+    try {
+      const { checkout, invoice } = await buyOne();
+      expect(invoice.successRedirectUrl).toContain(`/ticket/${checkout.transactionCode}?t=`);
+    } finally {
+      await prisma.appSetting.deleteMany({ where: { key: SETTING_KEYS.eventOrderPath } });
+      SettingsService.clearCache();
+    }
+  });
+});
+
+describe('GET /api/event/order/:code — bearer', () => {
+  const PASSWORD = 'Bearer#123';
+
+  /** A real member with a real session, so `optionalAuthGuard` accepts the token. */
+  async function member(label: string) {
+    const email = `order-bearer-${label}-${Date.now()}-${Math.floor(Math.random() * 10000)}@test.local`;
+    const row = await prisma.member.create({
+      data: {
+        email,
+        passwordHash: await bcrypt.hash(PASSWORD, 4),
+        fullName: 'Order Bearer',
+        isEmailVerified: true,
+      },
+    });
+    track(row.id);
+    const res = await request(app)
+      .post('/api/member/oauth/token')
+      .send({ grant_type: 'password', username: email, password: PASSWORD });
+    expect(res.status).toBe(200);
+    return { id: row.id, accessToken: res.body.data.access_token as string };
+  }
+
+  it('opens the order for its own member with no query at all', async () => {
+    const buyer = await member('own');
+    const { type } = await createTicketType({ price: 150000 });
+    const checkout = await service().start({
+      ticketTypeId: type.id,
+      memberId: buyer.id,
+      attendees: [attendee(1)],
+    });
+
+    const res = await request(app)
+      .get(`/api/event/order/${checkout.transactionCode}`)
+      .set('Authorization', `Bearer ${buyer.accessToken}`)
+      .expect(200);
+
+    expect(res.body.data.transactionCode).toBe(checkout.transactionCode);
+  });
+
+  it("404s another member's order", async () => {
+    const buyer = await member('owner');
+    const stranger = await member('stranger');
+    const { type } = await createTicketType({ price: 150000 });
+    const checkout = await service().start({
+      ticketTypeId: type.id,
+      memberId: buyer.id,
+      attendees: [attendee(1)],
+    });
+
+    await request(app)
+      .get(`/api/event/order/${checkout.transactionCode}`)
+      .set('Authorization', `Bearer ${stranger.accessToken}`)
+      .expect(404);
   });
 });

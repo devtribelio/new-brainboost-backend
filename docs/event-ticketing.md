@@ -735,3 +735,88 @@ Diperbaiki di `CheckoutService.start` (`createTransactionWithRetry`, 5 percobaan
 - **DB dev lokal sudah drift** jauh sebelum branch ini: 23 tabel ada di DB tapi tidak di `schema.prisma` (subscription, playlist, `bo_*`, dll) — sisa branch lain di DB yang sama. Tiga tabel event tidak termasuk; migrasi ini nol drift.
 - **`tests/notification/topic-digest.spec.ts:265` merah sebelum branch ini** (dibuktikan dengan `git stash`). Bukan dari pekerjaan event.
 - Sweeper BE-08 ikut lane cron **per jam**. Untuk event yang panas, kursi bisa tertahan sampai satu jam setelah ordernya kedaluwarsa. Kalau itu jadi masalah nyata, pindahkan namanya ke lane 5 menit — satu baris di `ecosystem.config.js` dan CDK.
+
+---
+
+## 16. Redirect setelah bayar (10 Sep 2026)
+
+Diminta FE lewat `~/Downloads/event-payment-redirect-contract.md`. Masalahnya nyata
+dan lebih tajam dari yang ditulis di sana: `env.xendit.invoiceSuccessUrl` default ke
+`…/checkout/success`, dan `/checkout` masuk `PROTECTED_PATHS` di FE — jadi pembeli
+tamu yang baru selesai bayar dilempar ke `/login` sambil memegang order yang sudah
+lunas dan akun yang passwordnya tidak pernah ia buat. Redirect lama juga membawa
+`transactionId` (UUID) dan **tidak membawa kode order sama sekali**, jadi halaman
+tiket bahkan tidak bisa mencari ordernya.
+
+Dua anggapan di dokumen FE sudah basi saat ditulis: `successRedirectUrl` /
+`failureRedirectUrl` **sudah** di-set per-invoice (`payment.service.ts`), jadi itu
+bukan kapabilitas baru; dan redirect itu tidak pernah membawa `code`.
+
+### 16.1 Yang dibangun
+
+- `PaymentService.create(memberId, dto, { redirect })` — override per-invoice,
+  opsional. Kosong = perilaku `env.xendit.*` seperti sekarang, jadi **jalur kursus
+  tidak berubah sama sekali**. Pemanggil yang menentukan, bukan PaymentService yang
+  menebak dari tipe produk: pemanggil sudah tahu apa yang ia jual, menebak berarti
+  satu query lagi untuk mengetahui hal yang sudah diketahui.
+- `EventCheckoutService.orderPageRedirect()` — `${shop.baseUrl}${event.orderPath}/<code>?t=<token>`,
+  dipakai untuk success DAN failure (halaman itu sudah merender EXPIRED/CANCELED dan
+  menawarkan ulang `invoiceUrl` selama PENDING).
+- `packages/common/src/utils/event-order-token.util.ts` — HMAC-SHA256 atas
+  `code|exp`, base64url, dibanding `timingSafeEqual`. **Ditandatangani, bukan
+  dienkripsi**: tetangganya `media-token.util.ts` menyegel dengan AES-GCM karena
+  `guid` Bunny di dalamnya harus rahasia, sedangkan di sini kode order sudah ada di
+  path URL — tidak ada yang disembunyikan.
+- `GET /api/event/order/:code` menerima **tiga** kredensial, cukup salah satu:
+  bearer (member pemilik order), `t`, atau `email` payer.
+
+### 16.2 Kenapa begitu, bukan yang lain
+
+- **Path tetap `/event/order/<code>`.** Usul FE `/ticket/<code>` bukan gratis:
+  bb-comms sudah hardcode path itu di dua handler Go (`event_ticket_issued.go`,
+  `event_order_summary.go`) plus dua template, dan repo itu langkah 2 di urutan
+  rilis yang mengikat. Argumen "sekali masuk invoice jadi permanen" juga terlalu
+  kuat untuk redirect: invoice tiket hidup 30 menit. Yang benar-benar permanen itu
+  **link di email**.
+- **Token, bukan email di URL.** `email` di URL bekerja hari ini tapi: (a) jadi
+  bearer credential di history/Referer/script analytics, dan (b) **404 untuk pembeli
+  yang login tapi mengisi contact email berbeda** — checkout terautentikasi
+  mengabaikan blok `buyer`, jadi payer email = email akun, sementara stash FE
+  menyimpan yang diketik. Token tidak punya ambiguitas itu.
+- **Link email tetap `?email=`.** Token di sana memaksa bb-comms ikut memegang
+  signing key (env + crypto Go) tanpa manfaat: penerima email sudah pemilik mailbox
+  itu.
+- **TTL token 24 jam, bukan 30 menit.** Token dicetak saat invoice dibuat dan URL
+  redirect yang sedang terbang tidak bisa ditukar, jadi TTL harus melewati seluruh
+  window bayar + pendaratan + polling. Halamannya read-only.
+- **Verifier mengembalikan `null`, tidak pernah throw.** Endpoint ini menjawab 404
+  yang SAMA untuk kode tak dikenal, email salah, dan token rusak — 401 dari verifier
+  justru membocorkan bedanya.
+- **Kunci diturunkan, URL-nya di `app_settings`.** Kuncinya
+  `sha256('event-order-token|v1|' + JWT_ACCESS_SECRET)` — nol env var baru, nol entry
+  Secrets Manager, nol langkah tambahan saat deploy. Label itu domain separation:
+  kunci ini tidak bisa menandatangani JWT, dan kalau bocor induknya tidak terbongkar.
+  Menandatangani dengan `env.jwt.accessSecret` langsung **tidak boleh** —
+  `verifyAccessToken` mengecast payload tanpa memeriksa bentuknya, jadi tokennya akan
+  ikut dipercaya jalur auth. Menaruh kuncinya di `app_settings` juga ditimbang lalu
+  ditolak: baris `app_settings` ikut di **setiap dump database** (proyek ini punya 3 DB
+  dan rutin menyalin antar-DB), sedangkan kunci ini menempa token untuk kode order
+  **apa pun** — dan kode order itu counter per hari yang bisa dienumerasi, jadi yang
+  terbuka adalah nama + email seluruh peserta. URL-nya sebaliknya: memang ingin bisa
+  diubah tanpa redeploy. Konsekuensi yang perlu diketahui: rotasi `JWT_ACCESS_SECRET`
+  ikut membatalkan token order yang sedang terbang, maksimal 24 jam — rotasi itu
+  sendiri sudah melogout semua member, jadi bukan jenis gangguan baru.
+- **400 untuk nol kredensial, 404 untuk kredensial salah.** 400 tidak bergantung
+  pada ada-tidaknya kode, jadi bukan oracle.
+
+### 16.3 Masih terbuka
+
+- **Tidak ada rate limiter** di `GET /api/event/order/:code` (dipertimbangkan, lalu
+  sengaja dilewati). Kode order bisa dienumerasi (`BB-YYYYMMDD-####`), dan halaman
+  itu menampilkan nama + email peserta. Yang menahan hanya keharusan kredensial.
+- **`event.orderPath` hanya memindahkan redirect.** bb-comms membangun link email
+  dari `SHOP_BASE_URL` miliknya sendiri + `/event/order/` yang hardcode, jadi
+  memutar setting itu tidak memindahkan email yang sudah terkirim. Kalau path benar
+  benar pindah, bb-comms harus ikut diubah.
+- FE harus `history.replaceState` membuang `t` setelah dibaca; backend tidak bisa
+  memaksakan itu.

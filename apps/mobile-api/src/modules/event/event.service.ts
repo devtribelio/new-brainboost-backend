@@ -1,5 +1,6 @@
 import { prisma } from '@bb/db';
-import { notFound, ERROR_CODES } from '@bb/common/exceptions';
+import { badRequest, notFound, ERROR_CODES } from '@bb/common/exceptions';
+import { verifyEventOrderToken } from '@bb/common/utils/event-order-token.util';
 
 /** Ticket statuses that occupy a seat. See docs/event-ticketing.md K-1. */
 const SEAT_TAKEN = ['RESERVED', 'ISSUED'];
@@ -223,13 +224,30 @@ export class EventService {
   /**
    * Order status for the "waiting for payment" / "paid" page.
    *
-   * Public, so the payer's email stands in for a session: a guest has no
-   * account to log into, and the same link is what the summary email carries.
-   * Anything that fails — unknown code, wrong email, an order that holds no
+   * Public, so one of three credentials stands in for a session — a guest has no
+   * account to log into. Any ONE suffices, because each covers a different way the
+   * buyer arrives: `memberId` (a logged-in buyer reading their own order), `token`
+   * (returning from the payment redirect, possibly on a second device), `email`
+   * (the link in the summary email).
+   *
+   * Anything that fails — unknown code, wrong credential, an order that holds no
    * tickets — answers the SAME 404. A 403 for "right code, wrong email" would
-   * confirm to a guesser that the code exists.
+   * confirm to a guesser that the code exists, and the code is enumerable
+   * (`BB-YYYYMMDD-####`, a per-day counter). A request carrying no credential at
+   * all is a 400 instead: there is nothing to check, and unlike a 403 that answer
+   * tells a guesser nothing about the code.
    */
-  async getOrderByCode(code: string, email: string): Promise<EventOrderView> {
+  async getOrderByCode(
+    code: string,
+    auth: { email?: string; token?: string; memberId?: string },
+  ): Promise<EventOrderView> {
+    const email = auth.email?.trim().toLowerCase() ?? '';
+    if (!email && !auth.token && !auth.memberId) {
+      throw badRequest(ERROR_CODES.VALIDATION_ERROR, {
+        message: 'email, t or a bearer token is required',
+      });
+    }
+
     const order = await prisma.commerceTransaction.findUnique({
       where: { code },
       select: {
@@ -238,6 +256,7 @@ export class EventService {
         amount: true,
         paidAt: true,
         expiredAt: true,
+        memberId: true,
         member: { select: { email: true } },
         payments: {
           where: { status: 'PENDING' },
@@ -263,9 +282,7 @@ export class EventService {
       },
     });
 
-    const wanted = email.trim().toLowerCase();
-    const payerEmail = order?.member.email?.trim().toLowerCase() ?? null;
-    if (!order || order.eventTickets.length === 0 || !payerEmail || payerEmail !== wanted) {
+    if (!order || order.eventTickets.length === 0 || !this.mayReadOrder(order, code, email, auth)) {
       throw notFound(ERROR_CODES.NOT_FOUND);
     }
 
@@ -288,6 +305,25 @@ export class EventService {
         status: t.status,
       })),
     };
+  }
+
+  /**
+   * Does this request get to read this order? Any ONE credential is enough.
+   *
+   * The token is checked against the code from the PATH, not the one on the row:
+   * they are equal here, but pinning it to the path makes it obvious that a token
+   * minted for order A can never open order B.
+   */
+  private mayReadOrder(
+    order: { memberId: string; member: { email: string | null } },
+    code: string,
+    email: string,
+    auth: { token?: string; memberId?: string },
+  ): boolean {
+    if (auth.memberId && auth.memberId === order.memberId) return true;
+    if (auth.token && verifyEventOrderToken(auth.token)?.code === code) return true;
+    const payerEmail = order.member.email?.trim().toLowerCase() ?? null;
+    return !!email && !!payerEmail && payerEmail === email;
   }
 
   /** Seats occupied per ticket type, counted from ticket rows (no counter column). */

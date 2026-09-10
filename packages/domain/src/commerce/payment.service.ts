@@ -14,6 +14,19 @@ export interface CreatePaymentInput {
   transactionId: string;
 }
 
+/**
+ * Where Xendit sends the buyer after the hosted checkout resolves.
+ *
+ * Per-invoice, not per-account: an event ticket and a course bought by the same
+ * member must land on different pages. A course receipt may live behind auth, but
+ * event checkout is auth-optional, so a guest bounced to the member receipt meets
+ * `/login` holding a paid order and an account they have no password for.
+ */
+export interface PaymentRedirect {
+  successUrl: string;
+  failureUrl: string;
+}
+
 export interface CreatePaymentResult {
   paymentId: string;
   paymentStatus: CommercePaymentStatus;
@@ -53,7 +66,17 @@ function soonerOf(a: Date, b: Date | null | undefined): Date {
 export class PaymentService {
   constructor(private readonly xendit: XenditGateway = xenditGateway) {}
 
-  async create(memberId: string, dto: CreatePaymentInput): Promise<CreatePaymentResult> {
+  /**
+   * `redirect` is optional and defaults to the `env.xendit.*` pair, so the course
+   * path is unchanged by its existence. The caller passes it rather than having
+   * this service infer it from the product type: the caller already knows exactly
+   * what it is selling, and inferring would cost a query to learn it again.
+   */
+  async create(
+    memberId: string,
+    dto: CreatePaymentInput,
+    opts: { redirect?: PaymentRedirect } = {},
+  ): Promise<CreatePaymentResult> {
     const tx = await prisma.commerceTransaction.findUnique({
       where: { id: dto.transactionId },
     });
@@ -68,7 +91,7 @@ export class PaymentService {
     if (tx.amount === 0) {
       return this.completeVoucherBypass(memberId, tx);
     }
-    return this.dispatchInvoice(memberId, tx);
+    return this.dispatchInvoice(memberId, tx, opts.redirect);
   }
 
   // ============================================================
@@ -78,6 +101,7 @@ export class PaymentService {
   private async dispatchInvoice(
     memberId: string,
     tx: TransactionRow,
+    redirect?: PaymentRedirect,
   ): Promise<CreatePaymentResult> {
     const externalId = generateExternalId();
     // The invoice must never outlive the order it pays for. If it did, a buyer
@@ -130,8 +154,10 @@ export class PaymentService {
       currency: 'IDR',
       payerEmail: member?.email ?? undefined,
       description: `Commerce ${tx.id}`,
-      successRedirectUrl: `${env.xendit.invoiceSuccessUrl}?transactionId=${tx.id}`,
-      failureRedirectUrl: `${env.xendit.invoiceFailureUrl}?transactionId=${tx.id}`,
+      successRedirectUrl:
+        redirect?.successUrl ?? `${env.xendit.invoiceSuccessUrl}?transactionId=${tx.id}`,
+      failureRedirectUrl:
+        redirect?.failureUrl ?? `${env.xendit.invoiceFailureUrl}?transactionId=${tx.id}`,
       invoiceDuration: invoiceDurationSec,
       customer: member?.fullName
         ? {

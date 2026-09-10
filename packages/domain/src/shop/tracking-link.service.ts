@@ -1,7 +1,7 @@
 import { prisma } from '@bb/db';
 import { logger } from '@bb/common/config/logger';
-import { settingsService, SETTING_KEYS } from '@bb/common/services/settings.service';
 import { EVENT_TICKET_PRODUCT_TYPE } from '@bb/domain/event/order';
+import { shopBaseUrl } from './shop-base-url';
 
 /**
  * Shortlink resolution for `GET /s/:slug`.
@@ -11,9 +11,6 @@ import { EVENT_TICKET_PRODUCT_TYPE } from '@bb/domain/event/order';
  * can change, so a frozen URL would rot silently and every already-shared link
  * would keep pointing at the stale target.
  */
-
-/** Last-resort shop origin. Overridden by `app_settings['shop.baseUrl']`. */
-export const SHOP_BASE_URL_FALLBACK = 'https://brainboost.id';
 
 /**
  * Bot/preview fetchers. Same list as the shop visit logger: with a shortlink in
@@ -40,10 +37,9 @@ export interface ShortlinkTarget {
 }
 
 export class TrackingLinkService {
-  /** Shop origin, no trailing slash. */
+  /** Shop origin, no trailing slash. Kept as a method for its existing callers. */
   async shopBaseUrl(): Promise<string> {
-    const raw = await settingsService.get(SETTING_KEYS.shopBaseUrl, SHOP_BASE_URL_FALLBACK);
-    return raw.trim().replace(/\/+$/, '');
+    return shopBaseUrl();
   }
 
   /**

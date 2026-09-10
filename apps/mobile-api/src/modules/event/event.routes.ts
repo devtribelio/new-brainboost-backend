@@ -66,13 +66,16 @@ export function eventRoutes(): Router {
   });
 
   // Literal segment, so it must precede `/:slug` as well.
+  // Auth OPTIONAL for the same reason checkout is: the buyer may be a guest, and
+  // then `t` or `email` is their credential. A logged-in buyer should not have to
+  // hand over an email to read their own order, so the bearer counts too.
   bindRoute({
     router,
     controller: ctrl,
     method: 'get',
     path: '/order/:code',
     handlerKey: 'getOrder',
-    middlewares: [validateDto(EventOrderQueryDto, 'query')],
+    middlewares: [optionalAuthGuard, validateDto(EventOrderQueryDto, 'query')],
   });
 
   // Registered AFTER /on-sale: a bare `:slug` would otherwise swallow it.

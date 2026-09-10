@@ -5,8 +5,10 @@ import { badRequest, notFound, ERROR_CODES } from '@bb/common/exceptions';
 import { logger } from '@bb/common/config/logger';
 import { settingsService, SETTING_KEYS } from '@bb/common/services/settings.service';
 import { normalizePhonePair } from '@bb/common/utils/phone.util';
+import { signEventOrderToken } from '@bb/common/utils/event-order-token.util';
 import { CheckoutService, type TrackingSource } from '@bb/domain/commerce/checkout.service';
-import { PaymentService } from '@bb/domain/commerce/payment.service';
+import { PaymentService, type PaymentRedirect } from '@bb/domain/commerce/payment.service';
+import { shopBaseUrl } from '@bb/domain/shop/shop-base-url';
 import { generateTicketCode } from './ticket-code';
 
 /** Ticket statuses that occupy a seat. See docs/event-ticketing.md K-1. */
@@ -20,6 +22,8 @@ const CODE_RETRIES = 3;
  * somebody else wanted — and an event that sells out does so in minutes.
  */
 const CHECKOUT_EXPIRY_MINUTES_DEFAULT = 30;
+/** Order page path on the web shop, when `app_settings['event.orderPath']` is unset. */
+const ORDER_PATH_DEFAULT = '/event/order';
 
 export interface EventCheckoutAttendee {
   name: string;
@@ -111,9 +115,11 @@ export class EventCheckoutService {
       throw err;
     }
 
-    const payment = await this.paymentService.create(memberId, {
-      transactionId: order.transactionId,
-    });
+    const payment = await this.paymentService.create(
+      memberId,
+      { transactionId: order.transactionId },
+      { redirect: await this.orderPageRedirect(order.transactionCode) },
+    );
 
     return {
       transactionId: order.transactionId,
@@ -129,6 +135,29 @@ export class EventCheckoutService {
       },
       tickets,
     };
+  }
+
+  /**
+   * Where Xendit returns the buyer — the order page, carrying a signed token.
+   *
+   * Success and failure point at the SAME page: it already renders EXPIRED and
+   * CANCELED and re-offers `invoiceUrl` while the order is still PENDING, so a
+   * dedicated failure page would only duplicate it.
+   *
+   * The token stands in for the payer's email, which that page normally
+   * authenticates on and which a redirect cannot carry — the buyer who opened
+   * checkout on a desktop and paid by QR on a phone arrives with nothing to read
+   * it back out of.
+   */
+  private async orderPageRedirect(transactionCode: string): Promise<PaymentRedirect> {
+    const [base, path] = await Promise.all([
+      shopBaseUrl(),
+      settingsService.get(SETTING_KEYS.eventOrderPath, ORDER_PATH_DEFAULT),
+    ]);
+    const clean = `/${path.trim().replace(/^\/+|\/+$/g, '')}`;
+    const token = signEventOrderToken(transactionCode);
+    const url = `${base}${clean}/${encodeURIComponent(transactionCode)}?t=${token}`;
+    return { successUrl: url, failureUrl: url };
   }
 
   /**

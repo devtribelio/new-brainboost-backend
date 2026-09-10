@@ -280,6 +280,34 @@ the emails are on their way.
 until the order is `PAID` — show them as information, not as a ticket anyone can
 present.
 
+### Where Xendit sends the buyer back
+
+An event invoice redirects to the order page, **not** to the course receipt:
+
+```
+https://<shop>/event/order/BB-20260909-0042?t=<token>
+```
+
+Success and failure point at the same URL — the page already renders `EXPIRED`
+and `CANCELED` and re-offers `invoiceUrl` while the order is still `PENDING`, so
+a separate failure page would only duplicate it.
+
+`t` is an opaque signed token, scoped to that ONE order and good for ~24h. It
+exists because the page authenticates on the payer's email and the redirect
+cannot carry one: Xendit actively encourages opening checkout on a desktop and
+paying by QR on a phone, and that buyer arrives with no `localStorage` to read it
+back out of.
+
+Treat `t` as a credential: **strip it from the URL after the first read**
+(`history.replaceState`) so it does not leak through `Referer` or to analytics
+scripts. Do not log it, and do not build your own — the value is opaque and its
+format is not a contract.
+
+The path is a runtime setting (`app_settings['event.orderPath']`, joined to
+`shop.baseUrl`), so it can move without a backend deploy. Note this moves the
+**redirect only** — the links in already-sent ticket emails are built separately
+and keep pointing at `/event/order/`.
+
 ### Errors
 
 | HTTP | code | Meaning | Suggested copy |
@@ -310,11 +338,19 @@ auto-retry — reload the event data and let the buyer decide.
 
 ## 4. `GET /api/event/order/:code` — order status
 
-**Public, but the payer's email is required as proof.**
+**Public, but one credential is required. Any ONE of three.**
 
 ```
 GET /api/event/order/BB-20260909-0042?email=rina%40example.com
+GET /api/event/order/BB-20260909-0042?t=<token from the payment redirect>
+GET /api/event/order/BB-20260909-0042     + Authorization: Bearer <jwt>
 ```
+
+| Credential | Use it when |
+|---|---|
+| `Authorization: Bearer` | the buyer is logged in — it must be the order's own member |
+| `t` | the buyer just came back from Xendit (works on a second device) |
+| `email` | the link in the summary email; must match the payer's |
 
 ### What it is for
 
@@ -323,8 +359,10 @@ guest buyer has no account to browse history with, so this is their only window
 into their own order. The same URL is sent in the summary email, so it must open
 days later from a different device.
 
-`email` is required and must match the payer's. A mismatch is **404**, not 403:
-a 403 would confirm to a guesser that the order code exists.
+A wrong credential is **404**, not 403: a 403 would confirm to a guesser that the
+order code exists, and the code is guessable — `BB-YYYYMMDD-####` is a per-day
+counter. Sending **no** credential at all is a **400** instead; unlike a 403 that
+answer reveals nothing about the code.
 
 ### Response — 200
 
@@ -462,7 +500,7 @@ for the FE to make.
 | Shop home | `GET /api/event/on-sale` | Block disappears entirely when `items` is empty |
 | `/event/[slug]` | `GET /api/event/:slug` + `POST /api/event/visits` | `canBuy` drives the button; sold-out types stay visible. Log the visit once per page view |
 | `/event/[slug]/checkout` | data from that same call, submit to `POST /api/event/checkout` | Must send `source` from cookies |
-| `/event/order/[code]` | `GET /api/event/order/:code?email=` | Poll every 3s, 20 times |
+| `/event/order/[code]` | `GET /api/event/order/:code` + one of `?t=` / `?email=` / bearer | Poll every 3s, 20 times. Xendit redirects here with `?t=`; strip it from the URL after reading |
 
 Easiest things to get wrong, most frequent first:
 

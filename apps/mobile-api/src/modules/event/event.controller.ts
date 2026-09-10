@@ -65,17 +65,20 @@ export class EventController {
   };
 
   @ApiOperation({
-    summary: 'Order status by code (public, payer email required)',
+    summary: 'Order status by code (public, one credential required)',
     description:
-      'The waiting/paid/expired page for a buyer with no account — the same link the summary email carries. Unknown code, wrong email and an order holding no tickets all answer the SAME 404: a 403 would confirm to a guesser that the code exists.',
+      'The waiting/paid/expired page for a buyer with no account — the same link the summary email carries, and where an event invoice returns the buyer after paying. Any ONE of three credentials opens it: a bearer token for the order\'s own member, `t` (the signed token on that redirect), or the payer\'s `email`. Unknown code, wrong credential and an order holding no tickets all answer the SAME 404: a 403 would confirm to a guesser that the code exists. No credential at all is a 400 — there is nothing to check, and that answer does not depend on whether the code exists.',
   })
-  @ApiQuery({ name: 'email', required: true, description: "Payer's email" })
+  @ApiQuery({ name: 'email', required: false, description: "Payer's email" })
+  @ApiQuery({ name: 't', required: false, description: 'Signed token from the payment redirect' })
   @ApiResponse({ status: 200, type: () => EventOrderResultDto })
   getOrder = async (req: Request, res: Response) => {
-    const order = await this.eventService.getOrderByCode(
-      String(req.params.code ?? ''),
-      String((req.query as { email?: string }).email ?? ''),
-    );
+    const query = req.query as { email?: string; t?: string };
+    const order = await this.eventService.getOrderByCode(String(req.params.code ?? ''), {
+      email: query.email,
+      token: query.t,
+      memberId: (req as AuthenticatedRequest).user?.id,
+    });
     return ok(res, order);
   };
 
