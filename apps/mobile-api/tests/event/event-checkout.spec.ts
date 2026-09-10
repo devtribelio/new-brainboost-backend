@@ -246,7 +246,7 @@ describe('EventCheckoutService.start — buyer phone', () => {
     expect(after!.isPhoneVerified).toBe(false);
   });
 
-  it('never overwrites a phone the member already has', async () => {
+  it("keeps the member's own number and ignores the one typed", async () => {
     const { type } = await createTicketType({ price: 0 });
     const original = `8100${Date.now().toString().slice(-7)}`;
     const member = await prisma.member.create({
@@ -266,10 +266,52 @@ describe('EventCheckoutService.start — buyer phone', () => {
       attendees: [attendee(1)],
     });
 
-    // Profile untouched; the order still carries the number used for this event.
+    // Profile untouched, and the order records the profile's number — a checkout
+    // form does not get to decide which number the organiser is given.
     expect((await prisma.member.findUnique({ where: { id: member.id } }))!.phone).toBe(original);
     const tx = await prisma.commerceTransaction.findUnique({ where: { id: result.transactionId } });
-    expect(tx!.buyerPhone).toBe('81211112222');
+    expect(tx!.buyerPhone).toBe(original);
+  });
+
+  it('stamps the dial code that was sent, so a foreign number stays dialable', async () => {
+    const { type } = await createTicketType({ price: 0 });
+    const member = await prisma.member.create({
+      data: { email: `foreign-${Date.now()}@test.local`, passwordHash: 'x', fullName: 'Foreign' },
+    });
+    track(member.id);
+
+    await service().start({
+      ticketTypeId: type.id,
+      memberId: member.id,
+      buyer: { name: 'X', email: 'x@test.local', phone: '91234567', phoneCode: '+65' },
+      attendees: [attendee(1)],
+    });
+
+    // Without the code the number is stored as Indonesian and `otpPhoneTarget`
+    // rebuilds it as +6591234567 — a number that does not exist.
+    const after = await prisma.member.findUnique({ where: { id: member.id } });
+    expect(after!.phone).toBe('91234567');
+    expect(after!.phoneCode).toBe('+65');
+  });
+
+  it('defaults the dial code to +62 when none is sent', async () => {
+    const { type } = await createTicketType({ price: 0 });
+    const member = await prisma.member.create({
+      data: { email: `nocode-${Date.now()}@test.local`, passwordHash: 'x', fullName: 'No Code' },
+    });
+    track(member.id);
+
+    await service().start({
+      ticketTypeId: type.id,
+      memberId: member.id,
+      buyer: { name: 'X', email: 'x@test.local', phone: '081233334444' },
+      attendees: [attendee(1)],
+    });
+
+    const after = await prisma.member.findUnique({ where: { id: member.id } });
+    expect(after!.phone).toBe('81233334444');
+    // NOT the empty string: `phoneCode ?? '+62'` at the read end would not catch it.
+    expect(after!.phoneCode).toBe('+62');
   });
 });
 
@@ -304,6 +346,27 @@ describe('EventCheckoutService.start — buyer email', () => {
     // And the account's identity is untouched — an email typed into a checkout
     // form must never become the login handle.
     expect((await prisma.member.findUnique({ where: { id: member.id } }))!.email).toBeNull();
+  });
+
+  it("keeps the account's email and ignores the one typed", async () => {
+    const { type } = await createTicketType({ price: 0 });
+    const account = `acct-wins-${Date.now()}@test.local`;
+    const member = await prisma.member.create({
+      data: { email: account, passwordHash: 'x', fullName: 'Has Email' },
+    });
+    track(member.id);
+
+    const result = await service().start({
+      ticketTypeId: type.id,
+      memberId: member.id,
+      buyer: { name: 'X', email: `typed-${Date.now()}@test.local` },
+      attendees: [attendee(1)],
+    });
+
+    // A checkout form must not redirect where this member's receipts go.
+    const tx = await prisma.commerceTransaction.findUnique({ where: { id: result.transactionId } });
+    expect(tx!.buyerEmail).toBe(account);
+    expect((await prisma.member.findUnique({ where: { id: member.id } }))!.email).toBe(account);
   });
 
   it("falls back to the account's email when none is typed", async () => {

@@ -44,6 +44,15 @@ export class EventBuyerDto {
   @IsOptional()
   @IsString()
   phone?: string;
+
+  @ApiPropertyOptional({
+    example: '+62',
+    description:
+      'Dial code for `phone`. Defaults to +62 when omitted — send it for any number outside Indonesia, or the number is stored as an Indonesian one and becomes undialable.',
+  })
+  @IsOptional()
+  @IsString()
+  phoneCode?: string;
 }
 
 /** Tracking-link snapshot. Same shape the product checkout accepts. */

@@ -245,17 +245,22 @@ this is for good error messages, not for safety):
   and may match the payer (P5) — do not reject that.
 - Attendee block #1 is **prefilled** from the payer's details but stays editable
   (D-4). Not locked, not blank.
-- **`buyer` is the contact for this order, not the buyer's identity.** Logging in
-  decides whose order it is; nothing in this block can change the account.
-  - **`phone` — always send it**, logged in or not. It is stored on the order,
-    which is what the organiser uses to reach whoever paid. A logged-in member
-    whose profile has no number also gets it filled in — never overwritten if
-    they already have one, and never treated as verified.
-  - **`email` — required when logged out.** When logged in, send it only if the
-    account has no email of its own (someone who registered by phone): without
-    it their receipt cannot be sent and their order page cannot be opened. It is
-    never written to the account — an email becomes a login identity only through
-    `requestVerificationEmail` → `validateOtpEmail`.
+- **`buyer` fills gaps; it never overrides the account.** Logging in decides whose
+  order it is, and every field here is a **fallback**: whatever the account already
+  holds wins, silently. Nothing in this block can change the account.
+  - **`phone` — always send it**, logged in or not. Used when the account has no
+    number: it goes on the order AND fills the empty profile field (never
+    overwritten, never treated as verified). When the account already has a number,
+    that one is used and yours is ignored.
+  - **`phoneCode` — send it for any number outside Indonesia** (`"+65"`, `"+60"`).
+    Omitted means `+62`. Without it a foreign number is stored as an Indonesian one
+    and becomes undialable, so "+65 9123 4567" must not be sent as `phone` alone.
+  - **`email` — required when logged out.** When logged in it is used only if the
+    account has no email of its own (someone who registered by phone), where it is
+    what makes their receipt deliverable and their order page openable. If the
+    account has one, that is used and yours is ignored — you cannot redirect a
+    member's receipt. It is never written to the account either: an email becomes a
+    login identity only through `requestVerificationEmail` → `validateOtpEmail`.
   - **`name` — ignored when logged in.** The account already has one.
 - `source` is read from the `bb_attr`/`bb_gid` cookies **exactly the same way**
   product checkout reads them. This is the only thing that records "bought via
@@ -363,7 +368,7 @@ GET /api/event/order/BB-20260909-0042     + Authorization: Bearer <jwt>
 |---|---|
 | `Authorization: Bearer` | the buyer is logged in — it must be the order's own member |
 | `t` | the buyer just came back from Xendit (works on a second device) |
-| `email` | the link in the summary email. Must match the order's contact address — what you sent as `buyer.email`, or the account's own email when you sent none |
+| `email` | the link in the summary email. Must match the order's contact address: **the account's own email** when it has one, otherwise what you sent as `buyer.email` |
 
 ### What it is for
 

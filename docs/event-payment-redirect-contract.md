@@ -88,14 +88,17 @@ found" — the order is fine, the credential is stale.
 
 ### Which email counts
 
-`?email=` is matched against the **order's** contact address: whatever you sent as
-`buyer.email`, falling back to the account's own email when you sent none. So the
-address your `localStorage` stash holds is the right one to replay, for a guest and
-a logged-in buyer alike.
+`?email=` is matched against the **order's** contact address, and that is the
+**account's own email whenever it has one** — what you sent as `buyer.email` is only
+used for an account that has none (someone who registered by phone).
 
-Send the bearer anyway when the visitor is logged in — it needs no email at all, and
-it is the only credential that still works once `t` has expired and the buyer has
-cleared their browser storage.
+So for a guest, your `localStorage` stash is the right thing to replay. For a
+logged-in buyer it may not be: if they typed a different address at checkout, that
+is not what the order records, and replaying it gives a 404.
+
+**Send the bearer when the visitor is logged in.** It needs no email at all, it
+cannot disagree with the account, and it is the only credential that still works
+once `t` has expired and the buyer has cleared their browser storage.
 
 ---
 
