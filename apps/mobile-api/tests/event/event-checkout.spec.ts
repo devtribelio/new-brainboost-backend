@@ -205,6 +205,49 @@ describe('EventCheckoutService.start — guest checkout', () => {
   });
 });
 
+describe('EventCheckoutService.start — payment window', () => {
+  it('gives the buyer the configured minutes, not the 24h course window', async () => {
+    const { type } = await createTicketType({ price: 150000 });
+    const email = `window-${Date.now()}@test.local`;
+
+    const before = Date.now();
+    const result = await service().start({
+      ticketTypeId: type.id,
+      buyer: { name: 'Rina', email },
+      attendees: [attendee(1)],
+    });
+    track((await prisma.member.findUnique({ where: { email } }))!.id);
+
+    const minutes = (result.expiredAt.getTime() - before) / 60000;
+    // 30 by default. Anything near 1440 would mean the course window leaked in
+    // and a seat is held overnight.
+    expect(minutes).toBeGreaterThan(25);
+    expect(minutes).toBeLessThan(35);
+  });
+
+  it('never lets the Xendit invoice outlive the order it pays for', async () => {
+    const { type } = await createTicketType({ price: 150000 });
+    const email = `invoice-${Date.now()}@test.local`;
+
+    const result = await service().start({
+      ticketTypeId: type.id,
+      buyer: { name: 'Rina', email },
+      attendees: [attendee(1)],
+    });
+    track((await prisma.member.findUnique({ where: { email } }))!.id);
+
+    const payment = await prisma.commercePayment.findUnique({
+      where: { id: result.payment.paymentId },
+      select: { expiredAt: true },
+    });
+    // If the invoice outlived the order, a buyer could pay after the sweeper
+    // released their seats: the webhook still emits payment success, the ticket
+    // flip matches zero RESERVED rows, and the money is taken with nothing
+    // issued and no error raised anywhere.
+    expect(payment!.expiredAt!.getTime()).toBeLessThanOrEqual(result.expiredAt.getTime());
+  });
+});
+
 describe('EventCheckoutService.start — free tickets', () => {
   it('settles a price-0 ticket without Xendit', async () => {
     const { type } = await createTicketType({ price: 0 });

@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { badRequest, notFound, ERROR_CODES } from '@bb/common/exceptions';
 import { logger } from '@bb/common/config/logger';
+import { settingsService, SETTING_KEYS } from '@bb/common/services/settings.service';
 import { normalizePhonePair } from '@bb/common/utils/phone.util';
 import { CheckoutService, type TrackingSource } from '@bb/domain/commerce/checkout.service';
 import { PaymentService } from '@bb/domain/commerce/payment.service';
@@ -12,6 +13,13 @@ import { generateTicketCode } from './ticket-code';
 const SEAT_TAKEN = ['RESERVED', 'ISSUED'];
 /** Retries for a ticket-code unique collision (32^6 space — one is already generous). */
 const CODE_RETRIES = 3;
+/**
+ * Minutes to pay before the seats go back on sale, when the setting is unset.
+ * Far shorter than the 24h course window: a course has no quota, so an abandoned
+ * checkout costs nobody anything, while an abandoned ticket checkout holds a seat
+ * somebody else wanted — and an event that sells out does so in minutes.
+ */
+const CHECKOUT_EXPIRY_MINUTES_DEFAULT = 30;
 
 export interface EventCheckoutAttendee {
   name: string;
@@ -77,10 +85,16 @@ export class EventCheckoutService {
     const memberId = input.memberId ?? (await this.resolveGuestMember(input.buyer));
     await assertNotTrialVoucher(input.voucherCode);
 
+    const expiryMinutes = await settingsService.getNumber(
+      SETTING_KEYS.eventCheckoutExpiryMinutes,
+      CHECKOUT_EXPIRY_MINUTES_DEFAULT,
+    );
+
     const order = await this.checkoutService.start({
       memberId,
       productId: ticketType.productId,
       qty: attendees.length,
+      expiryMinutes,
       voucherCode: input.voucherCode,
       source: input.source,
     });

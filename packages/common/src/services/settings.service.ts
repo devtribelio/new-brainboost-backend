@@ -24,6 +24,13 @@ export const SETTING_KEYS = {
   // The client sends ?platform=&version= on /data/banner; a newer build gets an empty list.
   bannerMaxVersionAndroid: 'banner.maxVersionAndroid',
   bannerMaxVersionIos: 'banner.maxVersionIos',
+  // Minutes a buyer has to pay for event tickets before the seats go back on
+  // sale. Separate from the 24h course window on purpose: a course has no quota,
+  // so an abandoned checkout costs nobody anything, while an abandoned ticket
+  // checkout holds a seat somebody else wanted. Runtime-configurable because the
+  // right number depends on the event — a webinar that sells out in minutes wants
+  // a tighter hold than a workshop selling for weeks.
+  eventCheckoutExpiryMinutes: 'event.checkoutExpiryMinutes',
   disbursementAutoEnabled: 'disbursement.autoEnabled',
   disbursementAutoApproveMax: 'disbursement.autoApproveMax',
   disbursementFee: 'disbursement.fee',

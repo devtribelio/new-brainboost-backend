@@ -27,6 +27,13 @@ export interface StartCheckoutInput {
    * keeps the existing behaviour byte-for-byte.
    */
   qty?: number;
+  /**
+   * Minutes the buyer has to pay. Defaults to the 24h course window
+   * (`COMMERCE_TRANSACTION_EXPIRY_HOURS`). Event ticketing passes a much shorter
+   * one: a course has no quota, so an abandoned checkout costs nobody anything,
+   * while an abandoned ticket checkout holds a seat somebody else wanted.
+   */
+  expiryMinutes?: number;
 }
 
 export interface TrackingSource {
@@ -110,7 +117,11 @@ export class CheckoutService {
       input.productId, // per-product attribution (B-5): prefer a visit for THIS product
     );
 
-    const expiredAt = new Date(Date.now() + env.commerce.transactionExpiryHours * 3600 * 1000);
+    const expiryMs =
+      input.expiryMinutes && input.expiryMinutes > 0
+        ? input.expiryMinutes * 60 * 1000
+        : env.commerce.transactionExpiryHours * 3600 * 1000;
+    const expiredAt = new Date(Date.now() + expiryMs);
 
     // `generateOrderCode` derives its sequence by COUNTING today's orders, so two
     // checkouts in the same instant read the same count and mint the same code —

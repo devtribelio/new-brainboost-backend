@@ -28,6 +28,12 @@ const SETTINGS: Array<{ key: string; value: string; description: string }> = [
       'Days an IAP-channel commission stays PENDING before BALANCE (longer: covers store refund window).',
   },
   {
+    key: 'event.checkoutExpiryMinutes',
+    value: '30',
+    description:
+      'Menit yang diberikan pembeli tiket event untuk membayar sebelum kursinya dilepas kembali. Terpisah dari batas 24 jam checkout kursus: kursus tidak punya kuota, tiket punya.',
+  },
+  {
     key: 'banner.maxVersionAndroid',
     value: '',
     description:

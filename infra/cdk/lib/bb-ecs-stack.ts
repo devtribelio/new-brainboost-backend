@@ -317,7 +317,6 @@ export class BbEcsStack extends cdk.Stack {
         taskDefinition: makeCronLane('Cron', 'cron', [
           'affiliatePendingToBalance',
           'expirePendingPayments',
-          'expireEventTicketOrders',
           'topicDigest',
           'streakReminder',
         ]),
@@ -329,7 +328,13 @@ export class BbEcsStack extends cdk.Stack {
       subnetSelection: { subnetType: ec2.SubnetType.PUBLIC },
       securityGroups: [appSg],
       scheduledFargateTaskDefinitionOptions: {
-        taskDefinition: makeCronLane('CronDisburse', 'cron-disburse', ['executeApprovedDisbursements']),
+        // expireEventTicketOrders rides this lane, not the hourly one: the ticket
+        // payment window is 30 minutes by default, and an hourly sweep would hold
+        // a seat for up to 90 — a lag three times the limit it enforces.
+        taskDefinition: makeCronLane('CronDisburse', 'cron-disburse', [
+          'executeApprovedDisbursements',
+          'expireEventTicketOrders',
+        ]),
       },
     });
     // CATATAN: ScheduledFargateTask nggak set assignPublicIp. Kalau cron gagal pull image

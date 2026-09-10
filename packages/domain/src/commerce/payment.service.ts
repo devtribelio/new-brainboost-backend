@@ -35,7 +35,20 @@ type TransactionRow = {
   affiliatorId: string | null;
   programId: string | null;
   attributedAffiliatorMemberId: string | null;
+  expiredAt: Date | null;
 };
+
+/**
+ * Floor for the Xendit invoice window. `create()` already refuses a transaction
+ * past its own expiry, but a request landing seconds before it would otherwise
+ * ask Xendit for a near-zero duration, which it rejects.
+ */
+const MIN_INVOICE_DURATION_SEC = 60;
+
+/** The earlier of two moments; `b` may be absent (legacy rows carry no expiry). */
+function soonerOf(a: Date, b: Date | null | undefined): Date {
+  return b && b.getTime() < a.getTime() ? b : a;
+}
 
 export class PaymentService {
   constructor(private readonly xendit: XenditGateway = xenditGateway) {}
@@ -67,7 +80,20 @@ export class PaymentService {
     tx: TransactionRow,
   ): Promise<CreatePaymentResult> {
     const externalId = generateExternalId();
-    const expiredAt = new Date(Date.now() + env.commerce.invoiceExpiryHours * 60 * 60 * 1000);
+    // The invoice must never outlive the order it pays for. If it did, a buyer
+    // could pay a still-open Xendit page after the sweeper released the seats:
+    // the webhook emits `commerce.payment.success` regardless of the order's
+    // state, the ticket flip then matches zero RESERVED rows, and the member has
+    // paid for nothing with no error anywhere. Harmless while both windows were
+    // 24h; a real hole the moment one of them shrinks.
+    const expiredAt = soonerOf(
+      new Date(Date.now() + env.commerce.invoiceExpiryHours * 60 * 60 * 1000),
+      tx.expiredAt,
+    );
+    const invoiceDurationSec = Math.max(
+      MIN_INVOICE_DURATION_SEC,
+      Math.floor((expiredAt.getTime() - Date.now()) / 1000),
+    );
 
     // 1. Claim the transaction's active slot BEFORE the (expensive, non-idempotent) Xendit
     //    call. The `activeSlotTxId` unique index serializes concurrent checkouts so only the
@@ -106,7 +132,7 @@ export class PaymentService {
       description: `Commerce ${tx.id}`,
       successRedirectUrl: `${env.xendit.invoiceSuccessUrl}?transactionId=${tx.id}`,
       failureRedirectUrl: `${env.xendit.invoiceFailureUrl}?transactionId=${tx.id}`,
-      invoiceDuration: env.commerce.invoiceExpiryHours * 60 * 60,
+      invoiceDuration: invoiceDurationSec,
       customer: member?.fullName
         ? {
             givenNames: member.fullName,
