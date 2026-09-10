@@ -28,6 +28,20 @@ export class EventAttendeeDto {
   @ApiProperty({ example: 'rina@example.com', description: 'Normalised to lowercase server-side' })
   @IsEmail()
   email!: string;
+
+  @ApiPropertyOptional({
+    example: '081234567890',
+    description:
+      "Optional. How the organiser reaches THIS attendee. Not an identity: never verified, never matched against an account. Stored in full E.164, so send `phoneCode` for a number outside Indonesia.",
+  })
+  @IsOptional()
+  @IsString()
+  phone?: string;
+
+  @ApiPropertyOptional({ example: '+62', description: 'Dial code for `phone`. Defaults to +62.' })
+  @IsOptional()
+  @IsString()
+  phoneCode?: string;
 }
 
 export class EventBuyerDto {

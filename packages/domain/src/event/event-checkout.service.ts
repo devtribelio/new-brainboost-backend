@@ -28,7 +28,14 @@ const ORDER_PATH_DEFAULT = '/event/order';
 export interface EventCheckoutAttendee {
   name: string;
   email: string;
+  /** Optional; stored on the ticket in full E.164. Never an identity. */
+  phone?: string;
+  /** Dial code for `phone`. Defaults to +62. */
+  phoneCode?: string;
 }
+
+/** What actually reaches the ticket row: the phone already in E.164, or null. */
+type NormalizedAttendee = { name: string; email: string; phone: string | null };
 
 export interface EventCheckoutInput {
   ticketTypeId: string;
@@ -280,7 +287,7 @@ export class EventCheckoutService {
     ticketTypeId: string,
     transactionId: string,
     buyerMemberId: string,
-    attendees: EventCheckoutAttendee[],
+    attendees: NormalizedAttendee[],
   ) {
     return prisma.$transaction(async (txdb) => {
       const locked = await txdb.$queryRaw<Array<{ quota: number | null }>>`
@@ -317,7 +324,7 @@ export class EventCheckoutService {
       ticketTypeId: string;
       transactionId: string;
       buyerMemberId: string;
-      attendee: EventCheckoutAttendee;
+      attendee: NormalizedAttendee;
     },
   ) {
     for (let attempt = 0; ; attempt++) {
@@ -331,6 +338,7 @@ export class EventCheckoutService {
             buyerMemberId: args.buyerMemberId,
             attendeeName: args.attendee.name,
             attendeeEmail: args.attendee.email,
+            attendeePhone: args.attendee.phone,
             status: 'RESERVED',
           },
           select: { id: true },
@@ -369,7 +377,7 @@ export class EventCheckoutService {
 function normalizeAttendees(
   attendees: EventCheckoutAttendee[] | undefined,
   maxPerOrder: number,
-): EventCheckoutAttendee[] {
+): NormalizedAttendee[] {
   if (!Array.isArray(attendees) || attendees.length === 0) {
     throw badRequest(ERROR_CODES.EVENT_TICKET_QTY_INVALID);
   }
@@ -380,7 +388,11 @@ function normalizeAttendees(
     const name = typeof a?.name === 'string' ? a.name.trim() : '';
     const email = typeof a?.email === 'string' ? a.email.trim().toLowerCase() : '';
     if (!name || !isEmail(email)) throw badRequest(ERROR_CODES.EVENT_ATTENDEE_INVALID);
-    return { name, email };
+    // An unusable number is dropped, not rejected: it is optional and nothing in
+    // the sale depends on it, so failing the whole order over a typo in a field
+    // the buyer did not have to fill would be the wrong trade.
+    const pair = normalizeBuyerPhone(a?.phone, a?.phoneCode);
+    return { name, email, phone: pair ? `${pair.phoneCode}${pair.phone}` : null };
   });
 }
 

@@ -131,6 +131,49 @@ describe('EventCheckoutService.start — guest checkout', () => {
     expect(result.payment.invoiceUrl).toContain('xendit.co');
   });
 
+  it("stores each attendee's own phone in E.164, and null when none is sent", async () => {
+    const { type } = await createTicketType({ price: 0 });
+    const email = `att-phone-${Date.now()}@test.local`;
+
+    const result = await service().start({
+      ticketTypeId: type.id,
+      buyer: { name: 'Rina', email },
+      attendees: [
+        { ...attendee(1), phone: '081234567890' },
+        { ...attendee(2), phone: '91234567', phoneCode: '+65' },
+        attendee(3),
+      ],
+    });
+    track((await prisma.member.findUnique({ where: { email } }))!.id);
+
+    const tickets = await prisma.eventTicket.findMany({
+      where: { transactionId: result.transactionId },
+      orderBy: { createdAt: 'asc' },
+      select: { attendeePhone: true },
+    });
+    // Full E.164, unlike members.phone / buyer_phone: this column has no COALESCE
+    // partner and no lookup, so the dialable form is the useful one.
+    expect(tickets.map((t) => t.attendeePhone)).toEqual(['+6281234567890', '+6591234567', null]);
+  });
+
+  it('drops an unusable attendee phone rather than failing the sale', async () => {
+    const { type } = await createTicketType({ price: 0 });
+    const email = `att-badphone-${Date.now()}@test.local`;
+
+    const result = await service().start({
+      ticketTypeId: type.id,
+      buyer: { name: 'Rina', email },
+      attendees: [{ ...attendee(1), phone: '   ' }],
+    });
+    track((await prisma.member.findUnique({ where: { email } }))!.id);
+
+    const ticket = await prisma.eventTicket.findFirst({
+      where: { transactionId: result.transactionId },
+      select: { attendeePhone: true },
+    });
+    expect(ticket!.attendeePhone).toBeNull();
+  });
+
   it('reuses an existing member for the same email instead of creating a second one', async () => {
     const { type } = await createTicketType({});
     const email = `existing-${Date.now()}@test.local`;

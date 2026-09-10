@@ -243,6 +243,14 @@ this is for good error messages, not for safety):
 - `attendees.length` between 1 and that ticket type's `maxPerOrder`.
 - Every attendee needs a name and an email. Emails may repeat across attendees
   and may match the payer (P5) — do not reject that.
+- **Each attendee may also carry `phone` (+ `phoneCode`, default `+62`)** — how the
+  organiser reaches that specific person, separate from the payer's number. Optional,
+  never verified, never matched against an account. An unusable value is **dropped,
+  not rejected**: the field is optional and no part of the sale depends on it, so a
+  typo must not fail the order. It is stored in full E.164 and is **not returned** in
+  the checkout or order-status responses — the order page opens for anyone holding
+  the link, and it already lists attendee emails; the organiser reads phones from the
+  backoffice instead.
 - Attendee block #1 is **prefilled** from the payer's details but stays editable
   (D-4). Not locked, not blank.
 - **`buyer` fills gaps; it never overrides the account.** Logging in decides whose

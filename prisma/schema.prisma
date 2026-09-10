@@ -1718,6 +1718,16 @@ model EventTicket {
   /// Normalised lowercase. The same email may hold several tickets (P5), so this
   /// is indexed, not unique.
   attendeeEmail String    @map("attendee_email")
+  /// Optional — the organiser's way to reach this attendee (a WhatsApp group
+  /// invite, a no-show call), not an identity: no unique, no verification, never
+  /// matched against `members.phone`.
+  ///
+  /// Stored in FULL E.164 (`+6281…`), unlike `members.phone` / `buyer_phone` which
+  /// keep the national part and the dial code apart. Those two must share a shape
+  /// because they are read through one COALESCE and because the national form is
+  /// what the unique index and login-by-phone match on. This column has neither
+  /// partner nor lookup, so the dialable form is simply the useful one.
+  attendeePhone String?   @map("attendee_phone")
   /// Filled when the ATTENDEE claims the ticket by verifying that email — not
   /// the payer. Buying for someone else does not make you the ticket's owner.
   /// Known gap: only `validateOtpEmail` claims today, so a member who signed up
