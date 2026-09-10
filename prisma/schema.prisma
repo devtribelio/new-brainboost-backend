@@ -1162,6 +1162,20 @@ model CommerceTransaction {
   utmContent                   String?                   @map("utm_content")
   utmTerm                      String?                   @map("utm_term")
   guestId                      String?                   @map("guest_id")
+  /// Phone the buyer typed at checkout. A fact about THIS order, not an identity:
+  /// no unique, no normalisation into `members.phone`. Stored unconditionally, so
+  /// it survives the cases where the member record cannot take it — a logged-in
+  /// buyer using a different number, a repeat purchase, a number already held by
+  /// another account. Event tickets need it because the organiser has to reach
+  /// the person who paid.
+  buyerPhone                   String?                   @map("buyer_phone")
+  /// Email the buyer gave for THIS order. Not routed into `members.email`: that
+  /// column is the account's primary identity — the login handle, the recovery
+  /// channel, and locked once verified — so a value merely typed into a checkout
+  /// form must never become it. Without this column an order placed by a member
+  /// who registered by phone has no contact address at all: their summary email
+  /// dead-letters and their order page can never be opened.
+  buyerEmail                   String?                   @map("buyer_email")
   status                       CommerceTransactionStatus @default(PENDING)
   paidAt                       DateTime?                 @map("paid_at")
   canceledAt                   DateTime?                 @map("canceled_at")

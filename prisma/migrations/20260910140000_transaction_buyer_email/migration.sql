@@ -1,0 +1,14 @@
+-- Email the buyer gave for this order.
+--
+-- `members.email` is nullable and is NULL for everyone who registered by phone.
+-- Those orders therefore had no contact address: the payer's summary email was
+-- rejected by bb-comms into the DLQ, and GET /api/event/order/:code — which
+-- authenticates on the payer's email — answered 404 for its own owner. Both
+-- failed silently, because the tickets themselves go to the attendee addresses
+-- and still arrived.
+--
+-- Deliberately NOT filled into members.email: that column is the account's
+-- primary identity (login handle, recovery channel, locked once verified), so a
+-- value typed into a checkout form must never become it. The existing
+-- requestVerificationEmail → validateOtpEmail flow is how an account gains one.
+ALTER TABLE "commerce_transactions" ADD COLUMN "buyer_email" TEXT;

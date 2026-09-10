@@ -207,6 +207,151 @@ describe('EventCheckoutService.start — guest checkout', () => {
   });
 });
 
+describe('EventCheckoutService.start — buyer phone', () => {
+  it('freezes the typed number on the order', async () => {
+    const { type } = await createTicketType({ price: 0 });
+    const email = `phone-${Date.now()}@test.local`;
+
+    const result = await service().start({
+      ticketTypeId: type.id,
+      buyer: { name: 'Rina', email, phone: '081234567890' },
+      attendees: [attendee(1)],
+    });
+    track((await prisma.member.findUnique({ where: { email } }))!.id);
+
+    const tx = await prisma.commerceTransaction.findUnique({ where: { id: result.transactionId } });
+    expect(tx!.buyerPhone).toBe('81234567890');
+  });
+
+  it('keeps the number even for a logged-in buyer, whose buyer block is otherwise ignored', async () => {
+    const { type } = await createTicketType({ price: 0 });
+    const member = await prisma.member.create({
+      data: { email: `logged-phone-${Date.now()}@test.local`, passwordHash: 'x', fullName: 'Logged' },
+    });
+    track(member.id);
+
+    const result = await service().start({
+      ticketTypeId: type.id,
+      memberId: member.id,
+      buyer: { name: 'Ignored', email: 'ignored@test.local', phone: '081298765432' },
+      attendees: [attendee(1)],
+    });
+
+    const tx = await prisma.commerceTransaction.findUnique({ where: { id: result.transactionId } });
+    expect(tx!.buyerPhone).toBe('81298765432');
+    // And the empty profile gets filled — unverified, so it cannot be used to
+    // recover the account.
+    const after = await prisma.member.findUnique({ where: { id: member.id } });
+    expect(after!.phone).toBe('81298765432');
+    expect(after!.isPhoneVerified).toBe(false);
+  });
+
+  it('never overwrites a phone the member already has', async () => {
+    const { type } = await createTicketType({ price: 0 });
+    const original = `8100${Date.now().toString().slice(-7)}`;
+    const member = await prisma.member.create({
+      data: {
+        email: `has-phone-${Date.now()}@test.local`,
+        passwordHash: 'x',
+        fullName: 'Has Phone',
+        phone: original,
+      },
+    });
+    track(member.id);
+
+    const result = await service().start({
+      ticketTypeId: type.id,
+      memberId: member.id,
+      buyer: { name: 'X', email: 'x@test.local', phone: '081211112222' },
+      attendees: [attendee(1)],
+    });
+
+    // Profile untouched; the order still carries the number used for this event.
+    expect((await prisma.member.findUnique({ where: { id: member.id } }))!.phone).toBe(original);
+    const tx = await prisma.commerceTransaction.findUnique({ where: { id: result.transactionId } });
+    expect(tx!.buyerPhone).toBe('81211112222');
+  });
+});
+
+describe('EventCheckoutService.start — buyer email', () => {
+  // A member who registered by phone has members.email = NULL. Before the order
+  // carried its own address, their summary email was rejected into the DLQ and
+  // their order page answered 404 to the person who had just paid — both
+  // silently, because the tickets themselves go to the attendee addresses and
+  // arrived fine.
+  it('takes the typed email when the account has none', async () => {
+    const { type } = await createTicketType({ price: 0 });
+    const member = await prisma.member.create({
+      data: {
+        email: null,
+        phone: `8155${Date.now().toString().slice(-7)}`,
+        passwordHash: 'x',
+        fullName: 'Phone Only',
+      },
+    });
+    track(member.id);
+    const typed = `typed-${Date.now()}@test.local`;
+
+    const result = await service().start({
+      ticketTypeId: type.id,
+      memberId: member.id,
+      buyer: { name: 'X', email: typed, phone: '081200000000' },
+      attendees: [attendee(1)],
+    });
+
+    const tx = await prisma.commerceTransaction.findUnique({ where: { id: result.transactionId } });
+    expect(tx!.buyerEmail).toBe(typed);
+    // And the account's identity is untouched — an email typed into a checkout
+    // form must never become the login handle.
+    expect((await prisma.member.findUnique({ where: { id: member.id } }))!.email).toBeNull();
+  });
+
+  it("falls back to the account's email when none is typed", async () => {
+    const { type } = await createTicketType({ price: 0 });
+    const email = `acct-${Date.now()}@test.local`;
+    const member = await prisma.member.create({
+      data: { email, passwordHash: 'x', fullName: 'Has Email' },
+    });
+    track(member.id);
+
+    const result = await service().start({
+      ticketTypeId: type.id,
+      memberId: member.id,
+      attendees: [attendee(1)],
+    });
+
+    const tx = await prisma.commerceTransaction.findUnique({ where: { id: result.transactionId } });
+    expect(tx!.buyerEmail).toBe(email);
+  });
+
+  it('opens the order page for a payer whose account has no email', async () => {
+    const { type } = await createTicketType({ price: 0 });
+    const member = await prisma.member.create({
+      data: {
+        email: null,
+        phone: `8156${Date.now().toString().slice(-7)}`,
+        passwordHash: 'x',
+        fullName: 'Phone Only',
+      },
+    });
+    track(member.id);
+    const typed = `page-${Date.now()}@test.local`;
+
+    const checkout = await service().start({
+      ticketTypeId: type.id,
+      memberId: member.id,
+      buyer: { name: 'X', email: typed, phone: '081200000001' },
+      attendees: [attendee(1)],
+    });
+
+    const res = await request(app)
+      .get(`/api/event/order/${checkout.transactionCode}`)
+      .query({ email: typed })
+      .expect(200);
+    expect(res.body.data.tickets).toHaveLength(1);
+  });
+});
+
 describe('EventCheckoutService.start — payment window', () => {
   it('gives the buyer the configured minutes, not the 24h course window', async () => {
     const { type } = await createTicketType({ price: 150000 });

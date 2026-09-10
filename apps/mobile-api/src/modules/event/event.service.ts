@@ -257,6 +257,7 @@ export class EventService {
         paidAt: true,
         expiredAt: true,
         memberId: true,
+        buyerEmail: true,
         member: { select: { email: true } },
         payments: {
           where: { status: 'PENDING' },
@@ -315,14 +316,18 @@ export class EventService {
    * minted for order A can never open order B.
    */
   private mayReadOrder(
-    order: { memberId: string; member: { email: string | null } },
+    order: { memberId: string; buyerEmail: string | null; member: { email: string | null } },
     code: string,
     email: string,
     auth: { token?: string; memberId?: string },
   ): boolean {
     if (auth.memberId && auth.memberId === order.memberId) return true;
     if (auth.token && verifyEventOrderToken(auth.token)?.code === code) return true;
-    const payerEmail = order.member.email?.trim().toLowerCase() ?? null;
+    // The order's OWN contact address first, the account's only as a fallback: a
+    // member who registered by phone has no `members.email`, and matching on that
+    // alone answered 404 to the very person who paid.
+    const payerEmail =
+      order.buyerEmail?.trim().toLowerCase() ?? order.member.email?.trim().toLowerCase() ?? null;
     return !!email && !!payerEmail && payerEmail === email;
   }
 

@@ -1032,6 +1032,13 @@ export class AuthService {
         where: { OR: candidates.map((phone) => ({ phone })) },
       });
       if (!member?.phone) return null;
+      // A phone nobody proved must not open the account behind it. Numbers reach
+      // `members.phone` from places that never verify them — register-by-phone
+      // before its OTP, and the ticket checkout filling an empty profile — so
+      // without this, one mistyped digit hands password reset to whoever owns
+      // the number that was actually typed. Same silent null as an unknown
+      // number: the caller must not learn which case it hit.
+      if (!member.isPhoneVerified) return null;
       return {
         member,
         target: otpPhoneTarget(member.phoneCode ?? '+62', member.phone),

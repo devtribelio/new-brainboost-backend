@@ -86,7 +86,21 @@ export class EventCheckoutService {
   async start(input: EventCheckoutInput): Promise<EventCheckoutResult> {
     const ticketType = await this.loadSellableTicketType(input.ticketTypeId);
     const attendees = normalizeAttendees(input.attendees, ticketType.maxPerOrder);
+    // The phone is read even for a logged-in buyer. The rest of `buyer` is
+    // ignored then (the account already answers for name and email), but the
+    // number is about THIS order: a member whose profile has no phone, or who is
+    // reachable on a different one for this event, would otherwise leave the
+    // organiser with nothing to call.
+    const buyerPhone = normalizeBuyerPhone(input.buyer?.phone);
     const memberId = input.memberId ?? (await this.resolveGuestMember(input.buyer));
+    // The order's own contact address. Falls back to the account's, which is why
+    // a logged-in buyer with an email on file need not send one — but a
+    // phone-registered member has none, and without this their summary email
+    // dead-letters and their order page 404s at them.
+    const buyerEmail = await resolveBuyerEmail(memberId, input.buyer?.email);
+    // Opportunistic, never destructive: fills an EMPTY profile field, never
+    // replaces a number the member already has.
+    if (buyerPhone) await fillMissingMemberPhone(memberId, buyerPhone);
     await assertNotTrialVoucher(input.voucherCode);
 
     const expiryMinutes = await settingsService.getNumber(
@@ -101,6 +115,8 @@ export class EventCheckoutService {
       expiryMinutes,
       voucherCode: input.voucherCode,
       source: input.source,
+      buyerPhone,
+      buyerEmail,
     });
 
     let tickets: Array<{ code: string; attendeeName: string; attendeeEmail: string }>;
@@ -211,7 +227,7 @@ export class EventCheckoutService {
     // the account still needs OTP before anyone can log into it.
     if (existing) return existing.id;
 
-    const phone = buyer.phone ? normalizePhonePair(buyer.phone, '+62').phone : null;
+    const phone = normalizeBuyerPhone(buyer.phone);
     // `members.phone` is UNIQUE, and a guest may well type a number that already
     // belongs to another account. The phone is a convenience for the backoffice
     // export, never an identity here, so it is dropped rather than allowed to
@@ -378,6 +394,60 @@ async function assertNotTrialVoucher(code?: string): Promise<void> {
     select: { type: true },
   });
   if (voucher?.type === 'TRIAL') throw badRequest(ERROR_CODES.VOUCHER_INVALID);
+}
+
+/**
+ * Contact address for this order: what the buyer typed, else the account's.
+ *
+ * Deliberately one-way — it is never written back to `members.email`. That
+ * column is the account's identity (login handle, recovery channel, locked once
+ * verified), and this value was merely typed into a checkout form. A member
+ * gains an email through requestVerificationEmail → validateOtpEmail, nowhere
+ * else.
+ */
+async function resolveBuyerEmail(memberId: string, typed?: string | null): Promise<string | null> {
+  const clean = typeof typed === 'string' ? typed.trim().toLowerCase() : '';
+  if (clean && isEmail(clean)) return clean;
+  const member = await prisma.member.findUnique({
+    where: { id: memberId },
+    select: { email: true },
+  });
+  return member?.email ?? null;
+}
+
+/** Canonical stored form, or null when nothing usable was sent. */
+function normalizeBuyerPhone(raw?: string | null): string | null {
+  const trimmed = typeof raw === 'string' ? raw.trim() : '';
+  if (!trimmed) return null;
+  return normalizePhonePair(trimmed, '+62').phone || null;
+}
+
+/**
+ * Give a member a phone number ONLY if they have none.
+ *
+ * Never an overwrite: changing an account's contact details from a checkout form
+ * is not this endpoint's business, and the number here is typed rather than
+ * proven. `isPhoneVerified` therefore stays false, which is what keeps this out
+ * of the phone-based account-recovery path.
+ *
+ * A number already held by another member is skipped rather than allowed to fail
+ * the sale: `members.phone` is UNIQUE, and the order carries the number anyway.
+ */
+async function fillMissingMemberPhone(memberId: string, phone: string): Promise<void> {
+  try {
+    const taken = await prisma.member.count({ where: { phone } });
+    if (taken > 0) return;
+    // Conditional update, not read-then-write: two concurrent checkouts for the
+    // same member would otherwise both see NULL and race.
+    await prisma.member.updateMany({
+      where: { id: memberId, phone: null },
+      data: { phone, phoneCode: '+62' },
+    });
+  } catch (err) {
+    // A losing race on the UNIQUE index is the expected failure here, and the
+    // order already holds the number — never fail a sale over this.
+    logger.warn({ err, memberId }, '[event] could not fill member phone');
+  }
 }
 
 function isEmail(value: string): boolean {

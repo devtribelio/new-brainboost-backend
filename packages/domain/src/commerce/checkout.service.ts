@@ -34,6 +34,19 @@ export interface StartCheckoutInput {
    * while an abandoned ticket checkout holds a seat somebody else wanted.
    */
   expiryMinutes?: number;
+  /**
+   * Phone the buyer typed at checkout, frozen on the order. Deliberately not
+   * routed through `members.phone`: that column is UNIQUE, must never be
+   * overwritten from a checkout form, and is skipped whenever the email already
+   * has an account — so it loses the number on every repeat purchase.
+   */
+  buyerPhone?: string | null;
+  /**
+   * Email the buyer gave for this order. Frozen here rather than resolved from
+   * the member at read time: `members.email` is NULL for every phone-registered
+   * account, which left those orders with no contact address at all.
+   */
+  buyerEmail?: string | null;
 }
 
 export interface TrackingSource {
@@ -145,6 +158,8 @@ export class CheckoutService {
         // Frozen at creation, never updated: the shop cookie is last-touch, so
         // reading the source back through shop_visits would retro-move a paid
         // order onto whatever campaign the buyer clicked next.
+        buyerPhone: input.buyerPhone ?? null,
+        buyerEmail: input.buyerEmail ?? null,
         guestId: input.source?.guestId,
         utmSource: input.source?.utmSource,
         utmMedium: input.source?.utmMedium,

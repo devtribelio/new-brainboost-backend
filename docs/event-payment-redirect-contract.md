@@ -86,13 +86,16 @@ state — the backend cannot tell you which it was, by design.
 redirect link, fall back to your email prompt rather than rendering "order not
 found" — the order is fine, the credential is stale.
 
-### The bearer case closes a bug you were about to hit
+### Which email counts
 
-A logged-in buyer's order belongs to their **account** email. Checkout ignores the
-`buyer` block when a bearer is present, so if that buyer typed a different contact
-email at checkout, your `localStorage` stash holds an email that will never match
-the payer — a permanent 404 on their own order. Send the bearer when you have one
-and the problem disappears; no email needed at all.
+`?email=` is matched against the **order's** contact address: whatever you sent as
+`buyer.email`, falling back to the account's own email when you sent none. So the
+address your `localStorage` stash holds is the right one to replay, for a guest and
+a logged-in buyer alike.
+
+Send the bearer anyway when the visitor is logged in — it needs no email at all, and
+it is the only credential that still works once `t` has expired and the buyer has
+cleared their browser storage.
 
 ---
 

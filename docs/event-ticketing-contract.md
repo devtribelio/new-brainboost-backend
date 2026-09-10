@@ -215,7 +215,8 @@ token with which to call it.
 ```jsonc
 {
   "ticketTypeId": "0199c3a1-....",   // REQUIRED — from ticketTypes[].id
-  "buyer": {                          // REQUIRED when logged out; IGNORED when logged in
+  "buyer": {                          // Contact details FOR THIS ORDER, not identity.
+                                      // Identity always comes from the session.
     "name": "Rina Kusuma",
     "email": "rina@example.com",
     "phone": "081234567890"
@@ -244,6 +245,18 @@ this is for good error messages, not for safety):
   and may match the payer (P5) — do not reject that.
 - Attendee block #1 is **prefilled** from the payer's details but stays editable
   (D-4). Not locked, not blank.
+- **`buyer` is the contact for this order, not the buyer's identity.** Logging in
+  decides whose order it is; nothing in this block can change the account.
+  - **`phone` — always send it**, logged in or not. It is stored on the order,
+    which is what the organiser uses to reach whoever paid. A logged-in member
+    whose profile has no number also gets it filled in — never overwritten if
+    they already have one, and never treated as verified.
+  - **`email` — required when logged out.** When logged in, send it only if the
+    account has no email of its own (someone who registered by phone): without
+    it their receipt cannot be sent and their order page cannot be opened. It is
+    never written to the account — an email becomes a login identity only through
+    `requestVerificationEmail` → `validateOtpEmail`.
+  - **`name` — ignored when logged in.** The account already has one.
 - `source` is read from the `bb_attr`/`bb_gid` cookies **exactly the same way**
   product checkout reads them. This is the only thing that records "bought via
   the Instagram link"; when it is missing, the order is `direct` forever (it
@@ -350,7 +363,7 @@ GET /api/event/order/BB-20260909-0042     + Authorization: Bearer <jwt>
 |---|---|
 | `Authorization: Bearer` | the buyer is logged in — it must be the order's own member |
 | `t` | the buyer just came back from Xendit (works on a second device) |
-| `email` | the link in the summary email; must match the payer's |
+| `email` | the link in the summary email. Must match the order's contact address — what you sent as `buyer.email`, or the account's own email when you sent none |
 
 ### What it is for
 
@@ -406,70 +419,10 @@ that is the first question a buyer purchasing for other people will ask.
 
 ## 5. `POST /api/event/visits` — log an event-page visit
 
-**Public. No `Authorization`.** Call it once when the event page renders.
-
-### What it is for
-
-It is what turns the campaign report from "orders" into a funnel: click →
-**visit** → order. Without it, a channel that brings a thousand people and sells
-nothing looks identical to one nobody ever opened.
-
-Event visits are stored **apart from shop visits**, in their own table, so an
-event's traffic never appears on the product Marketing pages. That separation is
-invisible to you — it changes nothing about how you call this.
-
-### Request
-
-```jsonc
-{
-  "guestId": "0190a4d1-....",       // REQUIRED — contents of cookie bb_gid
-  "eventSlug": "mt-mountain",       // optional; an unknown slug is still logged
-  "utmSource": "instagram",         // optional — from cookie bb_attr
-  "utmMedium": "social",
-  "utmCampaign": "mt-mountain-instagram-denny",
-  "utmContent": "story-1",
-  "utmTerm": null,
-  "referer": "https://t.co/...",    // optional
-  "clientEventId": "0190a4d2-...."  // optional — see below
-}
-```
-
-### Response — **always 200**
-
-```jsonc
-{ "success": true, "data": { "status": "logged" }, "meta": null, "error": null }
-```
-
-| `status` | Meaning | What you do |
-|---|---|---|
-| `logged` | Stored | Nothing |
-| `duplicate` | This `clientEventId` was already logged | Nothing — your retry worked the first time |
-| `invalid` | No `guestId`, or the caller looks like a bot/unfurler | Nothing |
-| `error` | Write failed | Nothing |
-
-**It never answers 4xx or 5xx** — not for bad input, not for an unknown slug, not
-when the rate limiter is out of budget. A marketing link that returns an error
-loses the click it exists to measure. So: do not surface failures to the visitor,
-do not block rendering on it, and do not retry on a non-200 beyond your normal
-network retry.
-
-### The two rules that decide whether the numbers are right
-
-**1. `clientEventId` dedupes a RETRY, never a visit.** Generate a fresh id per
-page view and reuse it only when re-sending *that same* view after a network
-failure. A refresh is a new view and must send a new id — a deterministic key
-(say `hash(guestId + eventSlug)`) would collapse "Kunjungan" onto "Pengunjung
-unik" and the two columns would forever be equal.
-
-**2. Send it once per page view, not per render.** React strict mode, a resize,
-a state change — none of those are visits. Guard it so a remount does not log
-again.
-
-### Login
-
-There is no separate claim call for events. `POST /api/shop/visits/claim` — the
-one you already call after any successful auth — binds this guest's event visits
-too, in the same request.
+Specified on its own in **`docs/event-visit-contract.md`**: one public endpoint,
+called once when the event page renders, so a campaign reads as click → visit →
+order instead of orders alone. It never answers anything but 200, and login needs
+no new call — `POST /api/shop/visits/claim` already binds event visits too.
 
 ## Register / login for buyers who want an account
 
