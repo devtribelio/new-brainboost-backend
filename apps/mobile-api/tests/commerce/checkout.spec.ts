@@ -65,7 +65,11 @@ describe('commerce checkout flow', () => {
     expect(r.status).toBe(201);
     expect(r.body.success).toBe(true);
     expect(r.body.data.transactionId).toBeDefined();
-    expect(r.body.data.transactionCode).toMatch(/^BB-\d{8}-\d{4}$/);
+    // The `-XXXX` tail is optional and documented: `generateOrderCode` derives its
+    // sequence from a per-day COUNT, so two inserts in the same instant collide on
+    // `code` and the retry appends jitter. Pinning the clean form made this assert
+    // on how busy the suite happened to be, not on the code's shape.
+    expect(r.body.data.transactionCode).toMatch(/^BB-\d{8}-\d{4}(-[0-9A-F]{4})?$/);
     expect(r.body.data.itemTotal).toBe(500_000);
     expect(r.body.data.voucherAmount).toBe(0);
     expect(r.body.data.amount).toBe(500_000);
