@@ -820,3 +820,109 @@ bukan kapabilitas baru; dan redirect itu tidak pernah membawa `code`.
   benar pindah, bb-comms harus ikut diubah.
 - FE harus `history.replaceState` membuang `t` setelah dibaca; backend tidak bisa
   memaksakan itu.
+
+---
+
+## 17. Bundling: tangga harga (10 Sep 2026)
+
+Dari PRD §15. Dibangun di backend; backoffice (BO-04) dan marketplace (MP-05) belum.
+
+### 17.1 Yang dibangun
+
+- `event_ticket_price_tiers` — `min_qty`, `total_price`, `label`, unique per
+  `(ticket_type_id, min_qty)`, `ON DELETE CASCADE` ke jenis tiketnya. **Tidak ada
+  baris untuk qty 1**: harga itu tetap `products.price`, satu sumber kebenaran.
+  Migration `20260910160000_event_ticket_price_tier`.
+- `computeTicketItemTotal` (`packages/domain/src/event/price-tier.ts`) — harga
+  termurah untuk `qty` tiket + `breakdown`-nya.
+- `computeTotals` dapat parameter **opsional** `itemTotal`. Absen = `unitPrice × qty`
+  seperti sebelumnya, jadi checkout kursus tidak berubah sama sekali.
+- `StartCheckoutInput.itemTotal` meneruskannya; `EventCheckoutService` yang menghitung.
+- `priceTiers` di payload `GET /api/event/:slug` dan `/on-sale`.
+- `GET /api/event/quote?ticketTypeId=&qty=` — publik, read-only.
+
+### 17.2 Kenapa DP, bukan greedy seperti di PRD
+
+PRD §15.3 mengklaim: dengan tangga monoton (harga per tiket tidak naik saat
+`minQty` naik), ambil-paket-terbesar-dulu = termurah. **Klaim itu salah.**
+
+```
+unit 200.000, tangga { 4 → 600.000 (150rb/tiket), 5 → 700.000 (140rb/tiket) }
+monoton ✓   paket < satuan ✓   (semua validasi PRD lolos)
+
+qty 8  greedy : 5 + 3×satuan = 1.300.000
+       optimal: 4 + 4        = 1.200.000
+```
+
+Greedy gagal tiap kali ada **lubang** di bawah paket terbesar — bentuk yang wajar
+kalau ops cuma menawarkan "paket 4" dan "paket 5". Karena janji produknya
+(§15.1) adalah kombinasi termurah, algoritmanya harus benar-benar mencarinya.
+
+Jadi: DP min-cost atas `1..qty`. `qty` dibatasi cap peserta (50) dan tangganya
+segelintir baris, jadi ini aritmetika, bukan biaya yang perlu dioptimalkan. Seri
+diselesaikan ke paket yang lebih besar — harga sama, struk lebih enak dibaca.
+
+Konsekuensinya: **monotonisitas berhenti jadi load-bearing.** Validasi di
+backoffice tetap berguna untuk menolak tangga ngawur, tapi kalau satu baris lolos,
+pembeli tetap dapat harga termurah — baris buruknya sekadar tidak pernah terpakai.
+Itu menurunkan validasi dari "penjaga kebenaran harga" jadi "penjaga kewarasan
+data", dan itu tempat yang jauh lebih aman untuk sebuah validasi.
+
+### 17.3 Yang ternyata tidak perlu disentuh
+
+- **Komisi affiliate.** `payment-success.listener.ts` menurunkan basis komisi dari
+  `acceptedAmount ?? amount` **order**, bukan `products.price`. Jadi order berpaket
+  otomatis dihitung benar kalau nanti tiket punya program affiliate (P4).
+- **Laporan pendapatan backoffice.** `listEvents` memakai
+  `SUM(tx.item_total - tx.voucher_amount)` dari baris order.
+- **Kuota + data peserta.** Sudah per tiket; paket Trio makan 3 kursi karena
+  `qty` = panjang `attendees`.
+- **Order yang sudah dibayar.** `item_total` dibekukan di baris order, jadi mengubah
+  tangga tidak pernah menulis ulang penjualan yang sudah terjadi. Kunci-setelah-ISSUED
+  di backoffice itu soal konsistensi laporan, bukan koreksi.
+
+### 17.4 `/quote` tanpa voucher — sengaja
+
+PRD §15.4 menaruh `voucherCode` di `/quote`. Tidak dibangun, dua alasan:
+
+1. **Jadi oracle voucher publik.** Validasi voucher hari ini ada di balik
+   `authGuard` + `voucherValidateRateLimiter`. Endpoint publik yang menerima kode
+   memberi cara gratis tanpa login untuk menebak kode hidup dan membaca diskonnya.
+2. **Tidak bisa menjawab benar.** `voucherService.validate(code, productId, memberId)`
+   mewajibkan `memberId` — TRIAL sekali-per-member. Tamu tidak punya, jadi jawabannya
+   paling banter indikatif dan checkout bisa menolak voucher yang tadi tampak sah.
+
+Keputusan produknya belum diambil (1 = tanpa voucher, 2 = dengan voucher + limiter
+dan dikontrakkan indikatif, 3 = preview hanya untuk yang login). Yang dibangun =
+opsi 1, satu-satunya yang tidak menambah paparan. Menambahkannya nanti ~10 baris.
+
+### 17.5 Backoffice (BO-04, selesai)
+
+`backoffice-bb` branch `feat/events`:
+
+- Section **Paket (opsional)** di form jenis tiket (`components/ticket-type-form.tsx`),
+  read-only kalau sudah ada tiket ISSUED. Baris kosong dibuang di klien, bukan
+  ditolak server — baris setengah jadi yang ditinggalkan operator bukan error.
+- Kolom ringkas **Paket** di tabel jenis tiket (`Duo 350rb · Trio 500rb`, atau `—`).
+- `validatePriceTiers` — `minQty ≥ 2`, unik, `totalPrice < minQty × satuan`,
+  **`minQty ≤ maxPerOrder`** (tidak ada di PRD: tangga di atas cap itu baris mati,
+  tidak ada pembeli yang bisa mencapainya), plus monoton. Tiap pesan menyebut
+  **nomor barisnya**, karena operator mengisi beberapa sekaligus.
+- Tangga dikunci bersama harga satuan setelah ada ISSUED, dibandingkan pada
+  **qty + harga saja** (`tiersChanged`) — ganti label "Duo" → "Paket Duo" tidak
+  memindahkan uang, jadi tetap boleh setelah penjualan.
+- `priceTiers: undefined` = biarkan tangga tersimpan; `[]` = tidak ada paket.
+  Pembedaan itu penting supaya pemanggil yang tidak mengurus paket tidak menghapus
+  tangga orang lain.
+
+Jebakan yang ketangkap saat verifikasi: `WHERE ticket_type_id = ANY(${ids})`
+**gagal keras** dengan `42883 operator does not exist: uuid = text` — postgres.js
+mengirim array string JS sebagai `text[]`. Tanpa `::uuid[]`, `getEvent` akan 500 di
+setiap halaman detail event yang punya jenis tiket. Semua `ANY()` lain di file itu
+membandingkan kolom text, jadi tidak ada preseden yang memperingatkan.
+
+### 17.6 Masih terbuka
+
+- MP-05 (kartu paket + tombol cepat + stepper + ringkasan dari `/quote`).
+- `/quote` tidak memeriksa sisa kuota. Kalau ternyata menyesatkan di lapangan,
+  tambahkan sebagai peringatan, jangan sebagai penolakan.

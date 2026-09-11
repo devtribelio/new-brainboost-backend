@@ -797,6 +797,160 @@ describe('GET /api/event/order/:code', () => {
   });
 });
 
+describe('bundle pricing', () => {
+  /** Ladder used throughout: unit 200k, Duo 350k, Trio 500k. */
+  async function withLadder() {
+    const made = await createTicketType({ price: 200_000, maxPerOrder: 10 });
+    await prisma.eventTicketPriceTier.createMany({
+      data: [
+        { ticketTypeId: made.type.id, minQty: 2, totalPrice: 350_000, label: 'Duo' },
+        { ticketTypeId: made.type.id, minQty: 3, totalPrice: 500_000, label: 'Trio' },
+      ],
+    });
+    return made;
+  }
+
+  it('charges the laddered total, not price x qty', async () => {
+    const { type } = await withLadder();
+    const email = `ladder-${Date.now()}@test.local`;
+
+    const result = await service().start({
+      ticketTypeId: type.id,
+      buyer: { name: 'Rina', email },
+      attendees: [attendee(1), attendee(2), attendee(3), attendee(4)],
+    });
+    track((await prisma.member.findUnique({ where: { email } }))!.id);
+
+    // Trio + 1 single. price x qty would be 800k.
+    expect(result.itemTotal).toBe(700_000);
+    expect(result.amount).toBe(700_000);
+    expect(result.breakdown).toEqual([
+      { label: 'Trio', qty: 3, amount: 500_000 },
+      { label: 'Satuan', qty: 1, amount: 200_000 },
+    ]);
+
+    // And the order row carries it, which is what every report reads.
+    const tx = await prisma.commerceTransaction.findUnique({
+      where: { id: result.transactionId },
+    });
+    expect(tx!.itemTotal).toBe(700_000);
+    expect(tx!.qty).toBe(4);
+  });
+
+  it('discounts a PERCENT voucher from the laddered total, not the undiscounted one', async () => {
+    const { type, product } = await withLadder();
+    const email = `ladder-voucher-${Date.now()}@test.local`;
+    const code = `LADDER${Date.now().toString().slice(-6)}`;
+    const voucher = await prisma.voucher.create({
+      data: { code, type: 'PERCENT', value: 10, isActive: true },
+    });
+    await prisma.voucherProduct.create({
+      data: { voucherId: voucher.id, productId: product.id },
+    });
+
+    const result = await service().start({
+      ticketTypeId: type.id,
+      buyer: { name: 'Rina', email },
+      attendees: [attendee(1), attendee(2), attendee(3)],
+      voucherCode: code,
+    });
+    track((await prisma.member.findUnique({ where: { email } }))!.id);
+
+    // 10% of the Trio price (500k), NOT of 3 x 200k.
+    expect(result.itemTotal).toBe(500_000);
+    expect(result.voucherAmount).toBe(50_000);
+    expect(result.amount).toBe(450_000);
+
+    await prisma.voucherProduct.deleteMany({ where: { voucherId: voucher.id } });
+    await prisma.voucher.delete({ where: { id: voucher.id } });
+  });
+
+  it('prices a kind with no ladder exactly as before', async () => {
+    const { type } = await createTicketType({ price: 150_000 });
+    const email = `noladder-${Date.now()}@test.local`;
+
+    const result = await service().start({
+      ticketTypeId: type.id,
+      buyer: { name: 'Rina', email },
+      attendees: [attendee(1), attendee(2)],
+    });
+    track((await prisma.member.findUnique({ where: { email } }))!.id);
+
+    expect(result.itemTotal).toBe(300_000);
+    expect(result.breakdown).toEqual([{ label: 'Satuan', qty: 2, amount: 300_000 }]);
+  });
+
+  it('exposes the ladder on the event detail payload', async () => {
+    const { event, type } = await withLadder();
+
+    const res = await request(app).get(`/api/event/${event.slug}`).expect(200);
+    const kind = res.body.data.ticketTypes.find((t: { id: string }) => t.id === type.id);
+
+    expect(kind.price).toBe(200_000);
+    expect(kind.priceTiers).toEqual([
+      { minQty: 2, totalPrice: 350_000, label: 'Duo' },
+      { minQty: 3, totalPrice: 500_000, label: 'Trio' },
+    ]);
+  });
+
+  describe('GET /api/event/quote', () => {
+    it('prices a quantity without writing anything', async () => {
+      const { type } = await withLadder();
+      const before = await prisma.commerceTransaction.count();
+
+      const res = await request(app)
+        .get('/api/event/quote')
+        .query({ ticketTypeId: type.id, qty: 5 })
+        .expect(200);
+
+      expect(res.body.data.itemTotal).toBe(850_000);
+      expect(res.body.data.amount).toBe(850_000);
+      expect(res.body.data.voucherAmount).toBe(0);
+      expect(res.body.data.breakdown).toEqual([
+        { label: 'Trio', qty: 3, amount: 500_000 },
+        { label: 'Duo', qty: 2, amount: 350_000 },
+      ]);
+      expect(await prisma.commerceTransaction.count()).toBe(before);
+    });
+
+    it('rejects a quantity above maxPerOrder', async () => {
+      const { type } = await createTicketType({ price: 200_000, maxPerOrder: 2 });
+      await request(app)
+        .get('/api/event/quote')
+        .query({ ticketTypeId: type.id, qty: 3 })
+        .expect(400);
+    });
+
+    it('404s an unknown ticket type', async () => {
+      await request(app)
+        .get('/api/event/quote')
+        .query({ ticketTypeId: '00000000-0000-7000-8000-000000000000', qty: 1 })
+        .expect(404);
+    });
+
+    it('agrees with what checkout actually charges', async () => {
+      const { type } = await withLadder();
+      const email = `quote-match-${Date.now()}@test.local`;
+
+      const quoted = await request(app)
+        .get('/api/event/quote')
+        .query({ ticketTypeId: type.id, qty: 4 })
+        .expect(200);
+
+      const result = await service().start({
+        ticketTypeId: type.id,
+        buyer: { name: 'Rina', email },
+        attendees: [attendee(1), attendee(2), attendee(3), attendee(4)],
+      });
+      track((await prisma.member.findUnique({ where: { email } }))!.id);
+
+      // A quote the buyer is then charged differently for is worse than no quote.
+      expect(result.itemTotal).toBe(quoted.body.data.itemTotal);
+      expect(result.breakdown).toEqual(quoted.body.data.breakdown);
+    });
+  });
+});
+
 describe('event invoice redirect', () => {
   /** Same fake gateway, but it keeps what was sent so the redirect can be asserted. */
   function capturing() {

@@ -1682,12 +1682,45 @@ model EventTicketType {
   createdAt     DateTime  @default(now()) @map("created_at")
   updatedAt     DateTime  @updatedAt @map("updated_at")
 
-  event   Event         @relation(fields: [eventId], references: [id])
-  product Product       @relation(fields: [productId], references: [id])
-  tickets EventTicket[]
+  event      Event                  @relation(fields: [eventId], references: [id])
+  product    Product                @relation(fields: [productId], references: [id])
+  tickets    EventTicket[]
+  priceTiers EventTicketPriceTier[]
 
   @@index([eventId])
   @@map("event_ticket_types")
+}
+
+/// Bundle pricing for one ticket kind: "from 2 tickets, 350k total".
+///
+/// A package is PRESENTATION; the quantity is the reality. Buying "Trio + 1 Solo"
+/// is one order of qty 4 of a single ticket kind, priced through this ladder —
+/// never a product of its own. A package-as-product would have to yield three
+/// tickets from one unit, would count quota wrong, and a mixed basket would force
+/// the multi-line order this schema does not have.
+///
+/// No row for qty 1: that price is `products.price`, which stays the single source
+/// of truth. A kind with no rows here behaves exactly as it did before bundling.
+///
+/// The ladder is read at checkout and the resulting `item_total` is frozen on the
+/// order, so editing a tier never rewrites a sale that already happened. The
+/// backoffice still locks the ladder once a ticket is ISSUED, for report
+/// consistency rather than correctness.
+model EventTicketPriceTier {
+  id           String   @id @default(uuid(7)) @db.Uuid
+  ticketTypeId String   @map("ticket_type_id") @db.Uuid
+  /// Tickets this tier covers, exactly. >= 2.
+  minQty       Int      @map("min_qty")
+  /// Total rupiah for exactly `minQty` tickets — NOT a per-ticket price.
+  totalPrice   Int      @map("total_price")
+  /// Display only ("Duo", "Trio"). Never matched on, never part of the price.
+  label        String?
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  ticketType EventTicketType @relation(fields: [ticketTypeId], references: [id], onDelete: Cascade)
+
+  @@unique([ticketTypeId, minQty])
+  @@map("event_ticket_price_tiers")
 }
 
 /// One seat, one attendee, one code. N of these hang off a single order

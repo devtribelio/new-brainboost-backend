@@ -10,6 +10,7 @@ import { EventDetailDto, EventListResultDto } from './dto/event.dto';
 import { EventCheckoutDto, EventCheckoutResultDto } from './dto/event-checkout.dto';
 import { EventOrderResultDto } from './dto/event-order.dto';
 import { LogEventVisitDto, EventVisitResultDto } from './dto/event-visit.dto';
+import { EventQuoteResultDto } from './dto/event-quote.dto';
 
 @ApiTags('Event')
 export class EventController {
@@ -28,6 +29,22 @@ export class EventController {
   listOnSale = async (_req: Request, res: Response) => {
     const items = await this.eventService.listOnSale();
     return ok(res, { items });
+  };
+
+  @ApiOperation({
+    summary: 'Price N tickets of one kind (public, read-only)',
+    description:
+      'The bundle ladder means the total is NOT `price x qty`, and the client must never compute it. Call this on every change of the quantity stepper and render the summary from `breakdown`. Always returns the CHEAPEST combination for that quantity. Writes nothing, reserves nothing, and applies no voucher — the discount is settled at checkout, where the member is known.',
+  })
+  @ApiQuery({ name: 'ticketTypeId', required: true })
+  @ApiQuery({ name: 'qty', required: true, type: 'integer' })
+  @ApiResponse({ status: 200, type: () => EventQuoteResultDto })
+  quote = async (req: Request, res: Response) => {
+    const q = req.query as unknown as { ticketTypeId: string; qty: number };
+    const quoted = await this.eventService.quote(q.ticketTypeId, Number(q.qty));
+    // `voucherAmount` / `amount` are echoed so the shape matches checkout, where a
+    // voucher can actually apply. Here they can only be the item total.
+    return ok(res, { ...quoted, voucherAmount: 0, amount: quoted.itemTotal });
   };
 
   @ApiOperation({

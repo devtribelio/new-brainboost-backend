@@ -28,6 +28,13 @@ export interface StartCheckoutInput {
    */
   qty?: number;
   /**
+   * Line total, when the caller prices it itself. Event ticketing passes the
+   * result of its bundle ladder (`computeTicketItemTotal`); omitted, the total is
+   * `price × qty` exactly as before. The caller computes it because the ladder is
+   * event-domain knowledge that the generic checkout has no business holding.
+   */
+  itemTotal?: number;
+  /**
    * Minutes the buyer has to pay. Defaults to the 24h course window
    * (`COMMERCE_TRANSACTION_EXPIRY_HOURS`). Event ticketing passes a much shorter
    * one: a course has no quota, so an abandoned checkout costs nobody anything,
@@ -120,6 +127,7 @@ export class CheckoutService {
     const totals = computeTotals({
       unitPrice: product.price,
       qty,
+      itemTotal: input.itemTotal,
       voucher: voucherMeta,
     });
 

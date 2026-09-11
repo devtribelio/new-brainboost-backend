@@ -14,6 +14,7 @@ import { EventController } from './event.controller';
 import { EventService } from './event.service';
 import { EventCheckoutDto } from './dto/event-checkout.dto';
 import { EventOrderQueryDto } from './dto/event-order.dto';
+import { EventQuoteQueryDto } from './dto/event-quote.dto';
 
 export function eventRoutes(): Router {
   const router = Router();
@@ -63,6 +64,18 @@ export function eventRoutes(): Router {
       optionalAuthGuard,
       validateDto(EventCheckoutDto),
     ],
+  });
+
+  // Literal segment, so it must precede `/:slug`. Public and read-only: it writes
+  // nothing and reserves nothing, and the ladder it prices is already public on the
+  // event detail payload. No voucher, so it is not a voucher-code oracle.
+  bindRoute({
+    router,
+    controller: ctrl,
+    method: 'get',
+    path: '/quote',
+    handlerKey: 'quote',
+    middlewares: [validateDto(EventQuoteQueryDto, 'query')],
   });
 
   // Literal segment, so it must precede `/:slug` as well.

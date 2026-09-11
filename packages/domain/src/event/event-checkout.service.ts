@@ -10,6 +10,7 @@ import { CheckoutService, type TrackingSource } from '@bb/domain/commerce/checko
 import { PaymentService, type PaymentRedirect } from '@bb/domain/commerce/payment.service';
 import { shopBaseUrl } from '@bb/domain/shop/shop-base-url';
 import { generateTicketCode } from './ticket-code';
+import { computeTicketItemTotal, type PriceLine } from './price-tier';
 
 /** Ticket statuses that occupy a seat. See docs/event-ticketing.md K-1. */
 const SEAT_TAKEN = ['RESERVED', 'ISSUED'];
@@ -55,7 +56,12 @@ export interface EventCheckoutInput {
 export interface EventCheckoutResult {
   transactionId: string;
   transactionCode: string;
+  /**
+   * Total for the tickets AFTER the bundle ladder — no longer `price × qty`.
+   * `breakdown` says how it was reached; nothing downstream should recompute it.
+   */
   itemTotal: number;
+  breakdown: PriceLine[];
   voucherAmount: number;
   amount: number;
   expiredAt: Date;
@@ -111,10 +117,19 @@ export class EventCheckoutService {
       CHECKOUT_EXPIRY_MINUTES_DEFAULT,
     );
 
+    // Priced here, not in CheckoutService: the ladder is event knowledge, and the
+    // generic checkout must keep multiplying price × qty for everything else.
+    const priced = computeTicketItemTotal(
+      ticketType.product.price,
+      ticketType.priceTiers,
+      attendees.length,
+    );
+
     const order = await this.checkoutService.start({
       memberId,
       productId: ticketType.productId,
       qty: attendees.length,
+      itemTotal: priced.itemTotal,
       expiryMinutes,
       voucherCode: input.voucherCode,
       source: input.source,
@@ -144,6 +159,7 @@ export class EventCheckoutService {
       transactionId: order.transactionId,
       transactionCode: order.transactionCode,
       itemTotal: order.itemTotal,
+      breakdown: priced.breakdown,
       voucherAmount: order.voucherAmount,
       amount: order.amount,
       expiredAt: order.expiredAt,
@@ -196,6 +212,8 @@ export class EventCheckoutService {
         isActive: true,
         saleStartsAt: true,
         saleEndsAt: true,
+        product: { select: { price: true } },
+        priceTiers: { select: { minQty: true, totalPrice: true, label: true } },
         event: { select: { status: true, startsAt: true, endsAt: true } },
       },
     });

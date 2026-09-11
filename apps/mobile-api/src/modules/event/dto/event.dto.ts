@@ -1,5 +1,24 @@
 import { ApiProperty, ApiPropertyOptional } from '@bb/common/openapi/decorators';
 
+/** One rung of a bundle ladder: a total price for exactly `minQty` tickets. */
+export class EventPriceTierDto {
+  @ApiProperty({ example: 2, description: 'Tickets this package covers, exactly. Always >= 2.' })
+  minQty!: number;
+
+  @ApiProperty({
+    example: 350000,
+    description: 'Total rupiah for exactly `minQty` tickets — NOT a per-ticket price.',
+  })
+  totalPrice!: number;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    example: 'Duo',
+    description: 'Display label. `null` = render it as "Paket <minQty>".',
+  })
+  label!: string | null;
+}
+
 /** One purchasable ticket kind of an event. Price comes from the linked product. */
 export class EventTicketTypeDto {
   @ApiProperty({ example: '0199c3a1-0000-7000-8000-000000000001' })
@@ -11,8 +30,19 @@ export class EventTicketTypeDto {
   @ApiProperty({ enum: ['ONLINE', 'OFFLINE'], example: 'ONLINE' })
   kind!: string;
 
-  @ApiProperty({ example: 150000, description: 'Integer rupiah. No decimals, no currency prefix.' })
+  @ApiProperty({
+    example: 150000,
+    description:
+      'UNIT price, integer rupiah. With `priceTiers` non-empty this is NOT the total for N tickets — ask `/api/event/quote` instead of multiplying.',
+  })
   price!: number;
+
+  @ApiProperty({
+    type: () => [EventPriceTierDto],
+    description:
+      'Bundle ladder, ascending by size. Empty = no packages, total is price x qty. Never price an order from these in the client: the backend always charges the cheapest combination, which is not always the one the buyer picked.',
+  })
+  priceTiers!: EventPriceTierDto[];
 
   @ApiPropertyOptional({
     example: 42,

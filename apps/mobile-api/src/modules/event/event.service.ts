@@ -1,15 +1,31 @@
 import { prisma } from '@bb/db';
 import { badRequest, notFound, ERROR_CODES } from '@bb/common/exceptions';
 import { verifyEventOrderToken } from '@bb/common/utils/event-order-token.util';
+import { computeTicketItemTotal, type PriceLine } from '@bb/domain/event/price-tier';
 
 /** Ticket statuses that occupy a seat. See docs/event-ticketing.md K-1. */
 const SEAT_TAKEN = ['RESERVED', 'ISSUED'];
+
+export interface PriceTierView {
+  minQty: number;
+  totalPrice: number;
+  label: string | null;
+}
+
+export interface TicketQuoteView {
+  qty: number;
+  itemTotal: number;
+  breakdown: PriceLine[];
+}
 
 export interface TicketTypeView {
   id: string;
   name: string;
   kind: string;
+  /** Unit price. With `priceTiers` non-empty it is NOT the total for N tickets. */
   price: number;
+  /** Bundle ladder, cheapest-first by size. Empty = no packages for this kind. */
+  priceTiers: PriceTierView[];
   remainingQuota: number | null;
   isSoldOut: boolean;
   maxPerOrder: number;
@@ -76,6 +92,7 @@ type TicketTypeRow = {
   saleStartsAt: Date | null;
   saleEndsAt: Date | null;
   product: { price: number };
+  priceTiers: Array<{ minQty: number; totalPrice: number; label: string | null }>;
 };
 
 export class EventService {
@@ -117,6 +134,10 @@ export class EventService {
             saleStartsAt: true,
             saleEndsAt: true,
             product: { select: { price: true } },
+            priceTiers: {
+              orderBy: { minQty: 'asc' },
+              select: { minQty: true, totalPrice: true, label: true },
+            },
           },
         },
       },
@@ -189,6 +210,10 @@ export class EventService {
             saleStartsAt: true,
             saleEndsAt: true,
             product: { select: { price: true } },
+            priceTiers: {
+              orderBy: { minQty: 'asc' },
+              select: { minQty: true, totalPrice: true, label: true },
+            },
           },
         },
       },
@@ -219,6 +244,41 @@ export class EventService {
         ticketTypes.some((t) => t.isOnSale),
       ticketTypes,
     };
+  }
+
+  /**
+   * Price `qty` tickets of one kind, without writing anything.
+   *
+   * Exists because the bundle ladder means the total is NOT `price × qty`, and the
+   * client must never compute it — the same rule vouchers already follow. The
+   * quantity stepper calls this on every change.
+   *
+   * Validates the quantity but deliberately NOT the seats: quoting is not buying,
+   * and an optimistic quote that checkout then refuses is better than refusing to
+   * show a price at all. Remaining quota is already on the event detail payload.
+   *
+   * No voucher here. Voucher validation is member-scoped (a TRIAL row is once per
+   * member) and lives behind `authGuard` + a rate limiter; accepting a code on a
+   * public endpoint would turn this into an unauthenticated oracle for live codes.
+   */
+  async quote(ticketTypeId: string, qty: number): Promise<TicketQuoteView> {
+    const type = await prisma.eventTicketType.findUnique({
+      where: { id: ticketTypeId },
+      select: {
+        maxPerOrder: true,
+        product: { select: { price: true } },
+        priceTiers: { select: { minQty: true, totalPrice: true, label: true } },
+      },
+    });
+    if (!type) throw notFound(ERROR_CODES.NOT_FOUND);
+
+    const n = Math.floor(qty);
+    if (!Number.isFinite(n) || n < 1 || n > type.maxPerOrder) {
+      throw badRequest(ERROR_CODES.EVENT_TICKET_QTY_INVALID, { maxPerOrder: type.maxPerOrder });
+    }
+
+    const priced = computeTicketItemTotal(type.product.price, type.priceTiers, n);
+    return { qty: n, itemTotal: priced.itemTotal, breakdown: priced.breakdown };
   }
 
   /**
@@ -370,6 +430,7 @@ function toTicketTypeView(
     // Read from the product, never copied onto the ticket type: one source of
     // truth for what the buyer is charged.
     price: t.product.price,
+    priceTiers: t.priceTiers,
     remainingQuota,
     isSoldOut,
     maxPerOrder: t.maxPerOrder,

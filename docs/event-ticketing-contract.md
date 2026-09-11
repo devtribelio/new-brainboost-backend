@@ -162,7 +162,11 @@ closed, or canceled — the page must still open for someone clicking an old lin
       "id": "0199c3a1-....",               // pass this as ticketTypeId at checkout
       "name": "Online",
       "kind": "ONLINE",                    // ONLINE | OFFLINE — for icon/filter
-      "price": 150000,
+      "price": 150000,                     // UNIT price. NOT the total for N tickets
+      "priceTiers": [                      // [] = no packages; total is price x qty
+        { "minQty": 2, "totalPrice": 350000, "label": "Duo" },
+        { "minQty": 3, "totalPrice": 500000, "label": "Trio" }
+      ],
       "remainingQuota": 42,                // null = unlimited
       "isSoldOut": false,
       "maxPerOrder": 10,
@@ -185,6 +189,12 @@ closed, or canceled — the page must still open for someone clicking an old lin
 - `remainingQuota` is a **snapshot**. It goes stale in a tab left open. Do not
   try to keep it fresh — a checkout that refuses (§3,
   `EVENT_TICKET_SOLD_OUT`) is the final word.
+- **`priceTiers` is a display list, never a calculator.** Show the packages on the
+  card ("Duo Rp350.000 · Trio Rp500.000") and ask §2b for any total. The backend
+  always charges the cheapest combination for a quantity, which is not always the
+  one the buyer clicked — four singles cost the same as Trio + Solo — so a total
+  computed on the client will sometimes be higher than the bill. Empty array =
+  behave exactly as before bundling existed.
 
 ### Errors
 
@@ -193,6 +203,55 @@ closed, or canceled — the page must still open for someone clicking an old lin
 | 404 | `NOT_FOUND` | No such slug. Render the normal 404 |
 
 A `DRAFT` event is also **404** — nobody may see it yet.
+
+---
+
+## 2b. `GET /api/event/quote` — price N tickets
+
+**Public. No `Authorization`. Writes nothing, reserves nothing.**
+
+```
+GET /api/event/quote?ticketTypeId=0199c3a1-....&qty=4
+```
+
+### What it is for
+
+A ticket kind may carry a bundle ladder, so the total is **not** `price × qty`.
+Call this on every change of the quantity stepper and render the price summary
+from what comes back. Same rule as vouchers: the client never computes money.
+
+### Response — 200
+
+```jsonc
+{
+  "qty": 4,
+  "itemTotal": 700000,        // Trio + 1 single, NOT 4 x 200000
+  "breakdown": [
+    { "label": "Trio",   "qty": 3, "amount": 500000 },
+    { "label": "Satuan", "qty": 1, "amount": 200000 }
+  ],
+  "voucherAmount": 0,         // always 0 here — see below
+  "amount": 700000            // equals itemTotal; the shape matches checkout
+}
+```
+
+`label` is either the tier's own label, a `Paket <n>` fallback, or `Satuan` for
+the leftover single tickets. Treat it as copy to print, not a key to switch on.
+
+### Rules
+
+- **Always the cheapest combination.** A buyer who picks "4 singles" is charged
+  the same as one who picks "Trio + Solo". Do not build UI that warns them they
+  could have saved money — there is nothing to save.
+- **No voucher.** This endpoint takes no `voucherCode` and always reports
+  `voucherAmount: 0`. Voucher validation is per-member (a trial code is once per
+  account) and lives behind auth, so accepting codes here would make a public
+  endpoint that confirms which codes are live. The discount is applied at
+  checkout; show it there.
+- **Quantity only, seats not checked.** `qty` above the kind's `maxPerOrder` is
+  `400 EVENT_TICKET_QTY_INVALID`. Availability is **not** verified — quoting is not
+  buying, and `remainingQuota` from §2 is what you gate the stepper on.
+- Unknown `ticketTypeId` → `404`.
 
 ---
 
@@ -281,7 +340,10 @@ this is for good error messages, not for safety):
 {
   "transactionId": "0199c3b2-....",
   "transactionCode": "BB-20260909-0042",   // used in the status page URL
-  "itemTotal": 300000,                      // price × ticket count
+  "itemTotal": 300000,                      // total AFTER the bundle ladder — never recompute it
+  "breakdown": [                            // how that total was reached; render the summary from this
+    { "label": "Duo", "qty": 2, "amount": 350000 }
+  ],
   "voucherAmount": 60000,
   "amount": 240000,                         // amount due
   "expiredAt": "2026-09-09T14:00:00Z",      // payment deadline; seats are released after this
