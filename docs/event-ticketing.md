@@ -926,3 +926,38 @@ membandingkan kolom text, jadi tidak ada preseden yang memperingatkan.
 - MP-05 (kartu paket + tombol cepat + stepper + ringkasan dari `/quote`).
 - `/quote` tidak memeriksa sisa kuota. Kalau ternyata menyesatkan di lapangan,
   tambahkan sebagai peringatan, jangan sebagai penolakan.
+
+### 17.7 Komisi affiliate ditutup untuk tiket (11 Sep 2026)
+
+PRD §4.4 (P4) memperkirakan tiket otomatis bebas komisi karena tidak punya baris
+`affiliate_programs`. **Premis itu salah untuk repo ini.** Commit `2e74448`
+(21 Mei 2026) membuat semua produk affiliate-able:
+
+```
+// Option B: any product is affiliate-able — `programId` is optional metadata, not a gate.
+```
+
+Gerbangnya **seed**: kode affiliate saat checkout, atau `members.inviter_id` pembeli.
+Terukur sebelum diperbaiki: **0 program** untuk produk tiket, tapi **3 baris komisi
+PENDING di tarif 30%** pada penjualan tiket — dari satu-satunya pembeli tiket yang
+punya inviter.
+
+Jadi rantai kesimpulan PRD-nya putus di mata rantai terakhir, dan konsekuensinya
+"tidak ada perubahan kode" ikut salah: justru **butuh** perubahan kode.
+
+`commitCommissionsForPayment` sekarang berhenti lebih awal kalau
+`isEventTicketOrder(productId)`. **Dua pintu ditutup sekaligus** — inviter dan
+override per-pembelian — karena menutup satu saja menyisakan tiket yang membayar
+komisi tepat kepada orang yang mempromosikannya.
+
+Tipe produk **dibaca di dalam service**, bukan dioper: argumen yang sama dengan
+`isEventTicketOrder` dan `loadTrialGrant` — input opsional terbaca "bukan tiket" oleh
+pemanggil yang lupa mengisinya, dan yang ini soal uang.
+
+Niat P4 tidak berubah: skema tiket tetap direncanakan **nominal tetap**
+(`commission_mode` + `fixed_amount` di level program, satu cabang di `computeAmount`,
+tanpa tier PERFORMANCE/GROWTH). Blok ini yang membuat "tidak ada komisi saat rilis"
+jadi benar sampai skema itu dibangun.
+
+**Masih terbuka:** baris komisi yang terlanjur tertulis dibiarkan. Mem-VOID-nya
+keputusan data, dan prod harus dihitung dulu dengan query yang sama.
