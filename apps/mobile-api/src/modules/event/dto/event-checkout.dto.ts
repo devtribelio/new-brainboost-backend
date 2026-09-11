@@ -11,6 +11,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@bb/common/openapi/decorators';
+import { EventQuoteLineDto } from './event-quote.dto';
 
 /**
  * Upper bound only — the real limit is the ticket type's `maxPerOrder`, which
@@ -173,8 +174,19 @@ export class EventCheckoutResultDto {
   @ApiProperty({ example: 'BB-20260909-0042', description: 'Used in the order status URL' })
   transactionCode!: string;
 
-  @ApiProperty({ example: 300000 })
+  @ApiProperty({
+    example: 35000,
+    description:
+      'Total for the tickets AFTER the bundle ladder — NOT price x qty. Two tickets at 20000 with a Duo package of 35000 bill 35000. Never recompute this.',
+  })
   itemTotal!: number;
+
+  @ApiProperty({
+    type: () => [EventQuoteLineDto],
+    description:
+      'How `itemTotal` was reached. Same shape as GET /api/event/quote, so the checkout summary and the success page can render from one component.',
+  })
+  breakdown!: EventQuoteLineDto[];
 
   @ApiProperty({ example: 60000 })
   voucherAmount!: number;
