@@ -37,7 +37,7 @@ export class BbEcsStack extends cdk.Stack {
     const vpc = ec2.Vpc.fromLookup(this, 'Vpc', { isDefault: true });
 
     const cluster = new ecs.Cluster(this, 'Cluster', {
-      vpc, clusterName: 'bb-prod', containerInsightsV2: ecs.ContainerInsights.ENABLED,
+      vpc, clusterName: 'bb-prod', containerInsightsV2: ecs.ContainerInsights.DISABLED,
     });
 
     // === Secret app (DATABASE_URL pakai bb_app, SQS urls, dst) ===
