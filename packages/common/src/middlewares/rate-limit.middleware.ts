@@ -326,6 +326,29 @@ export const eventCheckoutIpRateLimiter: RequestHandler = makeRateLimiter({
   limit: 30,
 });
 
+// --- Event price quote — PUBLIC, unauthenticated, and the cheapest endpoint in
+//     the event module: three indexed reads and arithmetic, no writes and no seat
+//     count. The budget is therefore generous on purpose. It exists to stop a
+//     script pointlessly spinning the database, not to ration buyers.
+//
+//     Per-minute rather than the 15-minute default, and 300 rather than 60,
+//     because Indonesian mobile carriers NAT a lot of people behind few egress
+//     IPs — the same reason the note below sends volumetric per-IP defence to the
+//     edge. A webinar link goes to a broadcast list and hundreds open the page at
+//     once; at 60/min a handful of carrier IPs would lock real buyers out of
+//     seeing a price during exactly the spike the event exists for. A bot at 5
+//     req/s still gets cut within seconds.
+//
+//     Over budget answers 429, NOT a fake 200 the way `shopVisitRateLimiter`
+//     does: a missed visit row is invisible, whereas a missed price renders an
+//     empty or stale total in front of a buyer. The client can hold the last
+//     figure and retry.
+export const eventQuoteRateLimiter: RequestHandler = makeRateLimiter({
+  name: 'event-quote',
+  limit: 300,
+  windowMs: 60 * 1000,
+});
+
 // --- Login — keyed per-account (username); only FAILED attempts count, so a
 //     colleague logging in successfully never spends a shared budget. Social /
 //     refresh grants carry no username -> IP fallback (they can't brute-force). --

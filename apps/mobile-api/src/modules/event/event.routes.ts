@@ -6,6 +6,7 @@ import { validateDto } from '@bb/common/middlewares/validation.middleware';
 import {
   eventCheckoutEmailRateLimiter,
   eventCheckoutIpRateLimiter,
+  eventQuoteRateLimiter,
   shopVisitRateLimiter,
 } from '@bb/common/middlewares/rate-limit.middleware';
 import { EventCheckoutService } from '@bb/domain/event/event-checkout.service';
@@ -75,7 +76,7 @@ export function eventRoutes(): Router {
     method: 'get',
     path: '/quote',
     handlerKey: 'quote',
-    middlewares: [validateDto(EventQuoteQueryDto, 'query')],
+    middlewares: [eventQuoteRateLimiter, validateDto(EventQuoteQueryDto, 'query')],
   });
 
   // Literal segment, so it must precede `/:slug` as well.
