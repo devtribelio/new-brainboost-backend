@@ -1,4 +1,5 @@
 import { prisma } from '@bb/db';
+import { Prisma } from '@prisma/client';
 import { env } from '@bb/common/config/env';
 import { badRequest, notFound, ERROR_CODES } from '@bb/common/exceptions';
 import { computeTotals } from './utils/compute-totals';
@@ -20,6 +21,39 @@ export interface StartCheckoutInput {
    * no source: the column stays NULL and the report renders "direct".
    */
   source?: TrackingSource;
+  /**
+   * Units bought. Defaults to 1 — every caller but event ticketing buys a
+   * single course, and `computeTotals` multiplies by it, so leaving it out
+   * keeps the existing behaviour byte-for-byte.
+   */
+  qty?: number;
+  /**
+   * Line total, when the caller prices it itself. Event ticketing passes the
+   * result of its bundle ladder (`computeTicketItemTotal`); omitted, the total is
+   * `price × qty` exactly as before. The caller computes it because the ladder is
+   * event-domain knowledge that the generic checkout has no business holding.
+   */
+  itemTotal?: number;
+  /**
+   * Minutes the buyer has to pay. Defaults to the 24h course window
+   * (`COMMERCE_TRANSACTION_EXPIRY_HOURS`). Event ticketing passes a much shorter
+   * one: a course has no quota, so an abandoned checkout costs nobody anything,
+   * while an abandoned ticket checkout holds a seat somebody else wanted.
+   */
+  expiryMinutes?: number;
+  /**
+   * Phone the buyer typed at checkout, frozen on the order. Deliberately not
+   * routed through `members.phone`: that column is UNIQUE, must never be
+   * overwritten from a checkout form, and is skipped whenever the email already
+   * has an account — so it loses the number on every repeat purchase.
+   */
+  buyerPhone?: string | null;
+  /**
+   * Email the buyer gave for this order. Frozen here rather than resolved from
+   * the member at read time: `members.email` is NULL for every phone-registered
+   * account, which left those orders with no contact address at all.
+   */
+  buyerEmail?: string | null;
 }
 
 export interface TrackingSource {
@@ -89,9 +123,11 @@ export class CheckoutService {
       voucherMeta = { type: check.type!, value: check.voucherAmount!, maxAmount: check.maxAmount };
     }
 
+    const qty = Math.max(1, Math.floor(input.qty ?? 1));
     const totals = computeTotals({
       unitPrice: product.price,
-      qty: 1,
+      qty,
+      itemTotal: input.itemTotal,
       voucher: voucherMeta,
     });
 
@@ -102,15 +138,23 @@ export class CheckoutService {
       input.productId, // per-product attribution (B-5): prefer a visit for THIS product
     );
 
-    const code = await generateOrderCode();
-    const expiredAt = new Date(Date.now() + env.commerce.transactionExpiryHours * 3600 * 1000);
+    const expiryMs =
+      input.expiryMinutes && input.expiryMinutes > 0
+        ? input.expiryMinutes * 60 * 1000
+        : env.commerce.transactionExpiryHours * 3600 * 1000;
+    const expiredAt = new Date(Date.now() + expiryMs);
 
-    const tx = await prisma.commerceTransaction.create({
-      data: {
+    // `generateOrderCode` derives its sequence by COUNTING today's orders, so two
+    // checkouts in the same instant read the same count and mint the same code —
+    // the unique index then rejects one with P2002. Rare for a course, routine
+    // for an event: a webinar link goes out to a broadcast list and the whole
+    // audience presses buy at once. Retry with a jittered code, same as the
+    // ingest path does for an IAP-restore burst.
+    const tx = await this.createTransactionWithRetry((code) => ({
         code,
         memberId: input.memberId,
         productId: input.productId,
-        qty: 1,
+        qty,
         itemTotal: totals.itemTotal,
         voucherAmount: totals.voucherAmount,
         voucherCode: input.voucherCode,
@@ -122,6 +166,8 @@ export class CheckoutService {
         // Frozen at creation, never updated: the shop cookie is last-touch, so
         // reading the source back through shop_visits would retro-move a paid
         // order onto whatever campaign the buyer clicked next.
+        buyerPhone: input.buyerPhone ?? null,
+        buyerEmail: input.buyerEmail ?? null,
         guestId: input.source?.guestId,
         utmSource: input.source?.utmSource,
         utmMedium: input.source?.utmMedium,
@@ -130,9 +176,7 @@ export class CheckoutService {
         utmTerm: input.source?.utmTerm,
         status: 'PENDING',
         expiredAt,
-      },
-      select: { id: true, code: true },
-    });
+    }));
 
     return {
       transactionId: tx.id,
@@ -142,6 +186,37 @@ export class CheckoutService {
       amount: totals.amount,
       expiredAt,
     };
+  }
+
+  /**
+   * Insert the order, minting a fresh code on a `code` collision.
+   *
+   * Only a `code` conflict is retried — any other P2002 (there are none on this
+   * table's insert path today, but a future column could add one) must surface
+   * rather than be retried into a duplicate order.
+   */
+  private async createTransactionWithRetry(
+    build: (code: string) => Prisma.CommerceTransactionUncheckedCreateInput,
+  ): Promise<{ id: string; code: string }> {
+    const MAX_ATTEMPTS = 5;
+    for (let attempt = 1; ; attempt++) {
+      const code = await generateOrderCode(new Date(), { jitter: attempt > 1 });
+      try {
+        return await prisma.commerceTransaction.create({
+          data: build(code),
+          select: { id: true, code: true },
+        });
+      } catch (e) {
+        const isCodeConflict =
+          e instanceof Prisma.PrismaClientKnownRequestError &&
+          e.code === 'P2002' &&
+          String((e.meta as { target?: string | string[] } | undefined)?.target ?? '').includes(
+            'code',
+          );
+        if (isCodeConflict && attempt < MAX_ATTEMPTS) continue;
+        throw e;
+      }
+    }
   }
 
   /**

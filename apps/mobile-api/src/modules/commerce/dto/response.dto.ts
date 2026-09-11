@@ -80,6 +80,14 @@ export class TransactionProductSummaryDto {
 
   @ApiPropertyOptional({ nullable: true })
   thumbnail?: string | null;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    example: 'event_ticket',
+    description:
+      'What was bought. `event_ticket` means this order is event seats, not a course — its tickets live under the event, and the client should route it there rather than to course content. Free-form on purpose: new kinds appear without a migration, so treat anything unknown as a plain product.',
+  })
+  type?: string | null;
 }
 
 export class TransactionStatusResultDto {

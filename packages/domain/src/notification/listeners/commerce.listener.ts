@@ -4,12 +4,17 @@ import { commerceEvents } from '@bb/common/events/commerce-events';
 import { NotificationProducer } from '../notification.producer';
 import { ActionLabel, NotifGroup } from '../action-labels';
 import { loadTrialGrant, trialExpiresAt, formatDateWib } from '@bb/domain/commerce/trial';
+import { isEventTicketOrder } from '@bb/domain/event/order';
 
 const producer = new NotificationProducer();
 
 export function registerCommerceNotificationListener(): void {
   commerceEvents.on('commerce.payment.success', async (e) => {
     try {
+      // A ticket order's buyer is usually a guest placeholder that will never
+      // open the app: the row would be unread forever and the push has nowhere
+      // to go. Their tickets arrive by email, which is the channel they chose.
+      if (await isEventTicketOrder(e.productId)) return;
       const product = await prisma.product.findUnique({
         where: { id: e.productId },
         select: { title: true, code: true },

@@ -8,6 +8,17 @@ export type Ownership = (typeof OWNERSHIP_VALUES)[number];
 export const PRODUCT_TYPE_VALUES = ['course', 'mini_course'] as const;
 export type ProductType = (typeof PRODUCT_TYPE_VALUES)[number];
 
+/**
+ * Product types the mobile catalog lists.
+ *
+ * `products` is not a catalog table: an event ticket is one product row per
+ * ticket kind, and a subscription plan is a product too. Neither belongs in a
+ * course list, and both would open a course detail page with no course behind
+ * it. Same values as the `type` filter accepts, kept as its own constant so the
+ * two can diverge if a filterable type is ever not listable by default.
+ */
+export const LISTABLE_PRODUCT_TYPES = PRODUCT_TYPE_VALUES;
+
 export const SORT_VALUES = ['price_asc', 'price_desc', 'newest', 'top_rated'] as const;
 export type ProductSort = (typeof SORT_VALUES)[number];
 

@@ -91,7 +91,10 @@ module.exports = {
       name: 'bb-cron-disburse',
       cwd: root,
       script: 'apps/mobile-api/dist/jobs-runner.js',
-      args: 'executeApprovedDisbursements',
+      // expireEventTicketOrders rides the fast lane, not the hourly one: the
+      // ticket payment window is 30 minutes by default, and an hourly sweep would
+      // hold a seat for up to 90 — a lag three times the limit it enforces.
+      args: 'executeApprovedDisbursements expireEventTicketOrders',
       exec_mode: 'fork',
       instances: 1,
       autorestart: false,

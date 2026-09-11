@@ -73,6 +73,10 @@ export class BbEcsStack extends cdk.Stack {
       XENDIT_CALLBACK_TOKEN: sm('XENDIT_CALLBACK_TOKEN'),
       XENDIT_INVOICE_SUCCESS_URL: sm('XENDIT_INVOICE_SUCCESS_URL'), // redirect after pay (default localhost → override)
       XENDIT_INVOICE_FAILURE_URL: sm('XENDIT_INVOICE_FAILURE_URL'),
+      // Token ?t= di redirect invoice event TIDAK punya key sendiri di sini: dia
+      // diturunkan dari JWT_ACCESS_SECRET (lihat event-order-token.util.ts), dan URL
+      // redirect-nya ada di app_settings (shop.baseUrl + event.orderPath). Jadi tidak
+      // ada yang perlu ditambah ke secret bb/prod/app untuk fitur itu.
       REVENUECAT_WEBHOOK_AUTH: sm('REVENUECAT_WEBHOOK_AUTH'),
 
       // Bunny: cuma 2 yang DIPAKAI media module (streamApiKey & libraryId itu dead field).
@@ -328,7 +332,13 @@ export class BbEcsStack extends cdk.Stack {
       subnetSelection: { subnetType: ec2.SubnetType.PUBLIC },
       securityGroups: [appSg],
       scheduledFargateTaskDefinitionOptions: {
-        taskDefinition: makeCronLane('CronDisburse', 'cron-disburse', ['executeApprovedDisbursements']),
+        // expireEventTicketOrders rides this lane, not the hourly one: the ticket
+        // payment window is 30 minutes by default, and an hourly sweep would hold
+        // a seat for up to 90 — a lag three times the limit it enforces.
+        taskDefinition: makeCronLane('CronDisburse', 'cron-disburse', [
+          'executeApprovedDisbursements',
+          'expireEventTicketOrders',
+        ]),
       },
     });
     // CATATAN: ScheduledFargateTask nggak set assignPublicIp. Kalau cron gagal pull image
