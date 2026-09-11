@@ -312,7 +312,7 @@ export class PaymentService {
     const tx = await prisma.commerceTransaction.findUnique({
       where: { id: transactionId },
       include: {
-        product: { select: { id: true, title: true, thumbnail: true } },
+        product: { select: { id: true, title: true, thumbnail: true, type: true } },
         payments: { orderBy: { createdAt: 'desc' }, take: 1 },
       },
     });
@@ -372,7 +372,7 @@ export class PaymentService {
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * perPage,
         take: perPage,
-        include: { product: { select: { id: true, title: true, thumbnail: true } } },
+        include: { product: { select: { id: true, title: true, thumbnail: true, type: true } } },
       }),
       prisma.commerceTransaction.count({ where }),
     ]);
