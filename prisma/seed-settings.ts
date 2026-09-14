@@ -28,6 +28,24 @@ const SETTINGS: Array<{ key: string; value: string; description: string }> = [
       'Days an IAP-channel commission stays PENDING before BALANCE (longer: covers store refund window).',
   },
   {
+    key: 'event.checkoutExpiryMinutes',
+    value: '30',
+    description:
+      'Menit yang diberikan pembeli tiket event untuk membayar sebelum kursinya dilepas kembali. Terpisah dari batas 24 jam checkout kursus: kursus tidak punya kuota, tiket punya.',
+  },
+  {
+    key: 'event.orderPath',
+    value: '/event/order',
+    description:
+      'Path halaman pesanan di web shop, ditempel ke shop.baseUrl untuk membangun redirect setelah pembayaran tiket event (ditambah token ?t=). Ubah di sini kalau route FE pindah — tidak perlu redeploy. CATATAN: hanya memindahkan REDIRECT; link di email tiket dibangun bb-comms dari SHOP_BASE_URL + /event/order/ yang hardcode, jadi email yang sudah terkirim tidak ikut pindah.',
+  },
+  {
+    key: 'shop.baseUrl',
+    value: 'https://brainboost.id',
+    description:
+      'Origin web shop, tanpa slash di akhir. SATU baris yang dipakai bersama: target redirect shortlink /s/:slug, URL di halaman Tracking Link backoffice, dan redirect setelah pembayaran tiket event. Salinan kedua di tempat lain adalah cara redirect mulai menunjuk host yang tidak pernah dilihat operator.',
+  },
+  {
     key: 'banner.maxVersionAndroid',
     value: '',
     description:

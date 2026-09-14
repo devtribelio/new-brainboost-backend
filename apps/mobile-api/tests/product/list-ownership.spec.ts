@@ -64,24 +64,26 @@ describe('ProductService.list ownership filter', () => {
     expect(r.purchasedProductIds.has(ownedCourseProductId)).toBe(true);
   });
 
-  it('ownership=not_purchased → non-owned course + book', async () => {
+  it('ownership=not_purchased → the non-owned course only', async () => {
     const r = await svc.list(page, { memberId, ownership: 'not_purchased', keyword: KW });
-    const ids = r.rows.map((p) => p.id).sort();
-    const expected = [notOwnedCourseProductId, bookProductId].sort();
-    expect(ids).toEqual(expected);
-    expect(r.total).toBe(2);
+    const ids = r.rows.map((p) => p.id);
+    // The `book` fixture is deliberately absent: the catalog now lists only
+    // course-backed types (LISTABLE_PRODUCT_TYPES). It used to appear here.
+    expect(ids).toEqual([notOwnedCourseProductId]);
+    expect(ids).not.toContain(bookProductId);
+    expect(r.total).toBe(1);
   });
 
-  it('no ownership param → all 3 (legacy behavior preserved)', async () => {
+  it('no ownership param → both courses, never the non-catalog product', async () => {
     const r = await svc.list(page, { memberId, keyword: KW });
     const ourIds = r.rows.map((p) => p.id).filter((id) => productIds.includes(id));
-    expect(ourIds.sort()).toEqual([...productIds].sort());
+    expect(ourIds.sort()).toEqual([ownedCourseProductId, notOwnedCourseProductId].sort());
   });
 
   it('guest with ownership=purchased ignored (no memberId)', async () => {
     const r = await svc.list(page, { ownership: 'purchased', keyword: KW });
     // Guest path goes through the normal where; ignored ownership.
     const ourIds = r.rows.map((p) => p.id).filter((id) => productIds.includes(id));
-    expect(ourIds.length).toBe(3);
+    expect(ourIds.length).toBe(2);
   });
 });

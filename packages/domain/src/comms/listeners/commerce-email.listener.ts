@@ -4,6 +4,7 @@ import { affiliateEvents } from '@bb/common/events/affiliate-events';
 import { enqueueComms } from '@bb/common/services/comms-outbox';
 import { settingsService, SETTING_KEYS } from '@bb/common/services/settings.service';
 import { loadTrialGrant } from '@bb/domain/commerce/trial';
+import { isEventTicketOrder } from '@bb/domain/event/order';
 
 /**
  * Outbound email producer for commerce events. Enqueues a transactional email
@@ -20,6 +21,11 @@ export function registerCommsEmailListeners(): void {
     // Renewals are subscription events, not first-purchase receipts — skip for now.
     if (e.isRenewal) return;
     try {
+      // Event tickets have their own emails (one per attendee + a summary),
+      // queued by the ticket listener. This receipt is rendered from
+      // commerce_transactions as a COURSE purchase, so leaving it on would send
+      // a ticket buyer a third email about a course they did not buy.
+      if (await isEventTicketOrder(e.productId)) return;
       // A trial gets its own type, not the receipt: every line of the receipt's
       // money block is Rp 0 or a discount equal to the full price, which reads as
       // a bill for a purchase that never happened. bb-comms resolves the end date
@@ -48,6 +54,10 @@ export function registerCommsEmailListeners(): void {
   commerceEvents.on('commerce.payment.success', async (e) => {
     if (e.isRenewal) return;
     try {
+      // A ticket sale is not alerted: the buyer's summary email is already the
+      // record of it, and one alert per order would bury the team's inbox the
+      // hour a webinar link goes out.
+      if (await isEventTicketOrder(e.productId)) return;
       // A free trial is not a sale. Alerting the team on one would mean an email
       // per trial claimed, each saying "Penjualan baru" for Rp 0. Trial uptake is
       // a number to read on the voucher dashboard, not an inbox event.

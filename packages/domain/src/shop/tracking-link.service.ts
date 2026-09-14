@@ -1,6 +1,7 @@
 import { prisma } from '@bb/db';
 import { logger } from '@bb/common/config/logger';
-import { settingsService, SETTING_KEYS } from '@bb/common/services/settings.service';
+import { EVENT_TICKET_PRODUCT_TYPE } from '@bb/domain/event/order';
+import { shopBaseUrl } from './shop-base-url';
 
 /**
  * Shortlink resolution for `GET /s/:slug`.
@@ -10,9 +11,6 @@ import { settingsService, SETTING_KEYS } from '@bb/common/services/settings.serv
  * can change, so a frozen URL would rot silently and every already-shared link
  * would keep pointing at the stale target.
  */
-
-/** Last-resort shop origin. Overridden by `app_settings['shop.baseUrl']`. */
-export const SHOP_BASE_URL_FALLBACK = 'https://brainboost.id';
 
 /**
  * Bot/preview fetchers. Same list as the shop visit logger: with a shortlink in
@@ -39,10 +37,9 @@ export interface ShortlinkTarget {
 }
 
 export class TrackingLinkService {
-  /** Shop origin, no trailing slash. */
+  /** Shop origin, no trailing slash. Kept as a method for its existing callers. */
   async shopBaseUrl(): Promise<string> {
-    const raw = await settingsService.get(SETTING_KEYS.shopBaseUrl, SHOP_BASE_URL_FALLBACK);
-    return raw.trim().replace(/\/+$/, '');
+    return shopBaseUrl();
   }
 
   /**
@@ -78,12 +75,30 @@ export class TrackingLinkService {
 
     const product = await prisma.product.findUnique({
       where: { id: link.productId },
-      select: { code: true, slug: true, legacyId: true },
+      select: {
+        code: true,
+        slug: true,
+        legacyId: true,
+        type: true,
+        // A ticket product is one kind of ticket, but the visitor must land on
+        // the EVENT — that is the page that carries the story and every tier.
+        // Which tier the link happens to name is a bookkeeping detail of
+        // `tracking_links.product_id`, not something a buyer should be routed by.
+        eventTicketType: { select: { event: { select: { slug: true } } } },
+      },
     });
+
+    const eventSlug =
+      product?.type === EVENT_TICKET_PRODUCT_TYPE
+        ? (product.eventTicketType?.event.slug ?? null)
+        : null;
     // Same preference order the shop route and the visit resolver accept:
     // code -> slug -> legacyId.
     const ref = product?.code ?? product?.slug ?? (product?.legacyId?.toString() || null);
-    if (!ref) {
+    // An event ticket whose type row is missing falls through to the product
+    // path rather than to the shop home: a half-wired link should still land the
+    // visitor somewhere they can buy, and the miss is logged either way.
+    if (!eventSlug && !ref) {
       logger.warn({ slug: clean, productId: link.productId }, 'shortlink.product_unusable');
       return { url: base, linkId: link.id };
     }
@@ -96,8 +111,12 @@ export class TrackingLinkService {
     if (link.utmTerm) params.set('utm_term', link.utmTerm);
     if (link.voucherCode) params.set('voucher', link.voucherCode);
 
+    const path = eventSlug
+      ? `/event/${encodeURIComponent(eventSlug)}`
+      : `/product/${encodeURIComponent(ref as string)}`;
+
     return {
-      url: `${base}/product/${encodeURIComponent(ref)}?${params.toString()}`,
+      url: `${base}${path}?${params.toString()}`,
       linkId: link.id,
     };
   }

@@ -118,6 +118,8 @@ model Member {
   commercePayments       CommercePayment[]
   notificationMutes      NotificationMute[]
   kycEvents              KycEvent[]
+  eventTicketsBought     EventTicket[]           @relation("EventTicketBuyer")
+  eventTicketsClaimed    EventTicket[]           @relation("EventTicketAttendee")
 
   @@map("members")
 }
@@ -402,6 +404,7 @@ model Product {
   affiliateCommissions AffiliateCommission[]
   commerceTransactions CommerceTransaction[]
   voucherProducts      VoucherProduct[]
+  eventTicketType      EventTicketType?
 
   @@map("products")
 }
@@ -1159,6 +1162,31 @@ model CommerceTransaction {
   utmContent                   String?                   @map("utm_content")
   utmTerm                      String?                   @map("utm_term")
   guestId                      String?                   @map("guest_id")
+  /// Who to contact about this order. Both columns take the MEMBER's own value
+  /// whenever they have one; what was typed at checkout only fills the gap. A
+  /// checkout form is not a profile editor — letting it win would let one event's
+  /// form decide where that member's receipts go, and would hand the organiser a
+  /// number the member never confirmed is theirs.
+  ///
+  /// So for a member with both on file these are a copy of the profile, which
+  /// still leaves them two jobs: they are the ONLY record when the profile cannot
+  /// take the value (a number already held by another account, a lost race), and
+  /// they are the snapshot of who to contact at purchase time, which survives a
+  /// later profile edit. No unique, no identity semantics.
+  ///
+  /// National number only, dial code NOT included — same shape as `members.phone`,
+  /// so the two are interchangeable in a COALESCE. The code lives on the member
+  /// (`members.phone_code`); a reader that needs a dialable number abroad must
+  /// take it from there.
+  buyerPhone                   String?                   @map("buyer_phone")
+  /// See `buyerPhone`. Never routed INTO `members.email`: that column is the
+  /// account's primary identity — login handle, recovery channel, locked once
+  /// verified — so a value merely typed into a checkout form must never become it
+  /// (an account gains one through requestVerificationEmail → validateOtpEmail).
+  /// Without this column an order placed by a member who registered by phone has
+  /// no contact address at all: their summary email dead-letters and their order
+  /// page can never be opened.
+  buyerEmail                   String?                   @map("buyer_email")
   status                       CommerceTransactionStatus @default(PENDING)
   paidAt                       DateTime?                 @map("paid_at")
   canceledAt                   DateTime?                 @map("canceled_at")
@@ -1166,12 +1194,13 @@ model CommerceTransaction {
   createdAt                    DateTime                  @default(now()) @map("created_at")
   updatedAt                    DateTime                  @updatedAt @map("updated_at")
 
-  member     Member            @relation(fields: [memberId], references: [id])
-  product    Product           @relation(fields: [productId], references: [id])
-  affiliator MemberAffiliator? @relation(fields: [affiliatorId], references: [id])
-  program    AffiliateProgram? @relation(fields: [programId], references: [id])
-  voucher    Voucher?          @relation(fields: [voucherId], references: [id])
-  payments   CommercePayment[]
+  member       Member            @relation(fields: [memberId], references: [id])
+  product      Product           @relation(fields: [productId], references: [id])
+  affiliator   MemberAffiliator? @relation(fields: [affiliatorId], references: [id])
+  program      AffiliateProgram? @relation(fields: [programId], references: [id])
+  voucher      Voucher?          @relation(fields: [voucherId], references: [id])
+  payments     CommercePayment[]
+  eventTickets EventTicket[]
 
   @@unique([provider, providerEventId]) // idempotent ingest; both null for web (NULLs distinct in PG)
   @@index([memberId, createdAt])
@@ -1552,4 +1581,243 @@ model TrackingLinkClick {
   @@id([linkId, day])
   @@index([day])
   @@map("tracking_link_clicks")
+}
+
+/// A sellable event (webinar, workshop, kopdar). Sold on the marketplace as one
+/// or more `EventTicketType`, never on its own — the event carries the story
+/// (title, cover, when, where), the ticket type carries the price and the quota.
+///
+/// There is no index page: events appear as a swiper on the shop home and are
+/// otherwise reached by slug, because there is not always one running.
+/// See docs/event-ticketing.md.
+model Event {
+  id              String    @id @default(uuid(7)) @db.Uuid
+  /// Public URL segment: `shop.brainboost.id/event/<slug>`.
+  slug            String    @unique
+  title           String
+  /// HTML from the backoffice editor.
+  description     String?
+  coverUrl        String?   @map("cover_url")
+  /// Stored UTC, rendered WIB everywhere (same rule as every other date here).
+  startsAt        DateTime  @map("starts_at")
+  endsAt          DateTime? @map("ends_at")
+  /// Optional: an online event has no address (P1).
+  location        String?
+  /// Maps link for an offline event. A Zoom link is NOT put here — it is sent to
+  /// ticket holders, not published on a page anyone can open.
+  locationUrl     String?   @map("location_url")
+  /// DRAFT | ON_SALE | CLOSED | CANCELED. Free-form string, not a DB enum: the
+  /// set is likely to grow (postponed, sold out as a state) and every other
+  /// lifecycle column in this schema that grew regretted the enum.
+  status          String    @default("DRAFT")
+  /// Announcement strip shown alongside the event ("Bisa reservasi tiket dulu…").
+  /// Three plain-text columns rather than one HTML blob on purpose: the operator
+  /// would otherwise author the `<a href>` themselves, which puts a `javascript:`
+  /// URL one paste away from a public page. Nothing here is markup, so nothing
+  /// here can become markup.
+  noticeText      String?   @map("notice_text")
+  /// Clickable part of the strip. The link renders only when a label exists —
+  /// a URL with no label has nothing to press.
+  noticeLinkLabel String?   @map("notice_link_label")
+  /// Where the label points. NULL means the event's own page: resolved at read
+  /// time, never stored, because the slug is still editable while no ticket has
+  /// sold and a stored absolute URL would rot into a 404 without a sound.
+  noticeLinkUrl   String?   @map("notice_link_url")
+  /// `bo_users.id` — a backoffice-owned table, so no FK can point at it from
+  /// here (same as `tracking_links.created_by`).
+  createdBy       String?   @map("created_by") @db.Uuid
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  ticketTypes EventTicketType[]
+
+  @@index([status, startsAt])
+  @@map("events")
+}
+
+/// One sellable ticket kind of an event: "Online", "Offline", "Early Bird" —
+/// each with its own price, quota and sale window.
+///
+/// 1:1 with a `products` row of `type='event_ticket'`. That is the load-bearing
+/// decision of this whole feature: checkout, voucher whitelist, tracking links,
+/// the Sumber Traffic report and (if it ever arrives) commission all key on
+/// `product_id`. Without it, every one of those layers would have to be taught
+/// what a ticket is. Price is READ FROM THE PRODUCT, never copied here, so
+/// there is one source of truth for what the buyer is charged.
+///
+/// Consequence of one `product_id` per `commerce_transactions` row: one order
+/// buys one ticket type. Online + offline in one payment is out of scope (P7).
+model EventTicketType {
+  id            String    @id @default(uuid(7)) @db.Uuid
+  eventId       String    @map("event_id") @db.Uuid
+  /// The `products` row this ticket sells as. Price lives THERE.
+  productId     String    @unique @map("product_id") @db.Uuid
+  name          String
+  /// ONLINE | OFFLINE — drives an icon and a filter, nothing in the money path.
+  kind          String
+  /// null = unlimited. Seats taken = `event_tickets` in RESERVED or ISSUED for
+  /// this type; seats come back when the sweeper expires an abandoned order.
+  quota         Int?
+  maxPerOrder   Int       @default(10) @map("max_per_order")
+  saleStartsAt  DateTime? @map("sale_starts_at")
+  saleEndsAt    DateTime? @map("sale_ends_at")
+  sortOrder     Int       @default(0) @map("sort_order")
+  isActive      Boolean   @default(true) @map("is_active")
+  /// Overrides for the ticket email THIS kind of ticket produces. Plain text,
+  /// each optional and falling back FIELD BY FIELD to the standard copy.
+  ///
+  /// Per ticket kind, not per event: an Online attendee needs the Zoom link and
+  /// an Offline attendee needs the venue and the gate time. One call to action
+  /// per event would send one of those two groups to the wrong place.
+  ///
+  /// Text, never HTML — bb-comms renders with html/template, which escapes by
+  /// default, so accepting HTML would mean deliberately marking operator input
+  /// safe. Blank lines become paragraphs at render time.
+  emailSubject  String?   @map("email_subject")
+  emailBody     String?   @map("email_body")
+  emailFooter   String?   @map("email_footer")
+  /// Rendered as a button, only when BOTH label and URL are set.
+  emailCtaLabel String?   @map("email_cta_label")
+  emailCtaUrl   String?   @map("email_cta_url")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  event      Event                  @relation(fields: [eventId], references: [id])
+  product    Product                @relation(fields: [productId], references: [id])
+  tickets    EventTicket[]
+  priceTiers EventTicketPriceTier[]
+
+  @@index([eventId])
+  @@map("event_ticket_types")
+}
+
+/// Bundle pricing for one ticket kind: "from 2 tickets, 350k total".
+///
+/// A package is PRESENTATION; the quantity is the reality. Buying "Trio + 1 Solo"
+/// is one order of qty 4 of a single ticket kind, priced through this ladder —
+/// never a product of its own. A package-as-product would have to yield three
+/// tickets from one unit, would count quota wrong, and a mixed basket would force
+/// the multi-line order this schema does not have.
+///
+/// No row for qty 1: that price is `products.price`, which stays the single source
+/// of truth. A kind with no rows here behaves exactly as it did before bundling.
+///
+/// The ladder is read at checkout and the resulting `item_total` is frozen on the
+/// order, so editing a tier never rewrites a sale that already happened. The
+/// backoffice still locks the ladder once a ticket is ISSUED, for report
+/// consistency rather than correctness.
+model EventTicketPriceTier {
+  id           String   @id @default(uuid(7)) @db.Uuid
+  ticketTypeId String   @map("ticket_type_id") @db.Uuid
+  /// Tickets this tier covers, exactly. >= 2.
+  minQty       Int      @map("min_qty")
+  /// Total rupiah for exactly `minQty` tickets — NOT a per-ticket price.
+  totalPrice   Int      @map("total_price")
+  /// Display only ("Duo", "Trio"). Never matched on, never part of the price.
+  label        String?
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  ticketType EventTicketType @relation(fields: [ticketTypeId], references: [id], onDelete: Cascade)
+
+  @@unique([ticketTypeId, minQty])
+  @@map("event_ticket_price_tiers")
+}
+
+/// One seat, one attendee, one code. N of these hang off a single order
+/// (`commerce_transactions.qty` = N).
+///
+/// Unlike `affiliate_visits` / `shop_visits` / `tracking_links`, this table DOES
+/// carry foreign keys: those three are written by public endpoints that must
+/// never fail (or point at backoffice-owned tables), while every row here is
+/// written by our own service inside the order's transaction. Integrity is free,
+/// so take it.
+///
+/// `status` is load-bearing, not decoration: the quota query reads it directly.
+/// RESERVED is claimed at checkout and released by `expirePendingTransactions`
+/// when the order expires or is canceled — nothing else gives the seat back.
+model EventTicket {
+  id            String    @id @default(uuid(7)) @db.Uuid
+  /// `BBT-XXXXXX`, alphabet [A-Z2-9] (no 0/O/1/I). Minted at RESERVED so it can
+  /// be shown on the "waiting for payment" page; only VALID once ISSUED. Wide
+  /// enough to become a QR payload later without a migration.
+  code          String    @unique
+  ticketTypeId  String    @map("ticket_type_id") @db.Uuid
+  transactionId String    @map("transaction_id") @db.Uuid
+  /// Whoever paid — a real account when logged in, otherwise the placeholder
+  /// member created from the payer's email (§4.2). Never null: every listener on
+  /// `commerce.payment.success` assumes an order has a member.
+  buyerMemberId String    @map("buyer_member_id") @db.Uuid
+  attendeeName  String    @map("attendee_name")
+  /// Normalised lowercase. The same email may hold several tickets (P5), so this
+  /// is indexed, not unique.
+  attendeeEmail String    @map("attendee_email")
+  /// Optional — the organiser's way to reach this attendee (a WhatsApp group
+  /// invite, a no-show call), not an identity: no unique, no verification, never
+  /// matched against `members.phone`.
+  ///
+  /// Stored in FULL E.164 (`+6281…`), unlike `members.phone` / `buyer_phone` which
+  /// keep the national part and the dial code apart. Those two must share a shape
+  /// because they are read through one COALESCE and because the national form is
+  /// what the unique index and login-by-phone match on. This column has neither
+  /// partner nor lookup, so the dialable form is simply the useful one.
+  attendeePhone String?   @map("attendee_phone")
+  /// Filled when the ATTENDEE claims the ticket by verifying that email — not
+  /// the payer. Buying for someone else does not make you the ticket's owner.
+  /// Known gap: only `validateOtpEmail` claims today, so a member who signed up
+  /// with Google or by phone never passes through it and this stays NULL. See
+  /// docs/event-ticketing.md K-3 before relying on it.
+  memberId      String?   @map("member_id") @db.Uuid
+  /// RESERVED | ISSUED | EXPIRED | VOID.
+  status        String    @default("RESERVED")
+  issuedAt      DateTime? @map("issued_at")
+  emailSentAt   DateTime? @map("email_sent_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  ticketType  EventTicketType     @relation(fields: [ticketTypeId], references: [id])
+  transaction CommerceTransaction @relation(fields: [transactionId], references: [id])
+  buyer       Member              @relation("EventTicketBuyer", fields: [buyerMemberId], references: [id])
+  attendee    Member?             @relation("EventTicketAttendee", fields: [memberId], references: [id])
+
+  @@index([transactionId])
+  @@index([attendeeEmail])
+  /// Quota count: seats taken per ticket type.
+  @@index([ticketTypeId, status])
+  @@map("event_tickets")
+}
+
+/// Visits to an event page, kept OUT of `shop_visits` on purpose.
+///
+/// Not a nullable `event_id` on the shop table: isolation there would hold only
+/// because nothing reads `shop_visits` today, and the first marketing report
+/// built on it would sweep event rows in unless its author remembered to filter.
+/// A separate table makes the mixing impossible rather than merely absent.
+///
+/// No FK to Event or Member — same rule as ShopVisit and AffiliateVisit: it is
+/// written by a public unauthenticated endpoint that must never fail, and a FK
+/// violation there turns a marketing click into a lost row. An unknown slug is
+/// stored with a null `eventId`, because the UTM on it is still worth having.
+model EventVisit {
+  id            String   @id @default(uuid(7)) @db.Uuid
+  guestId       String   @map("guest_id")
+  memberId      String?  @map("member_id") @db.Uuid
+  eventId       String?  @map("event_id") @db.Uuid
+  utmSource     String?  @map("utm_source")
+  utmMedium     String?  @map("utm_medium")
+  utmCampaign   String?  @map("utm_campaign")
+  utmContent    String?  @map("utm_content")
+  utmTerm       String?  @map("utm_term")
+  referer       String?
+  ipAddress     String?  @map("ip_address")
+  userAgent     String?  @map("user_agent")
+  /// Dedupes a RETRY, never a visit: a refresh must send a new id and produce a
+  /// new row, else "Kunjungan" collapses onto "Pengunjung unik".
+  clientEventId String?  @unique @map("client_event_id")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@index([guestId, createdAt])
+  @@index([memberId])
+  @@index([eventId, createdAt])
+  @@index([utmSource, utmCampaign, createdAt])
+  @@map("event_visits")
 }

@@ -1,6 +1,16 @@
 export interface ComputeTotalsInput {
   unitPrice: number;
   qty?: number;
+  /**
+   * Pre-computed line total, for a seller whose price is not `unitPrice × qty` —
+   * event tickets with a bundle ladder (`computeTicketItemTotal`). Omitted, the
+   * multiplication below stands, so course checkout is untouched.
+   *
+   * Passed in rather than computed here on purpose: the ladder lives in the event
+   * domain, and teaching this function about it would drag ticket pricing into
+   * every order that has nothing to do with events.
+   */
+  itemTotal?: number;
   voucher?:
     | {
         type: 'PERCENT' | 'AMOUNT' | 'TRIAL';
@@ -27,12 +37,15 @@ export interface ComputeTotalsResult {
  *    (0 on a trial row) and silently charge the member full price.
  *  - Voucher discount cannot exceed itemTotal (clamp to itemTotal).
  *
+ * A PERCENT voucher therefore discounts the BUNDLED total when one is supplied —
+ * the bill the buyer actually faces, not a notional `unitPrice × qty`.
+ *
  * Legacy parity: `priceRecipient` uses floor((max(productPrice - voucherAmount, 0)) * rate / 100)
  * — voucher is subtracted from itemTotal before fee in this function.
  */
 export function computeTotals(input: ComputeTotalsInput): ComputeTotalsResult {
   const qty = Math.max(1, Math.floor(input.qty ?? 1));
-  const itemTotal = input.unitPrice * qty;
+  const itemTotal = input.itemTotal ?? input.unitPrice * qty;
 
   let voucherAmount = 0;
   if (input.voucher) {

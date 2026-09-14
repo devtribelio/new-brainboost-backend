@@ -1,5 +1,6 @@
 import { prisma } from '@bb/db';
 import { logger } from '@bb/common/config/logger';
+import { BOT_UA } from './visit.rules';
 
 /** Window a guest's visits stay claimable after login. Kept equal to the
  *  affiliate cookie window (COOKIE_DAYS) — if one moves, move both. */
@@ -13,7 +14,6 @@ const MAX_FIELD_LEN = 255;
 /** Bot/preview fetchers (WhatsApp + Slack unfurl, mail scanners, crawlers).
  *  With a shortlink in front these are a real share of raw hits, and they would
  *  inflate both Kunjungan and Pengunjung unik. */
-const BOT_UA = /bot|crawler|spider|crawling|preview|facebookexternalhit|slackbot|whatsapp|telegrambot|twitterbot|discordbot|embedly|quora link preview|pinterest|redditbot|applebot|bingpreview|headlesschrome|python-requests|curl\/|wget\//i;
 
 export interface ShopVisitInput {
   guestId?: string;
@@ -104,11 +104,22 @@ export class ShopVisitService {
     if (!gid) return { claimed: 0 };
 
     const since = new Date(Date.now() - CLAIM_WINDOW_DAYS * 24 * 3600 * 1000);
-    const res = await prisma.shopVisit.updateMany({
-      where: { guestId: gid, memberId: null, createdAt: { gte: since } },
-      data: { memberId },
-    });
-    return { claimed: res.count };
+    // Both stores, one call. Event visits live in their own table so they can
+    // never surface on the product Marketing pages, but that separation is a
+    // reporting concern — a guest who logs in claims everything they did, and
+    // the FE must not have to learn how many tables that is.
+    const [res, eventRes] = await Promise.all([
+      prisma.shopVisit.updateMany({
+        where: { guestId: gid, memberId: null, createdAt: { gte: since } },
+        data: { memberId },
+      }),
+      prisma.eventVisit.updateMany({
+        where: { guestId: gid, memberId: null, createdAt: { gte: since } },
+        data: { memberId },
+      }),
+    ]);
+    // Counts both: the caller's log line should reflect what was actually bound.
+    return { claimed: res.count + eventRes.count };
   }
 
   /**
