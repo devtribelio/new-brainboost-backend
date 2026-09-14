@@ -356,7 +356,15 @@ export class BbEcsStack extends cdk.Stack {
       // SES_FROM = display-name + alamat pengirim (RFC 5322). Bukan rahasia → plain env.
       // Prod nggak baca .env, jadi tanpa ini Go service jatuh ke default 'no-reply@brainboost.id'
       // (tanpa nama). Nilai disamakan dengan staging bb-notification-service/.env.
-      environment: { ...env, AWS_REGION: 'ap-southeast-1', SES_FROM: 'BrainBoost <no-reply@brainboost.id>' },
+      // SHOP_BASE_URL = origin web shop untuk link di email tiket event ("Buka pesanan").
+      // config.go default-nya 'https://brainboost.id' (landing, bukan shop) → tanpa ini
+      // setiap email tiket menunjuk halaman yang tidak ada. Bukan rahasia → plain env.
+      environment: {
+        ...env,
+        AWS_REGION: 'ap-southeast-1',
+        SES_FROM: 'BrainBoost <no-reply@brainboost.id>',
+        SHOP_BASE_URL: 'https://shop.brainboost.id',
+      },
       // Qontak (WhatsApp OTP) — dipakai bb-comms SAJA, jadi di-scope ke container ini
       // (bukan shared `secrets` map yang kena mobile-api/relay/cron juga). CLIENT_ID/
       // SECRET/USERNAME/PASSWORD = kredensial (Go baca via os.Getenv, tanpa default →
