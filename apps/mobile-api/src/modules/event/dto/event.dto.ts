@@ -47,7 +47,10 @@ export class EventTicketTypeDto {
   @ApiPropertyOptional({
     example: 42,
     nullable: true,
-    description: 'Seats left. `null` = unlimited. A snapshot — checkout is the final word.',
+    description:
+      'Seats left. `null` = nothing to show — the kind is unlimited, or the organiser '
+      + 'turned the count off for this event. A snapshot either way; checkout is the '
+      + 'final word, and `isSoldOut` stays truthful even when this is hidden.',
   })
   remainingQuota!: number | null;
 
@@ -97,9 +100,18 @@ export class EventListItemDto {
   @ApiPropertyOptional({
     nullable: true,
     example: 42,
-    description: 'Seats left across every type. `null` if any type is unlimited.',
+    description:
+      'Seats left across every type. `null` if any type is unlimited, or if the '
+      + 'organiser turned the count off for this event.',
   })
   remainingQuota!: number | null;
+
+  @ApiProperty({
+    example: true,
+    description:
+      'Whether this event publishes its seat counts. `false` is what makes every `remainingQuota` here null — it does NOT mean unlimited, and it never loosens `isSoldOut`.',
+  })
+  showRemainingQuota!: boolean;
 
   @ApiPropertyOptional({
     nullable: true,
@@ -165,6 +177,13 @@ export class EventDetailDto {
       'Clickable part of the strip. `null` = render the text without a link. The target is not exposed yet; point it at this event page.',
   })
   noticeLinkLabel!: string | null;
+
+  @ApiProperty({
+    example: true,
+    description:
+      'Whether this event publishes its seat counts. `false` is what makes every `remainingQuota` here null — it does NOT mean unlimited, and it never loosens `isSoldOut`.',
+  })
+  showRemainingQuota!: boolean;
 
   @ApiProperty({
     example: true,
