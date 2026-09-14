@@ -518,8 +518,14 @@ async function fillMissingMemberPhone(memberId: string, pair: PhonePair): Promis
   }
 }
 
+/**
+ * Domain labels exclude `.` so each dot-separated part has exactly one parse —
+ * the old `[^\s@]+\.[^\s@]+` let `.` match on both sides of the dot, which
+ * backtracks polynomially on a hostile local part (`js/polynomial-redos`) and
+ * this runs on the buyer-typed email at checkout.
+ */
 function isEmail(value: string): boolean {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+  return /^[^\s@]+@[^\s@.]+(\.[^\s@.]+)+$/.test(value);
 }
 
 function isUniqueViolation(err: unknown): boolean {
