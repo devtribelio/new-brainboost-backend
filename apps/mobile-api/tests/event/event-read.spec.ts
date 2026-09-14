@@ -13,6 +13,7 @@ async function createEvent(opts: {
   startsAt?: Date;
   endsAt?: Date | null;
   location?: string | null;
+  showRemainingQuota?: boolean;
 }) {
   const suffix = `${Date.now()}-${Math.floor(Math.random() * 100000)}`;
   const event = await prisma.event.create({
@@ -24,6 +25,7 @@ async function createEvent(opts: {
       endsAt: opts.endsAt === undefined ? new Date(Date.now() + 50 * HOUR) : opts.endsAt,
       location: opts.location === undefined ? 'Zoom' : opts.location,
       status: opts.status ?? 'ON_SALE',
+      showRemainingQuota: opts.showRemainingQuota ?? true,
     },
   });
   created.events.push(event.id);
@@ -403,5 +405,84 @@ describe('GET /api/event/:slug', () => {
     const res = await request(app).get(`/api/event/${event.slug}`).expect(200);
     expect(res.body.data.ticketTypes[0].remainingQuota).toBeNull();
     expect(res.body.data.ticketTypes[0].isSoldOut).toBe(false);
+  });
+});
+
+describe('event quota display toggle', () => {
+  it('shows the count by default, so an event authored before the flag is unchanged', async () => {
+    const event = await createEvent({});
+    await addTicketType(event.id, { quota: 10 });
+
+    const res = await request(app).get(`/api/event/${event.slug}`).expect(200);
+    expect(res.body.data.ticketTypes[0].remainingQuota).toBe(10);
+    expect(res.body.data.showRemainingQuota).toBe(true);
+  });
+
+  it('hides the count on the event page when the organiser turns it off', async () => {
+    const event = await createEvent({ showRemainingQuota: false });
+    await addTicketType(event.id, { quota: 10 });
+
+    const res = await request(app).get(`/api/event/${event.slug}`).expect(200);
+    const [ticket] = res.body.data.ticketTypes;
+
+    expect(ticket.remainingQuota).toBeNull();
+    // The flag is what tells a client the null is a hidden count and not an
+    // unlimited kind — the two render differently, so it cannot be guessed.
+    expect(res.body.data.showRemainingQuota).toBe(false);
+    // The seat is still there — hiding the number must not close the sale.
+    expect(ticket.isSoldOut).toBe(false);
+    expect(ticket.isOnSale).toBe(true);
+    expect(res.body.data.canBuy).toBe(true);
+  });
+
+  it('still reports sold out with the count hidden', async () => {
+    // The whole safety argument for the flag: it moves a number off a page, it
+    // does not sell a seat that no longer exists. A buyer told nothing is fine;
+    // a buyer told "available" when it is not, is an oversell.
+    const event = await createEvent({ showRemainingQuota: false });
+    const type = await addTicketType(event.id, { quota: 2 });
+    await occupySeats(type.id, 2, 'ISSUED');
+
+    const res = await request(app).get(`/api/event/${event.slug}`).expect(200);
+    const [ticket] = res.body.data.ticketTypes;
+
+    expect(ticket.remainingQuota).toBeNull();
+    expect(ticket.isSoldOut).toBe(true);
+    expect(ticket.isOnSale).toBe(false);
+    expect(res.body.data.canBuy).toBe(false);
+  });
+
+  it('separates an unlimited kind from a hidden count', async () => {
+    const event = await createEvent({});
+    await addTicketType(event.id, { quota: null });
+
+    const res = await request(app).get(`/api/event/${event.slug}`).expect(200);
+
+    // Same null as a hidden count, opposite flag: unlimited seats, freely shown.
+    expect(res.body.data.ticketTypes[0].remainingQuota).toBeNull();
+    expect(res.body.data.showRemainingQuota).toBe(true);
+  });
+
+  it('hides the aggregate on the shop-home card too', async () => {
+    const event = await createEvent({ showRemainingQuota: false });
+    await addTicketType(event.id, { quota: 10 });
+
+    const res = await request(app).get('/api/event/on-sale').expect(200);
+    const item = res.body.data.items.find((i: { slug: string }) => i.slug === event.slug);
+
+    expect(item).toBeDefined();
+    expect(item.remainingQuota).toBeNull();
+    expect(item.showRemainingQuota).toBe(false);
+  });
+
+  it('keeps a sold-out event off the swiper even with the count hidden', async () => {
+    const event = await createEvent({ showRemainingQuota: false });
+    const type = await addTicketType(event.id, { quota: 1 });
+    await occupySeats(type.id, 1, 'RESERVED');
+
+    const res = await request(app).get('/api/event/on-sale').expect(200);
+    expect(
+      res.body.data.items.find((i: { slug: string }) => i.slug === event.slug),
+    ).toBeUndefined();
   });
 });

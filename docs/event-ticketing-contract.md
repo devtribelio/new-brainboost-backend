@@ -116,15 +116,29 @@ No parameters. (A `limit` may be added later; the default is sized for a swiper.
       "endsAt": "2026-09-20T04:00:00Z",          // may be null
       "location": "Zoom",                        // null for an event with no location
       "lowestPrice": 150000,                     // cheapest ticket type still on sale
-      "remainingQuota": 42                       // null = unlimited; see the quota note
+      "remainingQuota": 42,                      // null = nothing to show; see the quota note
+      "showRemainingQuota": true                 // false = organiser turned the count off
     }
   ]
 }
 ```
 
 `remainingQuota` is the **aggregate** across every ticket type, not per type.
-Use it for a "42 seats left" badge. If any ticket type is unlimited, the whole
-value is `null`.
+Use it for a "42 seats left" badge.
+
+**`null` means "print no number", and it has two causes.** `showRemainingQuota`
+is what tells them apart:
+
+| `remainingQuota` | `showRemainingQuota` | what it is | suggested render |
+|---|---|---|---|
+| `42` | `true` | 42 seats left | "42 kursi tersisa" |
+| `null` | `true` | at least one kind is unlimited | "Kuota tidak dibatasi", or nothing |
+| `null` | `false` | organiser turned the count off | nothing — no badge, no placeholder |
+
+Never guess between the last two, and never compute a count from anything else.
+
+Hiding the count never hides a closed door: `isSoldOut` on the detail payload
+stays truthful, and `canBuy` still flips to `false` when everything is gone.
 
 ---
 
@@ -156,6 +170,7 @@ closed, or canceled — the page must still open for someone clicking an old lin
   "location": "Zoom",                      // null → do not render the location row at all
   "locationUrl": "https://maps.app.goo.gl/…", // null; map link for an offline event
   "status": "ON_SALE",                     // DRAFT | ON_SALE | CLOSED | CANCELED
+  "showRemainingQuota": true,              // false = every remainingQuota below is null on purpose
   "canBuy": true,                          // the single gate for showing the buy button
   "ticketTypes": [
     {
@@ -167,7 +182,7 @@ closed, or canceled — the page must still open for someone clicking an old lin
         { "minQty": 2, "totalPrice": 350000, "label": "Duo" },
         { "minQty": 3, "totalPrice": 500000, "label": "Trio" }
       ],
-      "remainingQuota": 42,                // null = unlimited
+      "remainingQuota": 42,                // null = unlimited OR count hidden by the organiser
       "isSoldOut": false,
       "maxPerOrder": 10,
       "saleStartsAt": null,                // null = already open
@@ -189,6 +204,11 @@ closed, or canceled — the page must still open for someone clicking an old lin
 - `remainingQuota` is a **snapshot**. It goes stale in a tab left open. Do not
   try to keep it fresh — a checkout that refuses (§3,
   `EVENT_TICKET_SOLD_OUT`) is the final word.
+- **`remainingQuota: null` never means "buyable without limit".** It means there
+  is no number to print. Gate the quantity stepper on `maxPerOrder` and let
+  checkout be the authority on seats; `isSoldOut` / `isOnSale` remain correct on
+  a hidden-count event, so a sold-out tier still renders as sold out with no
+  number beside it.
 - **`priceTiers` is a display list, never a calculator.** Show the packages on the
   card ("Duo Rp350.000 · Trio Rp500.000") and ask §2b for any total. The backend
   always charges the cheapest combination for a quantity, which is not always the

@@ -26,6 +26,14 @@ export interface TicketTypeView {
   price: number;
   /** Bundle ladder, cheapest-first by size. Empty = no packages for this kind. */
   priceTiers: PriceTierView[];
+  /**
+   * Seats left, or null when there is no number to print — either the kind is
+   * unlimited or the event has `showRemainingQuota` off. Those two collapse on
+   * purpose: both render as "no count", so nothing new had to reach the client.
+   *
+   * A hidden count never hides a closed door: `isSoldOut` below is computed from
+   * the real seats either way.
+   */
   remainingQuota: number | null;
   isSoldOut: boolean;
   maxPerOrder: number;
@@ -38,6 +46,11 @@ export interface EventListItemView {
   slug: string;
   title: string;
   coverUrl: string | null;
+  /**
+   * Whether this event publishes its seat count at all. `false` is why
+   * `remainingQuota` below is null — as opposed to the kinds being unlimited.
+   */
+  showRemainingQuota: boolean;
   startsAt: Date;
   endsAt: Date | null;
   location: string | null;
@@ -79,6 +92,12 @@ export interface EventDetailView {
   noticeText: string | null;
   /** Clickable part of the strip; null means the strip renders as text only. */
   noticeLinkLabel: string | null;
+  /**
+   * Whether this event publishes its seat counts. `false` is the reason every
+   * `remainingQuota` below is null; it does NOT mean the tickets are unlimited,
+   * and it never loosens `isSoldOut`.
+   */
+  showRemainingQuota: boolean;
   canBuy: boolean;
   ticketTypes: TicketTypeView[];
 }
@@ -122,6 +141,7 @@ export class EventService {
         // client points the label at the event page it already has the slug for.
         noticeText: true,
         noticeLinkLabel: true,
+        showRemainingQuota: true,
         ticketTypes: {
           where: { isActive: true },
           orderBy: { sortOrder: 'asc' },
@@ -148,7 +168,9 @@ export class EventService {
 
     const items: EventListItemView[] = [];
     for (const event of live) {
-      const types = event.ticketTypes.map((t) => toTicketTypeView(t, taken, now));
+      const types = event.ticketTypes.map((t) =>
+        toTicketTypeView(t, taken, now, event.showRemainingQuota),
+      );
       const sellable = types.filter((t) => t.isOnSale);
       if (sellable.length === 0) continue;
 
@@ -156,6 +178,7 @@ export class EventService {
         slug: event.slug,
         title: event.title,
         coverUrl: event.coverUrl,
+        showRemainingQuota: event.showRemainingQuota,
         startsAt: event.startsAt,
         endsAt: event.endsAt,
         location: event.location,
@@ -164,6 +187,8 @@ export class EventService {
         lowestPrice: Math.min(...sellable.map((t) => t.price)),
         // Aggregate across every type. One unlimited type makes the whole event
         // unlimited — a partial sum would read as a seat count and be wrong.
+        // With the count hidden every type already reports null, so the same
+        // test carries the flag through without a second branch.
         remainingQuota: sellable.some((t) => t.remainingQuota === null)
           ? null
           : sellable.reduce((sum, t) => sum + (t.remainingQuota ?? 0), 0),
@@ -195,6 +220,7 @@ export class EventService {
         status: true,
         noticeText: true,
         noticeLinkLabel: true,
+        showRemainingQuota: true,
         // `noticeLinkUrl` is deliberately NOT selected: nothing renders it yet,
         // and an unused field in a public payload is one more thing a client can
         // start depending on before its meaning is settled.
@@ -221,7 +247,9 @@ export class EventService {
     if (!event || event.status === 'DRAFT') throw notFound(ERROR_CODES.NOT_FOUND);
 
     const taken = await this.seatsTaken(event.ticketTypes.map((t) => t.id));
-    const ticketTypes = event.ticketTypes.map((t) => toTicketTypeView(t, taken, now));
+    const ticketTypes = event.ticketTypes.map((t) =>
+      toTicketTypeView(t, taken, now, event.showRemainingQuota),
+    );
 
     return {
       slug: event.slug,
@@ -235,6 +263,7 @@ export class EventService {
       status: event.status,
       noticeText: event.noticeText,
       noticeLinkLabel: event.noticeLinkLabel,
+      showRemainingQuota: event.showRemainingQuota,
       // Folded into one boolean on purpose: the FE must not reassemble this
       // from `status` + dates + quota, because every client that tries gets a
       // different answer.
@@ -416,9 +445,13 @@ function toTicketTypeView(
   t: TicketTypeRow,
   taken: Map<string, number>,
   now: Date,
+  showRemainingQuota: boolean,
 ): TicketTypeView {
-  const remainingQuota = t.quota === null ? null : Math.max(0, t.quota - (taken.get(t.id) ?? 0));
-  const isSoldOut = remainingQuota === 0;
+  const left = t.quota === null ? null : Math.max(0, t.quota - (taken.get(t.id) ?? 0));
+  // Computed from the real seat count, never from what is shown: the flag must
+  // move a number off a page, not sell a seat that does not exist.
+  const isSoldOut = left === 0;
+  const remainingQuota = showRemainingQuota ? left : null;
   const windowOpen =
     (t.saleStartsAt === null || t.saleStartsAt <= now) &&
     (t.saleEndsAt === null || t.saleEndsAt > now);
