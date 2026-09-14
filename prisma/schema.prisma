@@ -459,13 +459,18 @@ model CourseEnrollment {
   progress           Float     @default(0)
   dateStart          DateTime? @map("date_start")
   dateEnd            DateTime? @map("date_end")
+  // Non-null = a time-boxed grant, and access gates honour it (`activeEnrollment()`).
+  // A paid grant is permanent and leaves this NULL. Legacy agrees: its only writers
+  // of the column are the two free-trial paths, so a resynced row with a date is a
+  // legacy trial.
   expiredDate        DateTime? @map("expired_date")
   // Free-trial marker: set when this row was granted by a `type='TRIAL'` voucher
-  // (expiredDate = grant time + voucher.trialDays). NULL = retail/legacy row, which
-  // access gates must treat as ALWAYS valid REGARDLESS of expiredDate — the legacy
-  // migration filled expired_date on lifetime purchases, so honouring it globally
-  // would cut off paying buyers. No FK by design (mirrors AffiliateAttributionClaim):
-  // deleting a voucher must not delete or lock the enrollment it granted.
+  // (expiredDate = grant time + voucher.trialDays). Its job is the once-per-member
+  // rule — `VoucherService.validate` looks for a row with this voucher, unfiltered,
+  // so the record survives expiry. It is NOT what gates access: a LEGACY trial has no
+  // marker to find (legacy vouchers are not migrated), so the gate keys on
+  // expiredDate. No FK by design (mirrors AffiliateAttributionClaim): deleting a
+  // voucher must not delete or lock the enrollment it granted.
   viaVoucherId       String?   @map("via_voucher_id") @db.Uuid
   isCanceled         Boolean   @default(false) @map("is_canceled")
   cancelationReason  String?   @map("cancelation_reason")

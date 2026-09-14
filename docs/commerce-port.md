@@ -585,17 +585,33 @@ production table to buy a guarantee the enrollment unique already provides.
   A **function**, not a const: `new Date()` inside a module-level object freezes at
   process boot and every trial looks valid (or expired) forever.
 - `OWNED_FOR_PURCHASE` — *is it already paid for?* Trial says **no**.
-  `{ isCanceled: false, viaVoucherId: null }`. **Checkout guard only** — a trial must
-  never block the sale it exists to advertise.
+  `{ isCanceled: false, viaVoucherId: null, expiredDate: null }`. **Checkout guard only**
+  — a trial must never block the sale it exists to advertise. Both trial shapes have to
+  be excluded because they do not look alike: a trial granted here carries
+  `via_voucher_id`, a resynced legacy trial carries only `expired_date`.
 
 The `not_purchased` catalog shelf uses `activeEnrollment()`, NOT `OWNED_FOR_PURCHASE`:
 a course the member can already open does not belong on a "belum dibeli" shelf, even
 though it is genuinely unpaid. It returns to the shelf the moment the trial expires —
 date-based predicate, no sweep. Buying mid-trial still works, just not from that shelf.
 
-`expired_date` is honoured **only** for trial rows. A retail/legacy row is valid by
-existence: the legacy migration filled `expired_date` on lifetime purchases and the
-pre-trial gate never read it, so honouring it globally would cut off paying buyers.
+`expired_date` is honoured **globally** — any row carrying one is a time-boxed grant,
+and a paid grant leaves it NULL. The gate keys on the date, NOT on the `via_voucher_id`
+marker, because a **legacy** free trial has no marker to key on: legacy vouchers are
+never migrated (no `migrate-voucher` script exists, nothing fills `Voucher.legacyId`),
+so a resynced legacy trial lands `via_voucher_id = NULL` and a marker-keyed gate read it
+as permanent access.
+
+> **Correction (2026-09-14).** This section previously said the opposite — that
+> `expired_date` must be ignored on retail/legacy rows because "the legacy migration
+> filled it on lifetime purchases". That premise was wrong. Measured on legacy
+> (brainboost scope): 70 936 enrollments, **114** with a non-null `expired_date`, and
+> **all 114** join to a `voucher_redeem` row with `free_trial_activated = 1`. It matches
+> the legacy code: `TBCourse_Member::joined()` and the `TBModel_VoucherRedeem`
+> created-hook are the only two writers of the column, both on the trial path, and
+> legacy enforced expiry by *removing the row* (every-minute cron
+> `TBTaskQueue_Payment_Product_CourseEnrollmentExpiredFreeTrial`), never by reading the
+> date back. `via_voucher_id` keeps its other job: the once-per-member record.
 
 ### Flow
 
