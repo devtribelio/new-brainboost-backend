@@ -296,7 +296,9 @@ export class BbEcsStack extends cdk.Stack {
     //  - Cron (hourly): affiliate PENDING->BALANCE + expire stale payments +
     //    topic digest (aman tiap jam: no-op kecuali jam WIB == notification.digestHour)
     //    + streak reminder (dua jam sendiri: streak.atRiskHour / streak.dimmedHour,
-    //    plus saklar streak.atRiskEnabled / streak.dimmedEnabled yang ship false).
+    //    plus saklar streak.atRiskEnabled / streak.dimmedEnabled yang ship false)
+    //    + voucher pembeli pertama (no-op kecuali firstPurchaseVoucher.enabled true
+    //    DAN launchAt terisi; keduanya ship kosong/false).
     //  - CronDisburse (tiap 5 mnt): sweep payout yang sudah di-approve backoffice ke
     //    Xendit, biar approval MANUAL nggak nunggu sampai jam berikutnya. Idempotent —
     //    cuma ambil row PENDING dengan approvedAt terisi, overlap antar lane aman.
@@ -323,6 +325,7 @@ export class BbEcsStack extends cdk.Stack {
           'expirePendingPayments',
           'topicDigest',
           'streakReminder',
+          'firstPurchaseVoucher',
         ]),
       },
     });

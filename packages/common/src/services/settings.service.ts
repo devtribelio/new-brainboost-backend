@@ -47,6 +47,25 @@ export const SETTING_KEYS = {
   // above the FX API, which is the ops kill-switch when the provider misbehaves.
   fxUsdIdr: 'fx.usdIdr',
   fxUsdIdrPinned: 'fx.usdIdrPinned',
+  // First-purchase voucher program. Five of the six config values ship EMPTY and the
+  // switch ships false: the discount, its cap and how long it lives are a business
+  // decision the internal team makes in the backoffice, and a dev-chosen default is
+  // how a placeholder quietly becomes the number that went out to thousands of
+  // buyers. The job refuses to issue anything until they are all filled.
+  //
+  // `launchAt` is also the blast radius control: only purchases at or after it count,
+  // it is stamped by the backoffice when the program is first switched on, and it can
+  // never be moved backwards — a past date would mail every historical buyer at once.
+  firstPurchaseVoucherEnabled: 'firstPurchaseVoucher.enabled',
+  firstPurchaseVoucherLaunchAt: 'firstPurchaseVoucher.launchAt',
+  firstPurchaseVoucherType: 'firstPurchaseVoucher.type',
+  firstPurchaseVoucherValue: 'firstPurchaseVoucher.value',
+  firstPurchaseVoucherMaxAmount: 'firstPurchaseVoucher.maxAmount',
+  firstPurchaseVoucherValidityDays: 'firstPurchaseVoucher.validityDays',
+  // Sweep watermark, written by the job itself — not an operator setting. Kept in
+  // `app_settings` rather than `sync_state` because that table belongs to
+  // apps/resync-worker, which is deleted at cutover.
+  firstPurchaseVoucherLastSweepAt: 'firstPurchaseVoucher.lastSweepAt',
   kycMinBalance: 'kyc.minBalance',
   notificationUnopenedPushLimit: 'notification.unopenedPushLimit',
   notificationDigestEnabled: 'notification.digestEnabled',

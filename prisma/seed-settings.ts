@@ -152,6 +152,51 @@ const SETTINGS: Array<{ key: string; value: string; description: string }> = [
     description:
       'Comma-separated email address(es) that receive a SaleAlert email on every successful (non-subscription) sale. Empty = off.',
   },
+  // --- voucher pembeli pertama -------------------------------------------------
+  // Lima nilai program sengaja DIKOSONGKAN. Angkanya keputusan tim internal lewat
+  // backoffice, dan default pilihan dev adalah cara sebuah placeholder diam-diam jadi
+  // angka yang benar-benar terkirim. Job menolak menerbitkan apa pun sampai semuanya
+  // terisi, jadi seed kosong = program mati dengan aman, bukan program setengah jadi.
+  {
+    key: 'firstPurchaseVoucher.enabled',
+    value: 'false',
+    description:
+      'Saklar program voucher pembeli pertama. false = job tidak menerbitkan apa pun. Dinyalakan tim internal dari backoffice setelah tipe/nilai/cap/masa berlaku terisi.',
+  },
+  {
+    key: 'firstPurchaseVoucher.launchAt',
+    value: '',
+    description:
+      'ISO datetime. Hanya pembelian kursus berbayar pada atau setelah waktu ini yang dihitung; member yang sudah pernah beli sebelumnya TIDAK pernah dapat. Kosong = job tidak jalan. Diisi otomatis saat program pertama kali dinyalakan dan tidak boleh dimundurkan — tanggal di masa lalu berarti email massal ke ribuan pembeli lama.',
+  },
+  {
+    key: 'firstPurchaseVoucher.type',
+    value: '',
+    description: "PERCENT | AMOUNT. Kosong = program dianggap belum dikonfigurasi.",
+  },
+  {
+    key: 'firstPurchaseVoucher.value',
+    value: '',
+    description:
+      'Persen (kalau type=PERCENT) atau rupiah (kalau type=AMOUNT). Disalin ke baris voucher saat terbit, jadi mengubahnya tidak mengubah voucher yang sudah dikirim.',
+  },
+  {
+    key: 'firstPurchaseVoucher.maxAmount',
+    value: '',
+    description:
+      'Batas rupiah untuk voucher PERCENT. Kosong = tanpa batas. Satu-satunya nilai program yang boleh kosong.',
+  },
+  {
+    key: 'firstPurchaseVoucher.validityDays',
+    value: '',
+    description: 'Berapa hari voucher berlaku sejak diterbitkan (ends_at = terbit + N hari).',
+  },
+  {
+    key: 'firstPurchaseVoucher.lastSweepAt',
+    value: '',
+    description:
+      'Watermark sweep, DITULIS OLEH JOB — bukan setelan operator. Jangan diedit manual: memundurkannya menyuruh job memindai ulang (aman, unique guard), memajukannya melewatkan pembeli secara permanen.',
+  },
 ];
 
 async function main() {

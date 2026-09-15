@@ -158,6 +158,7 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   EVENT_ATTENDEE_INVALID: 'Data peserta tidak lengkap atau tidak valid',
   VOUCHER_EXHAUSTED: 'Kuota voucher sudah habis',
   VOUCHER_TRIAL_ALREADY_USED: 'Voucher uji coba ini sudah pernah kamu pakai',
+  VOUCHER_COURSE_ONLY: 'Voucher ini hanya berlaku untuk pembelian kursus',
 
   // --- media -----------------------------------------------------------------
   MEDIA_TOKEN_MISSING: 'Media tidak dapat diakses, muat ulang halaman',
