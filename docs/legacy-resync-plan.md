@@ -368,6 +368,41 @@ excluded outright so a social-only account can never acquire an algo that authen
   identical to migration (payment SUCCESS or free). Re-point `member_id` through
   `member_redirect`. Skip if course not in the migrated 58 or member out of scope.
 - No new-system conflict (new purchases create their own enrollments with `legacyId=null`).
+- **Legacy removal propagates as a cancel (added 2026-09-14).** `course_enrollment` has
+  **no `deleted` column**, so the Cresenity soft-delete marks removal with `status = 0`
+  (and bumps `updated`, which is what rides the row into the scan). Two things reach it:
+  the free-trial expiry cron
+  (`TBTaskQueue_Payment_Product_CourseEnrollmentExpiredFreeTrial`, every minute, LIMIT 10)
+  and a manual removal. The syncer now sets `isCanceled = true` +
+  `cancelationReason = 'legacy_removed'` instead of importing the row as a live
+  enrollment — a cancel, never a row delete, so `progress` survives exactly as it does
+  for a refund.
+  - Handled **before** the payment/access check: a removal is true regardless of what the
+    payment row says now.
+  - Uses `resolveMember`, not `ensureMember` — a removal is no reason to materialise a
+    member who has no row here yet.
+  - Only cancels the row that *this* legacy row created (`existing.legacyId === legacyId`).
+    A pair now held by a different legacyId (member re-enrolled) or by a new-system
+    purchase (`legacyId = null`) is not the syncer's to revoke.
+  - Guarded on `isCanceled: false`, so a re-scan is a no-op rather than re-stamping
+    `canceled_at`. Counted in `stats.voided`.
+  - Measured at the time of the change: 3 508 legacy rows with `status = 0`, of which
+    **3 507 passed the access filter** and were being imported as live enrollments.
+    Dry-run of the fix over a full rescan: `voided=3240` (the rest resolve to no
+    matching row). 114 of them were expired free trials.
+- **Repair for rows already imported:** the soft-delete bumped `updated` in the *past*,
+  so those rows sit below the stored watermark and will never be rescanned. Force one
+  full pass — no new script needed:
+  ```
+  pnpm resync enrollments --dry-run --since=1970-01-01T00:00:00Z   # count first
+  pnpm resync enrollments --since=1970-01-01T00:00:00Z
+  ```
+- **`is_canceled` is deliberately NOT mapped.** The legacy column exists but is never
+  written: 0 rows carry `is_canceled = 1`. `status` is the real cancel marker.
+- `expired_date` is copied as-is and now *means something* on this side: access gates
+  honour it (`activeEnrollment()`), so a legacy free trial expires here too. See
+  `docs/commerce-port.md` §8b — the enrollment-migration script (`migrate-members.ts`)
+  carries the same `status = 1` filter.
 
 ### commissions — incremental
 - Insert/update legacy `affiliator_commision` rows as `status='MIGRATED'`, key `legacyId`,

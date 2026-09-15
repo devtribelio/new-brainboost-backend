@@ -136,17 +136,37 @@ describe('free-trial voucher', () => {
     expect(catalog.rows.map((r) => r.id)).toContain(productId);
   });
 
-  it('expired_date is ignored on a retail row (legacy lifetime purchases must not expire)', async () => {
+  it('an UNMARKED expired row also dies — that is the resynced legacy trial', async () => {
+    // Legacy vouchers are not migrated, so a legacy free trial arrives with its
+    // expired_date and NO via_voucher_id. Gating on the marker instead of the date
+    // read those rows as permanent access; gating on the date is what fixes it.
     await prisma.courseEnrollment.updateMany({
       where: { memberId, courseId },
       data: { viaVoucherId: null }, // expired_date stays in the past
     });
-    expect(await hasActiveEnrollment(memberId, courseId)).toBe(true);
+    expect(await hasActiveEnrollment(memberId, courseId)).toBe(false);
+
+    // ...and it does not count as owned either, so the member can buy the course.
+    const catalog = await productService.list(PAGE, { memberId, ownership: 'not_purchased' });
+    expect(catalog.rows.map((r) => r.id)).toContain(productId);
 
     // restore the trial state for the conversion test below
     await prisma.courseEnrollment.updateMany({
       where: { memberId, courseId },
       data: { viaVoucherId: trialVoucherId, progress: 42 },
+    });
+  });
+
+  it('a retail row with no expiry is never touched by the date gate', async () => {
+    await prisma.courseEnrollment.updateMany({
+      where: { memberId, courseId },
+      data: { viaVoucherId: null, expiredDate: null },
+    });
+    expect(await hasActiveEnrollment(memberId, courseId)).toBe(true);
+
+    await prisma.courseEnrollment.updateMany({
+      where: { memberId, courseId },
+      data: { viaVoucherId: trialVoucherId, expiredDate: new Date(Date.now() - 1000), progress: 42 },
     });
   });
 

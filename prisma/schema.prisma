@@ -459,13 +459,18 @@ model CourseEnrollment {
   progress           Float     @default(0)
   dateStart          DateTime? @map("date_start")
   dateEnd            DateTime? @map("date_end")
+  // Non-null = a time-boxed grant, and access gates honour it (`activeEnrollment()`).
+  // A paid grant is permanent and leaves this NULL. Legacy agrees: its only writers
+  // of the column are the two free-trial paths, so a resynced row with a date is a
+  // legacy trial.
   expiredDate        DateTime? @map("expired_date")
   // Free-trial marker: set when this row was granted by a `type='TRIAL'` voucher
-  // (expiredDate = grant time + voucher.trialDays). NULL = retail/legacy row, which
-  // access gates must treat as ALWAYS valid REGARDLESS of expiredDate — the legacy
-  // migration filled expired_date on lifetime purchases, so honouring it globally
-  // would cut off paying buyers. No FK by design (mirrors AffiliateAttributionClaim):
-  // deleting a voucher must not delete or lock the enrollment it granted.
+  // (expiredDate = grant time + voucher.trialDays). Its job is the once-per-member
+  // rule — `VoucherService.validate` looks for a row with this voucher, unfiltered,
+  // so the record survives expiry. It is NOT what gates access: a LEGACY trial has no
+  // marker to find (legacy vouchers are not migrated), so the gate keys on
+  // expiredDate. No FK by design (mirrors AffiliateAttributionClaim): deleting a
+  // voucher must not delete or lock the enrollment it granted.
   viaVoucherId       String?   @map("via_voucher_id") @db.Uuid
   isCanceled         Boolean   @default(false) @map("is_canceled")
   cancelationReason  String?   @map("cancelation_reason")
@@ -1591,43 +1596,55 @@ model TrackingLinkClick {
 /// otherwise reached by slug, because there is not always one running.
 /// See docs/event-ticketing.md.
 model Event {
-  id              String    @id @default(uuid(7)) @db.Uuid
+  id                 String    @id @default(uuid(7)) @db.Uuid
   /// Public URL segment: `shop.brainboost.id/event/<slug>`.
-  slug            String    @unique
-  title           String
+  slug               String    @unique
+  title              String
   /// HTML from the backoffice editor.
-  description     String?
-  coverUrl        String?   @map("cover_url")
+  description        String?
+  coverUrl           String?   @map("cover_url")
   /// Stored UTC, rendered WIB everywhere (same rule as every other date here).
-  startsAt        DateTime  @map("starts_at")
-  endsAt          DateTime? @map("ends_at")
+  startsAt           DateTime  @map("starts_at")
+  endsAt             DateTime? @map("ends_at")
   /// Optional: an online event has no address (P1).
-  location        String?
+  location           String?
   /// Maps link for an offline event. A Zoom link is NOT put here — it is sent to
   /// ticket holders, not published on a page anyone can open.
-  locationUrl     String?   @map("location_url")
+  locationUrl        String?   @map("location_url")
   /// DRAFT | ON_SALE | CLOSED | CANCELED. Free-form string, not a DB enum: the
   /// set is likely to grow (postponed, sold out as a state) and every other
   /// lifecycle column in this schema that grew regretted the enum.
-  status          String    @default("DRAFT")
+  status             String    @default("DRAFT")
   /// Announcement strip shown alongside the event ("Bisa reservasi tiket dulu…").
   /// Three plain-text columns rather than one HTML blob on purpose: the operator
   /// would otherwise author the `<a href>` themselves, which puts a `javascript:`
   /// URL one paste away from a public page. Nothing here is markup, so nothing
   /// here can become markup.
-  noticeText      String?   @map("notice_text")
+  noticeText         String?   @map("notice_text")
   /// Clickable part of the strip. The link renders only when a label exists —
   /// a URL with no label has nothing to press.
-  noticeLinkLabel String?   @map("notice_link_label")
+  noticeLinkLabel    String?   @map("notice_link_label")
   /// Where the label points. NULL means the event's own page: resolved at read
   /// time, never stored, because the slug is still editable while no ticket has
   /// sold and a stored absolute URL would rot into a 404 without a sound.
-  noticeLinkUrl   String?   @map("notice_link_url")
+  noticeLinkUrl      String?   @map("notice_link_url")
+  /// Whether the public page may print how many seats are LEFT. Scarcity sells,
+  /// but "tersisa 3" on a quiet event advertises that nobody came — so ops needs
+  /// to turn the number off per event without giving up the quota itself.
+  ///
+  /// Display only: the quota still limits the sale, `isSoldOut` still tells the
+  /// truth, and checkout still refuses seat 101. Hiding the count must never
+  /// become overselling — a buyer who is told nothing and one who is told "habis"
+  /// are both correct; a buyer sold a seat that does not exist is not.
+  ///
+  /// Event-level rather than per ticket kind: the number a visitor reads is the
+  /// event's, and a mix of shown and hidden kinds on one page reads as a bug.
+  showRemainingQuota Boolean   @default(true) @map("show_remaining_quota")
   /// `bo_users.id` — a backoffice-owned table, so no FK can point at it from
   /// here (same as `tracking_links.created_by`).
-  createdBy       String?   @map("created_by") @db.Uuid
-  createdAt       DateTime  @default(now()) @map("created_at")
-  updatedAt       DateTime  @updatedAt @map("updated_at")
+  createdBy          String?   @map("created_by") @db.Uuid
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
 
   ticketTypes EventTicketType[]
 

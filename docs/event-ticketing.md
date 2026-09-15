@@ -961,3 +961,71 @@ jadi benar sampai skema itu dibangun.
 
 **Masih terbuka:** baris komisi yang terlanjur tertulis dibiarkan. Mem-VOID-nya
 keputusan data, dan prod harus dihitung dulu dengan query yang sama.
+
+---
+
+## 18. Sisa kuota bisa disembunyikan (14 Sep 2026)
+
+`events.show_remaining_quota` (BOOLEAN NOT NULL DEFAULT true, migrasi
+`20260914120000_event_show_remaining_quota`). Satu kolom, satu centang di form
+event backoffice: **"Tampilkan sisa kuota di halaman publik"**.
+
+### 18.1 Kenapa ada
+
+Angka sisa kursi itu pisau bermata dua. Di event ramai, "tersisa 3" mendorong
+orang menekan tombol. Di event sepi, "tersisa 47" mengumumkan bahwa belum ada
+yang datang — dan itu tampil justru di event yang paling butuh pembeli. Ops
+butuh angkanya bisa dimatikan **tanpa** melepas kuotanya, karena kuota itulah
+yang menahan penjualan di kursi terakhir.
+
+### 18.2 Yang dijamin tidak ikut mati
+
+Ini flag **tampilan**, bukan batas. Yang tetap jalan persis seperti sebelumnya:
+
+- kuota tetap membatasi penjualan (`event_ticket_types.quota` tidak disentuh);
+- `isSoldOut` dan `isOnSale` tetap dihitung dari **kursi sebenarnya**, bukan dari
+  yang ditampilkan — di `toTicketTypeView` angkanya dihitung dulu, baru
+  disembunyikan;
+- `canBuy` tetap `false` saat semua tiket habis;
+- checkout tetap menolak kursi ke-101 (penjaganya `SELECT … FOR UPDATE` di
+  `EventCheckoutService`, yang tidak pernah membaca flag ini sama sekali).
+
+Argumennya satu kalimat: menyembunyikan angka boleh, menjual kursi yang tidak
+ada tidak. Pembeli yang tidak diberi tahu apa-apa dan pembeli yang diberi tahu
+"habis" sama-sama benar; pembeli yang dijual kursi hantu tidak.
+
+### 18.3 Bentuk di API
+
+Dua hal, dan keduanya perlu:
+
+1. **`remainingQuota` jadi `null`** saat flag mati — nilai yang **sudah** berarti
+   "tidak ada angka untuk ditulis", karena itu yang dipakai tipe tiket tanpa
+   kuota. Klien lama merender keduanya sama (tidak ada badge), jadi bentuk
+   payload yang mereka baca tidak berubah: **tidak perlu rilis klien**.
+2. **`showRemainingQuota` ikut di payload** — di detail event dan di kartu
+   shop-home. Aditif, jadi klien lama mengabaikannya.
+
+Rancangan awal hanya poin 1, dengan alasan field itu memberi tahu pengunjung
+bahwa ada angka yang sengaja disembunyikan darinya. Itu kalah oleh alasan yang
+lebih praktis: tanpa flag, `null` punya **dua sebab yang tidak bisa dibedakan**
+— kuota tak terbatas dan hitungan dimatikan — padahal keduanya wajar dirender
+beda ("Kuota tidak dibatasi" vs tidak menulis apa-apa sama sekali). FE tidak
+punya jalan lain untuk tahu, dan menebaknya akan salah separuh waktu.
+
+Yang **tidak** ikut berubah: `showRemainingQuota: false` bukan izin untuk
+menjual bebas. `isSoldOut` tetap jujur, dan stepper tetap dipagari
+`maxPerOrder` plus jawaban checkout.
+
+### 18.4 Kenapa per event, bukan per jenis tiket
+
+Angka yang dibaca pengunjung itu milik event. Satu halaman dengan "Online:
+tersisa 12" di sebelah "Offline: —" terbaca sebagai bug, bukan sebagai
+kebijakan.
+
+### 18.5 Default
+
+`true` — perilaku hari ini untuk setiap baris yang sudah ada, dan untuk setiap
+event baru. Mematikannya adalah tindakan sadar operator. Di dua route API
+backoffice nilainya dibaca `body.showRemainingQuota !== false`, jadi klien lama
+yang tidak mengirim field ini tetap menampilkan angka (cek truthy akan membaca
+`false` sebagai "tidak dikirim").
