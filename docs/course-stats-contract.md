@@ -106,6 +106,23 @@ non-breaking, and free (the value is already loaded to compute `daysListened`).
 
 ---
 
+## The path param accepts either id
+
+`{courseId}` resolves from **both** id spaces: a `courses.id` (what `product.dto.ts`
+documents and hands you) **and** a `products.id`. Passing either returns the same
+numbers.
+
+This is deliberate insurance, not a licence to send whichever. `product.courseId` is
+still the right field — but the tracking payload has been sending `product.id` in a
+field named `courseId` since launch (§8b), and this endpoint used to answer **zeros**
+for a member with real listening whenever it got that id, while `/stats/home`
+reported the true number off the very same rows. Now the two cannot disagree.
+
+`courseId` in the response echoes the param **as you sent it**, not the resolved
+course id.
+
+---
+
 ## Unchanged
 
 - **`weeklyStreak`** — still exactly 7 entries, Monday→Sunday of the current WIB

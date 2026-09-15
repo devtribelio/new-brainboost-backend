@@ -43,6 +43,10 @@ describe('per-course stats survive the products.id / courses.id mismatch (real P
   /** A second program the client tracks with the CORRECT id, as a fixed client would. */
   let fixedProductId = '';
   let fixedCourseId = '';
+  /** A third program whose session row is a LEGACY one: written straight to the table
+   *  with a `products.id`, the way every row looked before `resolveCourseId` landed. */
+  let legacyProductId = '';
+  let legacyCourseId = '';
 
   const today = toListeningDayWIB(new Date());
 
@@ -56,6 +60,8 @@ describe('per-course stats survive the products.id / courses.id mismatch (real P
     courseId = (await prisma.course.create({ data: { productId, programDays: 30 } })).id;
     fixedProductId = (await prisma.product.create({ data: { type: 'course', title: 'Mismatch B', code: `MB-${uid()}` } })).id;
     fixedCourseId = (await prisma.course.create({ data: { productId: fixedProductId, programDays: 30 } })).id;
+    legacyProductId = (await prisma.product.create({ data: { type: 'course', title: 'Mismatch C', code: `MC-${uid()}` } })).id;
+    legacyCourseId = (await prisma.course.create({ data: { productId: legacyProductId, programDays: 30 } })).id;
 
     await prisma.courseEnrollment.createMany({
       data: [
@@ -80,14 +86,32 @@ describe('per-course stats survive the products.id / courses.id mismatch (real P
       { clientSessionId: crypto.randomUUID(), audioId: crypto.randomUUID(), courseId: fixedCourseId, startedAt: noonWibOf(today).toISOString(), listenedSec: 700, completed: true },
       'ios',
     );
+
+    // A LEGACY row, written straight to the table. It has to bypass
+    // `TrackingService.record`, which now normalises a product id to a course id —
+    // so every row a spec writes through it is already in the corrected id space,
+    // and no test that goes through it can prove the read still handles the old one.
+    // Prod still holds 171k rows of exactly this shape.
+    await prisma.listeningSession.create({
+      data: {
+        memberId,
+        clientSessionId: crypto.randomUUID(),
+        audioId: crypto.randomUUID(),
+        courseId: legacyProductId,
+        startedAt: noonWibOf(today),
+        listenedSec: 700,
+        completed: true,
+        localDay: today,
+      },
+    });
   });
 
   afterAll(async () => {
     await prisma.listeningSession.deleteMany({ where: { memberId } });
     await prisma.courseEnrollment.deleteMany({ where: { memberId } });
     await prisma.member.delete({ where: { id: memberId } });
-    await prisma.course.deleteMany({ where: { id: { in: [courseId, fixedCourseId] } } });
-    await prisma.product.deleteMany({ where: { id: { in: [productId, fixedProductId] } } });
+    await prisma.course.deleteMany({ where: { id: { in: [courseId, fixedCourseId, legacyCourseId] } } });
+    await prisma.product.deleteMany({ where: { id: { in: [productId, fixedProductId, legacyProductId] } } });
   });
 
   it('counts a challenge tracked with the product id', async () => {
@@ -132,6 +156,31 @@ describe('per-course stats survive the products.id / courses.id mismatch (real P
     const res = await stats.courseStats(memberId, fixedCourseId);
     expect(res.daysListened).toBe(1);
     expect(res.totalListenSec).toBe(700);
+  });
+
+  // The path param comes from the same payload the client reads the tracking id out
+  // of, and it demonstrably picks the wrong one of the two. Resolving only
+  // `courses.id` answered zeros here for a member with real listening, while
+  // `/stats/home` reported the true number off the very same rows.
+  it('serves courseStats when the PRODUCT id is passed as the path param', async () => {
+    const byCourse = await stats.courseStats(memberId, courseId);
+    const byProduct = await stats.courseStats(memberId, productId);
+    expect(byProduct.daysListened).toBe(byCourse.daysListened);
+    expect(byProduct.totalListenSec).toBe(byCourse.totalListenSec);
+    expect(byProduct.daysListened).toBe(2);
+    // The echo is the param as given — the client asked about this id.
+    expect(byProduct.courseId).toBe(productId);
+  });
+
+  // The union is what keeps the 171k pre-normalisation rows readable; it is not dead
+  // code left over from the fix.
+  it('still counts a LEGACY row stored under the product id, read by either id', async () => {
+    const byCourse = await stats.courseStats(memberId, legacyCourseId);
+    const byProduct = await stats.courseStats(memberId, legacyProductId);
+    expect(byCourse.totalListenSec).toBe(700);
+    expect(byCourse.daysListened).toBe(1);
+    expect(byProduct.totalListenSec).toBe(700);
+    expect(byProduct.daysListened).toBe(1);
   });
 
   it('keeps the global streak independent of any of this', async () => {

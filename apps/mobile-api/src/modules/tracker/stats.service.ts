@@ -335,20 +335,31 @@ export class StatsService {
    * Per-course listening stats for the course detail screen (spec §2 / BB-114).
    * Pure audio for THIS course only — the §1 video-OR union does NOT apply here.
    * A never-listened course yields zeros / null (not a 404): the caller just has
-   * no rows, so streak=0, totalListenSec=0, lastListenedAt=null.
+   * no rows, so daysListened=0, totalListenSec=0, lastListenedAt=null.
    */
   async courseStats(memberId: string, courseId: string): Promise<CourseStatsDto> {
     const todayWIB = toListeningDayWIB(new Date());
 
-    // The route takes a `courses.id` — that is what the product payload hands the
-    // client (`product.dto.ts`) — but the session rows hold a `products.id`. Match
-    // on both, for the same reason `home()` does. One lookup, and only on the course
-    // detail screen rather than on every app open.
-    const course = await prisma.course.findUnique({
-      where: { id: courseId },
-      select: { productId: true },
+    // `listening_session.course_id` holds BOTH id spaces and always will: rows
+    // written before `resolveCourseId` landed carry a `products.id`, newer ones a
+    // real `courses.id` (docs/tracker-streak.md §8b). So the path param is resolved
+    // from EITHER space, exactly as `home()` and the write path do — the client is
+    // the party that confuses the two, and it is the one calling this route.
+    // Resolving only `courses.id` answered zeros for a member with real listening
+    // whenever the client passed the product id, while `/stats/home` reported the
+    // true number off the same rows.
+    //
+    // A matching `id` wins over a matching `product_id` (same rule, same reason as
+    // `TrackingService.resolveCourseId`): the two are separate uuid spaces, so a
+    // `findFirst` over the OR would be order-dependent if one value ever sat in
+    // both. One indexed round-trip (PK + unique), only on the course detail screen.
+    const matches = await prisma.course.findMany({
+      where: { OR: [{ id: courseId }, { productId: courseId }] },
+      select: { id: true, productId: true },
+      take: 2,
     });
-    const courseIds = course ? [courseId, course.productId] : [courseId];
+    const course = matches.find((c) => c.id === courseId) ?? matches[0];
+    const courseIds = course ? [course.id, course.productId] : [courseId];
 
     const [dayGroups, totalAgg, last] = await Promise.all([
       prisma.listeningSession.groupBy({

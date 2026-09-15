@@ -41,7 +41,7 @@ export class StatsController {
     return ok(res, await this.statsService.streakCalendar(req.user.id, month));
   };
 
-  @ApiOperation({ summary: 'Per-course stats: streak, weekly strip, total listened, last listened (this course only)' })
+  @ApiOperation({ summary: 'Per-course stats: days listened, weekly strip, total listened, last listened (this course only)' })
   @ApiResponse({ status: 200, type: () => CourseStatsDto })
   courseStats = async (req: AuthenticatedRequest, res: Response) => {
     if (!req.user) throw new UnauthorizedException();
