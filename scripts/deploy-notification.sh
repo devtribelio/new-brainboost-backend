@@ -19,7 +19,9 @@ CERT="arn:aws:acm:${AWS_REGION}:${ACCOUNT}:certificate/b2e2ef7f-bfb2-453c-a686-f
 BACKEND="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # Repo notification = sibling dari backend repo. Override dgn: NOTIF_REPO=/path ./deploy-notification.sh
 NOTIF_REPO="${NOTIF_REPO:-$BACKEND/../bb-notification-service}"
-RESYNC_TAG=a532c61   # image resync-worker yg sudah di-build (interval 600 + kode merge)
+# RESYNC_TAG dibaca dari service yang LIVE (lihat bawah), sama seperti deploy-prod.sh.
+# Dulu di-hardcode a532c61 (28 Jul); pada 14 Sep 2026 itu menurunkan resync dari 94e73ce
+# ke image yang belum punya fix password_algo. Jangan pernah di-hardcode lagi.
 
 DIFF_ONLY=false
 [[ "${1:-}" == "--diff" ]] && DIFF_ONLY=true
@@ -50,10 +52,14 @@ COMMS_TAG=$(git -C "$NOTIF_REPO" rev-parse --short HEAD)
 # ---- mobile-api: JANGAN diubah — pakai tag yang sedang live ----
 IMAGE_TAG=$(live_tag_of mobileapi) || die "Tidak bisa baca tag mobile-api live."
 
+# ---- resync-worker: JANGAN diubah — pakai tag yang sedang live ----
+RESYNC_TAG=$(live_tag_of ResyncSvc) || die "Tidak bisa baca tag resync-worker live — batal (jangan tebak, tag lama bisa menurunkan versi)."
+[[ -n "$RESYNC_TAG" ]] || die "Tag resync-worker live kosong — batal."
+
 say "Rencana deploy"
 echo "  mobile-api  : $IMAGE_TAG   (TIDAK diubah — tidak di-rebuild)"
 echo "  bb-comms    : $COMMS_TAG   (notification, di-build sekarang)"
-echo "  resync      : $RESYNC_TAG  (interval 600 + kode merge — ikut karena ada di main)"
+echo "  resync      : $RESYNC_TAG  (TETAP — dibaca dari service live, tidak ikut naik)"
 
 # ---- build + push bb-comms (arm64/Graviton) ----
 say "Login ECR"
