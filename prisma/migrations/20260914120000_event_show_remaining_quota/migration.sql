@@ -1,0 +1,12 @@
+-- Let ops hide the remaining-seat count on the public event page.
+--
+-- Scarcity sells, but the same number that reads as "hurry" on a busy event
+-- reads as "nobody is coming" on a quiet one. Ops needs the number off without
+-- giving up the quota, so this is a DISPLAY flag, not a limit: the quota still
+-- caps the sale, sold-out is still reported, and checkout still refuses the
+-- seat that does not exist.
+--
+-- NOT NULL DEFAULT true = today's behaviour for every existing row. In
+-- PostgreSQL 11+ a NOT NULL column with a constant default is metadata-only,
+-- so there is no table rewrite even once this table is large.
+ALTER TABLE "events" ADD COLUMN "show_remaining_quota" BOOLEAN NOT NULL DEFAULT true;

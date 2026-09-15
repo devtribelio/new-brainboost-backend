@@ -5,6 +5,7 @@ import { notFound, ERROR_CODES } from '@bb/common/exceptions';
 import { activeEnrollment } from '@bb/domain/commerce/enrollment';
 import type { PaginationParams } from '@bb/common/utils/pagination.util';
 import { EntitlementService } from '@bb/domain/subscription/entitlement.service';
+import { LISTABLE_PRODUCT_TYPES } from './dto/list-query.dto';
 import type { Ownership, ProductMedia, ProductSort } from './dto/list-query.dto';
 
 interface ListQuery {
@@ -54,10 +55,14 @@ export class ProductService {
 
     const where: Prisma.ProductWhereInput = { isActive: true };
     if (q.keyword) where.title = { contains: q.keyword, mode: 'insensitive' };
-    // Subscription plan products never show in the catalog by default — the
-    // paywall reads GET /subscription/plans. Explicit ?type=subscription still works.
-    if (q.type) where.type = q.type;
-    else where.type = { not: 'subscription' };
+    // The catalog is course-only. `products` also holds rows that are not catalog
+    // items — an event ticket is one product per ticket kind (so a single webinar
+    // would put three entries in the mobile catalog), and a subscription plan is a
+    // product too (the paywall reads GET /subscription/plans instead). Each would
+    // open a course detail page with no course behind it.
+    // An allowlist rather than an exclusion keeps the rule additive: a future
+    // non-catalog type is hidden by default. An explicit `?type=` still works.
+    where.type = q.type ?? { in: [...LISTABLE_PRODUCT_TYPES] };
     if (q.ownership === 'not_purchased' && q.memberId) {
       // `activeEnrollment()` in the `none` filter is what makes a refunded course
       // reappear in the catalog — otherwise the cancelled row keeps hiding it and
@@ -120,25 +125,30 @@ export class ProductService {
   private async listRaw(p: PaginationParams, q: ListQuery) {
     const conds: Prisma.Sql[] = [Prisma.sql`p.is_active = true`];
     if (q.keyword) conds.push(Prisma.sql`p.title ILIKE ${`%${q.keyword}%`}`);
-    if (q.type) conds.push(Prisma.sql`p.type = ${q.type}`);
-    else conds.push(Prisma.sql`p.type <> 'subscription'`); // paywall products stay out of the catalog
+    // Same catalog restriction as the typed path — both are reachable from the
+    // same endpoint (this one serves `sort=top_rated` and the `media` filters),
+    // so a rule applied to only one of them shows different products depending
+    // on how the list happens to be sorted.
+    conds.push(
+      q.type
+        ? Prisma.sql`p.type = ${q.type}`
+        : Prisma.sql`p.type IN (${Prisma.join([...LISTABLE_PRODUCT_TYPES])})`,
+    );
     if (q.ownership === 'not_purchased' && q.memberId) {
       if (await this.entitlement.hasActiveSubscription(q.memberId)) {
         // Subscribers own every course-backed product → only course-less ones remain.
         conds.push(Prisma.sql`NOT EXISTS (SELECT 1 FROM courses c WHERE c.product_id = p.id)`);
       } else {
         // Only VALID enrollments count (raw-SQL mirror of `activeEnrollment()`):
-        // not refunded, retail rows (both grant markers NULL) by existence, granted
-        // rows — trial or subscription lazy — only while expired_date is future.
+        // not refunded, and a time-boxed grant only while `expired_date` is future.
+        // Keyed on the date alone, exactly as the Prisma predicate is — a resynced
+        // legacy trial carries no grant marker to key on.
         conds.push(Prisma.sql`NOT EXISTS (
           SELECT 1 FROM courses c
           JOIN course_enrollment ce ON ce.course_id = c.id
           WHERE c.product_id = p.id AND ce.member_id = ${q.memberId}::uuid
             AND ce.is_canceled = false
-            AND (
-              (ce.via_subscription_id IS NULL AND ce.via_voucher_id IS NULL)
-              OR ce.expired_date > now()
-            )
+            AND (ce.expired_date IS NULL OR ce.expired_date > now())
         )`);
       }
     }

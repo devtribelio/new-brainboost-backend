@@ -10,16 +10,21 @@ export type ActiveSubscription = MemberSubscription & { plan: SubscriptionPlan }
  * Entitled ⇔ the member HOLDS A SEAT (owner sits on seat 1) on a sub with
  * status=ACTIVE and coalesce(graceUntil, expiresAt) > now.
  *
- * Enrollment validity predicate — the sacred rule:
- * - BOTH grant markers NULL (retail/legacy) → ALWAYS valid. expired_date is
- *   deliberately ignored: legacy migration filled it on lifetime purchases, and
- *   the pre-subscription gate never read it. Honoring it would cut off paying
- *   lifetime buyers.
- * - via_subscription_id set (lazy row) → valid only while expired_date > now.
- *   Renewal bumps the date (SubscriptionService); seat removal/leave zeroes it
- *   (SeatService); expiry lets it die on its own — no cleanup job needed.
- * - via_voucher_id set (free-trial row) → same shape: valid only while
- *   expired_date > now, set once at grant time to grant + voucher.trialDays.
+ * Enrollment validity predicate — the sacred rule, keyed on `expired_date` and
+ * NOT on the grant markers:
+ * - expired_date NULL (paid/legacy lifetime) → ALWAYS valid.
+ * - expired_date set → valid only while it is in the future, whoever wrote it:
+ *   - via_subscription_id (lazy row) — renewal bumps the date
+ *     (SubscriptionService); seat removal/leave zeroes it (SeatService); expiry
+ *     lets it die on its own, no cleanup job needed;
+ *   - via_voucher_id (free-trial row) — set once at grant time to
+ *     grant + voucher.trialDays;
+ *   - no marker at all — a resynced LEGACY free trial. Legacy vouchers are not
+ *     migrated, so it has no marker to key on; a marker-keyed gate read it as
+ *     permanent access, which is the bug this rule was corrected for (2026-09-14).
+ *     Measured on legacy: all 114 enrollments with a non-null expired_date trace
+ *     to a `voucher_redeem` row with free_trial_activated = 1 — the column means
+ *     trial, never lifetime.
  *
  * This is the in-memory form of `activeEnrollment()` in commerce/enrollment.ts.
  * The two MUST stay identical — one is the SQL filter behind list badges, the
@@ -47,17 +52,21 @@ export class EntitlementService {
   }
 
   /**
-   * See class doc — retail rows are valid by existence, granted rows by date.
+   * In-memory mirror of `activeEnrollment()` — keep the two byte-for-byte in step,
+   * or a list badge disagrees with the media gate.
+   *
+   * A row is time-boxed by its `expired_date`, whoever wrote it (free-trial voucher,
+   * subscription lazy row, or a resynced LEGACY trial that carries no marker at all);
+   * a permanent grant leaves the column NULL. The markers are NOT read here — a
+   * marker-keyed gate reads a legacy trial as permanent access.
+   *
    * A refund soft-cancels the row instead of deleting it (`is_canceled`), so the
-   * flag is checked FIRST: a cancelled retail row would otherwise pass on the
-   * by-existence branch and keep serving a refunded member.
+   * flag is checked FIRST: a cancelled permanent row would otherwise pass on the
+   * null-date branch and keep serving a refunded member.
    */
-  isEnrollmentValid(
-    e: Pick<CourseEnrollment, 'viaSubscriptionId' | 'viaVoucherId' | 'expiredDate' | 'isCanceled'>,
-  ): boolean {
+  isEnrollmentValid(e: Pick<CourseEnrollment, 'expiredDate' | 'isCanceled'>): boolean {
     if (e.isCanceled) return false;
-    if (!e.viaSubscriptionId && !e.viaVoucherId) return true;
-    return e.expiredDate !== null && e.expiredDate > new Date();
+    return e.expiredDate === null || e.expiredDate > new Date();
   }
 
   /**

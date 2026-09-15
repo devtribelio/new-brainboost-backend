@@ -2,9 +2,10 @@
  * BE-10 + BE-11 — subscription-aware content surface:
  * media gate delegates to EntitlementService (subscriber streams, stranger
  * 403, lazy row created); product list/badges: subscriber owns every
- * course-backed product, lapsed sub reverts, retail legacy rows (past
- * expired_date, no marker) stay owned, plan products hidden from the default
- * catalog. Service-level over real Postgres (same pattern as tests/product/).
+ * course-backed product, lapsed sub reverts, paid rows (expired_date NULL) stay
+ * owned while a dead LEGACY free trial (past expired_date, no marker) does not,
+ * plan products hidden from the default catalog. Service-level over real
+ * Postgres (same pattern as tests/product/).
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { randomUUID } from 'node:crypto';
@@ -31,6 +32,7 @@ let planProductId: string;
 let courseAProductId: string;
 let courseBProductId: string;
 let courseAId: string;
+let courseBId: string;
 
 async function makeMember(tag: string): Promise<string> {
   const m = await prisma.member.create({
@@ -111,7 +113,7 @@ beforeAll(async () => {
   });
 
   ({ productId: courseAProductId, courseId: courseAId } = await makeCourseProduct('A'));
-  ({ productId: courseBProductId } = await makeCourseProduct('B'));
+  ({ productId: courseBProductId, courseId: courseBId } = await makeCourseProduct('B'));
 
   // subscriber: active sub, never opened any course
   await activateSub(subscriberId);
@@ -135,9 +137,14 @@ beforeAll(async () => {
     },
   });
 
-  // retail: legacy-style enrollment on course A — expired_date in the PAST, no marker
+  // retail: a paid enrollment on course A — permanent, so expired_date stays NULL
   await prisma.courseEnrollment.create({
-    data: { memberId: retailId, courseId: courseAId, expiredDate: new Date('2020-01-01') },
+    data: { memberId: retailId, courseId: courseAId },
+  });
+  // ...and a DEAD legacy free trial on course B: expired_date in the past, no marker
+  // at all (legacy vouchers are never migrated). It must not read as ownership.
+  await prisma.courseEnrollment.create({
+    data: { memberId: retailId, courseId: courseBId, expiredDate: new Date('2020-01-01') },
   });
 });
 
@@ -213,9 +220,10 @@ describe('product list & badges (BE-11)', () => {
     expect(notPurchased.rows.some((r) => r.id === courseAProductId)).toBe(true);
   });
 
-  it('retail legacy row (past expired_date, no marker) still counts as owned', async () => {
+  it('paid row counts as owned; a dead legacy trial does not and stays buyable', async () => {
     const list = await productService.list(PAGE, { keyword: KW, memberId: retailId });
     expect(list.purchasedProductIds.has(courseAProductId)).toBe(true);
+    expect(list.purchasedProductIds.has(courseBProductId)).toBe(false);
 
     const purchased = await productService.list(PAGE, {
       keyword: KW,

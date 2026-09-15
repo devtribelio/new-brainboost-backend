@@ -3,6 +3,7 @@ import { PaymentService } from '@bb/domain/commerce/payment.service';
 import { prisma } from '@bb/db';
 import type { XenditGateway } from '@bb/common/services/xendit-gateway';
 import type { CreateInvoiceRequest, Invoice } from 'xendit-node/invoice/models';
+import { env } from '@bb/common/config/env';
 import {
   createTestMember,
   createTestProduct,
@@ -72,6 +73,35 @@ describe('PaymentService — Invoice dispatch', () => {
     expect(payment?.paymentType).toBe('invoice');
     expect(payment?.status).toBe('PENDING');
     expect(payment?.checkoutUrl).toBe('https://checkout-staging.xendit.co/web/0193abc');
+  });
+
+  it('keeps the env.xendit redirect when no override is passed', async () => {
+    // `create()` grew an optional `redirect` for event tickets, which must land on
+    // a public order page instead of the member receipt. A course passes nothing,
+    // and must therefore still get the configured pair with `?transactionId=`.
+    const tx = await createPendingTransaction(memberId, productId, 450_000);
+    const sent: CreateInvoiceRequest[] = [];
+    const svc = new PaymentService(
+      makeMockGateway({
+        createInvoice: async (params) => {
+          sent.push(params);
+          return makeMockGateway().createInvoice(params);
+        },
+      }),
+    );
+
+    await svc.create(memberId, { transactionId: tx.id });
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0].successRedirectUrl).toBe(
+      `${env.xendit.invoiceSuccessUrl}?transactionId=${tx.id}`,
+    );
+    expect(sent[0].failureRedirectUrl).toBe(
+      `${env.xendit.invoiceFailureUrl}?transactionId=${tx.id}`,
+    );
+    // And nothing from the event path leaks in.
+    expect(sent[0].successRedirectUrl).not.toContain('?t=');
+    expect(sent[0].successRedirectUrl).not.toContain('/event/order/');
   });
 
   it('rejects when transaction not PENDING', async () => {

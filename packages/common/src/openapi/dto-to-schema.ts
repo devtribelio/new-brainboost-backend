@@ -23,8 +23,20 @@ function toJsonSchemaType(type: PropertyOptions['type']): {
 } {
   if (typeof type === 'function') {
     const ref = (type as () => unknown)();
-    if (typeof ref === 'function') {
-      return { schema: { $ref: `#/components/schemas/${(ref as { name: string }).name}` }, refName: (ref as { name: string }).name };
+    // `() => [Dto]` is the NestJS way to spell an array of DTOs, and it is what
+    // every nested list in the event module uses. Unwrapped here rather than left
+    // unhandled: the factory returns an ARRAY, not a function, so it used to fall
+    // through every branch below and emit `{ type: 'string' }` — documenting
+    // `attendees`, both `tickets` arrays, `items` and `ticketTypes` as strings,
+    // with nothing anywhere to say so.
+    const target = Array.isArray(ref) ? ref[0] : ref;
+    if (typeof target === 'function') {
+      const name = (target as { name: string }).name;
+      const itemSchema = { $ref: `#/components/schemas/${name}` };
+      return {
+        schema: Array.isArray(ref) ? { type: 'array', items: itemSchema } : itemSchema,
+        refName: name,
+      };
     }
   }
   if (type === 'integer') return { schema: { type: 'integer' } };
@@ -111,8 +123,11 @@ export function dtoToSchema(
             : undefined;
       if (nestedFactory) {
         const nested = nestedFactory();
-        if (typeof nested === 'function') {
-          dtoToSchema(nested as { new (): unknown; name: string }, collected);
+        // Same unwrap as `toJsonSchemaType`: without it the `$ref` it emitted for
+        // an array would point at a component that was never registered.
+        const target = Array.isArray(nested) ? nested[0] : nested;
+        if (typeof target === 'function') {
+          dtoToSchema(target as { new (): unknown; name: string }, collected);
         }
       }
     }

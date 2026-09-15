@@ -21,6 +21,9 @@ reason = "vite — dev/test tooling only, not in the production tree"
 [[IgnoredVulns]]
 id = "GHSA-5xrq-8626-4rwp"
 reason = "vitest — test tooling only, not in the production tree"
+[[IgnoredVulns]]
+id = "GHSA-82fw-gwwq-j7x9"
+reason = "vitest / @vitest/mocker — test tooling only, not in the production tree"
 
 # --- esbuild (bundler, pulled by tsup/vite) ---
 [[IgnoredVulns]]
@@ -34,6 +37,11 @@ reason = "esbuild — build tooling only, not in the production tree"
 [[IgnoredVulns]]
 id = "GHSA-hmw2-7cc7-3qxx"
 reason = "form-data — dev transitive, not in the production tree"
+
+# --- js-yaml (eslint transitive) ---
+[[IgnoredVulns]]
+id = "GHSA-2883-xcg3-v3hh"
+reason = "js-yaml — pulled only by eslint/@eslint/eslintrc (dev), not in the production tree"
 
 # --- brace-expansion --- NO LONGER IGNORED (2026-08-11)
 # GHSA-mh99-v99m-4gvg used to be triaged here for the 1.x line, on the grounds

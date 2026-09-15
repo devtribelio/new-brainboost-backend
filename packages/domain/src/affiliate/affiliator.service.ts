@@ -1,4 +1,5 @@
 import { prisma } from '@bb/db';
+import { isEventTicketOrder } from '@bb/domain/event/order';
 import { logger } from '@bb/common/config/logger';
 import { badRequest, notFound, ERROR_CODES } from '@bb/common/exceptions';
 import { assignMemberAffiliateCode } from './utils/code-generator';
@@ -180,6 +181,26 @@ export class AffiliatorService {
     /** Provider renewal flag (RC RENEWAL). Web renewals are detected via the ledger. */
     isRenewal?: boolean;
   }): Promise<{ committed: number }> {
+    // Event tickets pay no commission yet (PRD P4: the ticket scheme is meant to be
+    // a fixed amount, not the Brainboost percentage, and that scheme is unbuilt).
+    //
+    // It has to be refused HERE, and explicitly. The PRD assumed tickets would be
+    // silent because they carry no `affiliate_programs` row — but a program is not
+    // what opens this path (see Option B below), so without this branch a ticket
+    // bought by anyone with an inviter pays them the course rate. That was already
+    // happening: three PENDING rows at 30%.
+    //
+    // The type is read rather than passed in, for the same reason `isEventTicketOrder`
+    // reads it: an optional input reads as "not a ticket" to any caller that forgets
+    // it, and this is money.
+    if (await isEventTicketOrder(input.productId)) {
+      logger.debug(
+        { productId: input.productId, paymentId: input.paymentId },
+        '[affiliate] event ticket — no commission scheme yet, skip',
+      );
+      return { committed: 0 };
+    }
+
     // Subscription products pay a FLAT level-1 commission (PRD BE-09): no
     // PERFORMANCE tiering, no GROWTH upline. Short-circuit before the chain walk —
     // the retail path below stays identical.

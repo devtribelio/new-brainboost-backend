@@ -32,6 +32,7 @@ import { IngestModule } from '@/modules/ingest/ingest.module';
 import { TrackingModule } from '@/modules/tracker/tracking.module';
 import { StatsModule } from '@/modules/tracker/stats.module';
 import { ShopModule } from '@/modules/shop/shop.module';
+import { EventModule } from '@/modules/event/event.module';
 
 const modules: AppModule[] = [
   AppVersionModule,
@@ -63,6 +64,7 @@ const modules: AppModule[] = [
   TrackingModule,
   StatsModule,
   ShopModule,
+  EventModule,
 ];
 
 export function registerModules(): Router {

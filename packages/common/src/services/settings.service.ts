@@ -24,6 +24,20 @@ export const SETTING_KEYS = {
   // The client sends ?platform=&version= on /data/banner; a newer build gets an empty list.
   bannerMaxVersionAndroid: 'banner.maxVersionAndroid',
   bannerMaxVersionIos: 'banner.maxVersionIos',
+  // Minutes a buyer has to pay for event tickets before the seats go back on
+  // sale. Separate from the 24h course window on purpose: a course has no quota,
+  // so an abandoned checkout costs nobody anything, while an abandoned ticket
+  // checkout holds a seat somebody else wanted. Runtime-configurable because the
+  // right number depends on the event — a webinar that sells out in minutes wants
+  // a tighter hold than a workshop selling for weeks.
+  eventCheckoutExpiryMinutes: 'event.checkoutExpiryMinutes',
+  // Path of the order page on the web shop, appended to `shop.baseUrl` to build
+  // the post-payment redirect of an event invoice. A setting and not a constant
+  // because the FE route is not settled: moving it (to `/ticket`, say) is then one
+  // UPDATE, with no redeploy and no rebuilt invoice code. Covers the REDIRECT only
+  // — bb-comms builds its email link from its own SHOP_BASE_URL plus a hardcoded
+  // `/event/order/`, so flipping this does NOT move the links already in inboxes.
+  eventOrderPath: 'event.orderPath',
   disbursementAutoEnabled: 'disbursement.autoEnabled',
   disbursementAutoApproveMax: 'disbursement.autoApproveMax',
   disbursementFee: 'disbursement.fee',

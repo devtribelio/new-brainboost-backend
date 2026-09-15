@@ -37,7 +37,7 @@ export class BbEcsStack extends cdk.Stack {
     const vpc = ec2.Vpc.fromLookup(this, 'Vpc', { isDefault: true });
 
     const cluster = new ecs.Cluster(this, 'Cluster', {
-      vpc, clusterName: 'bb-prod', containerInsightsV2: ecs.ContainerInsights.ENABLED,
+      vpc, clusterName: 'bb-prod', containerInsightsV2: ecs.ContainerInsights.DISABLED,
     });
 
     // === Secret app (DATABASE_URL pakai bb_app, SQS urls, dst) ===
@@ -73,6 +73,10 @@ export class BbEcsStack extends cdk.Stack {
       XENDIT_CALLBACK_TOKEN: sm('XENDIT_CALLBACK_TOKEN'),
       XENDIT_INVOICE_SUCCESS_URL: sm('XENDIT_INVOICE_SUCCESS_URL'), // redirect after pay (default localhost → override)
       XENDIT_INVOICE_FAILURE_URL: sm('XENDIT_INVOICE_FAILURE_URL'),
+      // Token ?t= di redirect invoice event TIDAK punya key sendiri di sini: dia
+      // diturunkan dari JWT_ACCESS_SECRET (lihat event-order-token.util.ts), dan URL
+      // redirect-nya ada di app_settings (shop.baseUrl + event.orderPath). Jadi tidak
+      // ada yang perlu ditambah ke secret bb/prod/app untuk fitur itu.
       REVENUECAT_WEBHOOK_AUTH: sm('REVENUECAT_WEBHOOK_AUTH'),
 
       // Bunny: cuma 2 yang DIPAKAI media module (streamApiKey & libraryId itu dead field).
@@ -328,7 +332,13 @@ export class BbEcsStack extends cdk.Stack {
       subnetSelection: { subnetType: ec2.SubnetType.PUBLIC },
       securityGroups: [appSg],
       scheduledFargateTaskDefinitionOptions: {
-        taskDefinition: makeCronLane('CronDisburse', 'cron-disburse', ['executeApprovedDisbursements']),
+        // expireEventTicketOrders rides this lane, not the hourly one: the ticket
+        // payment window is 30 minutes by default, and an hourly sweep would hold
+        // a seat for up to 90 — a lag three times the limit it enforces.
+        taskDefinition: makeCronLane('CronDisburse', 'cron-disburse', [
+          'executeApprovedDisbursements',
+          'expireEventTicketOrders',
+        ]),
       },
     });
     // CATATAN: ScheduledFargateTask nggak set assignPublicIp. Kalau cron gagal pull image
@@ -346,7 +356,15 @@ export class BbEcsStack extends cdk.Stack {
       // SES_FROM = display-name + alamat pengirim (RFC 5322). Bukan rahasia → plain env.
       // Prod nggak baca .env, jadi tanpa ini Go service jatuh ke default 'no-reply@brainboost.id'
       // (tanpa nama). Nilai disamakan dengan staging bb-notification-service/.env.
-      environment: { ...env, AWS_REGION: 'ap-southeast-1', SES_FROM: 'BrainBoost <no-reply@brainboost.id>' },
+      // SHOP_BASE_URL = origin web shop untuk link di email tiket event ("Buka pesanan").
+      // config.go default-nya 'https://brainboost.id' (landing, bukan shop) → tanpa ini
+      // setiap email tiket menunjuk halaman yang tidak ada. Bukan rahasia → plain env.
+      environment: {
+        ...env,
+        AWS_REGION: 'ap-southeast-1',
+        SES_FROM: 'BrainBoost <no-reply@brainboost.id>',
+        SHOP_BASE_URL: 'https://shop.brainboost.id',
+      },
       // Qontak (WhatsApp OTP) — dipakai bb-comms SAJA, jadi di-scope ke container ini
       // (bukan shared `secrets` map yang kena mobile-api/relay/cron juga). CLIENT_ID/
       // SECRET/USERNAME/PASSWORD = kredensial (Go baca via os.Getenv, tanpa default →

@@ -378,7 +378,10 @@ async function migrateEnrollments(
     for (const m of members) if (m.legacyId !== null) memberByLegacy.set(m.legacyId, m.id);
   }
 
-  // Paid/free brainboost enrollments (access rule §6b)
+  // Paid/free brainboost enrollments (access rule §6b).
+  // `status = 1` filters legacy-removed rows: `course_enrollment` has no `deleted`
+  // column, so the Cresenity soft-delete marks removal with `status = 0` — which is
+  // how an expired free trial is retired (the every-minute expiry cron deletes the row).
   const [rows] = await legacy.query<RowDataPacket[]>(
     `SELECT e.course_enrollment_id, e.member_id, e.course_id, e.created, e.expired_date,
             e.certificate_code, e.certificate_created, e.progress,
@@ -388,7 +391,7 @@ async function migrateEnrollments(
        LEFT JOIN product_bundle_payment_detail bd
               ON bd.product_bundle_payment_detail_id = e.product_bundle_payment_detail_id
        LEFT JOIN product_bundle_payment bp ON bp.product_bundle_payment_id = bd.product_bundle_payment_id
-      WHERE e.${BB_COURSES} AND e.member_id IS NOT NULL`,
+      WHERE e.${BB_COURSES} AND e.member_id IS NOT NULL AND e.status = 1`,
   );
 
   const seenPair = new Set<string>(); // `${memberUuid}|${courseUuid}`

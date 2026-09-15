@@ -17,17 +17,34 @@ import type { Prisma } from '@prisma/client';
  *    A trial or subscription row says NO, otherwise a time-boxed grant would
  *    lock the member out of buying the very course it is advertising.
  *
- * Two grant markers feed both: `via_voucher_id` (free trial) and
- * `via_subscription_id` (subscription lazy row). They are structurally identical
- * — a set marker means the row is time-boxed — so both predicates treat them the
- * same way and neither is allowed to drift from the other.
+ * They key on different columns, and that is deliberate. Access keys on
+ * `expired_date` alone, because a resynced LEGACY trial carries no marker at all.
+ * Ownership keys on the two grant markers AND the date, because the three grant
+ * shapes do not look alike: `via_voucher_id` (this app's free trial),
+ * `via_subscription_id` (subscription lazy row) and a bare `expired_date` (legacy
+ * trial). A paid grant has none of them.
  */
 
 /**
- * Content-access filter. `expired_date` is honoured ONLY for GRANTED rows: a
- * retail/legacy row (both markers NULL) is valid by existence, because the legacy
- * migration filled `expired_date` on lifetime purchases and the pre-grant gate
- * never read it — honouring it globally would cut off paying lifetime buyers.
+ * Content-access filter. A time-boxed grant is honoured by its `expired_date`,
+ * whoever wrote it — this app's free-trial voucher, a subscription lazy row, or a
+ * LEGACY free-trial voucher whose redemption never crossed into this database.
+ *
+ * Keyed on the date rather than on the grant markers, because a legacy trial
+ * arrives with no marker to key on: legacy vouchers are not migrated (there is no
+ * `migrate-voucher` script and nothing fills `Voucher.legacyId`), so the resynced
+ * row lands `via_voucher_id = NULL` and a marker-keyed gate reads it as permanent
+ * access. A subscription lazy row always carries `expired_date` (it mirrors the
+ * non-nullable `sub.expiresAt`), so it is covered by the same date branch.
+ *
+ * The premise this replaces — "the legacy migration filled `expired_date` on
+ * lifetime purchases, so honouring it globally would cut off paying buyers" — was
+ * not true. Measured on legacy 2026-09-14 (brainboost scope): 70 936 enrollments,
+ * 114 with a non-null `expired_date`, and all 114 trace to a `voucher_redeem` row
+ * with `free_trial_activated = 1`. It matches the legacy writers: the only two
+ * places that set the column (`TBCourse_Member::joined()` and the
+ * `TBModel_VoucherRedeem` created-hook) are both the trial path, and legacy
+ * enforced expiry by deleting the row, never by reading the date back.
  *
  * Must mirror `EntitlementService.isEnrollmentValid` (BE-06) exactly: this is the
  * SQL form, that is the in-memory form, and list badges must not disagree with
@@ -39,7 +56,7 @@ import type { Prisma } from '@prisma/client';
 export function activeEnrollment(now: Date = new Date()): Prisma.CourseEnrollmentWhereInput {
   return {
     isCanceled: false,
-    OR: [{ viaVoucherId: null, viaSubscriptionId: null }, { expiredDate: { gt: now } }],
+    OR: [{ expiredDate: null }, { expiredDate: { gt: now } }],
   };
 }
 
@@ -51,6 +68,10 @@ export function activeEnrollment(now: Date = new Date()): Prisma.CourseEnrollmen
  * is the documented upgrade-to-lifetime path (the payment-success listener clears
  * the marker).
  *
+ * Both trial shapes have to be excluded, because they do not look alike: a trial
+ * granted here carries `via_voucher_id`, while a resynced legacy trial carries only
+ * `expired_date`. A paid grant is permanent, so it has neither.
+ *
  * Checkout guard ONLY. The catalog's `not_purchased` shelf uses `activeEnrollment()`
  * instead: a course the member can already open does not belong on a "belum dibeli"
  * shelf, even though it is genuinely not paid for yet.
@@ -59,6 +80,7 @@ export const OWNED_FOR_PURCHASE = {
   isCanceled: false,
   viaVoucherId: null,
   viaSubscriptionId: null,
+  expiredDate: null,
 } as const satisfies Prisma.CourseEnrollmentWhereInput;
 
 /** True when `memberId` holds a live (non-refunded, non-expired) enrollment in `courseId`. */

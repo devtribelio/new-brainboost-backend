@@ -69,6 +69,7 @@
     "seed:test-account": "tsx scripts/seed-test-account.ts",
     "seed:subscription-plans": "tsx scripts/seed-subscription-plans.ts",
     "grant:subscription": "tsx scripts/grant-subscription.ts",
+    "seed:event": "tsx scripts/seed-event.ts",
     "digest:run": "tsx --conditions=development scripts/run-topic-digest.ts",
     "void:stray-affiliate-commissions": "tsx scripts/void-stray-affiliate-commissions.ts"
   },

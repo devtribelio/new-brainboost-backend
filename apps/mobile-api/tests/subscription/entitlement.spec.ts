@@ -1,9 +1,10 @@
 /**
  * BE-06 — EntitlementService + lazy enrollment:
- * retail rows valid by EXISTENCE (legacy expired_date ignored — the sacred
- * rule), lazy rows valid by date; subscriber access lazily creates/refreshes
- * a marked enrollment; lapsed sub → 403; retail purchase over a lazy row
- * upgrades it to lifetime (marker cleared). Real Postgres, no mocks.
+ * paid rows valid by EXISTENCE (expired_date NULL), every time-boxed row valid
+ * by date — including a resynced LEGACY free trial, which carries a date and no
+ * marker at all (rule corrected 2026-09-14); subscriber access lazily
+ * creates/refreshes a marked enrollment; lapsed sub → 403; retail purchase over
+ * a lazy row upgrades it to lifetime (marker cleared). Real Postgres, no mocks.
  */
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
 import { randomUUID } from 'node:crypto';
@@ -114,15 +115,20 @@ async function activateSub() {
 }
 
 describe('EntitlementService', () => {
-  it('retail row with a PAST expired_date (legacy migration) still grants access', async () => {
-    await prisma.courseEnrollment.create({
-      data: {
-        memberId: outsiderId,
-        courseId,
-        expiredDate: new Date('2020-01-01'), // legacy-filled, must be ignored
-      },
-    });
+  it('paid row (expired_date NULL) grants access forever', async () => {
+    await prisma.courseEnrollment.create({ data: { memberId: outsiderId, courseId } });
     await expect(entitlement.assertCourseAccess(outsiderId, courseId)).resolves.toBeUndefined();
+  });
+
+  // A legacy free trial resyncs with expired_date set and NO marker (legacy vouchers
+  // are never migrated). Keying the gate on the marker read it as permanent access.
+  it('unmarked row with a PAST expired_date (legacy free trial) does NOT grant access', async () => {
+    await prisma.courseEnrollment.create({
+      data: { memberId: outsiderId, courseId, expiredDate: new Date('2020-01-01') },
+    });
+    await expect(entitlement.assertCourseAccess(outsiderId, courseId)).rejects.toThrow(
+      ForbiddenException,
+    );
   });
 
   it('non-subscriber without enrollment → 403; no row is created', async () => {
