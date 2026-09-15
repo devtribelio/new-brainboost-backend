@@ -101,36 +101,52 @@ disagree by construction.
 
 ## Where this differs from your proposal
 
-### 1. `dimmed` cannot appear where your example puts it
+### 1. `dimmed` in the past — CORRECTED 2026-09-15
 
-Your sample response has `2026-09-02` as `dimmed` with `today` = `2026-09-04`.
-That is not reachable, and not because of a gap in the implementation.
+**An earlier version of this document told you a past month contains no `dimmed`
+cells, ever. That was wrong, and it is now fixed in the backend.** Your original
+example — `2026-09-02` as `dimmed` with `today` = `2026-09-04` — is reachable after
+all. Please restore it.
 
-Grace is anchored on **today**, not on the gap. A missed day is forgiven only
-while it sits within `graceDays` listening days of today; anything older ends
-the walk. That anchor is load-bearing: the streak is recomputed from raw
-sessions on every read and nothing is stored, so a gap-relative rule would
-revive **every** single-day gap in the member's entire history the moment grace
-shipped — a streak broken in May would come back as 90 days.
+The reasoning that produced the wrong answer is worth stating, because half of it is
+still true. Grace is anchored on **today** for the streak *walk*: a missed day extends
+the streak only while it sits within `graceDays` listening days of today. That anchor
+is load-bearing and has not changed — nothing is stored, so forgiving gap-relatively
+in the walk would revive every single-day gap in a member's history the moment grace
+shipped, and a streak broken in May would come back as 90 days.
 
-What this means for the calendar:
+But that argument is about the **number**. Drawing a past cell never feeds the walk,
+so it costs nothing — and reading past cells off today's walk made the calendar a
+projection from today rather than a record. A member who listened on the 8th and the
+10th saw a streak of 3 with the 9th frozen when they looked on the 10th; opening the
+same calendar days later, the 9th had become a plain miss. The streak the app had
+shown them was silently taken back.
 
-- `dimmed` appears only on the day **immediately before `today`**.
-- A month in the past therefore contains **no** `dimmed` cells, ever.
-- One exception: when `today` is the 1st, the frozen day falls on the **last day
-  of the previous month**, so that month shows exactly one `dimmed` cell.
-- `graceDays` is runtime-configurable (`app_settings` → `streak.graceDays`,
-  currently `1`). At `N`, up to `N` consecutive frozen days can sit immediately
-  before today. **Do not hardcode 1** — read the shape from the response.
+**Two rules now feed `dimmed`, by which window the day is in:**
 
-Please correct the example in your document. Everything else about `dimmed`
-works as you described.
+| Day | Rule | Means |
+|---|---|---|
+| Within `graceDays` of `today` (window still open) | the live walk | "you missed it, and you can still save the streak" |
+| Older than that (window closed) | a **confirmed bridge** — the whole run of misses is ≤ `graceDays` long *and* is bounded by a qualifying day on **both** sides | "you missed it, and the streak really did survive" |
 
-Related, and worth knowing because it explains an oddity you may already have
-seen: on a Monday the headline can report `state: "dimmed"` with a live
-`restoreDeadline` while `weeklyStreak` contains no `dimmed` cell at all — the
-frozen day is in the previous week, outside the seven-day window. The monthly
-calendar fixes this, since it shows the day the strip cannot.
+So a past `dimmed` cell is a fact about what happened, and it stays put.
+
+A miss the member never came back from is **still** a plain `none`, whenever it was:
+the bridge needs a qualifying day after the gap. A gap longer than `graceDays` is
+`none` too — the streak genuinely died there.
+
+What did **not** change: `currentStreak`, `qualifiedDays`, `earliestMonth`, and every
+field on `/stats/home` (`streakDays`, `streak.state`, `streak.restoreDeadline`). No
+field was added or removed, so **no client release is needed**.
+
+`graceDays` is runtime-configurable (`app_settings` → `streak.graceDays`, currently
+`1`). At `N`, a bridged gap can be up to `N` days wide. **Do not hardcode 1** — read
+the shape from the response.
+
+Still true, and worth knowing because it explains an oddity you may have seen: on a
+Monday the headline can report `state: "dimmed"` with a live `restoreDeadline` while
+`weeklyStreak` contains no `dimmed` cell — the frozen day is in the previous week,
+outside the seven-day window. The monthly calendar shows the day the strip cannot.
 
 ### 2. `longestRun` bridges a frozen day, and is clipped to the month
 
@@ -143,6 +159,13 @@ It is still clipped at month edges, as you specified. A run spanning
 routinely **smaller than `currentStreak`**, which is correct but reads badly
 under a bare "Streak terpanjang" label. Recommend the copy says "bulan ini",
 or tell us and we will return an unclipped figure instead.
+
+**`longestRun` moves with the §1 correction.** Because a frozen day bridges the run,
+a past month that now shows a `dimmed` cell reports a longer run than it did before.
+Measured on a real member: September went from `2` to `3` — 7th, 8th, [9th frozen],
+10th, which is the run they actually had. Nothing else on the response moved. This is
+the one number on screen that changes without a client release, so it is worth a look
+before you ship.
 
 ### 3. `earliestMonth` comes from the first **tracked** day
 

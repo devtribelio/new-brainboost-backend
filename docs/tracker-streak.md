@@ -201,6 +201,25 @@ Efek pada tiga kasus insiden: semuanya putus satu hari lalu langsung dengar lagi
 - `computeStreakState(qualifyingDays, todayWIB, graceDays)` di `tracker.streak.ts`; `computeStreak()` tetap ada sebagai pembungkus yang cuma mengembalikan angka.
 - **Grace di-anchor ke HARI INI, bukan ke gap.** Hari kosong dimaafkan hanya bila jaraknya ≤ `graceDays` hari dengar dari hari ini. Ini bukan pilihan tuning — streak dihitung ulang dari baris mentah tiap kali dibaca dan tidak ada state tersimpan, jadi aturan relatif-gap ("maafkan setiap bolong satu hari") akan menghidupkan **seluruh** bolong satu hari sepanjang riwayat member begitu grace nyala; streak yang putus Mei balik jadi 90 hari. Aturan window ini menggantikan kebutuhan tabel `streak_restore` untuk urusan korektnes.
 - Hari yang dimaafkan dikembalikan di `forgivenDays` (❄️ di kalender mingguan) dan **tidak** menambah `days`.
+- **Dua sumber ❄️, dipisah berdasarkan jendela (dikoreksi 2026-09-15).** `forgivenDays`
+  hanya pernah mencakup `graceDays` hari terakhir, jadi membaca sel masa lalu dari
+  situ membuat riwayat kalender jadi proyeksi dari hari ini: hari yang ❄️ saat member
+  melihatnya hari Kamis digambar sebagai bolong biasa hari Minggu, dan streak yang
+  sudah terlanjur ditunjukkan ke dia ditarik diam-diam. Sekarang `confirmedBridgeDays`
+  (`tracker.streak.ts`) mengurus hari yang **jendelanya sudah tutup**: bolong
+  dimaafkan kalau seluruh rentang bolong berurutan itu ≤ `graceDays` **dan** diapit
+  hari qualify di **kedua** sisi — artinya member memang balik dan streak-nya benar
+  selamat. Hasilnya di-**union** dengan `forgivenDays`, tidak menggantikannya: selama
+  jendela masih buka walk sengaja optimis (kemarin ❄️ selagi masih bisa diselamatkan,
+  padahal belum ada hari qualify sesudahnya) dan vonis itu yang menang. Keduanya tidak
+  bisa bertabrakan — bridge butuh hari qualify sesudah gap, dan kalau itu ada di dalam
+  jendela yang masih buka, walk sudah memaafkan gap-nya juga.
+- **Ini BUKAN pengampunan relatif-gap yang ditolak di atas.** Yang ditolak adalah
+  memaafkan di dalam *walk*, karena walk itulah yang menghasilkan angka. `confirmedBridgeDays`
+  tidak pernah menyentuh walk: `days`, `state`, `restoreDeadline`, `streakDays` dan
+  `currentStreak` semuanya tidak berubah. Yang berubah hanya rupa satu sel — plus
+  `longestRun`, yang memang sudah menganggap ❄️ menyambung run. Di `graceDays = 0`
+  fungsinya mengembalikan kosong, jadi mode strict tetap identik.
 - `graceDays` runtime-configurable: `app_settings` key `streak.graceDays` (`SETTING_KEYS.streakGraceDays`, fallback `GRACE_DAYS_DEFAULT` = 1, di-seed 1). Berlaku untuk streak global **dan** challenge per program.
 - `graceDays = 0` → `dimmed` tidak pernah tercapai dan jalannya persis seperti versi strict. Itu yang bikin kode ini bisa masuk terpisah dari keputusan produk.
 - **Perlakukan perubahan nilainya sebagai saklar produk, bukan knob.** `streakDays` di root sudah dirender semua build app yang beredar, jadi flip mengubah angka yang dilihat member tanpa rilis client. Nyalakan **setelah** migrasi `local_day` dan backfill Firebase selesai, kalau tidak angkanya bergerak dua kali.

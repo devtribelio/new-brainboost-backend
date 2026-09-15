@@ -90,3 +90,53 @@ export function computeStreakState(
 export function computeStreak(qualifyingDays: Date[], todayWIB: Date, graceDays = 0): number {
   return computeStreakState(qualifyingDays, todayWIB, graceDays).days;
 }
+
+const DAY_MS = 86_400_000;
+
+/**
+ * Past misses a later qualifying day actually rescued — the ❄️ a CALENDAR should
+ * draw once the grace window on that day has closed.
+ *
+ * `computeStreakState` answers "where does the streak stand right now", so the days
+ * it forgives are the ones within `graceDays` of TODAY. Reading a past cell off that
+ * result means the calendar's history is a projection from today rather than a
+ * record: a day that was ❄️ when the member looked on Thursday is drawn as a plain
+ * miss on Sunday, and the streak the app showed them is silently un-shown.
+ *
+ * This is NOT the gap-relative forgiveness the walk refuses. The walk must stay
+ * today-anchored — nothing is stored, so forgiving gap-relatively there would revive
+ * every single-day gap in the member's history the moment grace ships. That argument
+ * is about the NUMBER. Rendering a cell never feeds the walk, so it costs nothing:
+ * `days`, `state` and `currentStreak` are untouched by this function.
+ *
+ * A miss is rescued when the whole run of consecutive misses it belongs to is at most
+ * `graceDays` long AND is bounded by a qualifying day on BOTH sides — which is the
+ * same thing `computeStreakState` means by moving `pendingForgiven` into
+ * `forgivenDays` only once the walk reaches a qualifying day beyond the gap. A gap the
+ * member never came back from stays a plain miss, here as there.
+ *
+ * Callers union this with the walk's own `forgivenDays` rather than replacing them:
+ * inside the still-open window the walk is deliberately optimistic (yesterday is ❄️
+ * while it can still be revived, before any qualifying day exists after it), and that
+ * verdict must win. The two can never contradict — a bridge needs a qualifying day
+ * after the gap, and if one exists inside the open window the walk forgave the gap too.
+ *
+ * `graceDays = 0` returns nothing, so the strict mode is byte-for-byte unchanged.
+ */
+export function confirmedBridgeDays(
+  qualifyingDays: Date[],
+  graceDays = 0,
+): Date[] {
+  if (graceDays <= 0 || qualifyingDays.length < 2) return [];
+
+  const sorted = [...qualifyingDays].sort((a, b) => a.getTime() - b.getTime());
+  const bridged: Date[] = [];
+  for (let i = 1; i < sorted.length; i++) {
+    const prev = sorted[i - 1];
+    const next = sorted[i];
+    const gap = Math.round((next.getTime() - prev.getTime()) / DAY_MS) - 1;
+    if (gap < 1 || gap > graceDays) continue;
+    for (let d = 1; d <= gap; d++) bridged.push(new Date(prev.getTime() + d * DAY_MS));
+  }
+  return bridged;
+}

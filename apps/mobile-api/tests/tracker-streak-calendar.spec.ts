@@ -183,6 +183,81 @@ describe('StatsService.streakCalendar (real Postgres)', () => {
   });
 });
 
+/**
+ * A miss the member came back from stays a frozen day forever, instead of reverting
+ * to a plain miss once the grace window on it closes.
+ *
+ * Reproduces a real complaint: a member listened on the 8th and the 10th, missed the
+ * 9th, and on the 10th the app showed a live streak of 3 with the 9th frozen. Days
+ * later the same calendar drew the 9th as a plain miss — the streak they had been
+ * shown was silently taken back, because every past cell was read off TODAY's walk.
+ *
+ * Their own member is the shape here: a bridged miss deep in the past, gaps they
+ * never came back from, and no listening at all in the last few days.
+ */
+describe('streakCalendar keeps a historical frozen day (real Postgres)', () => {
+  const tracking = new TrackingService();
+  const stats = new StatsService();
+  let memberId = '';
+
+  const today = toListeningDayWIB(new Date());
+  //  -8, -7 qualify · -6 MISSED (bridged, they came back) · -5 qualify
+  //  -4 .. today: nothing at all, so the streak is long dead and today's walk
+  //  forgives nothing. graceDays is 1 by default, which is what makes -6 a bridge.
+  const qualify = [-8, -7, -5].map((b) => addDays(today, b));
+  const bridged = addDays(today, -6);
+
+  beforeAll(async () => {
+    const m = await prisma.member.create({
+      data: { email: `cal-bridge-${uid()}@test.local`, passwordHash: await bcrypt.hash('s', 4) },
+    });
+    memberId = m.id;
+    for (const d of qualify) {
+      await tracking.record(
+        memberId,
+        { clientSessionId: crypto.randomUUID(), audioId: crypto.randomUUID(), courseId: null, startedAt: noonWibOf(d).toISOString(), listenedSec: 700, completed: true },
+        'ios',
+      );
+    }
+  });
+
+  afterAll(async () => {
+    await prisma.listeningSession.deleteMany({ where: { memberId } });
+    await prisma.member.delete({ where: { id: memberId } });
+  });
+
+  it("draws the rescued day dimmed even though today's walk forgives nothing", async () => {
+    const res = await stats.streakCalendar(memberId, monthKey(bridged));
+    expect(res.days.find((d) => d.date === dayKey(bridged))!.state).toBe('dimmed');
+  });
+
+  it('leaves the streak number alone — the cell is rendering, not forgiveness', async () => {
+    const res = await stats.streakCalendar(memberId, monthKey(today));
+    // Nothing for days: the streak is dead and must stay dead. A gap-relative rule
+    // applied to the WALK is exactly what would revive it here.
+    expect(res.currentStreak).toBe(0);
+    const home = await stats.home(memberId);
+    expect(home.streakDays).toBe(0);
+    expect(home.streak.state).toBe('none');
+    expect(home.streak.restoreDeadline).toBeNull();
+  });
+
+  it('still reports the days the member never came back from as plain misses', async () => {
+    const res = await stats.streakCalendar(memberId, monthKey(addDays(today, -1)));
+    for (const back of [4, 3, 2, 1]) {
+      const d = res.days.find((x) => x.date === dayKey(addDays(today, -back)));
+      if (d) expect(d.state).toBe('none');
+    }
+  });
+
+  it('counts the frozen day as bridging the run, not breaking it', async () => {
+    const res = await stats.streakCalendar(memberId, monthKey(bridged));
+    // -8, -7, [-6 frozen], -5 → a run of 3 qualifying days, clipped to this month.
+    // Without the frozen cell the same window reports 2.
+    expect(res.longestRun).toBeGreaterThanOrEqual(3);
+  });
+});
+
 describe('streakCalendar for a member who has never listened (real Postgres)', () => {
   const stats = new StatsService();
   let memberId = '';

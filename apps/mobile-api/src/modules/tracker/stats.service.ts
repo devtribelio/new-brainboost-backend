@@ -16,7 +16,8 @@ import {
   toListeningDayWIB,
   weekStartMondayWIB,
 } from './tracker.time';
-import { computeStreak, computeStreakState } from './tracker.streak';
+import { computeStreak, computeStreakState, confirmedBridgeDays } from './tracker.streak';
+import type { StreakResult } from './tracker.streak';
 import type { StatsHomeDto, WeeklyStreakEntryDto } from './dto/stats-home.dto';
 import type { CourseStatsDto } from './dto/course-stats.dto';
 import type { StreakCalendarDayDto, StreakCalendarDto } from './dto/streak-calendar.dto';
@@ -37,6 +38,29 @@ function qualifyingDays(
   return groups
     .filter((g) => (g._sum.listenedSec ?? 0) >= minQualifySec)
     .map((g) => g.localDay);
+}
+
+/**
+ * Every day that should render ❄️, for one member, right now.
+ *
+ * Two sources, unioned, because they answer the day at two different moments:
+ *  - the walk's own `forgivenDays` — the still-open window, where a missed day is
+ *    forgiven optimistically while it can still be revived;
+ *  - `confirmedBridgeDays` — the closed window, where a missed day is forgiven only
+ *    because the member actually came back and the streak really did survive it.
+ *
+ * Without the second, every surface reads the past off today's walk, so a day drawn
+ * ❄️ on Thursday is a plain miss by Sunday and the streak the member was shown gets
+ * quietly taken back. The walk is untouched: this only decides what a cell looks
+ * like, never how long the streak is.
+ *
+ * Built once per request and handed to both the strip and the calendar, so the two
+ * cannot disagree about the same date.
+ */
+function forgivenKeysFor(qualifying: Date[], streak: StreakResult, graceDays: number): Set<string> {
+  const keys = new Set(streak.forgivenDays.map(dayKey));
+  for (const d of confirmedBridgeDays(qualifying, graceDays)) keys.add(dayKey(d));
+  return keys;
 }
 
 /**
@@ -227,9 +251,10 @@ export class StatsService {
     // MIN_QUALIFY_SEC (global, all courses). `forgivenDays` comes from the same
     // grace walk that produced the headline state, so a dimmed flame and a dimmed
     // circle can never disagree about which night was let off.
+    const globalQualifying = qualifyingDays(dayGroups, minQualifySec);
     const weeklyStreak = buildWeeklyStreak(
-      new Set(qualifyingDays(dayGroups, minQualifySec).map(dayKey)),
-      new Set(streak.forgivenDays.map(dayKey)),
+      new Set(globalQualifying.map(dayKey)),
+      forgivenKeysFor(globalQualifying, streak, graceDays),
       todayWIB,
     );
 
@@ -294,7 +319,7 @@ export class StatsService {
     const qualifying = qualifyingDays(dayGroups, minQualifySec);
     const streak = computeStreakState(qualifying, todayWIB, graceDays);
     const qualifyingKeys = new Set(qualifying.map(dayKey));
-    const forgivenKeys = new Set(streak.forgivenDays.map(dayKey));
+    const forgivenKeys = forgivenKeysFor(qualifying, streak, graceDays);
 
     // First TRACKED day, not first qualifying day: a five-minute first session is
     // still a day the member could have listened on, so it shows as `none` rather
@@ -401,7 +426,7 @@ export class StatsService {
       daysListened: qualifying.length,
       weeklyStreak: buildWeeklyStreak(
         new Set(qualifying.map(dayKey)),
-        new Set(courseStreak.forgivenDays.map(dayKey)),
+        forgivenKeysFor(qualifying, courseStreak, graceDays),
         todayWIB,
       ),
       totalListenSec: totalAgg._sum.listenedSec ?? 0,

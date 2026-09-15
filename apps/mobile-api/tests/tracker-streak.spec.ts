@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { computeStreak, computeStreakState } from '@/modules/tracker/tracker.streak';
+import {
+  computeStreak,
+  computeStreakState,
+  confirmedBridgeDays,
+} from '@/modules/tracker/tracker.streak';
 import { toLocalDayWIB } from '@/modules/tracker/tracker.time';
 
 /** Build a WIB-midnight day Date from a YYYY-MM-DD string. */
@@ -163,5 +167,64 @@ describe('computeStreakState only forgives a day that bridges the streak', () =>
     const unbridged = computeStreakState([day('2026-06-23')], today, GRACE_2);
     expect(unbridged.days).toBe(1);
     expect(keys(unbridged)).toEqual([]);
+  });
+});
+
+/**
+ * The calendar's ❄️ for a day whose grace window has already closed.
+ *
+ * `computeStreakState` answers "where does the streak stand now", so its
+ * `forgivenDays` only ever covers the last `graceDays` days. Reading a past cell off
+ * it makes the history a projection from today: a day that was ❄️ on Thursday is a
+ * plain miss by Sunday. This predicate is the record instead — and it never touches
+ * the walk, so no streak number moves.
+ */
+describe('confirmedBridgeDays', () => {
+  const keys = (days: Date[]) => days.map((d) => d.toISOString().slice(0, 10)).sort();
+
+  it('marks a one-day miss the member came back from, however long ago', () => {
+    // 07th + 08th burning · 09th missed · 10th burning — and today is the 23rd, so
+    // the walk forgave nothing here. This is the case the calendar used to lose.
+    const qualifying = ['2026-06-07', '2026-06-08', '2026-06-10'].map(day);
+    expect(keys(confirmedBridgeDays(qualifying, 1))).toEqual(['2026-06-09']);
+  });
+
+  it('leaves a gap the member never came back from as a plain miss', () => {
+    // Nothing qualifying after the 08th within the window → nothing was rescued.
+    const qualifying = ['2026-06-07', '2026-06-08'].map(day);
+    expect(confirmedBridgeDays(qualifying, 1)).toEqual([]);
+  });
+
+  it('refuses a gap longer than the window, even bounded on both sides', () => {
+    // Two missed days with graceDays=1: the streak really did die there.
+    const qualifying = ['2026-06-07', '2026-06-10'].map(day);
+    expect(confirmedBridgeDays(qualifying, 1)).toEqual([]);
+    // The same gap is rescued once the window is wide enough to cover it.
+    expect(keys(confirmedBridgeDays(qualifying, 2))).toEqual(['2026-06-08', '2026-06-09']);
+  });
+
+  it('returns nothing at graceDays=0, so strict mode is unchanged', () => {
+    const qualifying = ['2026-06-07', '2026-06-08', '2026-06-10'].map(day);
+    expect(confirmedBridgeDays(qualifying, 0)).toEqual([]);
+  });
+
+  it('never contradicts the walk inside the still-open window', () => {
+    // Yesterday missed, today not listened yet: the walk is optimistically ❄️ (still
+    // revivable) while no qualifying day exists after the gap, so the bridge rule is
+    // silent. The union of the two is what the surfaces render, and it keeps the
+    // walk's verdict.
+    // 20th + 21st burning, 22nd (yesterday) missed, today (23rd) not listened yet.
+    const qualifying = ['2026-06-20', '2026-06-21'].map(day);
+    const walk = computeStreakState(qualifying, today, 1);
+    expect(walk.state).toBe('dimmed');
+    expect(keys(walk.forgivenDays)).toEqual(['2026-06-22']);
+    expect(confirmedBridgeDays(qualifying, 1)).toEqual([]);
+  });
+
+  it('is order-independent and does not mutate its input', () => {
+    const qualifying = ['2026-06-10', '2026-06-07', '2026-06-08'].map(day);
+    const snapshot = keys(qualifying);
+    expect(keys(confirmedBridgeDays(qualifying, 1))).toEqual(['2026-06-09']);
+    expect(keys(qualifying)).toEqual(snapshot);
   });
 });
