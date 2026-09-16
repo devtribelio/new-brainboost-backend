@@ -221,27 +221,7 @@ export class AuthService {
       if (ageYears < 13) throw badRequest(ERROR_CODES.AGE_BELOW_MINIMUM);
     }
 
-    let inviterId: string | undefined;
-    let inviterNetworkId: string | undefined;
-    if (dto.affiliateCode) {
-      const codePart = dto.affiliateCode.slice(0, 8);
-      const networkLegacyPart = dto.affiliateCode.slice(8);
-      const inviter = await prisma.member.findUnique({
-        where: { affiliateCode: codePart },
-        select: { id: true },
-      });
-      if (inviter) inviterId = inviter.id;
-      if (networkLegacyPart) {
-        const networkLegacyId = Number.parseInt(networkLegacyPart, 10);
-        if (Number.isFinite(networkLegacyId)) {
-          const net = await prisma.network.findUnique({
-            where: { legacyId: networkLegacyId },
-            select: { id: true },
-          });
-          if (net) inviterNetworkId = net.id;
-        }
-      }
-    }
+    let { inviterId, inviterNetworkId } = await this.resolveAffiliateCode(dto.affiliateCode);
 
     // Pre-registration carry-over: if this register call didn't carry an
     // affiliate code (e.g. mobile flow that only attached the code at the
@@ -409,6 +389,40 @@ export class AuthService {
       email: dto.email,
       expired_date: expiresAt.toISOString(),
     };
+  }
+
+  /**
+   * Affiliate code wire format: first 8 chars = inviter member code, remainder
+   * = network legacyId (optional). Both new codes (`randomUUID` slice) and
+   * legacy ones (base36 in [36^7, 36^8)) are exactly 8 chars, so the split is
+   * fixed. Shared by the email and phone register paths so the two can't drift
+   * on how the code is parsed.
+   */
+  private async resolveAffiliateCode(affiliateCode: string | undefined): Promise<{
+    inviterId?: string;
+    inviterNetworkId?: string;
+  }> {
+    if (!affiliateCode) return {};
+
+    const inviter = await prisma.member.findUnique({
+      where: { affiliateCode: affiliateCode.slice(0, 8) },
+      select: { id: true },
+    });
+
+    let inviterNetworkId: string | undefined;
+    const networkLegacyPart = affiliateCode.slice(8);
+    if (networkLegacyPart) {
+      const networkLegacyId = Number.parseInt(networkLegacyPart, 10);
+      if (Number.isFinite(networkLegacyId)) {
+        const net = await prisma.network.findUnique({
+          where: { legacyId: networkLegacyId },
+          select: { id: true },
+        });
+        if (net) inviterNetworkId = net.id;
+      }
+    }
+
+    return { inviterId: inviter?.id, inviterNetworkId };
   }
 
   private async generateUniqueMemberCode(): Promise<string> {
@@ -1128,6 +1142,13 @@ export class AuthService {
 
     const passwordHash = await bcrypt.hash(dto.password, 10);
 
+    // Affiliate attribution, same wire format as the email register path. The
+    // code reaches here from the invite deeplink the FE carries into the phone
+    // register form; without it `inviter_id` stays NULL and the click is lost.
+    // Network suffix is parsed but unused here — phone-register joins only the
+    // community networks below.
+    const { inviterId } = await this.resolveAffiliateCode(dto.affiliateCode);
+
     let member;
     if (existing) {
       // Abandoned-at-OTP placeholder: overwrite in place instead of erroring.
@@ -1140,6 +1161,10 @@ export class AuthService {
           passwordAlgo: 'bcrypt',
           fullName: dto.name,
           phoneCode,
+          // undefined when no code was sent (or it resolved to nothing) —
+          // Prisma skips the column, so an inviter already on the placeholder
+          // survives. Mirrors the email register path.
+          inviterId,
         },
         select: { id: true, legacyId: true, phone: true, phoneCode: true },
       });
@@ -1157,6 +1182,7 @@ export class AuthService {
             phoneCode,
             code: memberCode,
             affiliateCode: memberCode,
+            inviterId,
             isActive: false,
             isEmailVerified: false,
             isPhoneVerified: false,

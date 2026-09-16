@@ -1,5 +1,5 @@
-import { IsString, Length, Matches, MinLength } from 'class-validator';
-import { ApiProperty } from '@bb/common/openapi/decorators';
+import { IsOptional, IsString, Length, Matches, MinLength } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@bb/common/openapi/decorators';
 
 export class RegisterByPhoneDto {
   @ApiProperty({ example: '8111111111', description: 'Phone number without country code' })
@@ -21,6 +21,15 @@ export class RegisterByPhoneDto {
   @IsString()
   @MinLength(8)
   password!: string;
+
+  @ApiPropertyOptional({
+    example: 'JD000001-42',
+    description:
+      'Affiliate code from the invite deeplink. First 8 chars = inviter member code; remaining chars = network legacy id (parsed but unused on this path). Binds `inviterId` on register.',
+  })
+  @IsOptional()
+  @IsString()
+  affiliateCode?: string;
 }
 
 export class PhoneVerificationResponseDto {
