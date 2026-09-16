@@ -262,6 +262,10 @@ model CommsDelivery {
   type             String
   recipient        String?
   status           String /// SENT | FAILED
+  /// Which WhatsApp provider ran ('qontak', 'cekat'). NULL for email, and for a
+  /// failure that happened before a provider was picked — which reads as "never got
+  /// that far", not as "provider unknown".
+  provider         String?
   providerResponse String?  @map("provider_response")
   attempt          Int      @default(1)
   createdAt        DateTime @default(now()) @map("created_at")

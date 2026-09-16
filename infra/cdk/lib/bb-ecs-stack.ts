@@ -368,20 +368,29 @@ export class BbEcsStack extends cdk.Stack {
         SES_FROM: 'BrainBoost <no-reply@brainboost.id>',
         SHOP_BASE_URL: 'https://shop.brainboost.id',
       },
-      // Qontak (WhatsApp OTP) — dipakai bb-comms SAJA, jadi di-scope ke container ini
-      // (bukan shared `secrets` map yang kena mobile-api/relay/cron juga). CLIENT_ID/
-      // SECRET/USERNAME/PASSWORD = kredensial (Go baca via os.Getenv, tanpa default →
-      // wajib ada). BASE_URL/CHANNEL_INTEGRATION_ID/OTP_TEMPLATE_ID punya default di
-      // config.go tapi di-override dari secret. Semua 7 key sudah ada di bb/prod/app.
+      // Kredensial provider WhatsApp — dipakai bb-comms SAJA, jadi di-scope ke
+      // container ini (bukan shared `secrets` map yang kena mobile-api/relay/cron).
+      // Dibaca `wa.EnvCredentials` lewat pemindaian prefix `QONTAK_`, jadi provider
+      // berikutnya cukup menambah blok `CEKAT_*` di sini tanpa perubahan kode.
+      //
+      // BASE_URL / CHANNEL_INTEGRATION_ID / OTP_TEMPLATE_ID SENGAJA TIDAK ADA lagi:
+      // ketiganya bukan rahasia dan pindah ke `app_settings` (`wa.qontak.*`) supaya
+      // template yang ditolak Meta atau provider yang bermasalah bisa diganti ops
+      // tanpa deploy. Key-nya masih ada di bb/prod/app — dibiarkan, tidak dibaca.
+      // Lihat docs/wa-provider-switch.md.
+      //
+      // Kredensial tetap di env untuk sekarang (§10 dokumen itu). Rotasi masih
+      // berarti restart task; pemindahan ke Secrets Manager/Parameter Store menyusul.
       secrets: {
         ...secrets,
-        QONTAK_BASE_URL: sm('QONTAK_BASE_URL'),
         QONTAK_CLIENT_ID: sm('QONTAK_CLIENT_ID'),
         QONTAK_CLIENT_SECRET: sm('QONTAK_CLIENT_SECRET'),
         QONTAK_USERNAME: sm('QONTAK_USERNAME'),
         QONTAK_PASSWORD: sm('QONTAK_PASSWORD'),
-        QONTAK_CHANNEL_INTEGRATION_ID: sm('QONTAK_CHANNEL_INTEGRATION_ID'),
-        QONTAK_OTP_TEMPLATE_ID: sm('QONTAK_OTP_TEMPLATE_ID'),
+        // Cekat: satu API key statis, tanpa OAuth. Key-nya harus ditambahkan ke
+        // bb/prod/app lebih dulu — `sm()` merujuk key di dalam secret itu, dan key
+        // yang tidak ada bikin task gagal start.
+        CEKAT_API_KEY: sm('CEKAT_API_KEY'),
       },
       logging: ecs.LogDrivers.awsLogs({ streamPrefix: 'bb-comms', logGroup: logGroup('bb-comms') }),
     });

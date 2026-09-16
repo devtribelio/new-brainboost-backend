@@ -196,6 +196,65 @@ const SETTINGS: Array<{ key: string; value: string; description: string }> = [
     value: '',
     description:
       'Watermark sweep, DITULIS OLEH JOB — bukan setelan operator. Jangan diedit manual: memundurkannya menyuruh job memindai ulang (aman, unique guard), memajukannya melewatkan pembeli secara permanen.',
+  // --- provider WhatsApp ------------------------------------------------------
+  // Provider aktif + template id-nya hidup di sini, BUKAN di env, supaya template
+  // yang ditolak Meta atau provider yang bermasalah bisa diganti ops dalam hitungan
+  // menit tanpa deploy. Kredensialnya TETAP di env untuk sekarang (lihat
+  // docs/wa-provider-switch.md §10) — yang pindah ke sini hanya yang tidak rahasia.
+  {
+    key: 'wa.provider',
+    value: 'qontak',
+    description:
+      'Provider WhatsApp aktif untuk SEMUA pesan WhatsApp (OTP + voucher). Harus salah satu yang adaptornya sudah dideploy di bb-comms — nama tak dikenal membuat setiap kiriman WhatsApp gagal ke DLQ. Perubahan terbaca bb-comms <= 60 detik, tanpa deploy.',
+  },
+  {
+    key: 'wa.qontak.baseUrl',
+    value: 'https://service-chat.qontak.com',
+    description: 'Origin API Qontak. Kosong = pakai default di adaptor.',
+  },
+  {
+    key: 'wa.qontak.channelIntegrationId',
+    value: '9fe63a0f-e6c7-4a2e-b1ad-d12e69b5706c',
+    description: 'Pengenal integrasi channel WhatsApp di Qontak. Bukan rahasia.',
+  },
+  {
+    key: 'wa.qontak.template.otp',
+    value: '453e330c-64d6-434c-ba3e-900afd0da366',
+    description:
+      'ID template OTP di Qontak — UUID terbitan QONTAK, bukan ID numerik Meta (dua namespace berbeda; hanya UUID yang diterima endpoint broadcast). Satu template ini melayani SEMUA keperluan OTP; variabelnya cuma kodenya, jadi pesannya tidak bisa menyebut OTP itu untuk apa.',
+  },
+  // --- Cekat: provider kedua, adaptornya BELUM ada di bb-comms -----------------
+  // Nilai-nilai ini boleh diisi lebih dulu; `wa.provider` tetap qontak sampai
+  // adaptornya dideploy DAN ada uji yang berhasil. Memilih 'cekat' sebelum itu
+  // ditolak backoffice (tidak ada di `wa.supportedProviders`).
+  {
+    key: 'wa.cekat.baseUrl',
+    value: 'https://api.cekat.ai',
+    description: 'Origin API Cekat. Auth-nya API key statis di header `api_key`, bukan OAuth seperti Qontak.',
+  },
+  {
+    key: 'wa.cekat.inboxId',
+    value: 'ddd687f2-95ce-41ae-b3a1-f30757257d4f',
+    description:
+      'Inbox Cekat = SATU nomor WhatsApp Business. Menentukan pesan keluar dari nomor mana — salah inbox berarti OTP datang dari nomor yang bukan nomor resmi, dan itu terkirim tanpa error. Padanan channel_integration_id di Qontak.',
+  },
+  {
+    key: 'wa.cekat.template.otp',
+    value: '',
+    description:
+      'wa_template_id template OTP di Cekat. KOSONG: belum ada template OTP yang disetujui di sana, jadi Cekat belum bisa mengambil alih OTP. Isi setelah templatnya lolos review Meta di bawah akun Cekat — template tidak berpindah antar provider.',
+  },
+  {
+    key: 'wa.cekat.template.firstPurchaseVoucher',
+    value: '2285965248914372',
+    description:
+      "wa_template_id template `first_time_buyer` di Cekat (APPROVED, kategori MARKETING, bahasa id, 4 variabel). Angka — bentuknya berbeda dengan UUID milik Qontak; tiap provider punya namespace sendiri, jadi id ini TIDAK bisa dipakai di baris wa.qontak.*. Jangan tertukar dengan waba_id (1368529094981820), yang menunjuk akun WhatsApp Business, bukan template.",
+  },
+  {
+    key: 'wa.qontak.template.firstPurchaseVoucher',
+    value: '',
+    description:
+      'ID template voucher pembeli pertama di Qontak. Kosong = kiriman WhatsApp-nya dilewati dengan log, bukan DLQ — template ini kategori MARKETING dan harus lolos review Meta dulu. Isi setelah disetujui.',
   },
 ];
 
