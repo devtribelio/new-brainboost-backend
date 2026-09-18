@@ -101,52 +101,44 @@ disagree by construction.
 
 ## Where this differs from your proposal
 
-### 1. `dimmed` in the past — CORRECTED 2026-09-15
+### 1. `dimmed` — CORRECTED TWICE, read this one
 
-**An earlier version of this document told you a past month contains no `dimmed`
-cells, ever. That was wrong, and it is now fixed in the backend.** Your original
-example — `2026-09-02` as `dimmed` with `today` = `2026-09-04` — is reachable after
-all. Please restore it.
+Two earlier versions of this document were wrong about the same field. Sorry — the
+rule genuinely changed under us both times, and this section is now the only one to
+trust.
 
-The reasoning that produced the wrong answer is worth stating, because half of it is
-still true. Grace is anchored on **today** for the streak *walk*: a missed day extends
-the streak only while it sits within `graceDays` listening days of today. That anchor
-is load-bearing and has not changed — nothing is stored, so forgiving gap-relatively
-in the walk would revive every single-day gap in a member's history the moment grace
-shipped, and a streak broken in May would come back as 90 days.
+- **v1** said a past month contains no `dimmed` cells, ever. Wrong.
+- **v2** (15 Sep) said any past miss the member came back from is `dimmed`. Also
+  wrong, and worse: it made the calendar paint a frozen day while the streak number
+  printed above it said the streak had broken there.
 
-But that argument is about the **number**. Drawing a past cell never feeds the walk,
-so it costs nothing — and reading past cells off today's walk made the calendar a
-projection from today rather than a record. A member who listened on the 8th and the
-10th saw a streak of 3 with the 9th frozen when they looked on the 10th; opening the
-same calendar days later, the 9th had become a plain miss. The streak the app had
-shown them was silently taken back.
+**What the rule is now.** A freeze is **earned**: every `streak.freezeEarnEvery`
+qualifying days inside a streak grant one, and that rate is the whole limit — there is
+no ceiling on top of it. A missed day is
+`dimmed` when the streak had a freeze to spend on it and the member came back; it is
+`none` otherwise. The verdict is permanent — a freeze does **not** expire, so a day
+frozen on Thursday is still frozen when the member opens the calendar in December.
 
-**Two rules now feed `dimmed`, by which window the day is in:**
+Your original example (`2026-09-02` as `dimmed` with `today` = `2026-09-04`) is
+reachable, provided that member had earned a freeze by the 2nd.
 
-| Day | Rule | Means |
-|---|---|---|
-| Within `graceDays` of `today` (window still open) | the live walk | "you missed it, and you can still save the streak" |
-| Older than that (window closed) | a **confirmed bridge** — the whole run of misses is ≤ `graceDays` long *and* is bounded by a qualifying day on **both** sides | "you missed it, and the streak really did survive" |
+**Why v2 was wrong**, since it explains a screenshot you may already have. Grace used
+to be measured from today, which made a spent freeze silently expire. Measured on the
+tester account: listened the 15th, missed the 16th, listened the 17th → streak 2 with
+the 16th frozen. Listened **again** on the 18th → streak still 2, because by then the
+16th was two days back and the walk refused to cross it. So the calendar said "you
+missed it, but your streak survived" next to a number that said it had not. The walk
+and the cells now come out of one pass, so they cannot disagree by construction.
 
-So a past `dimmed` cell is a fact about what happened, and it stays put.
+**What this means for you:**
 
-A miss the member never came back from is **still** a plain `none`, whenever it was:
-the bridge needs a qualifying day after the gap. A gap longer than `graceDays` is
-`none` too — the streak genuinely died there.
-
-What did **not** change: `currentStreak`, `qualifiedDays`, `earliestMonth`, and every
-field on `/stats/home` (`streakDays`, `streak.state`, `streak.restoreDeadline`). No
-field was added or removed, so **no client release is needed**.
-
-`graceDays` is runtime-configurable (`app_settings` → `streak.graceDays`, currently
-`1`). At `N`, a bridged gap can be up to `N` days wide. **Do not hardcode 1** — read
-the shape from the response.
-
-Still true, and worth knowing because it explains an oddity you may have seen: on a
-Monday the headline can report `state: "dimmed"` with a live `restoreDeadline` while
-`weeklyStreak` contains no `dimmed` cell — the frozen day is in the previous week,
-outside the seven-day window. The monthly calendar shows the day the strip cannot.
+- `dimmed` can appear on **any** past date, not just yesterday.
+- A member with a short history will see **fewer** `dimmed` cells than under v2 — they
+  had not earned a freeze yet. That is correct, not a regression.
+- Do not infer the quota from the payload. It is not returned, and the earn rate is
+  runtime-configurable. If you want to render "2 hari beku tersisa", say so and we
+  will add it — it is derivable and cheap, we just did not want to ship a number
+  nobody asked for.
 
 ### 2. `longestRun` bridges a frozen day, and is clipped to the month
 
@@ -160,12 +152,11 @@ routinely **smaller than `currentStreak`**, which is correct but reads badly
 under a bare "Streak terpanjang" label. Recommend the copy says "bulan ini",
 or tell us and we will return an unclipped figure instead.
 
-**`longestRun` moves with the §1 correction.** Because a frozen day bridges the run,
-a past month that now shows a `dimmed` cell reports a longer run than it did before.
-Measured on a real member: September went from `2` to `3` — 7th, 8th, [9th frozen],
-10th, which is the run they actually had. Nothing else on the response moved. This is
-the one number on screen that changes without a client release, so it is worth a look
-before you ship.
+**`longestRun` moves with the §1 correction**, in both directions. A frozen day
+bridges the run, so a month that gains a `dimmed` cell reports a longer run — and a
+month that loses one (the member had not earned the freeze) reports a shorter one.
+Nothing else on the response moved. This and `currentStreak` are the numbers on screen
+that change without a client release, so they are worth a look before you ship.
 
 ### 3. `earliestMonth` comes from the first **tracked** day
 

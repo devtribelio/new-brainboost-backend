@@ -5,138 +5,183 @@ import { addDays, dayKey } from './tracker.time';
  *
  * - `burning`  — this listening day already qualifies.
  * - `at_risk`  — not yet today, but yesterday qualified. The number still stands.
- * - `dimmed`   — yesterday did NOT qualify and grace is carrying the streak; the
+ * - `dimmed`   — yesterday did NOT qualify and a freeze is carrying the streak; the
  *                member can revive it by listening 10 minutes before the day closes.
  * - `none`     — no streak.
  */
 export type StreakState = 'burning' | 'at_risk' | 'dimmed' | 'none';
 
+/** What a single past day looks like on a calendar. `at_risk`/`future` are today-relative
+ *  and decided by the caller, never by the walk. */
+export type StreakDayState = 'burning' | 'dimmed' | 'none';
+
+export interface StreakOptions {
+  /** Consecutive missed days a single gap may span and still be bridgeable. 0 = strict. */
+  graceDays?: number;
+  /** Qualifying days that earn one freeze. <= 0 disables freezes entirely (fail-safe). */
+  freezeEarnEvery?: number;
+}
+
 export interface StreakResult {
   days: number;
   state: StreakState;
   /**
-   * Missed days grace forgave. Shown ❄️ in the weekly calendar; never counted in `days`.
-   *
-   * Only days that BRIDGE the streak appear here — there is always a qualifying day
-   * further back that the walk went on to count. A gap the walk broke on forgave
-   * nothing and is reported as a plain miss instead.
+   * Missed days a freeze forgave inside the CURRENT streak. Shown ❄️ in the weekly
+   * calendar; never counted in `days`.
    */
   forgivenDays: Date[];
+  /**
+   * Every day from the member's first qualifying day to today, with the verdict the
+   * walk itself reached. This is the ONLY source a calendar or weekly strip may use:
+   * a second predicate answering the same date is how a frozen cell ends up
+   * contradicting the streak number printed above it.
+   */
+  dayStates: Map<string, StreakDayState>;
 }
 
 /**
- * Consecutive-day streak over listening days (04:00 WIB boundary), with an optional
- * grace window.
+ * The streak, and the state of every day behind it, from ONE forward pass.
  *
- * Walk backward from today. If today has not qualified *yet*, start from yesterday —
- * the streak is not broken until the day actually rolls over.
+ * ## Why a freeze is earned, not granted by recency
  *
- * A non-qualifying day is forgiven only while it sits within `graceDays` listening
- * days of TODAY; anything older ends the walk. Anchoring the window on today rather
- * than on the gap is the whole safety property: the streak is recomputed from raw
- * sessions on every read, so a gap-relative rule would forgive every single-day gap
- * in the member's entire history the moment grace is switched on. `graceDays = 0`
- * forgives nothing and reproduces the original strict walk exactly.
+ * The rule this replaces forgave a missed day only while it sat within `graceDays`
+ * of TODAY. That anchor was doing two jobs at once, and only one of them was its own.
  *
- * Used for the global streak and for the per-program challenge `day` (the caller
- * pre-filters `qualifyingDays` to one course for the latter).
+ * Its real job was to stop a read-time streak from forgiving every single-day gap in
+ * a member's history at once — without some limit, a member who listens every OTHER
+ * day has every gap forgiven and their streak becomes "days listened, ever". That
+ * hazard is real and this function still has to answer it.
+ *
+ * Its accidental job was deciding whether a freeze bridges the streak at all — and
+ * there it was actively wrong, because a freeze then silently expired. Measured on a
+ * real member: listened the 15th, missed the 16th, listened the 17th → streak 2 with
+ * the 16th frozen. Listened AGAIN on the 18th → streak still 2, because by then the
+ * 16th was two days back and the walk refused to cross it. The 15th fell off. They
+ * listened two days running after using a freeze and gained nothing; the streak
+ * shrank because time passed, not because they missed a day.
+ *
+ * So the limit moves to where it belongs: a freeze is **earned** by listening.
+ * `freezeEarnEvery` qualifying days inside the current streak earn one freeze, and a
+ * gap is bridged only if the streak had earned enough by then. The every-other-day
+ * member earns nothing (their run never reaches the bar before the next gap) and
+ * still lands on a streak of 1; a member 45 days in has earned theirs and keeps it.
+ * Nothing is stored — the quota is a function of the same rows the streak is, so it
+ * cannot drift from them.
+ *
+ * The RATE is the whole limit; there is deliberately no ceiling on top of it. A cap
+ * would only ever bind on a long streak, where it says a member two years in may take
+ * their third sick day and lose everything — while the rate already forces roughly
+ * six qualifying days per forgiven one, which is the behaviour the limit exists to
+ * require.
+ *
+ * ## Why forward, and why one pass
+ *
+ * A freeze's affordability depends on how long the run was *at that moment*, which is
+ * a fact about the past; walking backward from today cannot know it without
+ * re-walking. Going forward, `run` IS that fact.
+ *
+ * The pass also emits `dayStates` for the whole history, so the calendar reads the
+ * walk's own verdict instead of re-deriving one. That is not tidiness: two predicates
+ * answering the same date is exactly how the calendar came to paint a day frozen
+ * while the number above it said the streak had broken there.
+ *
+ * `graceDays = 0` forgives nothing and reproduces the original strict walk exactly,
+ * which is what lets this deploy independently of the product decision.
  *
  * @param qualifyingDays UTC-midnight listening-day Dates that met the threshold.
  * @param todayWIB       today's listening day (`toListeningDayWIB(now)`).
- * @param graceDays      size of the grace window in listening days; 0 = strict.
  */
+export function walkStreak(
+  qualifyingDays: Date[],
+  todayWIB: Date,
+  opts: StreakOptions = {},
+): StreakResult {
+  const graceDays = opts.graceDays ?? 0;
+  const earnEvery = opts.freezeEarnEvery ?? 0;
+
+  const qualifying = new Set(qualifyingDays.map(dayKey));
+  const dayStates = new Map<string, StreakDayState>();
+  if (qualifying.size === 0) {
+    return { days: 0, state: 'none', forgivenDays: [], dayStates };
+  }
+
+  /** Has this run earned the freezes it is about to spend? */
+  const affordable = (run: number, spent: number, want: number): boolean => {
+    if (graceDays <= 0 || earnEvery <= 0) return false;
+    return spent + want <= Math.floor(run / earnEvery);
+  };
+
+  const sorted = [...qualifyingDays].sort((a, b) => a.getTime() - b.getTime());
+  const start = sorted[0];
+
+  let run = 0;
+  let spent = 0;
+  let frozen: Date[] = [];
+  /** Missed days since the last qualifying one. Undecided until a qualifying day
+   *  arrives (they bridge) or the gap outgrows what the streak can pay for. */
+  let pending: Date[] = [];
+
+  const breakStreak = () => {
+    for (const p of pending) dayStates.set(dayKey(p), 'none');
+    pending = [];
+    run = 0;
+    spent = 0;
+    frozen = [];
+  };
+
+  for (let d = start; d.getTime() <= todayWIB.getTime(); d = addDays(d, 1)) {
+    if (qualifying.has(dayKey(d))) {
+      if (pending.length > 0) {
+        // The gap ended here, so now we know whether it was bridgeable.
+        for (const p of pending) dayStates.set(dayKey(p), 'dimmed');
+        spent += pending.length;
+        frozen.push(...pending);
+        pending = [];
+      }
+      dayStates.set(dayKey(d), 'burning');
+      run += 1;
+      continue;
+    }
+
+    // TODAY is not a miss — it has not finished yet. The streak is not broken until
+    // the day actually rolls over, which is what `at_risk` means: a member at 20:00
+    // who has not listened tonight still has their number. Counting it as a miss
+    // resets every streak in the app for most of every day.
+    if (d.getTime() === todayWIB.getTime()) break;
+
+    pending.push(d);
+    // Decide as soon as the gap becomes unpayable, so a trailing run of misses
+    // resets the streak without waiting for a qualifying day that never comes.
+    if (pending.length > graceDays || !affordable(run, spent, pending.length)) breakStreak();
+  }
+
+  // Days still pending at the tail are inside a gap the streak can currently afford:
+  // undecided, revivable, and rendered as frozen until the member misses one too many.
+  for (const p of pending) dayStates.set(dayKey(p), 'dimmed');
+
+  let state: StreakState;
+  if (run === 0) state = 'none';
+  else if (qualifying.has(dayKey(todayWIB))) state = 'burning';
+  else if (qualifying.has(dayKey(addDays(todayWIB, -1)))) state = 'at_risk';
+  else state = 'dimmed';
+
+  return { days: run, state, forgivenDays: [...frozen, ...pending], dayStates };
+}
+
+/** Streak length + state. Thin wrapper kept for callers that do not need `dayStates`. */
 export function computeStreakState(
   qualifyingDays: Date[],
   todayWIB: Date,
-  graceDays = 0,
+  opts: StreakOptions = {},
 ): StreakResult {
-  const set = new Set(qualifyingDays.map(dayKey));
-  const qualifiedToday = set.has(dayKey(todayWIB));
-  const forgivenDays: Date[] = [];
-  const pendingForgiven: Date[] = [];
-
-  let cursor = qualifiedToday ? todayWIB : addDays(todayWIB, -1);
-  let days = 0;
-
-  for (;;) {
-    if (set.has(dayKey(cursor))) {
-      days += 1;
-      // The walk got past the gap, so those days really did bridge two qualifying
-      // days. Only now are they forgiven.
-      forgivenDays.push(...pendingForgiven);
-      pendingForgiven.length = 0;
-    } else if ((todayWIB.getTime() - cursor.getTime()) / 86_400_000 <= graceDays) {
-      pendingForgiven.push(cursor);
-    } else {
-      break;
-    }
-    cursor = addDays(cursor, -1);
-  }
-  // Anything still pending is dropped on purpose: the walk broke right after it, so
-  // it joined a qualifying day to nothing. A member who has never listened, or whose
-  // streak died days ago, must not be shown a frozen day forgiving a streak that was
-  // not there — `days === 0 ⇒ forgivenDays === []` falls out of this, no special case.
-
-  let state: StreakState;
-  if (days === 0) state = 'none';
-  else if (qualifiedToday) state = 'burning';
-  else if (set.has(dayKey(addDays(todayWIB, -1)))) state = 'at_risk';
-  else state = 'dimmed';
-
-  return { days, state, forgivenDays };
+  return walkStreak(qualifyingDays, todayWIB, opts);
 }
 
 /** Streak length only — the shape callers that don't care about state still use. */
-export function computeStreak(qualifyingDays: Date[], todayWIB: Date, graceDays = 0): number {
-  return computeStreakState(qualifyingDays, todayWIB, graceDays).days;
-}
-
-const DAY_MS = 86_400_000;
-
-/**
- * Past misses a later qualifying day actually rescued — the ❄️ a CALENDAR should
- * draw once the grace window on that day has closed.
- *
- * `computeStreakState` answers "where does the streak stand right now", so the days
- * it forgives are the ones within `graceDays` of TODAY. Reading a past cell off that
- * result means the calendar's history is a projection from today rather than a
- * record: a day that was ❄️ when the member looked on Thursday is drawn as a plain
- * miss on Sunday, and the streak the app showed them is silently un-shown.
- *
- * This is NOT the gap-relative forgiveness the walk refuses. The walk must stay
- * today-anchored — nothing is stored, so forgiving gap-relatively there would revive
- * every single-day gap in the member's history the moment grace ships. That argument
- * is about the NUMBER. Rendering a cell never feeds the walk, so it costs nothing:
- * `days`, `state` and `currentStreak` are untouched by this function.
- *
- * A miss is rescued when the whole run of consecutive misses it belongs to is at most
- * `graceDays` long AND is bounded by a qualifying day on BOTH sides — which is the
- * same thing `computeStreakState` means by moving `pendingForgiven` into
- * `forgivenDays` only once the walk reaches a qualifying day beyond the gap. A gap the
- * member never came back from stays a plain miss, here as there.
- *
- * Callers union this with the walk's own `forgivenDays` rather than replacing them:
- * inside the still-open window the walk is deliberately optimistic (yesterday is ❄️
- * while it can still be revived, before any qualifying day exists after it), and that
- * verdict must win. The two can never contradict — a bridge needs a qualifying day
- * after the gap, and if one exists inside the open window the walk forgave the gap too.
- *
- * `graceDays = 0` returns nothing, so the strict mode is byte-for-byte unchanged.
- */
-export function confirmedBridgeDays(
+export function computeStreak(
   qualifyingDays: Date[],
-  graceDays = 0,
-): Date[] {
-  if (graceDays <= 0 || qualifyingDays.length < 2) return [];
-
-  const sorted = [...qualifyingDays].sort((a, b) => a.getTime() - b.getTime());
-  const bridged: Date[] = [];
-  for (let i = 1; i < sorted.length; i++) {
-    const prev = sorted[i - 1];
-    const next = sorted[i];
-    const gap = Math.round((next.getTime() - prev.getTime()) / DAY_MS) - 1;
-    if (gap < 1 || gap > graceDays) continue;
-    for (let d = 1; d <= gap; d++) bridged.push(new Date(prev.getTime() + d * DAY_MS));
-  }
-  return bridged;
+  todayWIB: Date,
+  opts: StreakOptions = {},
+): number {
+  return walkStreak(qualifyingDays, todayWIB, opts).days;
 }

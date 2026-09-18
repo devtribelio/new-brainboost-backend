@@ -201,11 +201,12 @@ describe('streakCalendar keeps a historical frozen day (real Postgres)', () => {
   let memberId = '';
 
   const today = toListeningDayWIB(new Date());
-  //  -8, -7 qualify · -6 MISSED (bridged, they came back) · -5 qualify
-  //  -4 .. today: nothing at all, so the streak is long dead and today's walk
-  //  forgives nothing. graceDays is 1 by default, which is what makes -6 a bridge.
-  const qualify = [-8, -7, -5].map((b) => addDays(today, b));
-  const bridged = addDays(today, -6);
+  //  -12 .. -6 qualify (seven days, which EARNS one freeze at the default rate)
+  //  -5 MISSED, and spent on — they came back on -4
+  //  -3 .. today: nothing at all, so the streak is long dead and today's walk
+  //  forgives nothing. That is the point: the frozen cell must survive anyway.
+  const qualify = [-12, -11, -10, -9, -8, -7, -6, -4].map((b) => addDays(today, b));
+  const bridged = addDays(today, -5);
 
   beforeAll(async () => {
     const m = await prisma.member.create({
@@ -244,17 +245,20 @@ describe('streakCalendar keeps a historical frozen day (real Postgres)', () => {
 
   it('still reports the days the member never came back from as plain misses', async () => {
     const res = await stats.streakCalendar(memberId, monthKey(addDays(today, -1)));
-    for (const back of [4, 3, 2, 1]) {
+    for (const back of [3, 2, 1]) {
       const d = res.days.find((x) => x.date === dayKey(addDays(today, -back)));
       if (d) expect(d.state).toBe('none');
     }
   });
 
   it('counts the frozen day as bridging the run, not breaking it', async () => {
+    // Only meaningful when the whole fixture sits in one month — `longestRun` is
+    // clipped at month edges, so a run split across the 1st reports two smaller ones.
+    if (monthKey(addDays(today, -12)) !== monthKey(addDays(today, -4))) return;
     const res = await stats.streakCalendar(memberId, monthKey(bridged));
-    // -8, -7, [-6 frozen], -5 → a run of 3 qualifying days, clipped to this month.
-    // Without the frozen cell the same window reports 2.
-    expect(res.longestRun).toBeGreaterThanOrEqual(3);
+    // -12..-6, [-5 frozen], -4 → eight qualifying days in one unbroken run.
+    // Without the frozen cell the same window reports 7 and 1.
+    expect(res.longestRun).toBe(8);
   });
 });
 

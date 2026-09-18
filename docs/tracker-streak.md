@@ -199,32 +199,45 @@ Efek pada tiga kasus insiden: semuanya putus satu hari lalu langsung dengar lagi
 **Terbangun (BE):** state machine 4 state + jendela grace + field API baru.
 
 - `computeStreakState(qualifyingDays, todayWIB, graceDays)` di `tracker.streak.ts`; `computeStreak()` tetap ada sebagai pembungkus yang cuma mengembalikan angka.
-- **Grace di-anchor ke HARI INI, bukan ke gap.** Hari kosong dimaafkan hanya bila jaraknya ≤ `graceDays` hari dengar dari hari ini. Ini bukan pilihan tuning — streak dihitung ulang dari baris mentah tiap kali dibaca dan tidak ada state tersimpan, jadi aturan relatif-gap ("maafkan setiap bolong satu hari") akan menghidupkan **seluruh** bolong satu hari sepanjang riwayat member begitu grace nyala; streak yang putus Mei balik jadi 90 hari. Aturan window ini menggantikan kebutuhan tabel `streak_restore` untuk urusan korektnes.
-- Hari yang dimaafkan dikembalikan di `forgivenDays` (❄️ di kalender mingguan) dan **tidak** menambah `days`.
-- **Dua sumber ❄️, dipisah berdasarkan jendela (dikoreksi 2026-09-15).** `forgivenDays`
-  hanya pernah mencakup `graceDays` hari terakhir, jadi membaca sel masa lalu dari
-  situ membuat riwayat kalender jadi proyeksi dari hari ini: hari yang ❄️ saat member
-  melihatnya hari Kamis digambar sebagai bolong biasa hari Minggu, dan streak yang
-  sudah terlanjur ditunjukkan ke dia ditarik diam-diam. Sekarang `confirmedBridgeDays`
-  (`tracker.streak.ts`) mengurus hari yang **jendelanya sudah tutup**: bolong
-  dimaafkan kalau seluruh rentang bolong berurutan itu ≤ `graceDays` **dan** diapit
-  hari qualify di **kedua** sisi — artinya member memang balik dan streak-nya benar
-  selamat. Hasilnya di-**union** dengan `forgivenDays`, tidak menggantikannya: selama
-  jendela masih buka walk sengaja optimis (kemarin ❄️ selagi masih bisa diselamatkan,
-  padahal belum ada hari qualify sesudahnya) dan vonis itu yang menang. Keduanya tidak
-  bisa bertabrakan — bridge butuh hari qualify sesudah gap, dan kalau itu ada di dalam
-  jendela yang masih buka, walk sudah memaafkan gap-nya juga.
-- **Ini BUKAN pengampunan relatif-gap yang ditolak di atas.** Yang ditolak adalah
-  memaafkan di dalam *walk*, karena walk itulah yang menghasilkan angka. `confirmedBridgeDays`
-  tidak pernah menyentuh walk: `days`, `state`, `restoreDeadline`, `streakDays` dan
-  `currentStreak` semuanya tidak berubah. Yang berubah hanya rupa satu sel — plus
-  `longestRun`, yang memang sudah menganggap ❄️ menyambung run. Di `graceDays = 0`
-  fungsinya mengembalikan kosong, jadi mode strict tetap identik.
+- **Freeze DIPEROLEH, bukan diberikan oleh kebaruan (dikoreksi 2026-09-18).** Aturan
+  sebelumnya memaafkan hari kosong hanya bila jaraknya ≤ `graceDays` hari dengar dari
+  HARI INI. Anchor itu merangkap dua pekerjaan, dan hanya satu yang memang miliknya.
+  - Pekerjaan aslinya: mencegah streak yang dihitung ulang tiap baca memaafkan
+    seluruh bolong satu hari sepanjang riwayat sekaligus. Tanpa batas apa pun, member
+    yang dengar **selang-seling** punya semua gap-nya dijembatani dan streak-nya jadi
+    "jumlah hari dengar seumur hidup". Bahaya ini nyata dan tetap harus dijawab.
+  - Pekerjaan sampingannya: memutuskan apakah freeze menyambung streak — dan di situ
+    dia salah, karena freeze jadi **kedaluwarsa diam-diam**. Terukur pada member asli
+    di staging: dengar 15, bolos 16, dengar 17 → streak 2 dengan 16 beku. Dengar
+    **lagi** 18 → streak **tetap 2**, karena 16 sudah 2 hari ke belakang dan walk
+    menolak menyeberanginya; tanggal 15 ikut lepas. Dengar dua hari berturut-turut
+    setelah pakai freeze tidak menambah apa pun — streak menyusut karena waktu
+    berlalu, bukan karena member bolos.
+- Jadi batasnya pindah ke tempat yang benar: `freezeEarnEvery` hari qualify di dalam
+  streak berjalan memberi satu freeze, dan sebuah gap dijembatani hanya kalau streak-nya sudah cukup mengumpulkan saat itu. Member selang-seling tidak
+  pernah mencapai bar di antara gap dan berhenti di streak 1; member yang sudah 45 hari
+  jelas sudah membayarnya. **Tidak ada yang disimpan** — kuotanya fungsi dari baris yang
+  sama dengan streak-nya, jadi tidak bisa melenceng darinya.
+- `graceDays` sekarang berarti **lebar gap** yang boleh dijembatani (berapa hari kosong
+  berurutan), bukan jendela dari hari ini.
+- **Satu walk maju, bukan dua predikat.** `walkStreak` menelusuri riwayat dari hari
+  qualify pertama sampai hari ini sekali jalan dan mengeluarkan `dayStates`
+  (`burning`/`dimmed`/`none`) untuk **setiap** hari, dan angka streak adalah properti
+  dari walk yang sama. Ini bukan kerapian: dua predikat yang menjawab tanggal yang sama
+  persis penyebab kalender sempat mengecat satu hari beku sementara angka di atasnya
+  bilang streak putus di situ. Maju, karena keterjangkauan sebuah freeze bergantung pada
+  panjang run **saat itu** — fakta masa lalu yang walk mundur tidak bisa tahu tanpa
+  menelusuri ulang.
+- Hari yang dimaafkan dikembalikan di `forgivenDays` (❄️ di kalender) dan **tidak**
+  menambah `days`.
+- **HARI INI bukan bolos.** Hari berjalan belum selesai, jadi dia tidak pernah memutus
+  streak — itu arti `at_risk`. Menghitungnya sebagai bolos akan me-reset streak semua
+  member selama hampir sepanjang hari.
 - `graceDays` runtime-configurable: `app_settings` key `streak.graceDays` (`SETTING_KEYS.streakGraceDays`, fallback `GRACE_DAYS_DEFAULT` = 1, di-seed 1). Berlaku untuk streak global **dan** challenge per program.
-- `graceDays = 0` → `dimmed` tidak pernah tercapai dan jalannya persis seperti versi strict. Itu yang bikin kode ini bisa masuk terpisah dari keputusan produk.
+- `graceDays = 0` **atau** `freezeEarnEvery = 0` → `dimmed` tidak pernah tercapai dan jalannya persis seperti versi strict. Nilai yang hilang atau tidak terbaca jatuh ke strict, tidak pernah ke tanpa-batas. Itu yang bikin kode ini bisa masuk terpisah dari keputusan produk.
 - **Perlakukan perubahan nilainya sebagai saklar produk, bukan knob.** `streakDays` di root sudah dirender semua build app yang beredar, jadi flip mengubah angka yang dilihat member tanpa rilis client. Nyalakan **setelah** migrasi `local_day` dan backfill Firebase selesai, kalau tidak angkanya bergerak dua kali.
 
-**Sengaja tidak dibangun:** tabel `streak_restore` (kebijakan A di §5.3). Yang bikin tabel itu load-bearing adalah pencegahan pengampunan retroaktif, dan itu sudah ditutup jendela today-anchored. Tabel baru layak ditambah kalau produk mau kuota yang tampil di UI — mekanismenya menumpuk, bukan mengganti.
+**Sengaja tidak dibangun:** tabel `streak_restore` (kebijakan A di §5.3). Kuotanya ada, tapi **diturunkan dari data**, bukan disimpan — sifat "tidak ada state tersimpan" itulah yang menopang seluruh fitur ini, dan tabel konsumsi memaksa pertanyaan "kapan freeze dicatat terpakai?" yang jalur baca tidak boleh jawab dengan menulis. Tabel baru layak ditambah kalau produk mau kuota yang **tampil** di UI (sisa jatah, tanggal reset) — mekanismenya menumpuk, bukan mengganti.
 
 **Belum dibangun:** push terancam/padam (§5.4).
 

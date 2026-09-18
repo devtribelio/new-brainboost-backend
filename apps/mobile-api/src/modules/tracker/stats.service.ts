@@ -2,6 +2,7 @@ import { prisma } from '@bb/db';
 import { settingsService, SETTING_KEYS } from '@bb/common/services/settings.service';
 import {
   DAY_BOUNDARY_HOURS,
+  FREEZE_EARN_EVERY_DEFAULT,
   GRACE_DAYS_DEFAULT,
   MIN_SESSION_SEC_DEFAULT,
   MIN_QUALIFY_SEC_DEFAULT,
@@ -16,8 +17,8 @@ import {
   toListeningDayWIB,
   weekStartMondayWIB,
 } from './tracker.time';
-import { computeStreak, computeStreakState, confirmedBridgeDays } from './tracker.streak';
-import type { StreakResult } from './tracker.streak';
+import { computeStreak, walkStreak } from './tracker.streak';
+import type { StreakDayState, StreakResult } from './tracker.streak';
 import type { StatsHomeDto, WeeklyStreakEntryDto } from './dto/stats-home.dto';
 import type { CourseStatsDto } from './dto/course-stats.dto';
 import type { StreakCalendarDayDto, StreakCalendarDto } from './dto/streak-calendar.dto';
@@ -41,57 +42,45 @@ function qualifyingDays(
 }
 
 /**
- * Every day that should render ❄️, for one member, right now.
+ * Read the three streak settings in one go.
  *
- * Two sources, unioned, because they answer the day at two different moments:
- *  - the walk's own `forgivenDays` — the still-open window, where a missed day is
- *    forgiven optimistically while it can still be revived;
- *  - `confirmedBridgeDays` — the closed window, where a missed day is forgiven only
- *    because the member actually came back and the streak really did survive it.
- *
- * Without the second, every surface reads the past off today's walk, so a day drawn
- * ❄️ on Thursday is a plain miss by Sunday and the streak the member was shown gets
- * quietly taken back. The walk is untouched: this only decides what a cell looks
- * like, never how long the streak is.
- *
- * Built once per request and handed to both the strip and the calendar, so the two
- * cannot disagree about the same date.
+ * Both are runtime-configurable and both change the streak number every shipped
+ * build already renders, so they travel together: a caller that read the grace width
+ * but defaulted the earn rate would compute a streak under a rule nobody configured.
  */
-function forgivenKeysFor(qualifying: Date[], streak: StreakResult, graceDays: number): Set<string> {
-  const keys = new Set(streak.forgivenDays.map(dayKey));
-  for (const d of confirmedBridgeDays(qualifying, graceDays)) keys.add(dayKey(d));
-  return keys;
+async function streakOptions(): Promise<{ graceDays: number; freezeEarnEvery: number }> {
+  const [graceDays, freezeEarnEvery] = await Promise.all([
+    settingsService.getNumber(SETTING_KEYS.streakGraceDays, GRACE_DAYS_DEFAULT),
+    settingsService.getNumber(SETTING_KEYS.streakFreezeEarnEvery, FREEZE_EARN_EVERY_DEFAULT),
+  ]);
+  return { graceDays, freezeEarnEvery };
 }
 
 /**
- * The verdict for one day. The single place a date becomes a state, shared by the
- * weekly strip and the monthly calendar — two surfaces resolving this independently
- * is exactly how a dialog ends up arguing with the tile that opened it.
+ * The verdict for one day, for a surface that draws days.
  *
- * Branch order is load-bearing. A day that qualified is `burning` even when it is
- * today (otherwise today would report `at_risk` after the member had already
- * listened), and `future` is decided before the today-check so tomorrow never reads
- * as a miss. `at_risk` is today-only and carries no claim about the streak's length —
- * a member on zero still gets it, meaning "today is still open".
+ * Everything in the past comes straight out of the walk (`dayStates`) rather than
+ * being re-derived here. That is the whole point of the single pass: a second
+ * predicate answering the same date is how the calendar came to paint a day frozen
+ * while the number printed above it said the streak had broken there.
+ *
+ * Only the two today-relative labels are decided here, because the walk has no
+ * business knowing which day the caller is rendering. Branch order is load-bearing:
+ * a day that qualified is `burning` even when it is today (otherwise today would
+ * report `at_risk` after the member had already listened), and `future` is settled
+ * before the today-check so tomorrow never reads as a miss. `at_risk` carries no
+ * claim about the streak's length — a member on zero still gets it, meaning "today
+ * is still open".
  *
  * The calendar never asks about a day past `today`, so it never sees `future`.
  */
-function dayState(
-  date: string,
-  todayKey: string,
-  qualifyingKeys: Set<string>,
-  forgivenKeys: Set<string>,
-): string {
+function dayState(date: string, todayKey: string, dayStates: Map<string, StreakDayState>): string {
+  const walked = dayStates.get(date);
+  if (walked === 'burning') return 'burning';
   // YYYY-MM-DD compares lexicographically, which is why the keys are strings.
-  return qualifyingKeys.has(date)
-    ? 'burning'
-    : date > todayKey
-      ? 'future'
-      : date === todayKey
-        ? 'at_risk'
-        : forgivenKeys.has(date)
-          ? 'dimmed'
-          : 'none';
+  if (date > todayKey) return 'future';
+  if (date === todayKey) return 'at_risk';
+  return walked ?? 'none';
 }
 
 /**
@@ -103,8 +92,7 @@ function dayState(
  * knows which listening day it is; it should say so. See `dayState` for the rules.
  */
 function buildWeeklyStreak(
-  qualifyingKeys: Set<string>,
-  forgivenKeys: Set<string>,
+  dayStates: Map<string, StreakDayState>,
   todayWIB: Date,
 ): WeeklyStreakEntryDto[] {
   const weekStart = weekStartMondayWIB(todayWIB);
@@ -112,7 +100,7 @@ function buildWeeklyStreak(
 
   return Array.from({ length: 7 }, (_, i) => {
     const date = dayKey(addDays(weekStart, i));
-    return { date, state: dayState(date, todayKey, qualifyingKeys, forgivenKeys) };
+    return { date, state: dayState(date, todayKey, dayStates) };
   });
 }
 
@@ -149,8 +137,8 @@ export class StatsService {
   async home(memberId: string): Promise<StatsHomeDto> {
     const todayWIB = toListeningDayWIB(new Date());
 
-    const [graceDays, minSessionSec, minQualifySec] = await Promise.all([
-      settingsService.getNumber(SETTING_KEYS.streakGraceDays, GRACE_DAYS_DEFAULT),
+    const [streakOpts, minSessionSec, minQualifySec] = await Promise.all([
+      streakOptions(),
       settingsService.getNumber(SETTING_KEYS.trackerMinSessionSec, MIN_SESSION_SEC_DEFAULT),
       settingsService.getNumber(SETTING_KEYS.trackerQualifySec, MIN_QUALIFY_SEC_DEFAULT),
     ]);
@@ -191,7 +179,8 @@ export class StatsService {
     const totalListenSec = totalAgg._sum.listenedSec ?? 0;
 
     // ---- Global streak --------------------------------------------------
-    const streak = computeStreakState(qualifyingDays(dayGroups, minQualifySec), todayWIB, graceDays);
+    const globalQualifying = qualifyingDays(dayGroups, minQualifySec);
+    const streak = walkStreak(globalQualifying, todayWIB, streakOpts);
     const streakDays = streak.days;
 
     // ---- Per-program challenges (one grouped query, then bucket) --------
@@ -232,7 +221,11 @@ export class StatsService {
       courseId: e.courseId,
       code: e.course.product.code,
       title: e.course.product.title,
-      day: computeStreak(qualifyingDays(byCourse.get(e.courseId) ?? [], minQualifySec), todayWIB, graceDays),
+      day: computeStreak(
+        qualifyingDays(byCourse.get(e.courseId) ?? [], minQualifySec),
+        todayWIB,
+        streakOpts,
+      ),
       target: e.course.programDays,
     }));
 
@@ -251,12 +244,7 @@ export class StatsService {
     // MIN_QUALIFY_SEC (global, all courses). `forgivenDays` comes from the same
     // grace walk that produced the headline state, so a dimmed flame and a dimmed
     // circle can never disagree about which night was let off.
-    const globalQualifying = qualifyingDays(dayGroups, minQualifySec);
-    const weeklyStreak = buildWeeklyStreak(
-      new Set(globalQualifying.map(dayKey)),
-      forgivenKeysFor(globalQualifying, streak, graceDays),
-      todayWIB,
-    );
+    const weeklyStreak = buildWeeklyStreak(streak.dayStates, todayWIB);
 
     return {
       streakDays,
@@ -305,8 +293,8 @@ export class StatsService {
     const todayKey = dayKey(todayWIB);
     const targetMonth = month ?? monthKey(todayWIB);
 
-    const [graceDays, minQualifySec] = await Promise.all([
-      settingsService.getNumber(SETTING_KEYS.streakGraceDays, GRACE_DAYS_DEFAULT),
+    const [streakOpts, minQualifySec] = await Promise.all([
+      streakOptions(),
       settingsService.getNumber(SETTING_KEYS.trackerQualifySec, MIN_QUALIFY_SEC_DEFAULT),
     ]);
 
@@ -317,9 +305,7 @@ export class StatsService {
     });
 
     const qualifying = qualifyingDays(dayGroups, minQualifySec);
-    const streak = computeStreakState(qualifying, todayWIB, graceDays);
-    const qualifyingKeys = new Set(qualifying.map(dayKey));
-    const forgivenKeys = forgivenKeysFor(qualifying, streak, graceDays);
+    const streak = walkStreak(qualifying, todayWIB, streakOpts);
 
     // First TRACKED day, not first qualifying day: a five-minute first session is
     // still a day the member could have listened on, so it shows as `none` rather
@@ -337,7 +323,7 @@ export class StatsService {
     for (let d = start; d.getTime() <= end.getTime(); d = addDays(d, 1)) {
       const date = dayKey(d);
       if (!firstTrackedKey || date < firstTrackedKey || date > todayKey) continue;
-      days.push({ date, state: dayState(date, todayKey, qualifyingKeys, forgivenKeys) });
+      days.push({ date, state: dayState(date, todayKey, streak.dayStates) });
     }
 
     return {
@@ -407,12 +393,12 @@ export class StatsService {
     // weekly strip needs `forgivenDays` to mark a day dimmed, and that only comes out
     // of the grace walk. Same grace as the home screen, so this strip and the one on
     // `/stats/home` can never disagree about which night was let off.
-    const [graceDays, minQualifySec] = await Promise.all([
-      settingsService.getNumber(SETTING_KEYS.streakGraceDays, GRACE_DAYS_DEFAULT),
+    const [streakOpts, minQualifySec] = await Promise.all([
+      streakOptions(),
       settingsService.getNumber(SETTING_KEYS.trackerQualifySec, MIN_QUALIFY_SEC_DEFAULT),
     ]);
     const qualifying = qualifyingDays(dayGroups, minQualifySec);
-    const courseStreak = computeStreakState(qualifying, todayWIB, graceDays);
+    const courseStreak = walkStreak(qualifying, todayWIB, streakOpts);
     return {
       courseId,
       // Days that met the 10-minute bar for THIS course. Free: `qualifying` is already
@@ -424,11 +410,7 @@ export class StatsService {
       // — and a member who listened 3x4 min would read as 0 here while their streak
       // counted the night. Two numbers on one screen contradicting each other.
       daysListened: qualifying.length,
-      weeklyStreak: buildWeeklyStreak(
-        new Set(qualifying.map(dayKey)),
-        forgivenKeysFor(qualifying, courseStreak, graceDays),
-        todayWIB,
-      ),
+      weeklyStreak: buildWeeklyStreak(courseStreak.dayStates, todayWIB),
       totalListenSec: totalAgg._sum.listenedSec ?? 0,
       lastListenedAt: last?.startedAt.toISOString() ?? null,
     };

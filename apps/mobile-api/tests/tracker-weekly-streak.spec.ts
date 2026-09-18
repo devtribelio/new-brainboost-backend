@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import * as bcrypt from 'bcryptjs';
 import { prisma } from '@bb/db';
+import { SettingsService, SETTING_KEYS } from '@bb/common/services/settings.service';
 import { TrackingService } from '@/modules/tracker/tracking.service';
 import { StatsService } from '@/modules/tracker/stats.service';
 import { addDays, dayKey, toListeningDayWIB, weekStartMondayWIB } from '@/modules/tracker/tracker.time';
@@ -129,13 +130,19 @@ describe('weeklyStreak states a member has to earn (real Postgres)', () => {
   const inWeek = (back: number) => addDays(today, -back).getTime() >= weekStart.getTime();
 
   beforeAll(async () => {
+    // A freeze is EARNED, and this fixture is one day long — so the quota is opened
+    // up for it. What is under test here is the strip's vocabulary, not the earning
+    // rule (tracker-streak.spec.ts owns that).
+    await new SettingsService().set(SETTING_KEYS.streakFreezeEarnEvery, '1');
+    SettingsService.clearCache();
+
     const m = await prisma.member.create({
       data: { email: `wstate-${uid()}@test.local`, passwordHash: await bcrypt.hash('s', 4) },
     });
     memberId = m.id;
 
-    // Qualify two days ago, miss yesterday, nothing today: grace carries the streak,
-    // so yesterday is `dimmed` and today is `at_risk`.
+    // Qualify two days ago, miss yesterday, nothing today: a freeze carries the
+    // streak, so yesterday is `dimmed` and today is `at_risk`.
     if (inWeek(2)) {
       await tracking.record(
         memberId,
@@ -146,6 +153,8 @@ describe('weeklyStreak states a member has to earn (real Postgres)', () => {
   });
 
   afterAll(async () => {
+    await prisma.appSetting.deleteMany({ where: { key: SETTING_KEYS.streakFreezeEarnEvery } });
+    SettingsService.clearCache();
     await prisma.listeningSession.deleteMany({ where: { memberId } });
     await prisma.member.delete({ where: { id: memberId } });
   });

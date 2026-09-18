@@ -75,19 +75,40 @@ export const STALE_FLUSH_WARN_HOURS = 24;
 export const DEFAULT_CHALLENGE_TARGET = 30;
 
 /**
- * Default number of listening days a member may miss without the streak resetting
- * to 0 — overridable at runtime via `app_settings` key `streak.graceDays`
+ * Consecutive listening days a single gap may span and still be bridged by a freeze
+ * — runtime-overridable via `app_settings` key `streak.graceDays`
  * (`SETTING_KEYS.streakGraceDays`), so it can be turned off without a redeploy.
  *
- * The window is measured from TODAY, not from the streak: only a gap within the
- * last `graceDays` listening days is forgiven. That is what keeps a computed-at-
- * read-time streak from silently rewriting history — without the window, every
- * single-day gap a member ever had would be forgiven the moment this ships, and a
- * streak broken months ago would come back to life.
+ * This is the WIDTH of a forgivable gap, not a window measured from today. It used
+ * to be the latter, which made a freeze silently expire: a member who used one on
+ * Tuesday and listened Wednesday and Thursday watched the streak stop growing,
+ * because by Thursday the frozen day was too far back to cross. What limits
+ * forgiveness now is `FREEZE_EARN_EVERY_DEFAULT` below — a quota, which is what the
+ * window was standing in for.
  *
- * 0 disables grace entirely and reproduces the strict walk exactly.
+ * 0 disables freezes entirely and reproduces the strict walk exactly.
  */
 export const GRACE_DAYS_DEFAULT = 1;
+
+/**
+ * Qualifying days inside the current streak that earn one freeze
+ * (`app_settings` key `streak.freezeEarnEvery`).
+ *
+ * Some limit is mandatory, not a tuning preference. A streak recomputed from raw
+ * rows with unlimited forgiveness means a member who listens every OTHER day has
+ * every gap bridged, and "streak" degenerates into "days listened, ever". Earning
+ * answers that without storing anything: the every-other-day member never reaches
+ * the bar between gaps, while someone weeks into a run has clearly paid for theirs.
+ *
+ * The rate is the whole limit — there is deliberately no ceiling on top of it. A cap
+ * would only bind on a long streak, where it would tell a member two years in that
+ * their third sick day costs them everything, while the rate already requires about
+ * six qualifying days per forgiven one.
+ *
+ * 0 disables freezes (fail-safe: a missing or malformed setting is strict, never
+ * unlimited).
+ */
+export const FREEZE_EARN_EVERY_DEFAULT = 7;
 
 /** Weekly recap target — qualifying days per week. */
 export const WEEKLY_DAYS_TARGET = 7;

@@ -3,9 +3,14 @@ import { logger } from '@bb/common/config/logger';
 import { settingsService, SETTING_KEYS } from '@bb/common/services/settings.service';
 import { NotificationProducer } from '@bb/domain/notification/notification.producer';
 import { ActionLabel } from '@bb/domain/notification/action-labels';
-import { GRACE_DAYS_DEFAULT, MIN_QUALIFY_SEC_DEFAULT, WIB_OFFSET_MS } from './tracker.constants';
+import {
+  FREEZE_EARN_EVERY_DEFAULT,
+  GRACE_DAYS_DEFAULT,
+  MIN_QUALIFY_SEC_DEFAULT,
+  WIB_OFFSET_MS,
+} from './tracker.constants';
 import { addDays, dayKey, toListeningDayWIB } from './tracker.time';
-import { computeStreakState, type StreakState } from './tracker.streak';
+import { computeStreakState, type StreakOptions, type StreakState } from './tracker.streak';
 
 /**
  * The two scheduled streak pushes (`docs/tracker-streak.md` §5.4).
@@ -113,10 +118,11 @@ function copyFor(mode: StreakState, days: number): { title: string; body: string
  */
 export async function collectStreakReminders(
   mode: 'at_risk' | 'dimmed',
-  graceDays: number,
+  streakOpts: StreakOptions,
   now: Date,
   onlyMemberId?: string,
 ): Promise<Array<{ memberId: string; days: number }>> {
+  const graceDays = streakOpts.graceDays ?? 0;
   // Read here rather than taken as a parameter: this function owns the qualifying
   // rule, and its signature is public (the specs call it directly).
   const minQualifySec = await settingsService.getNumber(
@@ -160,7 +166,7 @@ export async function collectStreakReminders(
 
   const plan: Array<{ memberId: string; days: number }> = [];
   for (const [memberId, days] of qualifyingDaysByMember(full, minQualifySec)) {
-    const streak = computeStreakState(days, today, graceDays);
+    const streak = computeStreakState(days, today, streakOpts);
     if (streak.state !== mode) continue;
     if (mode === 'at_risk' && streak.days < MIN_STREAK_FOR_AT_RISK) continue;
     plan.push({ memberId, days: streak.days });
@@ -174,13 +180,16 @@ export async function streakReminder(
 ): Promise<StreakReminderResult> {
   const empty: StreakReminderResult = { candidates: 0, pushed: 0 };
 
-  const [atRiskEnabled, dimmedEnabled, graceDays, atRiskHour, dimmedHour] = await Promise.all([
+  const [atRiskEnabled, dimmedEnabled, graceDays, freezeEarnEvery, atRiskHour, dimmedHour] =
+    await Promise.all([
     settingsService.getBoolean(SETTING_KEYS.streakAtRiskEnabled, false),
     settingsService.getBoolean(SETTING_KEYS.streakDimmedEnabled, false),
     settingsService.getNumber(SETTING_KEYS.streakGraceDays, GRACE_DAYS_DEFAULT),
-    settingsService.getNumber(SETTING_KEYS.streakAtRiskHour, AT_RISK_HOUR_DEFAULT),
-    settingsService.getNumber(SETTING_KEYS.streakDimmedHour, DIMMED_HOUR_DEFAULT),
-  ]);
+      settingsService.getNumber(SETTING_KEYS.streakFreezeEarnEvery, FREEZE_EARN_EVERY_DEFAULT),
+      settingsService.getNumber(SETTING_KEYS.streakAtRiskHour, AT_RISK_HOUR_DEFAULT),
+      settingsService.getNumber(SETTING_KEYS.streakDimmedHour, DIMMED_HOUR_DEFAULT),
+    ]);
+  const streakOpts: StreakOptions = { graceDays, freezeEarnEvery };
 
   let mode = opts.mode;
   if (!opts.force) {
@@ -199,11 +208,12 @@ export async function streakReminder(
   }
   if (!mode) throw new Error('streakReminder: opts.mode is required with force');
 
-  // A dimmed member only exists while grace is carrying them, so with grace off the
-  // morning send has nothing to say — skip the sweep instead of scanning for nobody.
-  if (mode === 'dimmed' && graceDays <= 0) return { ...empty, mode };
+  // A dimmed member only exists while a freeze is carrying them. Either knob at zero
+  // means nobody can be in that state, so the morning send has nothing to say — skip
+  // the sweep instead of scanning for nobody.
+  if (mode === 'dimmed' && (graceDays <= 0 || freezeEarnEvery <= 0)) return { ...empty, mode };
 
-  const plan = await collectStreakReminders(mode, graceDays, now, opts.memberId);
+  const plan = await collectStreakReminders(mode, streakOpts, now, opts.memberId);
   if (plan.length === 0) return { ...empty, mode };
   if (opts.dryRun) return { mode, candidates: plan.length, pushed: 0, preview: plan };
 

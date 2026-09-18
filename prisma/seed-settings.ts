@@ -143,7 +143,13 @@ const SETTINGS: Array<{ key: string; value: string; description: string }> = [
     key: 'streak.graceDays',
     value: '1',
     description:
-      'Listening days a member may miss without the streak resetting to 0, counted back from today (so an old gap is never forgiven retroactively). 0 = strict, no grace. Changing this changes the streak number every shipped app build already displays, so treat it as a product switch, not a tuning knob.',
+      'Consecutive listening days a single gap may span and still be bridged by a freeze. This is the WIDTH of a forgivable gap, NOT a window measured from today: a freeze does not expire, so a member who spends one and keeps listening keeps growing their streak. What limits forgiveness is the earn rate (streak.freezeEarnEvery), not recency. 0 = strict, no freezes at all. Changing this changes the streak number every shipped app build already displays, so treat it as a product switch, not a tuning knob.',
+  },
+  {
+    key: 'streak.freezeEarnEvery',
+    value: '7',
+    description:
+      'Qualifying days inside the current streak that earn one freeze. Some limit here is mandatory, not a preference: the streak is recomputed from raw rows with nothing stored, so with unlimited forgiveness a member who listens every OTHER day has every gap bridged and the streak degenerates into "days listened, ever". At 7, that member never reaches the bar between gaps and lands on 1, while someone weeks into a run has clearly paid for theirs. The rate is the whole limit — no ceiling sits on top of it, because a ceiling only ever binds on a long streak, where it would tell a member two years in that their third sick day costs them everything. 0 disables freezes entirely (fail-safe: a missing or malformed value is strict, never unlimited). Product switch, not a knob.',
   },
   {
     key: 'streak.atRiskEnabled',
@@ -155,7 +161,7 @@ const SETTINGS: Array<{ key: string; value: string; description: string }> = [
     key: 'streak.dimmedEnabled',
     value: 'false',
     description:
-      "Morning push telling a member their streak went dim and can still be revived today. 'true' to enable. Independent of streak.atRiskEnabled, and silent regardless while streak.graceDays = 0, since no member can be in the dimmed state then.",
+      "Morning push telling a member their streak went dim and can still be revived today. 'true' to enable. Independent of streak.atRiskEnabled, and silent regardless while either streak.graceDays or streak.freezeEarnEvery is 0, since no member can be in the dimmed state then.",
   },
   {
     key: 'streak.atRiskHour',

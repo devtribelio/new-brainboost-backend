@@ -45,6 +45,10 @@ describe('streak reminder job (real Postgres)', () => {
     });
   }
 
+  // Quota deliberately wide open: these specs are about who lands in which state,
+  // not about whether a freeze was earned (tracker-streak.spec.ts owns that).
+  const GRACE = { graceDays: 1, freezeEarnEvery: 1 };
+
   beforeAll(async () => {
     await new SettingsService().set(SETTING_KEYS.streakGraceDays, '1');
   });
@@ -114,7 +118,7 @@ describe('streak reminder job (real Postgres)', () => {
     await qualify(id, 2);
     await qualify(id, 3);
 
-    const plan = await collectStreakReminders('at_risk', 1, NOW);
+    const plan = await collectStreakReminders('at_risk', GRACE, NOW);
     expect(plan.find((p) => p.memberId === id)).toEqual({ memberId: id, days: 3 });
   });
 
@@ -123,7 +127,7 @@ describe('streak reminder job (real Postgres)', () => {
     await qualify(id, 1);
     await qualify(id, 2); // only 2 days — under MIN_STREAK_FOR_AT_RISK
 
-    const plan = await collectStreakReminders('at_risk', 1, NOW);
+    const plan = await collectStreakReminders('at_risk', GRACE, NOW);
     expect(plan.find((p) => p.memberId === id)).toBeUndefined();
   });
 
@@ -134,7 +138,7 @@ describe('streak reminder job (real Postgres)', () => {
     await qualify(id, 2);
     await qualify(id, 3);
 
-    const plan = await collectStreakReminders('at_risk', 1, NOW);
+    const plan = await collectStreakReminders('at_risk', GRACE, NOW);
     expect(plan.find((p) => p.memberId === id)).toBeUndefined();
   });
 
@@ -143,10 +147,10 @@ describe('streak reminder job (real Postgres)', () => {
     await qualify(id, 2);
     await qualify(id, 3); // yesterday (1) missing → grace carries it
 
-    const atRisk = await collectStreakReminders('at_risk', 1, NOW);
+    const atRisk = await collectStreakReminders('at_risk', GRACE, NOW);
     expect(atRisk.find((p) => p.memberId === id)).toBeUndefined();
 
-    const dimmed = await collectStreakReminders('dimmed', 1, NOW);
+    const dimmed = await collectStreakReminders('dimmed', GRACE, NOW);
     expect(dimmed.find((p) => p.memberId === id)).toEqual({ memberId: id, days: 2 });
   });
 
@@ -156,7 +160,7 @@ describe('streak reminder job (real Postgres)', () => {
     await qualify(id, 4); // days 1 AND 2 missing → streak 0, no push at 0
 
     for (const mode of ['at_risk', 'dimmed'] as const) {
-      const plan = await collectStreakReminders(mode, 1, NOW);
+      const plan = await collectStreakReminders(mode, GRACE, NOW);
       expect(plan.find((p) => p.memberId === id)).toBeUndefined();
     }
   });

@@ -77,6 +77,11 @@ export const SETTING_KEYS = {
   // Listening days a member may miss before the streak resets to 0. The window is
   // measured from today, so only a recent gap is forgiven — see tracker.constants.ts.
   streakGraceDays: 'streak.graceDays',
+  // A freeze is EARNED, not granted by recency: this many qualifying days inside the
+  // current streak earn one. Some limit is mandatory — without it a member who
+  // listens every other day has every gap forgiven and their streak becomes "days
+  // listened, ever". The rate is the whole limit; no ceiling sits on top of it.
+  streakFreezeEarnEvery: 'streak.freezeEarnEvery',
   // Streak reminder push. One switch PER SEND, not one for both: the two answer
   // different moments (an evening nudge vs a morning second chance) and ops must be
   // able to silence one without losing the other. The job runs on the hourly cron
