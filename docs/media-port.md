@@ -304,3 +304,56 @@ Serves both online playback and native offline download; the only difference is 
 - **Re-encoding the audio assets** as low-bitrate video with a long GOP would remove the
   keyframe penalty, but Bunny re-encodes on upload — untested whether the ladder can be
   configured per-library to avoid it.
+
+## 9. Audio as ONE file from our own storage (opt-in per asset, 2026-09-18)
+
+**Why.** Offline downloads on Android fail on Xiaomi/POCO: one HLS lesson is
+780–920 tiny `background_downloader` (WorkManager) jobs that MIUI/HyperOS stops
+(`canceled`), and the Dart loop that enqueues the next batch is frozen when the
+app is backgrounded. Bunny Stream has no audio-only rendition (§8), so every
+"audio" download also carries a still-image video track.
+
+**What.** For a guid with an **active** row in `media_audio_sources`,
+`GET /media/hls` answers with a URL on this backend,
+`GET /media/audio-playlist?t=<audio-playlist token>`, which renders an HLS media
+playlist whose only segment is the whole lesson as `.aac` behind a short-lived
+signed URL. The app already in the stores downloads "every segment in the
+playlist" and keeps the extension, so it fetches ONE file with zero client
+change; iOS hands the playlist to `AVAssetDownloadURLSession` as before.
+Video assets and every guid without a row keep the Bunny path byte-for-byte.
+
+**Rules.**
+- The playlist branch is checked **before** the `MEDIA_MODE=signed` guard: it
+  never touches the Bunny library, so the Token-Auth requirement does not apply.
+- `/media/audio-playlist` takes **no bearer** (native downloaders send none) and
+  accepts **only** an audio-playlist token (`k:'a'`), minted by `/media/hls`
+  AFTER its enrollment gate with a TTL equal to the segment URL TTL.
+  `verifyMediaToken` rejects `k:'a'` so the playlist token cannot be spent on
+  `/stream`, `/download` or `/hls`.
+- The playlist is rendered per request with a fresh signed segment URL and sent
+  `Cache-Control: no-store`. Today the signer is an S3 presigned GET
+  (`S3StorageService.getPresignedGetUrl`); the CloudFront signer replaces that
+  one call when the `/audio/*` behaviour ships.
+- Rollback per asset = `UPDATE media_audio_sources SET is_active=false` — the
+  next `/hls` answer is Bunny again; a playlist token already issued 404s.
+- Segment format is ADTS `.aac`: a single segment with no `EXT-X-MAP` is only
+  valid for an elementary stream. fMP4 + `EXT-X-MAP` is the fallback if a
+  device rejects ADTS (the app parser supports both).
+
+**Moving one asset by hand (develop / first prod canary).**
+```bash
+# 1. audio track out of the cheapest Bunny rendition, no re-encode
+ffmpeg -i "<signed 360p mp4 url>" -vn -c:a copy -f adts /tmp/<guid>.aac
+ffprobe -v error -show_entries format=duration -of csv=p=0 /tmp/<guid>.aac   # seconds
+shasum -a 256 /tmp/<guid>.aac
+# 2. private object, same bucket as public/*, NOT under public/
+aws s3 cp /tmp/<guid>.aac s3://<bucket>/audio/<guid>/1.aac --content-type audio/aac
+# 3. row (inactive first, then flip)
+INSERT INTO media_audio_sources (guid, audio_key, duration_sec, bytes, sha256, encoded_at, is_active)
+VALUES ('<guid>', 'audio/<guid>/1.aac', <dur>, <bytes>, '<sha>', now(), false);
+UPDATE media_audio_sources SET is_active = true WHERE guid = '<guid>';
+```
+Verify with the store build of the app pointed at that environment, on the
+POCO that failed: download with the screen off, three times.
+
+**Spec / decisions:** `docs/prd-audio-single-file-cdn.md`.

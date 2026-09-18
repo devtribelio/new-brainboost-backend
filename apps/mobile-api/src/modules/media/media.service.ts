@@ -1,9 +1,19 @@
 import { forbidden, ERROR_CODES, ForbiddenException } from '@bb/common/exceptions';
 import { env } from '@bb/common/config/env';
+import { prisma } from '@bb/db';
 import { S3StorageService, s3StorageService } from '@bb/common/services/s3-storage.service';
 import { hasActiveEnrollment } from '@bb/domain/commerce/enrollment';
 import type { MediaResolution } from './dto/media.dto';
 import { signBunnyHlsUrl, signBunnyMp4Url } from './bunny-sign.util';
+import { renderSingleSegmentPlaylist } from './audio-playlist.util';
+import { signAudioPlaylistToken, type MediaTokenPayload } from './media-token.util';
+
+/** The subset of `media_audio_sources` the playlist needs. */
+export interface AudioSource {
+  guid: string;
+  audioKey: string;
+  durationSec: number;
+}
 
 /**
  * Media proxy service.
@@ -94,6 +104,71 @@ export class MediaService {
    */
   buildDownloadUrl(guid: string, res: MediaResolution): string {
     return signBunnyMp4Url(guid, res);
+  }
+
+  /**
+   * The single-file audio source for a guid, or null when the asset is still
+   * served from Bunny. Inactive rows read as null on purpose: flipping
+   * `is_active` is the per-asset rollback, and it must need no deploy.
+   */
+  async findAudioSource(guid: string): Promise<AudioSource | null> {
+    const row = await prisma.mediaAudioSource.findUnique({
+      where: { guid },
+      select: { guid: true, audioKey: true, durationSec: true, isActive: true },
+    });
+    if (!row || !row.isActive) return null;
+    return { guid: row.guid, audioKey: row.audioKey, durationSec: row.durationSec };
+  }
+
+  /** Stream vs download TTL, the same rule the Bunny path uses. */
+  private ttlFor(forDownload: boolean): number {
+    return forDownload ? env.media.downloadTtlSeconds : env.media.signedUrlTtlSeconds;
+  }
+
+  /**
+   * URL of the backend-generated single-segment playlist for an asset that has
+   * moved to our own storage. Same shape as `buildHlsUrl` so the controller can
+   * answer `/media/hls` identically whichever source the guid lives on.
+   *
+   * The URL carries a dedicated audio-playlist token rather than the media
+   * token: the app fetches this URL with no bearer (native downloaders), so the
+   * token IS the credential, and it is minted only after the access gate on
+   * `/media/hls` passed. Its TTL equals the segment URL TTL the playlist will
+   * carry, so a token can never lead to a URL that has already expired.
+   */
+  buildAudioPlaylistUrl(
+    payload: MediaTokenPayload,
+    opts: { forDownload?: boolean } = {},
+  ): { url: string; expiresAt: number } {
+    const forDownload = opts.forDownload === true;
+    const ttlSeconds = this.ttlFor(forDownload);
+    const expiresAt = Math.floor(Date.now() / 1000) + ttlSeconds;
+    const token = signAudioPlaylistToken(
+      { guid: payload.guid, courseId: payload.courseId, isPreview: payload.isPreview, forDownload },
+      ttlSeconds,
+    );
+    const base = env.baseUrl.replace(/\/$/, '');
+    return { url: `${base}/api/member/media/audio-playlist?t=${encodeURIComponent(token)}`, expiresAt };
+  }
+
+  /**
+   * The playlist body: one `.aac` segment behind a short-lived signed URL.
+   *
+   * The segment URL is minted per request, never stored — that is what keeps
+   * the playlist itself uncacheable (`no-store` at the controller) and the
+   * object private. Today the signer is an S3 presigned GET; when the CDN
+   * behaviour ships, this is the one line that switches to a CloudFront
+   * signature. The app never sees the difference.
+   */
+  async buildAudioPlaylist(
+    source: AudioSource,
+    opts: { forDownload?: boolean } = {},
+  ): Promise<string> {
+    const segmentUrl = await this.storage.getPresignedGetUrl(
+      source.audioKey,
+      this.ttlFor(opts.forDownload === true),
+    );
+    return renderSingleSegmentPlaylist({ segmentUrl, durationSec: source.durationSec });
   }
 
   /**

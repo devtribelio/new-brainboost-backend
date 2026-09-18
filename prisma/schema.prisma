@@ -1420,6 +1420,28 @@ model AppVersionConfig {
   @@map("app_version_configs")
 }
 
+/// Audio lessons served as ONE file from our own S3/CDN instead of Bunny HLS.
+///
+/// Keyed on the Bunny `guid` because that is the asset identity the product
+/// serializer already emits inside the media token — no lesson column changes.
+/// A row present AND active flips `GET /media/hls` for that guid to a
+/// backend-generated single-segment playlist pointing at `audio_key`; absent or
+/// inactive = Bunny exactly as before. Rollback per asset = `is_active=false`.
+model MediaAudioSource {
+  guid        String   @id // Bunny Stream guid
+  audioKey    String   @map("audio_key") // S3 key, e.g. audio/<guid>/1.aac (private prefix, presigned/CDN-signed only)
+  version     Int      @default(1) // bump on re-encode; new key, old file untouched while downloads finish
+  codec       String   @default("aac") // aac (track copied) | aac-96k (re-encoded)
+  durationSec Int      @map("duration_sec") // for EXTINF / TARGETDURATION; from ffprobe
+  bytes       Int
+  sha256      String
+  isActive    Boolean  @default(true) @map("is_active")
+  encodedAt   DateTime @map("encoded_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@map("media_audio_sources")
+}
+
 /// Auth + per-channel capability toggles for 3rd-party ingestion (IAP/Scalev/Lynk.id) via
 /// POST /ingest/purchase. Key is stored hashed. Toggles are plain booleans (easy manual edit).
 model ThirdPartyCredential {

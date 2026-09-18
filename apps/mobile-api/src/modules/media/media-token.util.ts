@@ -44,7 +44,7 @@ export interface DocumentTokenPayload {
  * always video — download tokens are long-lived, so old ones are still in
  * circulation after a deploy and must keep verifying.
  */
-type TokenKind = 'v' | 'd';
+type TokenKind = 'v' | 'd' | 'a';
 
 interface TokenEnvelope {
   /** Expiry, unix seconds. */
@@ -53,10 +53,26 @@ interface TokenEnvelope {
   k?: TokenKind;
   courseId?: unknown;
   isPreview?: unknown;
-  /** Video only. */
+  /** Video and audio-playlist. */
   guid?: unknown;
   /** Document only. */
   key?: unknown;
+  /** Audio-playlist only: minted for an offline download (longer segment TTL). */
+  d?: unknown;
+}
+
+/**
+ * Payload of an audio-playlist token — minted by `/media/hls` AFTER the access
+ * gate passed, and the only credential `/media/audio-playlist` accepts. It has
+ * to stand alone because the native downloaders fetch the playlist URL with no
+ * `Authorization` header at all (AVAssetDownload, ExoPlayer, the app's own
+ * `HttpClient`), so the enrollment check cannot be repeated there.
+ */
+export interface AudioPlaylistTokenPayload {
+  guid: string;
+  courseId: string;
+  isPreview: boolean;
+  forDownload: boolean;
 }
 
 const IV_LEN = 12;
@@ -136,7 +152,12 @@ export function signMediaToken(
  */
 export function verifyMediaToken(token: string): MediaTokenPayload {
   const envelope = open(token);
-  if (envelope.k === 'd') {
+  // Only legacy (no kind) and 'v' are media tokens. A document or an
+  // audio-playlist token must not be spendable on the stream/download/hls
+  // endpoints: the playlist token in particular is handed out AFTER the
+  // enrollment gate and travels without a bearer, so accepting it here would
+  // let it skip that gate for the other endpoints.
+  if (envelope.k !== undefined && envelope.k !== 'v') {
     throw unauthorized(ERROR_CODES.MEDIA_TOKEN_INVALID);
   }
   if (typeof envelope.guid !== 'string' || typeof envelope.courseId !== 'string') {
@@ -184,5 +205,45 @@ export function verifyDocumentToken(token: string): DocumentTokenPayload {
     key: envelope.key,
     courseId: envelope.courseId,
     isPreview: envelope.isPreview === true,
+  };
+}
+
+/**
+ * Encrypt an audio-playlist token. TTL is the caller's choice and should match
+ * the segment URL TTL the playlist will carry (stream vs download), so the
+ * token cannot outlive the URLs it leads to.
+ */
+export function signAudioPlaylistToken(
+  payload: AudioPlaylistTokenPayload,
+  ttlSeconds: number,
+): string {
+  return seal({
+    k: 'a',
+    guid: payload.guid,
+    courseId: payload.courseId,
+    isPreview: payload.isPreview,
+    d: payload.forDownload,
+    exp: expiryAt(ttlSeconds),
+  });
+}
+
+/**
+ * Decrypt and validate an audio-playlist token. Rejects every other kind: a
+ * media token has a longer life and a different gate, and must not be
+ * exchangeable for a playlist directly.
+ */
+export function verifyAudioPlaylistToken(token: string): AudioPlaylistTokenPayload {
+  const envelope = open(token);
+  if (envelope.k !== 'a') {
+    throw unauthorized(ERROR_CODES.MEDIA_TOKEN_INVALID);
+  }
+  if (typeof envelope.guid !== 'string' || typeof envelope.courseId !== 'string') {
+    throw unauthorized(ERROR_CODES.MEDIA_TOKEN_INVALID);
+  }
+  return {
+    guid: envelope.guid,
+    courseId: envelope.courseId,
+    isPreview: envelope.isPreview === true,
+    forDownload: envelope.d === true,
   };
 }

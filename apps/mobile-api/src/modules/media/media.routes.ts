@@ -56,6 +56,20 @@ export function mediaRoutes(): Router {
     middlewares: [optionalAuthGuard, mediaDownloadRateLimiter],
   });
 
+  // Single-segment playlist for audio assets served from our own storage. No
+  // auth guard on purpose: the native downloaders fetch this URL with no
+  // bearer, and the audio-playlist token in `t` (minted by /media/hls after
+  // its gate) is the credential. Keeps the download rate limiter — one URL
+  // still covers a whole asset.
+  bindRoute({
+    router,
+    controller: ctrl,
+    method: 'get',
+    path: '/media/audio-playlist',
+    handlerKey: 'audioPlaylist',
+    middlewares: [mediaDownloadRateLimiter],
+  });
+
   // Lesson documents (DocumentTemplate slides) — same gating and rate limit as
   // download, but the asset is a private S3 object rather than a Bunny video, so
   // it 302s to a presigned GET instead of a signed Bunny URL.

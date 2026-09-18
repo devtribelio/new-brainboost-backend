@@ -2,7 +2,12 @@ import { Readable } from 'node:stream';
 import type { Request, Response } from 'express';
 import { MediaService } from './media.service';
 import { MEDIA_RESOLUTIONS, type MediaResolution } from './dto/media.dto';
-import { verifyMediaToken, verifyDocumentToken } from './media-token.util';
+import {
+  verifyMediaToken,
+  verifyDocumentToken,
+  verifyAudioPlaylistToken,
+} from './media-token.util';
+import { HLS_PLAYLIST_CONTENT_TYPE } from './audio-playlist.util';
 import {
   badRequest,
   unauthorized,
@@ -237,15 +242,6 @@ export class MediaController {
   @ApiResponse({ status: 404, description: 'Signed media is not enabled on this deployment' })
   @ApiResponse({ status: 429, description: 'Rate limit exceeded' })
   hls = async (req: Request, res: Response): Promise<void> => {
-    // Signed HLS only works against the Token-Auth Bunny library (Model C). In
-    // `proxy` mode the configured library has token auth off and blocks empty
-    // referrers, so the URL would be a `403` on the one client that matters — a
-    // native player, which sends no `Referer`. Fail here instead, where the app
-    // can tell the difference between "not deployed yet" and "access denied".
-    if (env.media.mode !== 'signed') {
-      throw notFound(ERROR_CODES.MEDIA_HLS_UNAVAILABLE);
-    }
-
     const token = typeof req.query.t === 'string' ? req.query.t : '';
     if (!token) {
       throw badRequest(ERROR_CODES.MEDIA_TOKEN_MISSING);
@@ -262,9 +258,41 @@ export class MediaController {
     }
 
     const forDownload = req.query.download === 'true' || req.query.download === '1';
+    const user = (req as AuthenticatedRequest).user;
+
+    // An asset that has moved to our own storage is served as a one-segment
+    // playlist from this backend, whatever MEDIA_MODE says: it does not touch
+    // the Bunny library at all, so the Token-Auth requirement below does not
+    // apply to it. Checked first for exactly that reason.
+    const audioSource = await this.mediaService.findAudioSource(payload.guid);
+    if (audioSource) {
+      const { url, expiresAt } = this.mediaService.buildAudioPlaylistUrl(payload, { forDownload });
+      logger.info(
+        {
+          memberId: user?.id ?? null,
+          courseId: payload.courseId,
+          guid: payload.guid,
+          forDownload,
+          isPreview: payload.isPreview,
+          source: 'audio-single-file',
+        },
+        'media: hls url issued',
+      );
+      ok(res, { url, expiresAt, guid: payload.guid });
+      return;
+    }
+
+    // Signed HLS only works against the Token-Auth Bunny library (Model C). In
+    // `proxy` mode the configured library has token auth off and blocks empty
+    // referrers, so the URL would be a `403` on the one client that matters — a
+    // native player, which sends no `Referer`. Fail here instead, where the app
+    // can tell the difference between "not deployed yet" and "access denied".
+    if (env.media.mode !== 'signed') {
+      throw notFound(ERROR_CODES.MEDIA_HLS_UNAVAILABLE);
+    }
+
     const { url, expiresAt } = this.mediaService.buildHlsUrl(payload.guid, { forDownload });
 
-    const user = (req as AuthenticatedRequest).user;
     logger.info(
       {
         memberId: user?.id ?? null,
@@ -272,6 +300,7 @@ export class MediaController {
         guid: payload.guid,
         forDownload,
         isPreview: payload.isPreview,
+        source: 'bunny',
       },
       'media: hls url issued',
     );
@@ -280,6 +309,63 @@ export class MediaController {
     // already visible in the signed URL's path, so a second identifier would buy
     // nothing and give the app two keys for one asset.
     ok(res, { url, expiresAt, guid: payload.guid });
+  };
+
+  @ApiOperation({
+    summary: 'HLS playlist for an audio asset served as a single file from our own storage',
+    description:
+      'Returns a media playlist (`application/vnd.apple.mpegurl`) whose only segment is the ' +
+      'whole lesson audio behind a short-lived signed URL. Exists so the app already in the ' +
+      'stores — which downloads "every segment in the playlist" — fetches one file instead of ' +
+      'hundreds of WorkManager jobs, with no client change. Authenticated by the audio-playlist ' +
+      'token minted by `/media/hls` after its access gate; no bearer is expected because native ' +
+      'downloaders fetch this URL themselves. Not the JSON envelope.',
+  })
+  @ApiQuery({
+    name: 't',
+    type: 'string',
+    required: true,
+    description: 'Audio-playlist token from `/media/hls` (not a media token).',
+  })
+  @ApiResponse({ status: 200, description: 'HLS media playlist, one segment', envelope: 'none' })
+  @ApiResponse({ status: 400, description: 'Missing token' })
+  @ApiResponse({ status: 401, description: 'Invalid/expired token, or a token of another kind' })
+  @ApiResponse({ status: 404, description: 'Asset is no longer served from our storage' })
+  @ApiResponse({ status: 429, description: 'Rate limit exceeded' })
+  audioPlaylist = async (req: Request, res: Response): Promise<void> => {
+    const token = typeof req.query.t === 'string' ? req.query.t : '';
+    if (!token) {
+      throw badRequest(ERROR_CODES.MEDIA_TOKEN_MISSING);
+    }
+
+    const payload = verifyAudioPlaylistToken(token);
+
+    // Re-read the source on every request: an asset rolled back to Bunny
+    // between the /hls answer and this fetch must fail here, not hand out a
+    // URL to an object that may be gone.
+    const source = await this.mediaService.findAudioSource(payload.guid);
+    if (!source) {
+      throw notFound(ERROR_CODES.MEDIA_HLS_UNAVAILABLE);
+    }
+
+    const body = await this.mediaService.buildAudioPlaylist(source, {
+      forDownload: payload.forDownload,
+    });
+
+    logger.info(
+      {
+        courseId: payload.courseId,
+        guid: payload.guid,
+        forDownload: payload.forDownload,
+        isPreview: payload.isPreview,
+      },
+      'media: audio playlist served',
+    );
+
+    // The segment URL inside is freshly signed; a cached playlist would carry
+    // a signature that expires under the next reader.
+    res.setHeader('Cache-Control', 'no-store');
+    res.type(HLS_PLAYLIST_CONTENT_TYPE).send(body);
   };
 
   @ApiOperation({
