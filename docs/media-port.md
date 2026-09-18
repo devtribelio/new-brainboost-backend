@@ -358,8 +358,11 @@ POCO that failed: download with the screen off, three times.
 
 **Spec / decisions:** `docs/prd-audio-single-file-cdn.md`.
 
-**Which lesson is this row? — view `media_audio_source_lessons`** (migration
-`20260918130000`). There is no FK by design (the relation lives inside
+**Which lesson is this row?** `media_audio_sources.lesson_id` is an informational FK
+(nullable, SET NULL, migration `20260918140000`) filled from `slides_data` at insert time;
+the runtime lookup stays by `guid`. The view `media_audio_source_lessons` (migration
+`20260918130000`) recomputes the relation from `slides_data` and exposes `stored_matches`
+so a stale `lesson_id` is visible. No hard dependency on the FK by design (the relation lives inside
 `slides_data` JSON and one asset may serve several lessons), so the view resolves
 it at read time:
 ```sql

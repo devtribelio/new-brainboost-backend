@@ -86,12 +86,21 @@ printf "  dengan signed -> %s (harus 200)\n" "$(curl -s -o /dev/null -w '%{http_
 # ---- 4. SQL ----
 say "Jalankan di database $ENV_NAME (baris NONAKTIF dulu):"
 cat <<SQL
-INSERT INTO media_audio_sources (guid, audio_key, version, codec, duration_sec, bytes, sha256, is_active, encoded_at)
-VALUES ('$GUID', '$KEY', $VERSION, '$CODEC_LABEL', $DUR_SEC, $BYTES, '$SHA', false, now())
+INSERT INTO media_audio_sources (guid, audio_key, version, codec, duration_sec, bytes, sha256, is_active, encoded_at, lesson_id)
+VALUES ('$GUID', '$KEY', $VERSION, '$CODEC_LABEL', $DUR_SEC, $BYTES, '$SHA', false, now(),
+  -- lesson yang memakai guid ini (dari slides_data); NULL = tidak ada lesson yang memakainya → cek guid-nya
+  (SELECT l.id FROM course_lessons l
+    WHERE jsonb_typeof(l.slides_data) = 'array'
+      AND EXISTS (SELECT 1 FROM jsonb_array_elements(l.slides_data) e
+                  WHERE e->'data'->>'guid' = '$GUID' OR e->'data'->'audio'->>'guid' = '$GUID' OR e->'data'->'video'->>'guid' = '$GUID')
+    ORDER BY l.created_at LIMIT 1))
 ON CONFLICT (guid) DO UPDATE SET
   audio_key = EXCLUDED.audio_key, version = EXCLUDED.version, codec = EXCLUDED.codec,
   duration_sec = EXCLUDED.duration_sec, bytes = EXCLUDED.bytes, sha256 = EXCLUDED.sha256,
-  encoded_at = EXCLUDED.encoded_at;
+  encoded_at = EXCLUDED.encoded_at, lesson_id = EXCLUDED.lesson_id;
+
+-- pastikan barisnya menempel ke lesson yang benar (lesson_id NULL = guid salah):
+SELECT product_title, lesson_name, stored_matches FROM media_audio_source_lessons WHERE guid = '$GUID';
 
 -- saat siap diuji:
 UPDATE media_audio_sources SET is_active = true  WHERE guid = '$GUID';

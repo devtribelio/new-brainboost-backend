@@ -521,6 +521,7 @@ model Lesson {
   updatedAt      DateTime @updatedAt @map("updated_at")
 
   section CourseSection @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  audioSources MediaAudioSource[]
 
   @@index([sectionId, order])
   @@map("course_lessons")
@@ -1439,7 +1440,14 @@ model MediaAudioSource {
   isActive    Boolean  @default(true) @map("is_active")
   encodedAt   DateTime @map("encoded_at")
   createdAt   DateTime @default(now()) @map("created_at")
+  // "Whose asset is this" for ops. Nullable + SET NULL: the runtime lookup is by
+  // guid, never by this column, so it can only inform, never gate. Filled from
+  // slides_data at insert time; the view media_audio_source_lessons recomputes
+  // the truth and shows when the two disagree (guid reused, lesson re-authored).
+  lessonId    String?  @map("lesson_id") @db.Uuid
+  lesson      Lesson?  @relation(fields: [lessonId], references: [id], onDelete: SetNull)
 
+  @@index([lessonId])
   @@map("media_audio_sources")
 }
 
