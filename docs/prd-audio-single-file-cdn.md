@@ -83,7 +83,8 @@ Streaming online memakai jalur yang sama (playlist satu segmen; pemutar HLS mena
 
 ```prisma
 model MediaAudioSource {
-  guid        String   @id                          // Bunny guid, identitas aset yang dipakai serializer
+  id          String   @id @default(uuid(7)) @db.Uuid
+  guid        String   @unique                      // Bunny guid, identitas aset yang dipakai serializer (kunci pencarian; tanpa FK ke lesson, lihat §4)
   audioKey    String   @map("audio_key")            // private/audio/<guid>/<version>.aac
   version     Int      @default(1)
   codec       String   @default("aac")              // aac | aac-96k (D-1)
