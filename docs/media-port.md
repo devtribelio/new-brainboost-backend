@@ -377,7 +377,9 @@ sits at 0 % then jumps to 100 %) and schedules segment batches from a Dart loop 
 MIUI freezes in the background. `media_audio_sources.segments`
 (`[{key,durationSec,bytes}]`, play order) lists MPEG-TS parts cut by ffmpeg's hls muxer
 without re-encoding; the playlist renders one line per part, each with its own signed
-URL. **Keep it ≤ 8**: that is one batch on both shipped batch sizes (12 in 3.3.3, 8 in
+URL. **Keep it ≤ the app's batch size** — decided 2026-09-18 at **12 parts** (= the 3.3.3
+batch); the 3.4.0 branch had lowered its batch to 8, so 3.4.0 must ship with a batch
+≥ 16 (asked of the mobile team), never 8. Was ≤ 8 (one batch on both shipped sizes: 12 in 3.3.3, 8 in
 3.4.0), so there is never a second batch to stall. `segments = NULL` keeps the
 single-file behaviour. `scripts/media-encode-audio.sh --parts N` produces both.
 

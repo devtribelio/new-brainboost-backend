@@ -2,12 +2,13 @@
 # Siapkan SATU aset audio untuk `media_audio_sources`: encode, potong jadi
 # beberapa bagian, unggah ke S3 (privat), cetak SQL.
 #
-#   ./scripts/media-encode-audio.sh <guid> <input-audio-or-video> [--env staging|prod] [--parts 8] [--reencode 96k]
+#   ./scripts/media-encode-audio.sh <guid> <input-audio-or-video> [--env staging|prod] [--parts 12] [--reencode 96k]
 #
 # Kenapa DIPOTONG (default 8 bagian), bukan satu file:
 #   pengunduh di aplikasi versi toko mengambil segmen per batch (12 di 3.3.3, 8 di 3.4.0)
 #   dan loop Dart yang menjadwalkan batch BERIKUTNYA dibekukan MIUI saat aplikasi di
-#   latar belakang. ≤ 8 bagian = satu batch, tidak ada batch kedua yang bisa macet,
+#   latar belakang. Bagian ≤ batch app = satu batch, tidak ada batch kedua yang bisa macet,
+#   (keputusan 2026-09-18: 12 bagian = batch 3.3.3; 3.4.0 wajib batch ≥ 16, jangan 8)
 #   retry per bagian (~7 MB, bukan seluruh pelajaran), dan bar progres bergerak
 #   (aplikasi menghitung progres = bagian selesai / total bagian).
 #   Satu file (--parts 1) tetap didukung: bar diam di 0% lalu lompat ke 100%.
@@ -22,7 +23,7 @@
 set -euo pipefail
 
 GUID="${1:-}"; INPUT="${2:-}"; shift 2 || true
-ENV_NAME=staging; REENCODE=""; PARTS=8
+ENV_NAME=staging; REENCODE=""; PARTS=12
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --env) ENV_NAME="$2"; shift 2 ;;

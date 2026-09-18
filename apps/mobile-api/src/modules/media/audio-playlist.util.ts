@@ -10,7 +10,9 @@
  * Why a handful and not one: the app's downloader fetches segments in batches
  * (12 in 3.3.3, 8 in 3.4.0) and schedules the next batch from a Dart loop that
  * MIUI freezes in the background; it also draws progress as segments done /
- * total. ≤ 8 segments = one batch, no stall, per-part retry, a bar that moves.
+ * total. Parts ≤ the app's batch size = one batch, no stall, per-part retry, a bar
+ * that moves. Decision 2026-09-18: 12 parts (= the 3.3.3 batch); 3.4.0 must ship
+ * with a batch ≥ 16, never 8, or every asset becomes two batches again.
  *
  * Constraints that shape the output:
  *  - `EXT-X-TARGETDURATION` must be >= the longest rounded segment duration.
