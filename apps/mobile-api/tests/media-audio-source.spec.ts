@@ -22,6 +22,7 @@ const PASSWORD = 'secret123';
 const guidMoved = `guid-audio-moved-${suffix}`;
 const guidInactive = `guid-audio-inactive-${suffix}`;
 const guidBunny = `guid-audio-bunny-${suffix}`;
+const guidSplit = `guid-audio-split-${suffix}`;
 
 let courseId: string;
 let productId: string;
@@ -86,6 +87,18 @@ beforeAll(async () => {
         encodedAt: new Date(),
       },
       {
+        guid: guidSplit,
+        audioKey: `private/audio/${guidSplit}/1/`,
+        durationSec: 1000,
+        bytes: 16_000_000,
+        sha256: 'c'.repeat(64),
+        encodedAt: new Date(),
+        segments: [
+          { key: `private/audio/${guidSplit}/1/000.ts`, durationSec: 480.5, bytes: 8_000_000 },
+          { key: `private/audio/${guidSplit}/1/001.ts`, durationSec: 519.5, bytes: 8_000_000 },
+        ],
+      },
+      {
         guid: guidInactive,
         audioKey: `audio/${guidInactive}/1.aac`,
         durationSec: 600,
@@ -99,7 +112,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await prisma.mediaAudioSource.deleteMany({ where: { guid: { in: [guidMoved, guidInactive] } } });
+  await prisma.mediaAudioSource.deleteMany({ where: { guid: { in: [guidMoved, guidInactive, guidSplit] } } });
   await prisma.courseEnrollment.deleteMany({ where: { courseId } });
   await prisma.course.deleteMany({ where: { id: courseId } });
   await prisma.product.deleteMany({ where: { id: productId } });
@@ -190,6 +203,22 @@ describe('GET /api/member/media/audio-playlist', () => {
     expect(body).toContain(`audio/${guidMoved}/1.aac`);
     expect(body).toContain('X-Amz-Signature');
     expect(body).toContain('#EXT-X-ENDLIST');
+  });
+
+  it('a split source renders one line per part, each with its own signature', async () => {
+    const token = signMediaToken({ guid: guidSplit, courseId, isPreview: true });
+    const hls = await request(app).get('/api/member/media/hls').query({ t: token });
+    expect(hls.status).toBe(200);
+    const res = await request(app).get(playlistPath(hls.body.data.url));
+    expect(res.status).toBe(200);
+    const body = res.text;
+    expect(body.match(/#EXTINF/g)).toHaveLength(2);
+    expect(body).toContain('#EXT-X-TARGETDURATION:520');
+    expect(body).toContain(`private/audio/${guidSplit}/1/000.ts`);
+    expect(body).toContain(`private/audio/${guidSplit}/1/001.ts`);
+    expect(body.match(/X-Amz-Signature/g)).toHaveLength(2);
+    // order preserved
+    expect(body.indexOf('/000.ts')).toBeLessThan(body.indexOf('/001.ts'));
   });
 
   it('a media token is not accepted here → 401', async () => {

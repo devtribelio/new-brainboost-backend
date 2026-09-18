@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { renderSingleSegmentPlaylist } from '../src/modules/media/audio-playlist.util';
+import { renderSingleSegmentPlaylist, renderPlaylist } from '../src/modules/media/audio-playlist.util';
 import {
   signMediaToken,
   verifyMediaToken,
@@ -32,6 +32,25 @@ describe('renderSingleSegmentPlaylist', () => {
     expect(lines[extinfAt + 1]).toContain('.aac');
     expect(lines[extinfAt + 2]).toBe('#EXT-X-ENDLIST');
     expect(body.endsWith('\n')).toBe(true);
+  });
+
+  it('renders several segments in order, target = longest rounded, EXTINF keeps fractions', () => {
+    const body = renderPlaylist([
+      { url: 'https://s/000.ts?sig=a', durationSec: 480.021 },
+      { url: 'https://s/001.ts?sig=b', durationSec: 479.979 },
+      { url: 'https://s/002.ts?sig=c', durationSec: 120 },
+    ]);
+    const lines = body.split('\n');
+    expect(body).toContain('#EXT-X-TARGETDURATION:480');
+    expect(body.match(/#EXTINF/g)).toHaveLength(3);
+    expect(lines.indexOf('https://s/000.ts?sig=a')).toBeLessThan(lines.indexOf('https://s/001.ts?sig=b'));
+    expect(body).toContain('#EXTINF:480.021,');
+    expect(body).toContain('#EXTINF:120.0,');
+    expect(lines[lines.length - 2]).toBe('#EXT-X-ENDLIST');
+  });
+
+  it('refuses an empty segment list', () => {
+    expect(() => renderPlaylist([])).toThrow();
   });
 
   it('never emits a zero target duration, and rounds fractional input', () => {

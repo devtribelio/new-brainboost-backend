@@ -1437,6 +1437,13 @@ model MediaAudioSource {
   durationSec Int      @map("duration_sec") // for EXTINF / TARGETDURATION; from ffprobe
   bytes       Int
   sha256      String
+  // Optional split into a few files: [{key, durationSec, bytes}, ...] in play order.
+  // Why a handful (8) and not one: the store app's downloader fetches segments in
+  // batches (12 in 3.3.3, 8 in 3.4.0) and the Dart loop that schedules the NEXT
+  // batch freezes when the app is backgrounded on MIUI — so ≤ 8 segments means one
+  // batch, no second batch to stall, per-segment retry, and a progress bar that
+  // moves. null = single file at `audio_key` (rows created before this column).
+  segments    Json?
   isActive    Boolean  @default(true) @map("is_active")
   encodedAt   DateTime @map("encoded_at")
   createdAt   DateTime @default(now()) @map("created_at")

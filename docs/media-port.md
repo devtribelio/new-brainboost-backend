@@ -370,3 +370,13 @@ SELECT product_title, lesson_name, lesson_duration_sec, source_duration_sec, is_
 FROM media_audio_source_lessons ORDER BY product_title, lesson_name;
 -- a source row with lesson_id NULL is an orphan: no lesson references that guid
 ```
+
+**Split into a handful of parts (default 8) — migration `20260918150000`.** One file
+works but the store app draws progress as *segments done / total* (a single segment
+sits at 0 % then jumps to 100 %) and schedules segment batches from a Dart loop that
+MIUI freezes in the background. `media_audio_sources.segments`
+(`[{key,durationSec,bytes}]`, play order) lists MPEG-TS parts cut by ffmpeg's hls muxer
+without re-encoding; the playlist renders one line per part, each with its own signed
+URL. **Keep it ≤ 8**: that is one batch on both shipped batch sizes (12 in 3.3.3, 8 in
+3.4.0), so there is never a second batch to stall. `segments = NULL` keeps the
+single-file behaviour. `scripts/media-encode-audio.sh --parts N` produces both.

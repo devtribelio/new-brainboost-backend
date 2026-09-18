@@ -5,14 +5,41 @@ import { S3StorageService, s3StorageService } from '@bb/common/services/s3-stora
 import { hasActiveEnrollment } from '@bb/domain/commerce/enrollment';
 import type { MediaResolution } from './dto/media.dto';
 import { signBunnyHlsUrl, signBunnyMp4Url } from './bunny-sign.util';
-import { renderSingleSegmentPlaylist } from './audio-playlist.util';
+import { renderPlaylist, type PlaylistSegment } from './audio-playlist.util';
 import { signAudioPlaylistToken, type MediaTokenPayload } from './media-token.util';
+
+/** One stored part of a split source (`media_audio_sources.segments[]`). */
+export interface AudioSegment {
+  key: string;
+  durationSec: number;
+}
 
 /** The subset of `media_audio_sources` the playlist needs. */
 export interface AudioSource {
   guid: string;
   audioKey: string;
   durationSec: number;
+  /** Split parts in play order; empty = single file at `audioKey`. */
+  segments: AudioSegment[];
+}
+
+/**
+ * `segments` is free-form JSON in the DB; accept only the shape the playlist
+ * can use and ignore the rest, so a hand-edited row degrades to "single file"
+ * rather than to a 500 on every download.
+ */
+function parseSegments(raw: unknown): AudioSegment[] {
+  if (!Array.isArray(raw)) return [];
+  const out: AudioSegment[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') return [];
+    const { key, durationSec } = item as { key?: unknown; durationSec?: unknown };
+    if (typeof key !== 'string' || !key || typeof durationSec !== 'number' || !(durationSec > 0)) {
+      return [];
+    }
+    out.push({ key, durationSec });
+  }
+  return out;
 }
 
 /**
@@ -114,10 +141,15 @@ export class MediaService {
   async findAudioSource(guid: string): Promise<AudioSource | null> {
     const row = await prisma.mediaAudioSource.findUnique({
       where: { guid },
-      select: { guid: true, audioKey: true, durationSec: true, isActive: true },
+      select: { guid: true, audioKey: true, durationSec: true, isActive: true, segments: true },
     });
     if (!row || !row.isActive) return null;
-    return { guid: row.guid, audioKey: row.audioKey, durationSec: row.durationSec };
+    return {
+      guid: row.guid,
+      audioKey: row.audioKey,
+      durationSec: row.durationSec,
+      segments: parseSegments(row.segments),
+    };
   }
 
   /** Stream vs download TTL, the same rule the Bunny path uses. */
@@ -152,23 +184,31 @@ export class MediaService {
   }
 
   /**
-   * The playlist body: one `.aac` segment behind a short-lived signed URL.
+   * The playlist body: the source's parts (or its single file) each behind a
+   * short-lived signed URL.
    *
-   * The segment URL is minted per request, never stored — that is what keeps
-   * the playlist itself uncacheable (`no-store` at the controller) and the
-   * object private. Today the signer is an S3 presigned GET; when the CDN
-   * behaviour ships, this is the one line that switches to a CloudFront
-   * signature. The app never sees the difference.
+   * Segment URLs are minted per request, never stored — that is what keeps the
+   * playlist itself uncacheable (`no-store` at the controller) and the objects
+   * private. Today the signer is an S3 presigned GET; when the CDN behaviour
+   * ships, this is the one call that switches to a CloudFront signature. The
+   * app never sees the difference.
    */
   async buildAudioPlaylist(
     source: AudioSource,
     opts: { forDownload?: boolean } = {},
   ): Promise<string> {
-    const segmentUrl = await this.storage.getPresignedGetUrl(
-      source.audioKey,
-      this.ttlFor(opts.forDownload === true),
+    const ttl = this.ttlFor(opts.forDownload === true);
+    const parts: AudioSegment[] =
+      source.segments.length > 0
+        ? source.segments
+        : [{ key: source.audioKey, durationSec: source.durationSec }];
+    const signed: PlaylistSegment[] = await Promise.all(
+      parts.map(async (p) => ({
+        url: await this.storage.getPresignedGetUrl(p.key, ttl),
+        durationSec: p.durationSec,
+      })),
     );
-    return renderSingleSegmentPlaylist({ segmentUrl, durationSec: source.durationSec });
+    return renderPlaylist(signed);
   }
 
   /**
