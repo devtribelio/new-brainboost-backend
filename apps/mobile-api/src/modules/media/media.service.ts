@@ -7,6 +7,7 @@ import type { MediaResolution } from './dto/media.dto';
 import { signBunnyHlsUrl, signBunnyMp4Url } from './bunny-sign.util';
 import { renderPlaylist, type PlaylistSegment } from './audio-playlist.util';
 import { signAudioPlaylistToken, type MediaTokenPayload } from './media-token.util';
+import { CDN_SIGNED_PREFIX, isCdnConfigured, signCdnUrl, type CdnSigningConfig } from './cdn-sign.util';
 
 /** One stored part of a split source (`media_audio_sources.segments[]`). */
 export interface AudioSegment {
@@ -50,7 +51,10 @@ function parseSegments(raw: unknown): AudioSegment[] {
  * media lives here; the controller stays thin.
  */
 export class MediaService {
-  constructor(private readonly storage: S3StorageService = s3StorageService) {}
+  constructor(
+    private readonly storage: S3StorageService = s3StorageService,
+    private readonly cdn: CdnSigningConfig = env.media.cdn,
+  ) {}
 
   /**
    * Throw `ForbiddenException` unless `memberId` holds a live enrollment in
@@ -184,14 +188,27 @@ export class MediaService {
   }
 
   /**
+   * Signed URL for one stored object. CloudFront when the CDN is configured AND
+   * the key sits under the prefix the signed behavior covers; otherwise an S3
+   * presigned GET. The prefix check is deliberate: a row whose key lives
+   * elsewhere would be answered 403 by the CDN (no behavior trusts the key group
+   * there), and S3 still serves it.
+   */
+  private signObjectUrl(key: string, ttl: number): Promise<string> {
+    if (isCdnConfigured(this.cdn) && key.startsWith(CDN_SIGNED_PREFIX)) {
+      return Promise.resolve(signCdnUrl(this.cdn, key, ttl));
+    }
+    return this.storage.getPresignedGetUrl(key, ttl);
+  }
+
+  /**
    * The playlist body: the source's parts (or its single file) each behind a
    * short-lived signed URL.
    *
    * Segment URLs are minted per request, never stored — that is what keeps the
    * playlist itself uncacheable (`no-store` at the controller) and the objects
-   * private. Today the signer is an S3 presigned GET; when the CDN behaviour
-   * ships, this is the one call that switches to a CloudFront signature. The
-   * app never sees the difference.
+   * private. The signer is `signObjectUrl`: CloudFront in an env with the CDN,
+   * S3 presign elsewhere. The app never sees the difference.
    */
   async buildAudioPlaylist(
     source: AudioSource,
@@ -204,7 +221,7 @@ export class MediaService {
         : [{ key: source.audioKey, durationSec: source.durationSec }];
     const signed: PlaylistSegment[] = await Promise.all(
       parts.map(async (p) => ({
-        url: await this.storage.getPresignedGetUrl(p.key, ttl),
+        url: await this.signObjectUrl(p.key, ttl),
         durationSec: p.durationSec,
       })),
     );

@@ -380,3 +380,36 @@ without re-encoding; the playlist renders one line per part, each with its own s
 URL. **Keep it ≤ 8**: that is one batch on both shipped batch sizes (12 in 3.3.3, 8 in
 3.4.0), so there is never a second batch to stall. `segments = NULL` keeps the
 single-file behaviour. `scripts/media-encode-audio.sh --parts N` produces both.
+
+### 9.x Segment URLs through CloudFront (signed), S3 presign as the fallback
+
+`MediaService.signObjectUrl` picks the signer per key. With `MEDIA_CDN_HOST`,
+`MEDIA_CDN_KEY_PAIR_ID` and `MEDIA_CDN_PRIVATE_KEY` all set, a key under
+`private/audio/` is signed as a **CloudFront canned-policy URL**
+(`https://<host>/<key>?Expires=&Key-Pair-Id=&Signature=`, `@aws-sdk/cloudfront-signer`);
+anything else — any of the three empty, or a key outside that prefix — stays an S3
+presigned GET. The prefix check is not tidiness: only the `private/audio/*` behavior
+trusts the key group, so the CDN would answer 403 for a key elsewhere while S3 still
+serves it. Why the CDN at all when the per-GB price is the same as S3 in this region:
+1 TB/month free tier (S3: 100 GB), one origin fetch per part instead of one S3 GET per
+download, HEAD works (an S3 presigned GET is GET-only, HEAD → 403), and the bytes
+come from the Jakarta/Singapore edge.
+
+Infra is `infra/cdk/lib/bb-media-cdn-stack.ts`: one distribution per env in front of
+the **existing** bucket (OAC; the bucket stays closed), default behavior = today's
+`public/*` (CachingOptimized, redirect-to-https, HTTP/2+3, IPv6 — copied from
+cdn.brainboost.id), plus `private/audio/*` with a trusted key group. The public key
+lives in the repo (`infra/cdk/cdn-keys/<env>.public.pem`); the private key in Secrets
+Manager `bb/<env>/cdn-signing-key` and reaches the app as `MEDIA_CDN_PRIVATE_KEY`
+(raw PEM or base64 of it — `env.ts` accepts both, because a multi-line value does not
+survive every .env loader). Two things are outside CDK on purpose: the ACM cert
+(must be us-east-1; DNS is Cloudflare, so validation is a manual CNAME, and CDK would
+block the deploy waiting for it) and the bucket policy (the bucket is imported —
+CDK's `BucketPolicy` would replace the public-read statement; merge the stack's
+`BucketPolicyStatement` output in by hand). Cloudflare records must be **DNS-only**
+(grey cloud): proxied, the cert validation fails and Cloudflare sits in front of
+CloudFront. Staging = `cdn-staging.brainboostos.com` (bucket `brainboost-staging`,
+ap-southeast-1); prod = the existing `cdn.brainboost.id` distribution, to be
+**imported** into the same stack (it was created by hand), never recreated.
+
+Deploy: `cdk deploy BbMediaCdnStagingStack -c mediaCdnEnv=staging -c mediaCdnCertificateArn=<arn>`.

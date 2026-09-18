@@ -61,3 +61,22 @@ Build+push image tag baru → `npx cdk deploy -c imageTag=<sha>`. ECS rolling up
 
 ## Teardown
 `npx cdk destroy` (RDS/SQS/Lightsail TIDAK termasuk — itu dibuat manual, di luar stack ini).
+
+## CDN media (BbMediaCdn<Env>Stack)
+
+CloudFront di depan bucket S3 yang **sudah ada** (bucket tidak dibuat di sini). Default
+behavior = baca bebas (`public/*`), `private/audio/*` = wajib signed URL (key group).
+Detail + alasan: `docs/media-port.md` §9.x.
+
+```bash
+# 1. cert WAJIB us-east-1; DNS di Cloudflare → validasi manual (CNAME, DNS only)
+aws acm request-certificate --region us-east-1 --domain-name cdn-staging.brainboostos.com --validation-method DNS
+# 2. tunggu ISSUED, lalu:
+npx cdk deploy BbMediaCdnStagingStack -c mediaCdnEnv=staging -c mediaCdnCertificateArn=<arn>
+# 3. output DistributionDomain → CNAME cdn-staging di Cloudflare (DNS only)
+#    output BucketPolicyStatement → merge ke bucket policy (jangan replace)
+#    output KeyPairId → MEDIA_CDN_KEY_PAIR_ID; private key: Secrets Manager bb/<env>/cdn-signing-key
+```
+
+Key pair: `infra/cdk/cdn-keys/<env>.public.pem` di repo; private key TIDAK pernah di repo.
+Prod: distribusi `cdn.brainboost.id` (EAN6B036LQYKV) dibuat manual — di-import ke stack ini, bukan dibuat baru.
