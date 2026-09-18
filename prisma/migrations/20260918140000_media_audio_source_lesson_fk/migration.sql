@@ -34,8 +34,10 @@ SET "lesson_id" = (
 WHERE s."lesson_id" IS NULL;
 
 -- The view gains the stored lesson_id next to the computed one, so a mismatch
--- is visible in one SELECT.
-CREATE OR REPLACE VIEW "media_audio_source_lessons" AS
+-- is visible in one SELECT. DROP + CREATE rather than OR REPLACE: Postgres
+-- refuses to insert or rename columns of an existing view in place.
+DROP VIEW IF EXISTS "media_audio_source_lessons";
+CREATE VIEW "media_audio_source_lessons" AS
 SELECT
   s.id            AS source_id,
   s.guid,
