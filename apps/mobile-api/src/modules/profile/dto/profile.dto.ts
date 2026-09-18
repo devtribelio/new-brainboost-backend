@@ -161,6 +161,10 @@ export class MemberProfileDto {
   @ApiProperty({ type: 'integer', enum: [0, 1], example: 0 })
   isDeleted!: number;
 
+  /** Deadline of a pending account deletion; null when none is scheduled. */
+  @ApiPropertyOptional({ nullable: true, example: '2026-10-03T07:12:00.000Z' })
+  scheduledDeletionAt?: string | null;
+
   @ApiPropertyOptional({ nullable: true, example: 'JD000001' })
   affiliatorCode?: string | null;
 

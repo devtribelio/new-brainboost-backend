@@ -12,6 +12,7 @@ import { subscriptionExpire } from '@bb/domain/jobs/subscription-expire';
 import { subscriptionRenewalReminder } from '@bb/domain/jobs/subscription-renewal-reminder';
 import { subscriptionSeatChoiceReminder } from '@bb/domain/jobs/subscription-seat-choice-reminder';
 import { topicDigest } from '@bb/domain/jobs/topic-digest';
+import { purgeScheduledDeletions } from '@bb/domain/jobs/purge-scheduled-deletions';
 import { streakReminder } from './modules/tracker/streak-reminder.job';
 
 /**
@@ -63,6 +64,11 @@ const JOBS: Array<{ name: string; run: () => Promise<unknown> }> = [
   { name: 'subscriptionSeatChoiceReminder', run: () => subscriptionSeatChoiceReminder() },
   // Safe on every hourly tick: the job no-ops unless the current WIB hour matches
   // `notification.digestHour`, which is what keeps the send time editable from the DB.
+  // Executes the account soft delete once the 15-day grace period has run out.
+  // Safe on every tick: it only picks rows past their own deadline, and claims each
+  // one conditionally so a member who logged in and cancelled in the meantime is
+  // skipped rather than anonymised.
+  { name: 'purgeScheduledDeletions', run: () => purgeScheduledDeletions() },
   { name: 'topicDigest', run: () => topicDigest() },
   // Same hourly-tick contract as the digest: the job owns its two WIB hours, so the
   // send times stay editable in `app_settings`. No-ops while `streak.reminderEnabled`

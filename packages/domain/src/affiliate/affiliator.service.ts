@@ -245,6 +245,15 @@ export class AffiliatorService {
       // own seed's chain; skip (don't break — legitimate upline may sit above).
       if (node.id === input.buyerMemberId) continue;
 
+      // A soft-deleted account cannot log in, cannot pass the KYC gate and cannot
+      // request a payout, so a commission written to it is a liability that will
+      // never be settled. Skip the row — and ONLY the row: the node keeps its place
+      // in the chain, so everyone above stays on the level (and the rate) they had.
+      // Severing the chain instead would take the money from uninvolved uplines.
+      // Read here rather than passed in, same as `isEventTicketOrder`: an optional
+      // input reads as "not deleted" to any caller that forgets it, and this is money.
+      if (node.deletedAt !== null) continue;
+
       const level = node.level;
       const rate = await this.resolveRate(node.id, node.affiliateBased, level);
       if (rate === null) continue;

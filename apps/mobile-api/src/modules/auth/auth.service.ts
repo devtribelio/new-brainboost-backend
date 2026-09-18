@@ -448,6 +448,45 @@ export class AuthService {
     }
   }
 
+  /**
+   * Reopen an account that is pending deletion, so its owner can log back in and
+   * decide whether to keep it.
+   *
+   * `verificationDeleteAccount` deactivates the row AND revokes every refresh
+   * token, which used to make `recoverAccountScheduled` unreachable: the endpoint
+   * needs `authGuard`, and after scheduling there was no way left to obtain a
+   * token — password, social and refresh all rejected the inactive row. The grace
+   * period was therefore unusable in practice.
+   *
+   * Deliberately does NOT clear `scheduledDeletionAt`. Logging in is not consent to
+   * cancel: an app opened out of habit, or a one-tap "Continue with Google", would
+   * silently call off a deletion the member asked for, and they would never learn it
+   * did not happen. Instead the account becomes usable, FE renders the deadline
+   * (`scheduledDeletionAt` on the profile payload) and cancelling stays an explicit
+   * tap on `recoverAccountScheduled`. Doing nothing still deletes, as promised.
+   *
+   * Gated on the DEADLINE rather than on `deletedAt` alone: the purge runs hourly, so
+   * keying on "not purged yet" would make recovery depend on when the cron last ran.
+   *
+   * The update is conditional for the same reason the purge job's claim is — the two
+   * race, and exactly one of them must win.
+   */
+  private async reopenWithinDeletionGrace(member: {
+    id: string;
+    scheduledDeletionAt: Date | null;
+    deletedAt: Date | null;
+  }): Promise<boolean> {
+    if (member.deletedAt !== null || member.scheduledDeletionAt === null) return false;
+    const now = new Date();
+    if (member.scheduledDeletionAt <= now) return false;
+
+    const reopened = await prisma.member.updateMany({
+      where: { id: member.id, deletedAt: null, scheduledDeletionAt: { gt: now } },
+      data: { isActive: true },
+    });
+    return reopened.count > 0;
+  }
+
   private async loginWithPassword(dto: LoginDto): Promise<TokenBundle> {
     if (!dto.username || !dto.password) {
       throw badRequest(ERROR_CODES.CREDENTIALS_REQUIRED);
@@ -478,7 +517,7 @@ export class AuthService {
     const matches = await this.verifyPassword(dto.password, member);
     if (!matches) throw unauthorized(ERROR_CODES.INVALID_CREDENTIALS);
 
-    if (!member.isActive) {
+    if (!member.isActive && !(await this.reopenWithinDeletionGrace(member))) {
       // Only after the password matched: reveal the unverified state so FE can
       // route to the OTP screen instead of a dead-end credentials error.
       // if (isReusableUnverifiedMember(member)) {
@@ -510,8 +549,10 @@ export class AuthService {
     const algo = (member.passwordAlgo ?? '').toLowerCase();
 
     // Social-only accounts have a random sentinel hash; password grant must
-    // never authenticate them.
-    if (algo === 'social') return false;
+    // never authenticate them. `deleted` is the same shape, written by the purge
+    // job: refusing here (rather than letting the unknown-algo branch bcrypt-compare
+    // a random string) keeps the answer independent of what that sentinel contains.
+    if (algo === 'social' || algo === 'deleted') return false;
 
     if (algo === 'bcrypt') {
       return bcrypt.compare(plaintext, member.passwordHash);
@@ -733,7 +774,9 @@ export class AuthService {
     // Fast path: known provider sub → straight to issue.
     const bySub = await prisma.member.findUnique({ where: subWhere });
     if (bySub) {
-      if (!bySub.isActive) throw unauthorized(ERROR_CODES.MEMBER_INACTIVE);
+      if (!bySub.isActive && !(await this.reopenWithinDeletionGrace(bySub))) {
+        throw unauthorized(ERROR_CODES.MEMBER_INACTIVE);
+      }
       // Heal legacy-migrated rows: legacy MariaDB has members with a social id
       // but is_email_verified=0 (pre-dates the unconditional set in
       // MemberLoginSocialMedia), and migration copies the flag as-is. The
@@ -850,6 +893,8 @@ export class AuthService {
       isEmailVerified: boolean;
       isActive: boolean;
       legacyId: number | null;
+      scheduledDeletionAt: Date | null;
+      deletedAt: Date | null;
     },
     subData: { googleSub: string } | { appleSub: string },
     clientType: ClientType,
@@ -858,7 +903,9 @@ export class AuthService {
     if (healEmailVerified && member.legacyId === null) {
       throw badRequest(ERROR_CODES.EMAIL_IN_USE_UNVERIFIED);
     }
-    if (!member.isActive) throw unauthorized(ERROR_CODES.MEMBER_INACTIVE);
+    if (!member.isActive && !(await this.reopenWithinDeletionGrace(member))) {
+      throw unauthorized(ERROR_CODES.MEMBER_INACTIVE);
+    }
 
     const linked = await prisma.member.update({
       where: { id: member.id },

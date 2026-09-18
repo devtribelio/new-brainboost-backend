@@ -66,7 +66,12 @@ export const membersSyncer: Syncer = {
       const ids = (rows as any[]).map((r) => ctx.memberByLegacy.get(Number(r.member_id))!);
       const current = new Map<string, { updatedAt: Date; legacySyncedAt: Date | null }>();
       for (const m of await ctx.prisma.member.findMany({
-        where: { id: { in: ids } },
+        // Soft-deleted accounts are excluded outright. The touch-gate already keeps
+        // legacy off them (anonymising bumps updatedAt past legacySyncedAt), but that
+        // is indirect: anything that re-levels legacySyncedAt would let legacy write
+        // full_name / avatar_url straight back over the anonymised values and undo the
+        // deletion with nothing to show for it. An explicit filter is cheap insurance.
+        where: { id: { in: ids }, deletedAt: null },
         select: { id: true, updatedAt: true, legacySyncedAt: true },
       })) {
         current.set(m.id, { updatedAt: m.updatedAt, legacySyncedAt: m.legacySyncedAt });
@@ -78,6 +83,11 @@ export const membersSyncer: Syncer = {
         watermark = maxWatermark(watermark, toDate(r.wm));
         const id = ctx.memberByLegacy.get(Number(r.member_id))!; // guaranteed: member_id ∈ our set
         const cur = current.get(id);
+        // Absent from `current` = soft-deleted (filtered above). Never write to it.
+        if (!cur) {
+          stats.skipped += 1;
+          return;
+        }
         const isActive = bool(r.is_active) && !bool(r.is_deleted);
         const legacyPassword = nonEmpty(r.password);
         const touched = cur?.legacySyncedAt != null && cur.updatedAt.getTime() > cur.legacySyncedAt.getTime();

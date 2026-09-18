@@ -13,8 +13,21 @@ import type {
   VerificationDeleteAccountDto,
 } from './dto/delete-account.dto';
 import type { GetPaymentTokenQueryDto } from './dto/payment-token.dto';
+import { settingsService, SETTING_KEYS } from '@bb/common/services/settings.service';
 
-const SCHEDULED_DELETION_DAYS = 15;
+/**
+ * Fallback grace period, in days, between asking to delete and the purge executing.
+ * Runtime-overridable through `app_settings` (`account.deletionGraceDays`) — this is a
+ * policy number that product or a regulator moves, not a release.
+ *
+ * Safe to change at any time: `verificationDeleteAccount` computes the deadline ONCE and
+ * stores it as an absolute date, so a new value only affects deletions scheduled after
+ * it. Accounts already in flight keep the date their owner was promised, and nothing is
+ * ever brought forward behind their back. Storing the request date and deriving the
+ * deadline on read would NOT have that property — lowering the number would retroactively
+ * expire a whole cohort at once.
+ */
+const SCHEDULED_DELETION_DAYS = 30;
 
 export class AccountService {
   /**
@@ -291,9 +304,11 @@ export class AccountService {
 
     await otpService.consume(this.deleteAccountOtpTarget(member), dto.otpCode, 'delete-account');
 
-    const scheduledDeletionAt = new Date(
-      Date.now() + SCHEDULED_DELETION_DAYS * 24 * 60 * 60 * 1000,
+    const graceDays = await settingsService.getNumber(
+      SETTING_KEYS.accountDeletionGraceDays,
+      SCHEDULED_DELETION_DAYS,
     );
+    const scheduledDeletionAt = new Date(Date.now() + graceDays * 24 * 60 * 60 * 1000);
     await prisma.member.update({
       where: { id: memberId },
       data: { scheduledDeletionAt, isActive: false },
@@ -312,11 +327,23 @@ export class AccountService {
     if (!member.scheduledDeletionAt) {
       throw badRequest(ERROR_CODES.DELETION_NOT_SCHEDULED);
     }
+    // Past the deadline there is nothing to cancel. Gated on the deadline rather
+    // than on `deletedAt`, so the answer does not depend on whether the hourly
+    // purge happens to have run yet — and `deletedAt` is checked too because once
+    // the row is anonymised the PII is gone and no recovery can restore it.
+    if (member.deletedAt !== null || member.scheduledDeletionAt <= new Date()) {
+      throw badRequest(ERROR_CODES.DELETION_NOT_SCHEDULED);
+    }
 
-    await prisma.member.update({
-      where: { id: memberId },
+    // Conditional: the purge job claims rows with the same predicate, and exactly
+    // one of the two must win.
+    const recovered = await prisma.member.updateMany({
+      where: { id: memberId, deletedAt: null, scheduledDeletionAt: { gt: new Date() } },
       data: { scheduledDeletionAt: null, isActive: true },
     });
+    if (recovered.count === 0) {
+      throw badRequest(ERROR_CODES.DELETION_NOT_SCHEDULED);
+    }
     return { memberId, recovered: true };
   }
 

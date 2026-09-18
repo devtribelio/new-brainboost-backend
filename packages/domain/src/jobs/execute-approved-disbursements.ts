@@ -26,7 +26,16 @@ export async function executeApprovedDisbursements(
   disbursementService: DisbursementService = new DisbursementService(),
 ): Promise<{ sent: number; failed: number; kycBlocked: number }> {
   const rows = await prisma.affiliateDisbursement.findMany({
-    where: { status: DISBURSEMENT_STATUS.PENDING, approvedAt: { not: null } },
+    // Never wire money out for a soft-deleted account. The purge voids PENDING
+    // payouts, so this is the safety net rather than the primary guard — but it has
+    // to exist: the bank details are snapshotted on the disbursement row, so
+    // anonymising `members.bank_*` does not stop a payout, and the kycStatus check
+    // below would wave it through (anonymising leaves kycStatus APPROVED).
+    where: {
+      status: DISBURSEMENT_STATUS.PENDING,
+      approvedAt: { not: null },
+      member: { deletedAt: null },
+    },
     orderBy: { approvedAt: 'asc' },
     include: { member: { select: { kycStatus: true } } },
   });

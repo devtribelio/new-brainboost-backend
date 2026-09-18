@@ -74,6 +74,10 @@ export class ProfileController {
       isPreRegister: 0,
       loginCount: 0,
       isDeleted: member.scheduledDeletionAt ? 1 : 0,
+      // Additive, so clients that predate it keep working. `isDeleted` alone only
+      // says a deletion is pending; the banner that offers to cancel it has to name
+      // the date, and this is where FE reads it. Null whenever nothing is scheduled.
+      scheduledDeletionAt: member.scheduledDeletionAt?.toISOString() ?? null,
       affiliatorCode: member.affiliateCode ?? null,
       haveAffiliateConnect: member.inviterId !== null,
       affiliateConnectedData,

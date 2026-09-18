@@ -6,6 +6,14 @@ export interface InviterChainNode {
   affiliateBased: string;
   inviterId: string | null;
   level: number;
+  /**
+   * Set when this member's account has been soft-deleted. The node stays IN the
+   * chain — dropping it here would shift everyone above it up a level and quietly
+   * change their rate (L2 10% → L1 20%). Payouts must not move because a third
+   * party closed their account, so the caller skips paying this node and leaves
+   * every other level exactly where it was.
+   */
+  deletedAt: Date | null;
 }
 
 /**
@@ -46,18 +54,19 @@ export async function walkInviterChain(
   const maxDepth = options.maxDepth ?? GROWTH_MAX_DEPTH;
   const stopOnPerformance = options.stopOnPerformance ?? false;
 
-  const rows = await prisma.$queryRaw<Array<{ id: string; affiliateBased: string; inviterId: string | null; level: number }>>`
+  const rows = await prisma.$queryRaw<Array<{ id: string; affiliateBased: string; inviterId: string | null; level: number; deletedAt: Date | null }>>`
     WITH RECURSIVE chain AS (
-      SELECT id, affiliate_based AS "affiliateBased", inviter_id AS "inviterId", 1 AS level
+      SELECT id, affiliate_based AS "affiliateBased", inviter_id AS "inviterId", 1 AS level,
+             deleted_at AS "deletedAt"
       FROM members
       WHERE id = ${startMemberId}::uuid
       UNION ALL
-      SELECT m.id, m.affiliate_based, m.inviter_id, c.level + 1
+      SELECT m.id, m.affiliate_based, m.inviter_id, c.level + 1, m.deleted_at
       FROM members m
       INNER JOIN chain c ON m.id = c."inviterId"
       WHERE c.level < ${maxDepth}
     )
-    SELECT id, "affiliateBased", "inviterId", level FROM chain ORDER BY level ASC
+    SELECT id, "affiliateBased", "inviterId", level, "deletedAt" FROM chain ORDER BY level ASC
   `;
 
   // Always guard against cycles first (mutual A<->B inviter links).

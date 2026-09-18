@@ -46,7 +46,13 @@ export type ReKycReason =
   | 'DORMANT_REACTIVATION'
   | 'LARGE_DISBURSEMENT'
   | 'SUSPICIOUS'
-  | 'ADMIN_MANUAL';
+  | 'ADMIN_MANUAL'
+  // The account was soft-deleted: `purgeScheduledDeletions` destroys the ID number,
+  // the document type and both images, so the APPROVED stamp no longer has any
+  // evidence behind it. Load-bearing once a purged account can be restored over the
+  // counter — without this, a restored row walks straight through the payout gate
+  // with zero KYC on file.
+  | 'ACCOUNT_DELETED';
 
 type Tx = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
 

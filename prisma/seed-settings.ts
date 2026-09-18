@@ -12,6 +12,12 @@ const prisma = new PrismaClient();
 
 const SETTINGS: Array<{ key: string; value: string; description: string }> = [
   {
+    key: 'account.deletionGraceDays',
+    value: '30',
+    description:
+      'Jumlah hari antara member mengonfirmasi penghapusan akun dan job purge menganonimkan barisnya. Selama rentang ini member masih bisa login dan membatalkan sendiri. Aman diubah kapan saja: tenggat dihitung sekali lalu disimpan sebagai tanggal absolut, jadi nilai baru hanya berlaku untuk penjadwalan berikutnya dan tidak pernah memajukan akun yang sudah berjalan. CATATAN: kalau ada copy statis di aplikasi yang menyebut jumlah harinya, copy itu harus ikut diubah.',
+  },
+  {
     key: 'affiliate.cookieDays',
     value: '365',
     description: 'Affiliate attribution cookie lifetime in days (legacy parity: 1 year).',

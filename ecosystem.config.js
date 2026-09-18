@@ -75,7 +75,7 @@ module.exports = {
       // delay the money jobs. streakReminder owns two hours (streak.atRiskHour /
       // streak.dimmedHour) and is additionally gated by its own on/off settings,
       // both of which ship false.
-      args: 'affiliatePendingToBalance expirePendingPayments refreshAffiliateLeaderboard sweepOrphanUploads topicDigest streakReminder',
+      args: 'affiliatePendingToBalance expirePendingPayments refreshAffiliateLeaderboard sweepOrphanUploads purgeScheduledDeletions topicDigest streakReminder',
       exec_mode: 'fork',
       instances: 1,
       autorestart: false,

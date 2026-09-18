@@ -17,6 +17,12 @@ interface CacheEntry {
 
 /** Stable keys for known settings (avoid typos across the codebase). */
 export const SETTING_KEYS = {
+  // Days between a member confirming account deletion and the purge anonymising the
+  // row. A policy number — product or a regulator moves it, not a release. Safe to
+  // change at any time: the deadline is computed once and stored as an absolute date,
+  // so a new value only affects deletions scheduled after it and never pulls an
+  // in-flight account forward.
+  accountDeletionGraceDays: 'account.deletionGraceDays',
   affiliateCookieDays: 'affiliate.cookieDays',
   affiliateHoldDays: 'affiliate.holdDays',
   affiliateIapHoldDays: 'affiliate.iapHoldDays',
