@@ -333,7 +333,7 @@ Video assets and every guid without a row keep the Bunny path byte-for-byte.
 - The playlist is rendered per request with a fresh signed segment URL and sent
   `Cache-Control: no-store`. Today the signer is an S3 presigned GET
   (`S3StorageService.getPresignedGetUrl`); the CloudFront signer replaces that
-  one call when the `/audio/*` behaviour ships.
+  one call when the `/private/audio/*` CloudFront behaviour ships.
 - Rollback per asset = `UPDATE media_audio_sources SET is_active=false` — the
   next `/hls` answer is Bunny again; a playlist token already issued 404s.
 - Segment format is ADTS `.aac`: a single segment with no `EXT-X-MAP` is only
@@ -346,11 +346,11 @@ Video assets and every guid without a row keep the Bunny path byte-for-byte.
 ffmpeg -i "<signed 360p mp4 url>" -vn -c:a copy -f adts /tmp/<guid>.aac
 ffprobe -v error -show_entries format=duration -of csv=p=0 /tmp/<guid>.aac   # seconds
 shasum -a 256 /tmp/<guid>.aac
-# 2. private object, same bucket as public/*, NOT under public/
-aws s3 cp /tmp/<guid>.aac s3://<bucket>/audio/<guid>/1.aac --content-type audio/aac
+# 2. under private/ — the prefix the bucket policy never opens and the storage service treats as presign-only
+aws s3 cp /tmp/<guid>.aac s3://<bucket>/private/audio/<guid>/1.aac --content-type audio/aac
 # 3. row (inactive first, then flip)
 INSERT INTO media_audio_sources (guid, audio_key, duration_sec, bytes, sha256, encoded_at, is_active)
-VALUES ('<guid>', 'audio/<guid>/1.aac', <dur>, <bytes>, '<sha>', now(), false);
+VALUES ('<guid>', 'private/audio/<guid>/1.aac', <dur>, <bytes>, '<sha>', now(), false);
 UPDATE media_audio_sources SET is_active = true WHERE guid = '<guid>';
 ```
 Verify with the store build of the app pointed at that environment, on the

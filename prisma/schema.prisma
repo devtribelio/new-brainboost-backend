@@ -1429,7 +1429,7 @@ model AppVersionConfig {
 /// inactive = Bunny exactly as before. Rollback per asset = `is_active=false`.
 model MediaAudioSource {
   guid        String   @id // Bunny Stream guid
-  audioKey    String   @map("audio_key") // S3 key, e.g. audio/<guid>/1.aac (private prefix, presigned/CDN-signed only)
+  audioKey    String   @map("audio_key") // S3 key, e.g. private/audio/<guid>/1.aac (private/ prefix = presigned/CDN-signed only, per S3StorageService convention)
   version     Int      @default(1) // bump on re-encode; new key, old file untouched while downloads finish
   codec       String   @default("aac") // aac (track copied) | aac-96k (re-encoded)
   durationSec Int      @map("duration_sec") // for EXTINF / TARGETDURATION; from ffprobe

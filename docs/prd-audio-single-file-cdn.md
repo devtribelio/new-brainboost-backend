@@ -40,7 +40,7 @@ Unduhan offline di Android gagal di Xiaomi/POCO karena satu pelajaran = 780–92
 | K5 | Sumber playlist bertahap **per aset**: tabel pemetaan `guid → audio_key`; baris kosong = playlist Bunny seperti sekarang | Rollback per aset tanpa deploy; migrasi 10 aset dulu |
 | K6 | URL segmen = **CloudFront signed URL** (key pair, private key di Secrets Manager), TTL sama dengan `/media/hls` sekarang | Menggantikan token Bunny; S3 tetap privat, tidak ada public-read |
 | K7 | Playlist **dibuat backend saat diminta** (bukan file statis di S3), berisi URL segmen yang baru ditandatangani | TTL berjalan dari saat diminta; tidak ada playlist basi di CDN |
-| K8 | Prefix S3 `audio/<guid>/<version>.aac` di bucket `brainboost-production`; behavior CloudFront baru untuk `/audio/*` dengan **signed URL wajib** dan cache panjang | Satu distribusi yang sudah ada; `version` memungkinkan encode ulang tanpa menimpa file yang sedang diunduh |
+| K8 | Prefix S3 `private/audio/<guid>/<version>.aac` di bucket `brainboost-production` (di bawah `private/`, konvensi presign-only yang sudah ada); behavior CloudFront baru untuk `/private/audio/*` dengan **signed URL wajib** dan cache panjang | Satu distribusi yang sudah ada; `version` memungkinkan encode ulang tanpa menimpa file yang sedang diunduh |
 | K9 | Unduhan HLS lama di perangkat **tidak disentuh**; user mendapat file baru saat mengunduh ulang | Tidak ada migrasi klien |
 
 ### Terbuka (butuh keputusan sebelum BE-03)
@@ -69,7 +69,7 @@ aplikasi → GET audio-playlist
       #EXT-X-MEDIA-SEQUENCE:0
       #EXT-X-PLAYLIST-TYPE:VOD
       #EXTINF:<durasi detik>,
-      https://cdn.brainboost.id/audio/<guid>/<v>.aac?Expires=…&Signature=…&Key-Pair-Id=…
+      https://cdn.brainboost.id/private/audio/<guid>/<v>.aac?Expires=…&Signature=…&Key-Pair-Id=…
       #EXT-X-ENDLIST
 aplikasi → mengunduh 1 segmen dari CloudFront (Android: 1 tugas; iOS: AVAssetDownload)
         → menulis playlist lokal dengan seg_00000.aac → memutar seperti biasa
@@ -84,7 +84,7 @@ Streaming online memakai jalur yang sama (playlist satu segmen; pemutar HLS mena
 ```prisma
 model MediaAudioSource {
   guid        String   @id                          // Bunny guid, identitas aset yang dipakai serializer
-  audioKey    String   @map("audio_key")            // audio/<guid>/<version>.aac
+  audioKey    String   @map("audio_key")            // private/audio/<guid>/<version>.aac
   version     Int      @default(1)
   codec       String   @default("aac")              // aac | aac-96k (D-1)
   durationSec Int      @map("duration_sec")         // untuk EXTINF/TARGETDURATION; dari ffprobe
@@ -108,8 +108,8 @@ Tidak ada perubahan pada `course_lessons`, `products`, tracker, atau tabel lain.
 | ID | Task | Acceptance |
 |---|---|---|
 | OPS-01 | Key pair CloudFront (public key + key group) untuk distribusi `EAN6B036LQYKV`; private key ke Secrets Manager `bb/prod/cdn-signing`; task role mobile-api boleh `GetSecretValue` untuk itu | Backend bisa menandatangani; kunci tidak ada di repo/env |
-| OPS-02 | Behavior CloudFront path `/audio/*`: origin `brainboost-production`, **Restrict viewer access = key group**, cache policy TTL panjang, compress off, Range diteruskan | URL tanpa tanda tangan → 403; dengan tanda tangan → 200; Range request → 206 |
-| OPS-03 | Bucket policy: `/audio/*` hanya lewat OAC CloudFront; tidak masuk policy public-read `public/*` | Akses langsung ke S3 → 403 |
+| OPS-02 | Behavior CloudFront path `/private/audio/*`: origin `brainboost-production`, **Restrict viewer access = key group**, cache policy TTL panjang, compress off, Range diteruskan | URL tanpa tanda tangan → 403; dengan tanda tangan → 200; Range request → 206 |
+| OPS-03 | Bucket policy: `/private/audio/*` hanya lewat OAC CloudFront; tidak masuk policy public-read `public/*` | Akses langsung ke S3 → 403 |
 | OPS-04 | Alarm biaya: CloudFront egress > D-2 per bulan | Notifikasi ke email ops |
 
 ### Backend — `[BE]`
@@ -120,7 +120,7 @@ Tidak ada perubahan pada `course_lessons`, `products`, tracker, atau tabel lain.
 | BE-02 | `cloudfront-sign.util.ts`: signed URL (canned policy) dengan key dari Secrets Manager, cache kunci di memori; unit test terhadap vektor yang dibuat dengan AWS CLI | Tanda tangan diterima CloudFront staging behavior | S | OPS-01 |
 | BE-03 | `MediaService.buildHlsUrl`: bila `media_audio_sources[guid].isActive` → URL endpoint playlist backend (token turunan dari token media yang ada, TTL sama); selain itu perilaku lama byte-identik | Test: guid tanpa baris → URL Bunny persis seperti sebelum; guid dengan baris → URL playlist | S | BE-01 |
 | BE-04 | Endpoint `GET /api/member/media/audio-playlist?t=` (publik seperti `/media/hls`, tanpa auth ulang karena token sudah membawa guid + expiry; `Cache-Control: no-store`) yang menghasilkan playlist satu segmen §3 dengan `EXTINF` dari `durationSec` | Playlist lolos validator `mediastreamvalidator`/`hls-parser`; app staging mengunduhnya | M | BE-02, BE-03 |
-| BE-05 | Skrip `pnpm media:encode-audio --guid=<g> [--all-audio] [--dry-run] [--reencode=96k]`: ambil MP4 360p dari Bunny (URL bertanda tangan yang sudah ada), `ffmpeg -vn -c:a copy -f adts` (atau encode ulang), `ffprobe` durasi, unggah ke `audio/<guid>/<v>.aac`, hitung sha256, tulis baris `isActive=false` dulu; flag `--activate` menyalakannya | Idempoten per guid+version; gagal di tengah tidak meninggalkan baris aktif tanpa file | M | BE-01 |
+| BE-05 | Skrip `pnpm media:encode-audio --guid=<g> [--all-audio] [--dry-run] [--reencode=96k]`: ambil MP4 360p dari Bunny (URL bertanda tangan yang sudah ada), `ffmpeg -vn -c:a copy -f adts` (atau encode ulang), `ffprobe` durasi, unggah ke `private/audio/<guid>/<v>.aac`, hitung sha256, tulis baris `isActive=false` dulu; flag `--activate` menyalakannya | Idempoten per guid+version; gagal di tengah tidak meninggalkan baris aktif tanpa file | M | BE-01 |
 | BE-06 | `GET /media/download` untuk aset yang sudah pindah mengarah ke file `.aac` yang sama (bukan MP4 Bunny) | Tidak ada jalur yang masih menarik byte video untuk aset audio yang sudah pindah | S | BE-03 |
 | BE-07 | Log + metrik: hitungan playlist per sumber (`bunny` vs `cdn`) per hari, untuk memantau rollout dan biaya | Terlihat di CloudWatch tanpa dashboard baru | S | BE-04 |
 | BE-08 | Docs: `docs/media-port.md` §9 (arsitektur audio baru, rollback per aset), CLAUDE.md §5 satu paragraf | Tertulis sebelum aset ke-11 diaktifkan | S | semua |
