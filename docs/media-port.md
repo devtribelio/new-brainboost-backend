@@ -357,3 +357,13 @@ Verify with the store build of the app pointed at that environment, on the
 POCO that failed: download with the screen off, three times.
 
 **Spec / decisions:** `docs/prd-audio-single-file-cdn.md`.
+
+**Which lesson is this row? — view `media_audio_source_lessons`** (migration
+`20260918130000`). There is no FK by design (the relation lives inside
+`slides_data` JSON and one asset may serve several lessons), so the view resolves
+it at read time:
+```sql
+SELECT product_title, lesson_name, lesson_duration_sec, source_duration_sec, is_active, audio_key
+FROM media_audio_source_lessons ORDER BY product_title, lesson_name;
+-- a source row with lesson_id NULL is an orphan: no lesson references that guid
+```
