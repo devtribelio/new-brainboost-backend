@@ -1453,6 +1453,10 @@ model MediaAudioSource {
   // the truth and shows when the two disagree (guid reused, lesson re-authored).
   lessonId    String?  @map("lesson_id") @db.Uuid
   lesson      Lesson?  @relation(fields: [lessonId], references: [id], onDelete: SetNull)
+  // Master file this was cut from when it was UPLOADED from the backoffice
+  // (private/audio-uploads/<guid>/source.<ext>); null = migrated from Bunny. An
+  // upload has no Bunny copy, so is_active=false is not a rollback for it.
+  sourceKey   String?  @map("source_key")
 
   @@index([lessonId])
   @@map("media_audio_sources")
@@ -1473,6 +1477,7 @@ model MediaAudioMigrationJob {
   attempts    Int       @default(0)
   error       String?
   requestedBy String?   @map("requested_by") // bo_users id/email — backoffice-owned, no FK
+  sourceKey   String?   @map("source_key") // set = read the master from our bucket (backoffice upload); null = download the Bunny MP4
   requestedAt DateTime  @default(now()) @map("requested_at")
   startedAt   DateTime? @map("started_at")
   finishedAt  DateTime? @map("finished_at")

@@ -441,3 +441,29 @@ unique index allows one open job per guid, so a double click is a 409, not two e
 It stops claiming work after 3 minutes because PM2's `cron_restart` kills a process
 still running at the next tick. **Needs `ffmpeg`/`ffprobe` on the host**: in the image
 via the Dockerfile; on the staging VPS `sudo apt-get install -y ffmpeg`.
+
+### 9.z Audio uploaded from the backoffice (no Bunny at all)
+
+The slide editor's **Unggah file audio…** PUTs the master from the browser straight to
+`private/audio-uploads/<guid>/source.<ext>` (presigned PUT; the file is 50–300 MB and
+never crosses the dashboard server), then queues the same job with `source_key` set.
+The guid is **minted by the backoffice** and goes into the slide exactly like a Bunny
+guid — token, `/media/hls`, playlist and app are unchanged. Differences from a Bunny
+migration, all keyed on `source_key IS NOT NULL`:
+
+- the job reads the master with `S3StorageService.downloadToFile` instead of fetching
+  the Bunny MP4, after checking the key sits under **that guid's own** upload folder
+  (the key comes from a DB row another app wrote — checked, not trusted);
+- non-AAC input (mp3, wav) is encoded to AAC 128 kbps; AAC/m4a is copied as-is;
+- `media_audio_sources.source_key` keeps the master's key, so a re-cut re-reads it and
+  the backoffice hides **Kembali ke Bunny** — there is no Bunny copy, `is_active=false`
+  would only break playback;
+- the job **stamps the duration**: `normalize-slides-data` can only ask Bunny, which has
+  never heard of the guid. `stampSlideDuration` rewrites matching audio slides lean
+  (`data.guid` + `data.durationSec`) and moves `Lesson.duration` by the **delta** — never
+  a re-sum, because raw-lite sibling slides carry no duration and would count as 0. The
+  backoffice save path does the same from `media_audio_sources` when the slide is saved
+  *after* the job finished, so either order ends correct.
+
+Until the job's tick (≤ 5 min) the guid has no row and `/media/hls` falls through to
+Bunny, which 404s — a just-uploaded lesson is not playable for those minutes.

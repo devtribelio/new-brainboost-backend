@@ -6,6 +6,9 @@ import {
   ListObjectsV2Command,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { createWriteStream } from 'fs';
+import { pipeline } from 'stream/promises';
+import type { Readable } from 'stream';
 import { env } from '../config/env';
 
 /**
@@ -70,6 +73,13 @@ export class S3StorageService {
         ...(cacheControl ? { CacheControl: cacheControl } : {}),
       }),
     );
+  }
+
+  /** Stream an object to a local file (never buffered: a master audio file is 50–300 MB). */
+  async downloadToFile(key: string, dest: string): Promise<void> {
+    const out = await this.client.send(new GetObjectCommand({ Bucket: this.bucket, Key: key }));
+    if (!out.Body) throw new Error(`S3 object has no body: ${key}`);
+    await pipeline(out.Body as Readable, createWriteStream(dest));
   }
 
   /** True when at least one object lives under `prefix`. */

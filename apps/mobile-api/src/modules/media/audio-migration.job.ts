@@ -35,13 +35,17 @@ const BUDGET_MS = 3 * 60 * 1000;
 /** Audio is byte-identical at 360p and 480p (134 kbps); take the smallest file that exists. */
 const RESOLUTIONS = ['360p', '480p', '720p', '240p'];
 const IMMUTABLE = 'public, max-age=31536000, immutable';
+/** The only place a job may read a master from. The key comes from a DB row the
+ * backoffice wrote, so it is checked rather than trusted. */
+export const UPLOAD_PREFIX = 'private/audio-uploads/';
 
 /**
  * Background job: move requested audio assets from Bunny to our own storage.
  *
  * The backoffice only INSERTs a `media_audio_migration_jobs` row; everything
  * that needs ffmpeg, the Bunny token key or S3 credentials happens here (same
- * split as `executeApprovedDisbursements`). Per job: download the Bunny MP4,
+ * split as `executeApprovedDisbursements`). Per job: download the Bunny MP4 (or,
+ * for a backoffice upload, the master at `source_key` in our own bucket),
  * copy the AAC track out WITHOUT re-encoding, cut it into ≤ `parts` MPEG-TS
  * files, upload under a fresh `private/audio/<guid>/<version>/`, verify, then
  * upsert `media_audio_sources` ACTIVE — from that moment `/media/hls` serves the
@@ -73,7 +77,7 @@ export async function migrateAudioToStorage(
     if (claimed.count === 0) continue;
 
     try {
-      const result = await migrateOne(next.guid, next.parts, next.lessonId, storage);
+      const result = await migrateOne(next.guid, next.parts, next.lessonId, next.sourceKey, storage);
       await prisma.mediaAudioMigrationJob.update({
         where: { id: next.id },
         data: { status: MIGRATION_STATUS.DONE, finishedAt: new Date() },
@@ -115,17 +119,24 @@ async function migrateOne(
   guid: string,
   parts: number,
   lessonId: string | null,
+  sourceKey: string | null,
   storage: S3StorageService,
 ): Promise<{ version: number; parts: number; durationSec: number; bytes: number; res: string }> {
+  if (sourceKey !== null && (!sourceKey.startsWith(`${UPLOAD_PREFIX}${guid}/`) || sourceKey.includes('..'))) {
+    throw new Error('source_key di luar folder unggahan audio ini');
+  }
   const work = await mkdtemp(join(tmpdir(), 'bb-audio-'));
   try {
-    const src = join(work, 'source.mp4');
-    const res = await downloadBunnyMp4(guid, src);
+    // ffmpeg sniffs the container, so the local name needs no real extension.
+    const src = join(work, 'source.bin');
+    let res = 'upload';
+    if (sourceKey) await storage.downloadToFile(sourceKey, src);
+    else res = await downloadBunnyMp4(guid, src);
 
     // Copy the track when it is already AAC (it always is on Bunny); never
     // re-encode spoken word for nothing. ADTS = self-describing, no EXT-X-MAP.
     const codec = (await ffprobe(['-select_streams', 'a:0', '-show_entries', 'stream=codec_name', '-of', 'csv=p=0', src])).split('\n')[0];
-    if (!codec) throw new Error('Sumber dari Bunny tidak punya track audio');
+    if (!codec) throw new Error('File sumber tidak punya track audio');
     const full = join(work, 'full.aac');
     const audioArgs = codec === 'aac' ? ['-c:a', 'copy'] : ['-c:a', 'aac', '-b:a', '128k'];
     await run('ffmpeg', ['-v', 'error', '-y', '-i', src, '-vn', ...audioArgs, '-f', 'adts', full], { maxBuffer: 1 << 20 });
@@ -182,8 +193,12 @@ async function migrateOne(
       isActive: true,
       encodedAt: new Date(),
       lessonId: resolvedLessonId,
+      sourceKey,
     };
     await prisma.mediaAudioSource.upsert({ where: { guid }, create: { guid, ...data }, update: data });
+    // An upload has no Bunny `length` for normalize-slides-data to find, so this
+    // job is the only thing that knows how long the audio is.
+    if (sourceKey) await stampSlideDuration(guid, durationSec);
     return { version, parts: segments.length, durationSec, bytes, res };
   } finally {
     await rm(work, { recursive: true, force: true });
@@ -233,4 +248,41 @@ async function findLessonId(guid: string): Promise<string | null> {
            OR e->'data'->'video'->>'guid' = ${guid})
     ORDER BY l.created_at LIMIT 1`;
   return rows[0]?.id ?? null;
+}
+
+/**
+ * Write the real duration into every audio slide that plays `guid`, in the lean
+ * shape (`data.guid` + `data.durationSec`), and move `Lesson.duration` by the
+ * difference. A delta, not a re-sum: sibling media slides the backoffice saved
+ * raw-lite carry no `durationSec` until normalize runs, and summing them as 0
+ * would shrink the lesson. No slide yet (uploaded, not saved) = no-op; the
+ * backoffice save path stamps it from `media_audio_sources` instead.
+ */
+async function stampSlideDuration(guid: string, durationSec: number): Promise<void> {
+  await prisma.$executeRaw`
+    WITH hit AS (
+      SELECT l.id,
+             (SELECT COALESCE(sum(COALESCE((e->'data'->>'durationSec')::int, 0)), 0)
+                FROM jsonb_array_elements(l.slides_data) e
+               WHERE e->>'type' = 'AudioTemplate'
+                 AND COALESCE(e->'data'->>'guid', e->'data'->'audio'->>'guid') = ${guid}) AS old_sec,
+             (SELECT count(*) FROM jsonb_array_elements(l.slides_data) e
+               WHERE e->>'type' = 'AudioTemplate'
+                 AND COALESCE(e->'data'->>'guid', e->'data'->'audio'->>'guid') = ${guid}) AS n
+      FROM course_lessons l
+      WHERE jsonb_typeof(l.slides_data) = 'array'
+    )
+    UPDATE course_lessons l
+    SET slides_data = (
+          SELECT jsonb_agg(
+                   CASE WHEN e->>'type' = 'AudioTemplate'
+                         AND COALESCE(e->'data'->>'guid', e->'data'->'audio'->>'guid') = ${guid}
+                        THEN jsonb_set(e, '{data}',
+                               ((e->'data') - 'audio') || jsonb_build_object('guid', ${guid}::text, 'durationSec', ${durationSec}::int))
+                        ELSE e END
+                   ORDER BY ord)
+          FROM jsonb_array_elements(l.slides_data) WITH ORDINALITY AS t(e, ord)),
+        duration = GREATEST(0, COALESCE(l.duration, 0) + (${durationSec}::int * hit.n)::int - hit.old_sec::int)
+    FROM hit
+    WHERE hit.id = l.id AND hit.n > 0`;
 }
