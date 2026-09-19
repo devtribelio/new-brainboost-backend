@@ -3,6 +3,7 @@ import {
   PutObjectCommand,
   GetObjectCommand,
   DeleteObjectCommand,
+  ListObjectsV2Command,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { env } from '../config/env';
@@ -23,6 +24,8 @@ export interface PutObjectInput {
   key: string;
   body: Buffer | Uint8Array;
   contentType: string;
+  /** Optional `Cache-Control`; set `immutable` only for keys that are never rewritten. */
+  cacheControl?: string;
 }
 
 function buildClient(): S3Client {
@@ -57,15 +60,24 @@ export class S3StorageService {
   }
 
   /** Upload bytes under `key`. ContentType is required so the CDN serves it correctly. */
-  async putObject({ key, body, contentType }: PutObjectInput): Promise<void> {
+  async putObject({ key, body, contentType, cacheControl }: PutObjectInput): Promise<void> {
     await this.client.send(
       new PutObjectCommand({
         Bucket: this.bucket,
         Key: key,
         Body: body,
         ContentType: contentType,
+        ...(cacheControl ? { CacheControl: cacheControl } : {}),
       }),
     );
+  }
+
+  /** True when at least one object lives under `prefix`. */
+  async prefixExists(prefix: string): Promise<boolean> {
+    const out = await this.client.send(
+      new ListObjectsV2Command({ Bucket: this.bucket, Prefix: prefix, MaxKeys: 1 }),
+    );
+    return (out.KeyCount ?? 0) > 0;
   }
 
   /** Permanent CDN/public URL for a `public/*` object. Throws for private keys. */

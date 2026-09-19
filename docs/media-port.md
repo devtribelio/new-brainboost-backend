@@ -415,3 +415,29 @@ ap-southeast-1); prod = the existing `cdn.brainboost.id` distribution, to be
 **imported** into the same stack (it was created by hand), never recreated.
 
 Deploy: `cdk deploy BbMediaCdnStagingStack -c mediaCdnEnv=staging -c mediaCdnCertificateArn=<arn>`.
+
+### 9.y Migrating an asset from the backoffice (queue + cron job)
+
+The backoffice page **Learning → Audio Storage** lists every audio lesson with where
+it is served from (Bunny / S3) and offers three actions. It never touches ffmpeg,
+Bunny or S3 — same split as payout approval:
+
+| Button | What the backoffice writes | Who does the work |
+|---|---|---|
+| Migrasi ke S3 | `INSERT media_audio_migration_jobs (guid, lesson_id, parts, requested_by)` | `migrateAudioToStorage` on the 5-minute lane (`bb-cron-disburse` / CDK `CronDisburse`) |
+| Kembali ke Bunny | `UPDATE media_audio_sources SET is_active = false` | nobody — `/media/hls` re-reads the row per request |
+| Aktifkan S3 | `UPDATE … SET is_active = true` | nobody |
+
+The job (`apps/mobile-api/src/modules/media/audio-migration.job.ts`) per request:
+download the Bunny MP4 (360p first — audio is byte-identical at 360p/480p; signed URL
+in `signed` mode, Referer in `proxy`), copy the AAC track out **without re-encoding**,
+cut into ≤ `parts` MPEG-TS files (`segmentSeconds` = ceil, so ffmpeg can only produce
+≤ `parts`), upload under the first **empty** `private/audio/<guid>/<version>/` (those
+keys are served `immutable`; a reused key would leave CDN and bucket disagreeing),
+range-GET the first and last part, then upsert `media_audio_sources` **active**. A
+failure is terminal for that job (`FAILED` + message; the button makes a new one);
+only a job that *died* (PROCESSING > 30 min) is retried, up to 3 attempts. A partial
+unique index allows one open job per guid, so a double click is a 409, not two encodes.
+It stops claiming work after 3 minutes because PM2's `cron_restart` kills a process
+still running at the next tick. **Needs `ffmpeg`/`ffprobe` on the host**: in the image
+via the Dockerfile; on the staging VPS `sudo apt-get install -y ffmpeg`.

@@ -1458,6 +1458,30 @@ model MediaAudioSource {
   @@map("media_audio_sources")
 }
 
+/// Work queue for moving an audio asset to our own storage. Written by the
+/// backoffice over plain SQL (id has a DB default for that reason), drained by
+/// the `migrateAudioToStorage` job. Kept apart from MediaAudioSource: that table
+/// is what the app is served from, so a half-done migration must never show there.
+/// The partial unique index (one open job per guid) lives in the migration —
+/// Prisma cannot express it.
+model MediaAudioMigrationJob {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  guid        String
+  lessonId    String?   @map("lesson_id") @db.Uuid // informational, no FK — same rule as the source row's runtime lookup: by guid
+  status      String    @default("REQUESTED") // REQUESTED | PROCESSING | DONE | FAILED
+  parts       Int       @default(12) // ≤ the app's downloader batch, see MediaAudioSource.segments
+  attempts    Int       @default(0)
+  error       String?
+  requestedBy String?   @map("requested_by") // bo_users id/email — backoffice-owned, no FK
+  requestedAt DateTime  @default(now()) @map("requested_at")
+  startedAt   DateTime? @map("started_at")
+  finishedAt  DateTime? @map("finished_at")
+
+  @@index([status, requestedAt])
+  @@index([guid])
+  @@map("media_audio_migration_jobs")
+}
+
 /// Auth + per-channel capability toggles for 3rd-party ingestion (IAP/Scalev/Lynk.id) via
 /// POST /ingest/purchase. Key is stored hashed. Toggles are plain booleans (easy manual edit).
 model ThirdPartyCredential {

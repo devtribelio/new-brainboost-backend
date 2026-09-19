@@ -53,8 +53,10 @@ RUN pnpm --filter=@bb/mobile-api --prod --legacy deploy /app \
 FROM node:${NODE_VERSION} AS runtime
 ENV NODE_ENV=production PORT=3000
 RUN apt-get update \
- && apt-get install -y --no-install-recommends openssl ca-certificates tini \
+ && apt-get install -y --no-install-recommends openssl ca-certificates tini ffmpeg \
  && rm -rf /var/lib/apt/lists/*
+# ffmpeg (+ffprobe): used ONLY by the migrateAudioToStorage cron job. Same image
+# for API and cron, so it rides along in the API container unused.
 WORKDIR /app
 # /app from the deploy stage already contains dist/ + node_modules/ (+ prisma client).
 COPY --from=build --chown=node:node /app ./

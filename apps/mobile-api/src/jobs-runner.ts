@@ -8,6 +8,7 @@ import { expirePendingPayments } from '@bb/domain/jobs/expire-pending-payments';
 import { expireEventTicketOrders } from '@bb/domain/jobs/expire-event-ticket-orders';
 import { topicDigest } from '@bb/domain/jobs/topic-digest';
 import { streakReminder } from './modules/tracker/streak-reminder.job';
+import { migrateAudioToStorage } from './modules/media/audio-migration.job';
 
 /**
  * Standalone scheduled-jobs entrypoint. Runs the registered jobs ONCE, then exits.
@@ -47,6 +48,10 @@ const JOBS: Array<{ name: string; run: () => Promise<unknown> }> = [
   // send times stay editable in `app_settings`. No-ops while `streak.reminderEnabled`
   // is false, which is how it ships.
   { name: 'streakReminder', run: () => streakReminder() },
+  // Drains the backoffice's "Migrasi ke S3" queue. LAST on its lane on purpose:
+  // it is the only job here that can run for minutes (download + ffmpeg + upload),
+  // and money jobs must not wait behind it. Needs ffmpeg/ffprobe on the host.
+  { name: 'migrateAudioToStorage', run: () => migrateAudioToStorage() },
 ];
 
 const requested = process.argv.slice(2);
