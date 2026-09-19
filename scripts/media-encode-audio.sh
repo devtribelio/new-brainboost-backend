@@ -69,7 +69,12 @@ elif [[ "$SRC_CODEC" == "aac" ]]; then
 else
   say "Sumber bukan AAC -> encode ke AAC 128k"; ffmpeg -v error -y -i "$INPUT" -vn -c:a aac -b:a 128k -f adts "$FULL"; CODEC_LABEL="aac-128k"
 fi
-DUR=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$FULL"); DUR_SEC=$(printf '%.0f' "$DUR")
+# Durasi untuk MERENCANAKAN potongan diambil dari kontainer sumber (mp4/mp3/wav punya
+# durasi asli). ADTS tidak punya field durasi -> ffprobe menebak dari bitrate (~5% lebih
+# panjang). Durasi yang DISIMPAN dijumlah dari hasil potongan (lihat setelah langkah 2).
+DUR=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$INPUT" 2>/dev/null | grep -E '^[0-9.]+$' || true)
+[[ -n "$DUR" ]] || DUR=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$FULL")
+DUR_SEC=$(printf '%.0f' "$DUR")
 BYTES=$(stat -f%z "$FULL" 2>/dev/null || stat -c%s "$FULL"); SHA=$(shasum -a 256 "$FULL" | awk '{print $1}')
 [[ "$DUR_SEC" -gt 0 ]] || die "durasi 0 — hasil encode tidak valid"
 [[ "$BYTES" -gt 100000 ]] || die "file terlalu kecil ($BYTES byte) — cek input"
@@ -93,6 +98,7 @@ for line in open(m3u8):
 print(json.dumps(segs))
 PY
 N=$(python3 -c "import json,sys;print(len(json.load(open(sys.argv[1]))))" "$WORK/segments.json")
+DUR_SEC=$(python3 -c "import json,sys;print(round(sum(s['durationSec'] for s in json.load(open(sys.argv[1])))))" "$WORK/segments.json")
 echo "  bagian: $N"
 python3 -c "
 import json,sys

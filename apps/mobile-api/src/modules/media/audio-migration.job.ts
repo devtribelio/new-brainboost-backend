@@ -141,9 +141,16 @@ async function migrateOne(
     const audioArgs = codec === 'aac' ? ['-c:a', 'copy'] : ['-c:a', 'aac', '-b:a', '128k'];
     await run('ffmpeg', ['-v', 'error', '-y', '-i', src, '-vn', ...audioArgs, '-f', 'adts', full], { maxBuffer: 1 << 20 });
 
-    const durationSec = Math.round(Number.parseFloat(await ffprobe(['-show_entries', 'format=duration', '-of', 'csv=p=0', full])));
+    // Length for PLANNING the cut comes from the source container (mp4/mp3/wav
+    // carry a real duration). Never from `full`: ADTS has no duration field, so
+    // ffprobe guesses it from the bitrate and lands ~5% long — enough to make the
+    // last part a stub. The length we STORE is summed from the cut parts below,
+    // which the muxer takes from packet timestamps.
+    const probe = (f: string) => ffprobe(['-show_entries', 'format=duration', '-of', 'csv=p=0', f]).then(Number.parseFloat);
+    const srcSec = await probe(src);
+    const planSec = srcSec > 0 ? srcSec : await probe(full);
     const bytes = (await stat(full)).size;
-    if (!(durationSec > 0)) throw new Error('Durasi hasil 0 detik — sumber tidak valid');
+    if (!(planSec > 0)) throw new Error('Durasi hasil 0 detik — sumber tidak valid');
     if (bytes < 100_000) throw new Error(`Hasil terlalu kecil (${bytes} byte) — sumber tidak valid`);
     const sha256 = await sha256Of(full);
 
@@ -152,7 +159,7 @@ async function migrateOne(
     await run(
       'ffmpeg',
       ['-v', 'error', '-y', '-i', full, '-c:a', 'copy', '-f', 'hls',
-        '-hls_time', String(segmentSeconds(durationSec, parts)),
+        '-hls_time', String(segmentSeconds(planSec, parts)),
         '-hls_playlist_type', 'vod', '-hls_list_size', '0',
         '-hls_segment_filename', join(partsDir, '%03d.ts'), join(partsDir, 'index.m3u8')],
       { maxBuffer: 1 << 20 },
@@ -161,6 +168,7 @@ async function migrateOne(
     if (cut.length === 0 || cut.length > parts) {
       throw new Error(`Pemotongan menghasilkan ${cut.length} bagian (maks ${parts})`);
     }
+    const durationSec = Math.round(cut.reduce((sum, p) => sum + p.durationSec, 0));
 
     // Never write into a prefix that holds anything: those keys are served
     // `immutable`, so reusing one would leave the CDN and the bucket disagreeing.
