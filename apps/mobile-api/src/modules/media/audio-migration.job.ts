@@ -78,9 +78,11 @@ export async function migrateAudioToStorage(
 
     try {
       const result = await migrateOne(next.guid, next.parts, next.lessonId, next.sourceKey, storage);
+      // DONE with a note: the asset IS served from our storage; only the Bunny
+      // backup is missing. The backoffice shows `error` on a DONE row as a warning.
       await prisma.mediaAudioMigrationJob.update({
         where: { id: next.id },
-        data: { status: MIGRATION_STATUS.DONE, finishedAt: new Date() },
+        data: { status: MIGRATION_STATUS.DONE, finishedAt: new Date(), error: result.warning ?? null },
       });
       done += 1;
       logger.info({ jobId: next.id, guid: next.guid, ...result }, '[jobs] audio migrated to storage');
@@ -121,7 +123,7 @@ async function migrateOne(
   lessonId: string | null,
   sourceKey: string | null,
   storage: S3StorageService,
-): Promise<{ version: number; parts: number; durationSec: number; bytes: number; res: string }> {
+): Promise<{ version: number; parts: number; durationSec: number; bytes: number; res: string; bunnyCopy: boolean; warning?: string }> {
   if (sourceKey !== null && (!sourceKey.startsWith(`${UPLOAD_PREFIX}${guid}/`) || sourceKey.includes('..'))) {
     throw new Error('source_key di luar folder unggahan audio ini');
   }
@@ -189,6 +191,20 @@ async function migrateOne(
       if (!check.ok) throw new Error(`Verifikasi unggahan gagal (${check.status}) untuk ${key}`);
     }
 
+    // An upload also goes to Bunny as the BACKUP, so "Kembali ke Bunny" stays a
+    // real rollback for it. Best-effort: the asset is already safe on our storage,
+    // and a Bunny outage must not block a lesson from going live.
+    let bunnyCopy = sourceKey === null;
+    let warning: string | undefined;
+    if (sourceKey !== null) {
+      try {
+        bunnyCopy = await pushToBunny(guid, full, work);
+      } catch (err) {
+        warning = `Cadangan Bunny gagal: ${err instanceof Error ? err.message : String(err)}`.slice(0, 500);
+        logger.warn({ guid, err }, '[jobs] audio upload: bunny backup failed');
+      }
+    }
+
     const resolvedLessonId = lessonId ?? (await findLessonId(guid));
     const data = {
       audioKey: `${prefix}/`,
@@ -202,12 +218,13 @@ async function migrateOne(
       encodedAt: new Date(),
       lessonId: resolvedLessonId,
       sourceKey,
+      hasBunnyCopy: bunnyCopy,
     };
     await prisma.mediaAudioSource.upsert({ where: { guid }, create: { guid, ...data }, update: data });
     // An upload has no Bunny `length` for normalize-slides-data to find, so this
     // job is the only thing that knows how long the audio is.
     if (sourceKey) await stampSlideDuration(guid, durationSec);
-    return { version, parts: segments.length, durationSec, bytes, res };
+    return { version, parts: segments.length, durationSec, bytes, res, bunnyCopy, warning };
   } finally {
     await rm(work, { recursive: true, force: true });
   }
@@ -293,4 +310,44 @@ async function stampSlideDuration(guid: string, durationSec: number): Promise<vo
         duration = GREATEST(0, COALESCE(l.duration, 0) + (${durationSec}::int * hit.n)::int - hit.old_sec::int)
     FROM hit
     WHERE hit.id = l.id AND hit.n > 0`;
+}
+
+/**
+ * Push an uploaded master to Bunny under the SAME guid (the backoffice created
+ * that empty video when the upload started). Returns false when the guid is not
+ * a Bunny video (minted locally: no API key in the backoffice env) or when this
+ * env has no API key; throws on a real failure.
+ *
+ * Sent as a VIDEO of a black frame, not as the bare audio file: every audio
+ * lesson already on Bunny is exactly that, so the MP4 fallback + the HLS ladder
+ * the app pins (360p) come out the same as for any legacy audio. The audio
+ * track is copied, never re-encoded.
+ */
+async function pushToBunny(guid: string, audioFile: string, work: string): Promise<boolean> {
+  const apiKey = env.bunny.streamApiKey;
+  if (!apiKey) return false;
+  const base = `https://video.bunnycdn.com/library/${env.bunny.streamLibraryId}/videos/${guid}`;
+
+  const head = await fetch(base, { headers: { AccessKey: apiKey, accept: 'application/json' } });
+  if (head.status === 404) return false;
+  if (!head.ok) throw new Error(`Bunny menjawab ${head.status} saat memeriksa video`);
+
+  const video = join(work, 'bunny.mp4');
+  await run(
+    'ffmpeg',
+    ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'color=c=black:s=640x360:r=2', '-i', audioFile,
+      '-c:v', 'libx264', '-preset', 'ultrafast', '-tune', 'stillimage', '-pix_fmt', 'yuv420p',
+      '-c:a', 'copy', '-bsf:a', 'aac_adtstoasc', '-shortest', '-movflags', '+faststart', video],
+    { maxBuffer: 1 << 20 },
+  );
+  const size = (await stat(video)).size;
+  const put = await fetch(base, {
+    method: 'PUT',
+    headers: { AccessKey: apiKey, 'Content-Type': 'application/octet-stream', 'Content-Length': String(size) },
+    body: Readable.toWeb(createReadStream(video)),
+    // Node's fetch requires this for a streamed request body.
+    duplex: 'half',
+  } as unknown as RequestInit);
+  if (!put.ok) throw new Error(`Bunny menolak unggahan (${put.status})`);
+  return true;
 }

@@ -467,3 +467,19 @@ migration, all keyed on `source_key IS NOT NULL`:
 
 Until the job's tick (≤ 5 min) the guid has no row and `/media/hls` falls through to
 Bunny, which 404s — a just-uploaded lesson is not playable for those minutes.
+
+**Bunny backup for uploads (2026-09-19).** With `BUNNY_STREAM_API_KEY` set in the
+backoffice, the upload's guid is **created on Bunny** (`POST /library/{id}/videos`,
+empty video) — Bunny will not accept a guid of ours, so this is what keeps ONE guid
+across slide, S3 folder and Bunny. The job then pushes the master to that video
+(`pushToBunny`) as a **black-frame MP4 with the audio track copied** — the same shape
+as every legacy audio on Bunny, so the MP4 fallback and the 360p HLS variant the app
+pins exist exactly as for any other audio. Best-effort by design: the asset is already
+safe on our storage, so a Bunny failure ends the job `DONE` with the reason in `error`
+(the backoffice shows it as a warning) and `media_audio_sources.has_bunny_copy = false`.
+That column — not `source_key` — is what the backoffice keys "Kembali ke Bunny" on:
+`true` for every Bunny migration and every backed-up upload, `false` for an upload with
+no Bunny copy (no key in that env, guid minted locally → Bunny answers 404, or the push
+failed), where `is_active = false` would be an outage, not a rollback. Bunny needs a few
+minutes to transcode after the push; a rollback inside that window plays nothing.
+Three different Bunny credentials are in play — see CLAUDE.md §5 Media access.

@@ -1457,6 +1457,9 @@ model MediaAudioSource {
   // (private/audio-uploads/<guid>/source.<ext>); null = migrated from Bunny. An
   // upload has no Bunny copy, so is_active=false is not a rollback for it.
   sourceKey   String?  @map("source_key")
+  // Is there a Bunny copy to fall back to? Decides whether is_active=false is a
+  // rollback or an outage. false only for an upload that never reached Bunny.
+  hasBunnyCopy Boolean @default(true) @map("has_bunny_copy")
 
   @@index([lessonId])
   @@map("media_audio_sources")
