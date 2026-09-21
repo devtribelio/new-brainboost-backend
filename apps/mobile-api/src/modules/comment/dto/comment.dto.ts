@@ -98,17 +98,6 @@ export class CommentDto {
   @ApiPropertyOptional({ nullable: true, format: 'uuid', example: 'comment-uuid-parent' })
   parentId?: string | null;
 
-  @ApiPropertyOptional({
-    nullable: true,
-    format: 'uuid',
-    example: 'comment-uuid-root',
-    description:
-      "Id of the thread's top-level comment; null when this row is that comment. " +
-      'Equals `parentId` for any row at depth <= 2. Use it to open the right thread ' +
-      'from a notification.',
-  })
-  rootCommentId?: string | null;
-
   @ApiProperty({ type: 'array', itemType: 'string', example: [] })
   images!: string[];
 

@@ -103,11 +103,7 @@ export function registerCommentNotificationListener(): void {
         // the comment hangs off — so resolve them through the parent post.
         prisma.comment.findUnique({
           where: { id: e.commentId },
-          select: {
-            postId: true,
-            parentId: true,
-            post: { select: { topicId: true, networkId: true } },
-          },
+          select: { postId: true, post: { select: { topicId: true, networkId: true } } },
         }),
       ]);
       if (!actor || !comment) return;
@@ -123,17 +119,7 @@ export function registerCommentNotificationListener(): void {
         type: ActionLabel.NewLike,
         notifGroup: NotifGroup.General,
         title: `${actor.fullName} menyukai komentarmu`,
-        // `postId` and `parentId` mirror what comment.created sends. Without
-        // postId the client has to resolve the comment before it can open
-        // anything, and it has nowhere to go at all when that comment has since
-        // been deleted — `/comment/detail` answers 404 for a deleted row.
-        payload: {
-          refTable: 'comment',
-          refId: e.commentId,
-          postId: comment.postId,
-          parentId: comment.parentId,
-          actorId: e.actorId,
-        },
+        payload: { refTable: 'comment', refId: e.commentId, actorId: e.actorId },
         dedupeKey: `newLike:comment:${e.commentId}:${e.actorId}`,
         muteScopes,
       });
