@@ -36,8 +36,11 @@ const MEDIA_CDN_ENVS: Record<string, { bucketName: string; bucketRegion: string;
     bucketRegion: 'ap-southeast-1',
     domainName: 'cdn-staging.brainboostos.com',
   },
-  // prod: distribusi cdn.brainboost.id (EAN6B036LQYKV) dibuat manual — di-import
-  // ke stack ini nanti (cdk import), jangan dibuat baru.
+  // prod: distribusi cdn.brainboost.id (EAN6B036LQYKV) dibuat manual dan TIDAK
+  // dikelola stack ini (jangan dibuat baru). Behavior private/audio/* + key group
+  // bb-media-prod (public key K3FE2W1Z0KLGDM, infra/cdk/cdn-keys/prod.public.pem)
+  // ditambahkan 2026-09-21 lewat CLI; private key di Secrets Manager
+  // bb/prod/cdn-signing-key. Kandidat `cdk import` kalau mau disatukan.
 };
 const mediaCdnEnv = app.node.tryGetContext('mediaCdnEnv') as string | undefined;
 if (mediaCdnEnv) {
