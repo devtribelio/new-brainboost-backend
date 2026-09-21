@@ -64,6 +64,12 @@ export class BbEcsStack extends cdk.Stack {
       BASE_URL: sm('BASE_URL'),                        // domain prod (default env.ts = localhost → WAJIB override)
       MEDIA_TOKEN_SECRET: sm('MEDIA_TOKEN_SECRET'),
       MEDIA_MODE: sm('MEDIA_MODE'),                    // 'proxy' | 'signed' — media serving mode (env.ts default 'proxy')
+      // CloudFront signed URL untuk bagian audio di private/audio/* (cdn.brainboost.id).
+      // Ketiganya WAJIB sudah ada di secret bb/prod/app sebelum deploy, atau task gagal
+      // start. Kosong/absen di env.ts = backend jatuh ke S3 presign (lihat docs/media-port.md §9.x).
+      MEDIA_CDN_HOST: sm('MEDIA_CDN_HOST'),
+      MEDIA_CDN_KEY_PAIR_ID: sm('MEDIA_CDN_KEY_PAIR_ID'),
+      MEDIA_CDN_PRIVATE_KEY: sm('MEDIA_CDN_PRIVATE_KEY'), // base64 PEM; pasangan public key infra/cdk/cdn-keys/prod.public.pem
       SQS_COMMS_URGENT_URL: sm('SQS_COMMS_URGENT_URL'),
       SQS_COMMS_NORMAL_URL: sm('SQS_COMMS_NORMAL_URL'),
       // --- VENDOR (nama key sudah dicocokkan ke env.ts) ---
