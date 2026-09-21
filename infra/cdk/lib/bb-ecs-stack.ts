@@ -88,6 +88,11 @@ export class BbEcsStack extends cdk.Stack {
       // Bunny: cuma 2 yang DIPAKAI media module (streamApiKey & libraryId itu dead field).
       BUNNY_STREAM_TOKEN_KEY: sm('BUNNY_STREAM_TOKEN_KEY'),
       BUNNY_STREAM_CDN_HOST: sm('BUNNY_STREAM_CDN_HOST'),
+      // Cadangan ke Bunny untuk audio yang diunggah dari backoffice (job migrateAudioToStorage).
+      // LIBRARY_ID wajib ikut: tanpa itu env.ts memakai default 157244 (library lama), dan
+      // cadangan akan dikirim ke library yang salah. Keduanya WAJIB ada di bb/prod/app.
+      BUNNY_STREAM_API_KEY: sm('BUNNY_STREAM_API_KEY'),   // API Key LIBRARY (Stream > library > API), bukan token key
+      BUNNY_STREAM_LIBRARY_ID: sm('BUNNY_STREAM_LIBRARY_ID'),
 
       // Didit KYC (gantiin Sumsub, PR #98). apiKey & webhookSecret = rahasia;
       // workflowId = UUID workflow (account-specific, taruh di secret biar nggak hardcode di git).
