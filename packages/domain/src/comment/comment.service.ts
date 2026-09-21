@@ -8,6 +8,12 @@ import { isPublished } from '@bb/common/utils/post-status.util';
 
 const MAX_CONTENT_CHARS = 5000;
 
+// A thread is a comment and its replies, and nothing below that — it is what the
+// post detail screen renders. Anything deeper is invisible in the app, so the
+// walk that finds a thread root only has to survive the rows that predate the
+// cap (legacy imports and the old notification screen reached depth 4).
+const MAX_THREAD_HOPS = 5;
+
 const commentInclude = {
   author: true,
   post: { select: { networkId: true } },
@@ -105,10 +111,34 @@ export class CommentService {
     return { rows, total };
   }
 
+  /**
+   * Id of the thread's top-level comment — `null` when `c` IS that comment.
+   *
+   * For a row at depth <= 2 the answer is just `parentId`, but it cannot be read
+   * off the row alone: confirming the parent has no parent of its own costs one
+   * lookup. The loop is for the rows written before the depth cap.
+   */
+  private async resolveRootId(c: { parentId: string | null }): Promise<string | null> {
+    if (!c.parentId) return null;
+    let currentId = c.parentId;
+    for (let hop = 0; hop < MAX_THREAD_HOPS; hop += 1) {
+      const parent = await prisma.comment.findUnique({
+        where: { id: currentId },
+        select: { parentId: true },
+      });
+      if (!parent?.parentId) return currentId;
+      currentId = parent.parentId;
+    }
+    return currentId;
+  }
+
   async detail(id: string) {
     const c = await this.resolveCommentByAnyId(id);
     if (!c || c.isDeleted) throw notFound(ERROR_CODES.COMMENT_NOT_FOUND);
-    return c;
+    // Notification routing opens the thread that contains this comment, and the
+    // thread root is only the same as `parentId` while the row is at depth <= 2.
+    // Resolve it here so the client never has to walk the chain itself.
+    return { ...c, rootId: await this.resolveRootId(c) };
   }
 
   async likedByMember(memberId: string, commentIds: string[]): Promise<Set<string>> {
@@ -218,7 +248,15 @@ export class CommentService {
       if (parent.postId !== postId) {
         throw badRequest(ERROR_CODES.PARENT_COMMENT_POST_MISMATCH);
       }
-      parentId = parent.id;
+      // Two levels is the cap. A reply aimed at another reply is REPARENTED onto
+      // the thread root rather than rejected: app 3.3.3 and earlier still offer
+      // that action from the old standalone comment screen, and an error there
+      // throws away what the member wrote, while a reparented comment is at
+      // least visible to everyone in the thread. Rejecting would only move the
+      // failure — the rows this produced were a real conversation nobody could
+      // see. Cost of the reparent: the reply notification goes to the author of
+      // the root comment, not to the author of the reply that was aimed at.
+      parentId = (await this.resolveRootId(parent)) ?? parent.id;
     }
 
     const comment = await prisma.$transaction(async (tx) => {

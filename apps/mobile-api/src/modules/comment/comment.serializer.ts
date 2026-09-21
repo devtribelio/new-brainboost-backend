@@ -4,6 +4,12 @@ import { dateAgoString, timeAgoString } from '@bb/common/serializers/time-format
 
 interface CommentWithAuthor extends Comment {
   author?: Member | null;
+  /**
+   * Thread root, resolved by `CommentService.detail()` — the one place routing
+   * reads. Left undefined everywhere else, where `parentId` is the same answer
+   * for every row at depth <= 2.
+   */
+  rootId?: string | null;
 }
 
 function parseMentions(content: string): string[] {
@@ -41,6 +47,11 @@ export function serializeComment(
     // Backend-native extras (FE tolerates)
     id: c.id,
     parentId: c.parentId,
+    // Id of the thread's top-level comment; null when this row IS that comment.
+    // Same value as `parentId` for every row at depth <= 2 — it differs only on
+    // the rows written before the depth cap, which is exactly when a client
+    // routing a notification would otherwise open the wrong thread.
+    rootCommentId: c.rootId === undefined ? (c.parentId ?? null) : c.rootId,
     images: [],
     isCurated: c.isCurated,
     isDeleted: c.isDeleted,
