@@ -3,7 +3,10 @@ import { Router } from 'express';
 import { MediaController } from './media.controller';
 import { MediaService } from './media.service';
 import { optionalAuthGuard } from '@bb/common/middlewares/auth.middleware';
-import { mediaDownloadRateLimiter } from '@bb/common/middlewares/rate-limit.middleware';
+import {
+  audioPlaylistRateLimiter,
+  mediaDownloadRateLimiter,
+} from '@bb/common/middlewares/rate-limit.middleware';
 import { bindRoute } from '@bb/common/openapi/route-binder';
 
 /**
@@ -59,15 +62,16 @@ export function mediaRoutes(): Router {
   // Single-segment playlist for audio assets served from our own storage. No
   // auth guard on purpose: the native downloaders fetch this URL with no
   // bearer, and the audio-playlist token in `t` (minted by /media/hls after
-  // its gate) is the credential. Keeps the download rate limiter — one URL
-  // still covers a whole asset.
+  // its gate) is the credential. Its own limiter, keyed on that token: with no
+  // bearer here the shared download limiter fell back to IP, pooling every
+  // member behind one carrier NAT into one 10/min budget.
   bindRoute({
     router,
     controller: ctrl,
     method: 'get',
     path: '/media/audio-playlist',
     handlerKey: 'audioPlaylist',
-    middlewares: [mediaDownloadRateLimiter],
+    middlewares: [audioPlaylistRateLimiter],
   });
 
   // Lesson documents (DocumentTemplate slides) — same gating and rate limit as

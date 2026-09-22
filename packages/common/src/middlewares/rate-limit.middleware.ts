@@ -399,6 +399,28 @@ export const mediaDownloadRateLimiter: RequestHandler = rateLimit({
   skip: skipInTest,
 });
 
+// --- Audio playlist — keyed on the TOKEN, not on IP or member. The endpoint
+//     takes no bearer (native downloaders send none) and the token carries no
+//     member id, while IP keying would let thousands of members behind one
+//     carrier NAT spend each other's budget. Minting a token is already
+//     throttled at /media/hls, so all that is left to bound here is replaying
+//     one token — which a player legitimately does to refresh expired URLs,
+//     hence the looser limit.
+export const audioPlaylistRateLimiter: RequestHandler = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => {
+    const token = typeof req.query.t === 'string' ? req.query.t : '';
+    if (!token) return clientIp(req);
+    return createHash('sha256').update(token).digest('base64url').slice(0, 24);
+  },
+  ...storeOption('audio-playlist'),
+  handler: tooManyRequestsHandler,
+  skip: skipInTest,
+});
+
 // --- Playlist share — the read endpoint is public and takes an opaque token,
 //     so it is the one surface where tokens could be sieved; minting/rotating is
 //     throttled separately so share links cannot be spun into a spam generator.
