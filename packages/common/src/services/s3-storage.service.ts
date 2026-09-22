@@ -3,8 +3,12 @@ import {
   PutObjectCommand,
   GetObjectCommand,
   DeleteObjectCommand,
+  ListObjectsV2Command,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { createWriteStream } from 'fs';
+import { pipeline } from 'stream/promises';
+import type { Readable } from 'stream';
 import { env } from '../config/env';
 
 /**
@@ -23,6 +27,8 @@ export interface PutObjectInput {
   key: string;
   body: Buffer | Uint8Array;
   contentType: string;
+  /** Optional `Cache-Control`; set `immutable` only for keys that are never rewritten. */
+  cacheControl?: string;
 }
 
 function buildClient(): S3Client {
@@ -57,15 +63,31 @@ export class S3StorageService {
   }
 
   /** Upload bytes under `key`. ContentType is required so the CDN serves it correctly. */
-  async putObject({ key, body, contentType }: PutObjectInput): Promise<void> {
+  async putObject({ key, body, contentType, cacheControl }: PutObjectInput): Promise<void> {
     await this.client.send(
       new PutObjectCommand({
         Bucket: this.bucket,
         Key: key,
         Body: body,
         ContentType: contentType,
+        ...(cacheControl ? { CacheControl: cacheControl } : {}),
       }),
     );
+  }
+
+  /** Stream an object to a local file (never buffered: a master audio file is 50–300 MB). */
+  async downloadToFile(key: string, dest: string): Promise<void> {
+    const out = await this.client.send(new GetObjectCommand({ Bucket: this.bucket, Key: key }));
+    if (!out.Body) throw new Error(`S3 object has no body: ${key}`);
+    await pipeline(out.Body as Readable, createWriteStream(dest));
+  }
+
+  /** True when at least one object lives under `prefix`. */
+  async prefixExists(prefix: string): Promise<boolean> {
+    const out = await this.client.send(
+      new ListObjectsV2Command({ Bucket: this.bucket, Prefix: prefix, MaxKeys: 1 }),
+    );
+    return (out.KeyCount ?? 0) > 0;
   }
 
   /** Permanent CDN/public URL for a `public/*` object. Throws for private keys. */

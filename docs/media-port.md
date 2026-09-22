@@ -304,3 +304,182 @@ Serves both online playback and native offline download; the only difference is 
 - **Re-encoding the audio assets** as low-bitrate video with a long GOP would remove the
   keyframe penalty, but Bunny re-encodes on upload — untested whether the ladder can be
   configured per-library to avoid it.
+
+## 9. Audio as ONE file from our own storage (opt-in per asset, 2026-09-18)
+
+**Why.** Offline downloads on Android fail on Xiaomi/POCO: one HLS lesson is
+780–920 tiny `background_downloader` (WorkManager) jobs that MIUI/HyperOS stops
+(`canceled`), and the Dart loop that enqueues the next batch is frozen when the
+app is backgrounded. Bunny Stream has no audio-only rendition (§8), so every
+"audio" download also carries a still-image video track.
+
+**What.** For a guid with an **active** row in `media_audio_sources`,
+`GET /media/hls` answers with a URL on this backend,
+`GET /media/audio-playlist?t=<audio-playlist token>`, which renders an HLS media
+playlist whose only segment is the whole lesson as `.aac` behind a short-lived
+signed URL. The app already in the stores downloads "every segment in the
+playlist" and keeps the extension, so it fetches ONE file with zero client
+change; iOS hands the playlist to `AVAssetDownloadURLSession` as before.
+Video assets and every guid without a row keep the Bunny path byte-for-byte.
+
+**Rules.**
+- The playlist branch is checked **before** the `MEDIA_MODE=signed` guard: it
+  never touches the Bunny library, so the Token-Auth requirement does not apply.
+- `/media/audio-playlist` takes **no bearer** (native downloaders send none) and
+  accepts **only** an audio-playlist token (`k:'a'`), minted by `/media/hls`
+  AFTER its enrollment gate with a TTL equal to the segment URL TTL.
+  `verifyMediaToken` rejects `k:'a'` so the playlist token cannot be spent on
+  `/stream`, `/download` or `/hls`.
+- The playlist is rendered per request with a fresh signed segment URL and sent
+  `Cache-Control: no-store`. Today the signer is an S3 presigned GET
+  (`S3StorageService.getPresignedGetUrl`); the CloudFront signer replaces that
+  one call when the `/private/audio/*` CloudFront behaviour ships.
+- Rollback per asset = `UPDATE media_audio_sources SET is_active=false` — the
+  next `/hls` answer is Bunny again; a playlist token already issued 404s.
+- Segment format is ADTS `.aac`: a single segment with no `EXT-X-MAP` is only
+  valid for an elementary stream. fMP4 + `EXT-X-MAP` is the fallback if a
+  device rejects ADTS (the app parser supports both).
+
+**Moving one asset by hand (develop / first prod canary).**
+```bash
+# 1. audio track out of the cheapest Bunny rendition, no re-encode
+ffmpeg -i "<signed 360p mp4 url>" -vn -c:a copy -f adts /tmp/<guid>.aac
+ffprobe -v error -show_entries format=duration -of csv=p=0 /tmp/<guid>.aac   # seconds
+shasum -a 256 /tmp/<guid>.aac
+# 2. under private/ — the prefix the bucket policy never opens and the storage service treats as presign-only
+aws s3 cp /tmp/<guid>.aac s3://<bucket>/private/audio/<guid>/1.aac --content-type audio/aac
+# 3. row (inactive first, then flip)
+INSERT INTO media_audio_sources (guid, audio_key, duration_sec, bytes, sha256, encoded_at, is_active)
+VALUES ('<guid>', 'private/audio/<guid>/1.aac', <dur>, <bytes>, '<sha>', now(), false);
+UPDATE media_audio_sources SET is_active = true WHERE guid = '<guid>';
+```
+Verify with the store build of the app pointed at that environment, on the
+POCO that failed: download with the screen off, three times.
+
+**Spec / decisions:** `docs/prd-audio-single-file-cdn.md`.
+
+**Which lesson is this row?** `media_audio_sources.lesson_id` is an informational FK
+(nullable, SET NULL, migration `20260918140000`) filled from `slides_data` at insert time;
+the runtime lookup stays by `guid`. The view `media_audio_source_lessons` (migration
+`20260918130000`) recomputes the relation from `slides_data` and exposes `stored_matches`
+so a stale `lesson_id` is visible. No hard dependency on the FK by design (the relation lives inside
+`slides_data` JSON and one asset may serve several lessons), so the view resolves
+it at read time:
+```sql
+SELECT product_title, lesson_name, lesson_duration_sec, source_duration_sec, is_active, audio_key
+FROM media_audio_source_lessons ORDER BY product_title, lesson_name;
+-- a source row with lesson_id NULL is an orphan: no lesson references that guid
+```
+
+**Split into a handful of parts (default 8) — migration `20260918150000`.** One file
+works but the store app draws progress as *segments done / total* (a single segment
+sits at 0 % then jumps to 100 %) and schedules segment batches from a Dart loop that
+MIUI freezes in the background. `media_audio_sources.segments`
+(`[{key,durationSec,bytes}]`, play order) lists MPEG-TS parts cut by ffmpeg's hls muxer
+without re-encoding; the playlist renders one line per part, each with its own signed
+URL. **Keep it ≤ the app's batch size** — decided 2026-09-18 at **12 parts** (= the 3.3.3
+batch); the 3.4.0 branch had lowered its batch to 8, so 3.4.0 must ship with a batch
+≥ 16 (asked of the mobile team), never 8. Was ≤ 8 (one batch on both shipped sizes: 12 in 3.3.3, 8 in
+3.4.0), so there is never a second batch to stall. `segments = NULL` keeps the
+single-file behaviour. `scripts/media-encode-audio.sh --parts N` produces both.
+
+### 9.x Segment URLs through CloudFront (signed), S3 presign as the fallback
+
+`MediaService.signObjectUrl` picks the signer per key. With `MEDIA_CDN_HOST`,
+`MEDIA_CDN_KEY_PAIR_ID` and `MEDIA_CDN_PRIVATE_KEY` all set, a key under
+`private/audio/` is signed as a **CloudFront canned-policy URL**
+(`https://<host>/<key>?Expires=&Key-Pair-Id=&Signature=`, `@aws-sdk/cloudfront-signer`);
+anything else — any of the three empty, or a key outside that prefix — stays an S3
+presigned GET. The prefix check is not tidiness: only the `private/audio/*` behavior
+trusts the key group, so the CDN would answer 403 for a key elsewhere while S3 still
+serves it. Why the CDN at all when the per-GB price is the same as S3 in this region:
+1 TB/month free tier (S3: 100 GB), one origin fetch per part instead of one S3 GET per
+download, HEAD works (an S3 presigned GET is GET-only, HEAD → 403), and the bytes
+come from the Jakarta/Singapore edge.
+
+Infra is `infra/cdk/lib/bb-media-cdn-stack.ts`: one distribution per env in front of
+the **existing** bucket (OAC; the bucket stays closed), default behavior = today's
+`public/*` (CachingOptimized, redirect-to-https, HTTP/2+3, IPv6 — copied from
+cdn.brainboost.id), plus `private/audio/*` with a trusted key group. The public key
+lives in the repo (`infra/cdk/cdn-keys/<env>.public.pem`); the private key in Secrets
+Manager `bb/<env>/cdn-signing-key` and reaches the app as `MEDIA_CDN_PRIVATE_KEY`
+(raw PEM or base64 of it — `env.ts` accepts both, because a multi-line value does not
+survive every .env loader). Two things are outside CDK on purpose: the ACM cert
+(must be us-east-1; DNS is Cloudflare, so validation is a manual CNAME, and CDK would
+block the deploy waiting for it) and the bucket policy (the bucket is imported —
+CDK's `BucketPolicy` would replace the public-read statement; merge the stack's
+`BucketPolicyStatement` output in by hand). Cloudflare records must be **DNS-only**
+(grey cloud): proxied, the cert validation fails and Cloudflare sits in front of
+CloudFront. Staging = `cdn-staging.brainboostos.com` (bucket `brainboost-staging`,
+ap-southeast-1); prod = the existing `cdn.brainboost.id` distribution, to be
+**imported** into the same stack (it was created by hand), never recreated.
+
+Deploy: `cdk deploy BbMediaCdnStagingStack -c mediaCdnEnv=staging -c mediaCdnCertificateArn=<arn>`.
+
+### 9.y Migrating an asset from the backoffice (queue + cron job)
+
+The backoffice page **Learning → Audio Storage** lists every audio lesson with where
+it is served from (Bunny / S3) and offers three actions. It never touches ffmpeg,
+Bunny or S3 — same split as payout approval:
+
+| Button | What the backoffice writes | Who does the work |
+|---|---|---|
+| Migrasi ke S3 | `INSERT media_audio_migration_jobs (guid, lesson_id, parts, requested_by)` | `migrateAudioToStorage` on the 5-minute lane (`bb-cron-disburse` / CDK `CronDisburse`) |
+| Kembali ke Bunny | `UPDATE media_audio_sources SET is_active = false` | nobody — `/media/hls` re-reads the row per request |
+| Aktifkan S3 | `UPDATE … SET is_active = true` | nobody |
+
+The job (`apps/mobile-api/src/modules/media/audio-migration.job.ts`) per request:
+download the Bunny MP4 (360p first — audio is byte-identical at 360p/480p; signed URL
+in `signed` mode, Referer in `proxy`), copy the AAC track out **without re-encoding**,
+cut into ≤ `parts` MPEG-TS files (`segmentSeconds` = ceil, so ffmpeg can only produce
+≤ `parts`), upload under the first **empty** `private/audio/<guid>/<version>/` (those
+keys are served `immutable`; a reused key would leave CDN and bucket disagreeing),
+range-GET the first and last part, then upsert `media_audio_sources` **active**. A
+failure is terminal for that job (`FAILED` + message; the button makes a new one);
+only a job that *died* (PROCESSING > 30 min) is retried, up to 3 attempts. A partial
+unique index allows one open job per guid, so a double click is a 409, not two encodes.
+It stops claiming work after 3 minutes because PM2's `cron_restart` kills a process
+still running at the next tick. **Needs `ffmpeg`/`ffprobe` on the host**: in the image
+via the Dockerfile; on the staging VPS `sudo apt-get install -y ffmpeg`.
+
+### 9.z Audio uploaded from the backoffice (no Bunny at all)
+
+The slide editor's **Unggah file audio…** PUTs the master from the browser straight to
+`private/audio-uploads/<guid>/source.<ext>` (presigned PUT; the file is 50–300 MB and
+never crosses the dashboard server), then queues the same job with `source_key` set.
+The guid is **minted by the backoffice** and goes into the slide exactly like a Bunny
+guid — token, `/media/hls`, playlist and app are unchanged. Differences from a Bunny
+migration, all keyed on `source_key IS NOT NULL`:
+
+- the job reads the master with `S3StorageService.downloadToFile` instead of fetching
+  the Bunny MP4, after checking the key sits under **that guid's own** upload folder
+  (the key comes from a DB row another app wrote — checked, not trusted);
+- non-AAC input (mp3, wav) is encoded to AAC 128 kbps; AAC/m4a is copied as-is;
+- `media_audio_sources.source_key` keeps the master's key, so a re-cut re-reads it and
+  the backoffice hides **Kembali ke Bunny** — there is no Bunny copy, `is_active=false`
+  would only break playback;
+- the job **stamps the duration**: `normalize-slides-data` can only ask Bunny, which has
+  never heard of the guid. `stampSlideDuration` rewrites matching audio slides lean
+  (`data.guid` + `data.durationSec`) and moves `Lesson.duration` by the **delta** — never
+  a re-sum, because raw-lite sibling slides carry no duration and would count as 0. The
+  backoffice save path does the same from `media_audio_sources` when the slide is saved
+  *after* the job finished, so either order ends correct.
+
+Until the job's tick (≤ 5 min) the guid has no row and `/media/hls` falls through to
+Bunny, which 404s — a just-uploaded lesson is not playable for those minutes.
+
+**Bunny backup for uploads (2026-09-19).** With `BUNNY_STREAM_API_KEY` set in the
+backoffice, the upload's guid is **created on Bunny** (`POST /library/{id}/videos`,
+empty video) — Bunny will not accept a guid of ours, so this is what keeps ONE guid
+across slide, S3 folder and Bunny. The job then pushes the master to that video
+(`pushToBunny`) as a **black-frame MP4 with the audio track copied** — the same shape
+as every legacy audio on Bunny, so the MP4 fallback and the 360p HLS variant the app
+pins exist exactly as for any other audio. Best-effort by design: the asset is already
+safe on our storage, so a Bunny failure ends the job `DONE` with the reason in `error`
+(the backoffice shows it as a warning) and `media_audio_sources.has_bunny_copy = false`.
+That column — not `source_key` — is what the backoffice keys "Kembali ke Bunny" on:
+`true` for every Bunny migration and every backed-up upload, `false` for an upload with
+no Bunny copy (no key in that env, guid minted locally → Bunny answers 404, or the push
+failed), where `is_active = false` would be an outage, not a rollback. Bunny needs a few
+minutes to transcode after the push; a rollback inside that window plays nothing.
+Three different Bunny credentials are in play — see CLAUDE.md §5 Media access.

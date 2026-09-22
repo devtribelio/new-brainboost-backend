@@ -1,0 +1,12 @@
+-- Optional split of a single-file audio source into a handful of segments.
+--
+-- One file worked, but the store app computes download progress as
+-- "segments done / segments total" and schedules segment batches from a Dart
+-- loop that MIUI/HyperOS freezes in the background. Eight segments keep the
+-- whole lesson inside ONE batch on both shipped batch sizes (12 in 3.3.3, 8 in
+-- 3.4.0), so there is no second batch to stall, retries cost one part instead
+-- of the lesson, and the bar moves in 12.5% steps. NULL keeps today's
+-- single-file behaviour for rows that predate the column.
+--
+-- Shape: [{"key":"private/audio/<guid>/<v>/000.ts","durationSec":480,"bytes":7340032}, ...]
+ALTER TABLE "media_audio_sources" ADD COLUMN "segments" JSONB;

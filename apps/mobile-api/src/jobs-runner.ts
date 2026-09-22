@@ -9,6 +9,7 @@ import { expireEventTicketOrders } from '@bb/domain/jobs/expire-event-ticket-ord
 import { topicDigest } from '@bb/domain/jobs/topic-digest';
 import { firstPurchaseVoucher } from '@bb/domain/jobs/first-purchase-voucher';
 import { streakReminder } from './modules/tracker/streak-reminder.job';
+import { migrateAudioToStorage } from './modules/media/audio-migration.job';
 
 /**
  * Standalone scheduled-jobs entrypoint. Runs the registered jobs ONCE, then exits.
@@ -50,8 +51,12 @@ const JOBS: Array<{ name: string; run: () => Promise<unknown> }> = [
   { name: 'streakReminder', run: () => streakReminder() },
   // Safe on every tick and cheap when idle: it returns immediately unless
   // `firstPurchaseVoucher.enabled` is true AND `launchAt` is set, and it ships with
-  // both off. Last in the lane — it writes outbox rows, never money.
+  // both off. It writes outbox rows, never money.
   { name: 'firstPurchaseVoucher', run: () => firstPurchaseVoucher() },
+  // Drains the backoffice's "Migrasi ke S3" queue. LAST on its lane on purpose:
+  // it is the only job here that can run for minutes (download + ffmpeg + upload),
+  // and money jobs must not wait behind it. Needs ffmpeg/ffprobe on the host.
+  { name: 'migrateAudioToStorage', run: () => migrateAudioToStorage() },
 ];
 
 const requested = process.argv.slice(2);
