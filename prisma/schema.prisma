@@ -1476,7 +1476,7 @@ model MediaAudioMigrationJob {
   guid        String
   lessonId    String?   @map("lesson_id") @db.Uuid // informational, no FK — same rule as the source row's runtime lookup: by guid
   status      String    @default("REQUESTED") // REQUESTED | PROCESSING | DONE | FAILED
-  parts       Int       @default(12) // ≤ the app's downloader batch, see MediaAudioSource.segments
+  parts       Int       @default(120) // 1..200 (CHECK in migration). 120 = ~1% progress steps; tested safe on MIUI 2026-09-22, see migration 20260922120000
   attempts    Int       @default(0)
   error       String?
   requestedBy String?   @map("requested_by") // bo_users id/email — backoffice-owned, no FK

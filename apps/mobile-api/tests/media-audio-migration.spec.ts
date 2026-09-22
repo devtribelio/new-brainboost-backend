@@ -10,6 +10,8 @@ describe('segmentSeconds', () => {
     [3600, 12, 300],
     [10, 12, 1],
     [3123, 1, 3123],
+    [3677, 120, 31],
+    [3755, 120, 32],
   ])('%is into %i parts → %is per part', (duration, parts, expected) => {
     expect(segmentSeconds(duration, parts)).toBe(expected);
   });
@@ -18,7 +20,7 @@ describe('segmentSeconds', () => {
   // even though ffmpeg makes every segment a little LONGER than hls_time.
   it('never yields more than `parts` segments', () => {
     for (const duration of [59, 600, 3123, 3676, 7201]) {
-      for (const parts of [1, 8, 12]) {
+      for (const parts of [1, 8, 12, 120, 200]) {
         expect(Math.ceil(duration / segmentSeconds(duration, parts))).toBeLessThanOrEqual(parts);
       }
     }
