@@ -64,6 +64,12 @@ export class BbEcsStack extends cdk.Stack {
       BASE_URL: sm('BASE_URL'),                        // domain prod (default env.ts = localhost → WAJIB override)
       MEDIA_TOKEN_SECRET: sm('MEDIA_TOKEN_SECRET'),
       MEDIA_MODE: sm('MEDIA_MODE'),                    // 'proxy' | 'signed' — media serving mode (env.ts default 'proxy')
+      // CloudFront signed URL untuk bagian audio di private/audio/* (cdn.brainboost.id).
+      // Ketiganya WAJIB sudah ada di secret bb/prod/app sebelum deploy, atau task gagal
+      // start. Kosong/absen di env.ts = backend jatuh ke S3 presign (lihat docs/media-port.md §9.x).
+      MEDIA_CDN_HOST: sm('MEDIA_CDN_HOST'),
+      MEDIA_CDN_KEY_PAIR_ID: sm('MEDIA_CDN_KEY_PAIR_ID'),
+      MEDIA_CDN_PRIVATE_KEY: sm('MEDIA_CDN_PRIVATE_KEY'), // base64 PEM; pasangan public key infra/cdk/cdn-keys/prod.public.pem
       SQS_COMMS_URGENT_URL: sm('SQS_COMMS_URGENT_URL'),
       SQS_COMMS_NORMAL_URL: sm('SQS_COMMS_NORMAL_URL'),
       // --- VENDOR (nama key sudah dicocokkan ke env.ts) ---
@@ -82,6 +88,11 @@ export class BbEcsStack extends cdk.Stack {
       // Bunny: cuma 2 yang DIPAKAI media module (streamApiKey & libraryId itu dead field).
       BUNNY_STREAM_TOKEN_KEY: sm('BUNNY_STREAM_TOKEN_KEY'),
       BUNNY_STREAM_CDN_HOST: sm('BUNNY_STREAM_CDN_HOST'),
+      // Cadangan ke Bunny untuk audio yang diunggah dari backoffice (job migrateAudioToStorage).
+      // LIBRARY_ID wajib ikut: tanpa itu env.ts memakai default 157244 (library lama), dan
+      // cadangan akan dikirim ke library yang salah. Keduanya WAJIB ada di bb/prod/app.
+      BUNNY_STREAM_API_KEY: sm('BUNNY_STREAM_API_KEY'),   // API Key LIBRARY (Stream > library > API), bukan token key
+      BUNNY_STREAM_LIBRARY_ID: sm('BUNNY_STREAM_LIBRARY_ID'),
 
       // Didit KYC (gantiin Sumsub, PR #98). apiKey & webhookSecret = rahasia;
       // workflowId = UUID workflow (account-specific, taruh di secret biar nggak hardcode di git).
@@ -339,6 +350,9 @@ export class BbEcsStack extends cdk.Stack {
         taskDefinition: makeCronLane('CronDisburse', 'cron-disburse', [
           'executeApprovedDisbursements',
           'expireEventTicketOrders',
+          // Antrean "Migrasi ke S3" dari backoffice. Terakhir di lane ini: satu-satunya
+          // job yang bisa jalan bermenit-menit. Butuh ffmpeg di image (Dockerfile).
+          'migrateAudioToStorage',
         ]),
       },
     });

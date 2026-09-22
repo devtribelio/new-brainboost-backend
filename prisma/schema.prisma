@@ -546,8 +546,9 @@ model Lesson {
   createdAt      DateTime @default(now()) @map("created_at")
   updatedAt      DateTime @updatedAt @map("updated_at")
 
-  section       CourseSection  @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  section       CourseSection      @relation(fields: [sectionId], references: [id], onDelete: Cascade)
   playlistItems PlaylistItem[]
+  audioSources  MediaAudioSource[]
 
   @@index([sectionId, order])
   @@map("course_lessons")
@@ -618,38 +619,38 @@ model ListeningSession {
 /// NOT NULL is a trivial migration, so it is not pre-emptively nullable.
 /// Playing/creating requires an active subscription (`playlist.requiresSubscription`).
 model Playlist {
-  id              String    @id @default(uuid(7)) @db.Uuid
-  ownerId         String    @map("owner_id") @db.Uuid
+  id                   String    @id @default(uuid(7)) @db.Uuid
+  ownerId              String    @map("owner_id") @db.Uuid
   /// PRIVATE | UNLISTED — a playlist becomes reachable by others only through a
   /// share token its owner switched on. Free-form string, no DB enum (same posture
   /// as `members.kyc_status`): a new value must not need a members-table DDL.
-  visibility      String    @default("PRIVATE")
+  visibility           String    @default("PRIVATE")
   /// Opaque random share key, minted when sharing is switched on, NULL when off,
   /// rotatable. Deliberately NOT the id: a UUID v7 carries its creation timestamp
   /// and can never be revoked.
-  shareToken      String?   @unique @map("share_token")
-  sharedAt        DateTime? @map("shared_at")
+  shareToken           String?   @unique @map("share_token")
+  sharedAt             DateTime? @map("shared_at")
   /// Share token this playlist was copied from — plain scalar, NO FK, so the source
   /// may be deleted without breaking the copy. Feeds analytics and, later, share
   /// commission attribution.
-  copiedFromToken String?   @map("copied_from_token")
+  copiedFromToken      String?   @map("copied_from_token")
   /// Playlist this one was copied from — plain scalar, NO FK, same posture as
   /// `copiedFromToken`. It exists BESIDE the token because the token is not a stable
   /// handle: unshare clears it and rotate replaces it, so a copy made yesterday can no
   /// longer find its source today. The history merge needs a link that survives both,
   /// otherwise a saved playlist splits into two cards — the source carrying the plays,
   /// the copy carrying the ownership.
-  copiedFromPlaylistId String? @map("copied_from_playlist_id") @db.Uuid
-  name            String
-  description     String?
-  coverUrl        String?   @map("cover_url")
-  sortOrder       Int       @default(0) @map("sort_order")
-  isActive        Boolean   @default(true) @map("is_active")
+  copiedFromPlaylistId String?   @map("copied_from_playlist_id") @db.Uuid
+  name                 String
+  description          String?
+  coverUrl             String?   @map("cover_url")
+  sortOrder            Int       @default(0) @map("sort_order")
+  isActive             Boolean   @default(true) @map("is_active")
   /// Ops moderation kill-switch. A blocked playlist answers 404, never 403 — a 403
   /// would confirm it exists.
-  isBlocked       Boolean   @default(false) @map("is_blocked")
-  createdAt       DateTime  @default(now()) @map("created_at")
-  updatedAt       DateTime  @updatedAt @map("updated_at")
+  isBlocked            Boolean   @default(false) @map("is_blocked")
+  createdAt            DateTime  @default(now()) @map("created_at")
+  updatedAt            DateTime  @updatedAt @map("updated_at")
 
   owner Member         @relation("PlaylistOwner", fields: [ownerId], references: [id], onDelete: Cascade)
   items PlaylistItem[]
@@ -1632,6 +1633,75 @@ model AppVersionConfig {
   createdAt     DateTime @default(now()) @map("created_at")
 
   @@map("app_version_configs")
+}
+
+/// Audio lessons served as ONE file from our own S3/CDN instead of Bunny HLS.
+///
+/// Keyed on the Bunny `guid` because that is the asset identity the product
+/// serializer already emits inside the media token — no lesson column changes.
+/// A row present AND active flips `GET /media/hls` for that guid to a
+/// backend-generated single-segment playlist pointing at `audio_key`; absent or
+/// inactive = Bunny exactly as before. Rollback per asset = `is_active=false`.
+model MediaAudioSource {
+  id           String   @id @default(uuid(7)) @db.Uuid
+  guid         String   @unique // Bunny Stream guid — the lookup key; lessons reference media only inside slides_data JSON, so there is no lesson column to FK to
+  audioKey     String   @map("audio_key") // S3 key, e.g. private/audio/<guid>/1.aac (private/ prefix = presigned/CDN-signed only, per S3StorageService convention)
+  version      Int      @default(1) // bump on re-encode; new key, old file untouched while downloads finish
+  codec        String   @default("aac") // aac (track copied) | aac-96k (re-encoded)
+  durationSec  Int      @map("duration_sec") // for EXTINF / TARGETDURATION; from ffprobe
+  bytes        Int
+  sha256       String
+  // Optional split into a few files: [{key, durationSec, bytes}, ...] in play order.
+  // Why a handful (8) and not one: the store app's downloader fetches segments in
+  // batches (12 in 3.3.3, 8 in 3.4.0) and the Dart loop that schedules the NEXT
+  // batch freezes when the app is backgrounded on MIUI — so ≤ 8 segments means one
+  // batch, no second batch to stall, per-segment retry, and a progress bar that
+  // moves. null = single file at `audio_key` (rows created before this column).
+  segments     Json?
+  isActive     Boolean  @default(true) @map("is_active")
+  encodedAt    DateTime @map("encoded_at")
+  createdAt    DateTime @default(now()) @map("created_at")
+  // "Whose asset is this" for ops. Nullable + SET NULL: the runtime lookup is by
+  // guid, never by this column, so it can only inform, never gate. Filled from
+  // slides_data at insert time; the view media_audio_source_lessons recomputes
+  // the truth and shows when the two disagree (guid reused, lesson re-authored).
+  lessonId     String?  @map("lesson_id") @db.Uuid
+  lesson       Lesson?  @relation(fields: [lessonId], references: [id], onDelete: SetNull)
+  // Master file this was cut from when it was UPLOADED from the backoffice
+  // (private/audio-uploads/<guid>/source.<ext>); null = migrated from Bunny. An
+  // upload has no Bunny copy, so is_active=false is not a rollback for it.
+  sourceKey    String?  @map("source_key")
+  // Is there a Bunny copy to fall back to? Decides whether is_active=false is a
+  // rollback or an outage. false only for an upload that never reached Bunny.
+  hasBunnyCopy Boolean  @default(true) @map("has_bunny_copy")
+
+  @@index([lessonId])
+  @@map("media_audio_sources")
+}
+
+/// Work queue for moving an audio asset to our own storage. Written by the
+/// backoffice over plain SQL (id has a DB default for that reason), drained by
+/// the `migrateAudioToStorage` job. Kept apart from MediaAudioSource: that table
+/// is what the app is served from, so a half-done migration must never show there.
+/// The partial unique index (one open job per guid) lives in the migration —
+/// Prisma cannot express it.
+model MediaAudioMigrationJob {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  guid        String
+  lessonId    String?   @map("lesson_id") @db.Uuid // informational, no FK — same rule as the source row's runtime lookup: by guid
+  status      String    @default("REQUESTED") // REQUESTED | PROCESSING | DONE | FAILED
+  parts       Int       @default(120) // 1..200 (CHECK in migration). 120 = ~1% progress steps; tested safe on MIUI 2026-09-22, see migration 20260922120000
+  attempts    Int       @default(0)
+  error       String?
+  requestedBy String?   @map("requested_by") // bo_users id/email — backoffice-owned, no FK
+  sourceKey   String?   @map("source_key") // set = read the master from our bucket (backoffice upload); null = download the Bunny MP4
+  requestedAt DateTime  @default(now()) @map("requested_at")
+  startedAt   DateTime? @map("started_at")
+  finishedAt  DateTime? @map("finished_at")
+
+  @@index([status, requestedAt])
+  @@index([guid])
+  @@map("media_audio_migration_jobs")
 }
 
 /// Auth + per-channel capability toggles for 3rd-party ingestion (IAP/Scalev/Lynk.id) via

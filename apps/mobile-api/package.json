@@ -12,6 +12,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@aws-sdk/cloudfront-signer": "^3.1125.0",
     "@bb/common": "workspace:*",
     "@bb/db": "workspace:*",
     "@bb/domain": "workspace:*",

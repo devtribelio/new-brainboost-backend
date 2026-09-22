@@ -94,7 +94,10 @@ module.exports = {
       // expireEventTicketOrders rides the fast lane, not the hourly one: the
       // ticket payment window is 30 minutes by default, and an hourly sweep would
       // hold a seat for up to 90 — a lag three times the limit it enforces.
-      args: 'executeApprovedDisbursements expireEventTicketOrders',
+      // migrateAudioToStorage rides here too (the backoffice button should not
+      // wait an hour) and runs last; it stops claiming work after 3 minutes so it
+      // is idle before the next cron_restart. Host needs ffmpeg (apt install ffmpeg).
+      args: 'executeApprovedDisbursements expireEventTicketOrders migrateAudioToStorage',
       exec_mode: 'fork',
       instances: 1,
       autorestart: false,
