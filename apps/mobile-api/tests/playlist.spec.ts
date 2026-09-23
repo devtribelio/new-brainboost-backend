@@ -5,6 +5,7 @@ import { prisma } from '@bb/db';
 import { ERROR_CODES } from '@bb/common/exceptions';
 import { SettingsService, settingsService, SETTING_KEYS } from '@bb/common/services/settings.service';
 import { PlaylistService } from '@/modules/playlist/playlist.service';
+import { PlaylistController } from '@/modules/playlist/playlist.controller';
 
 function uid(): string {
   return Math.random().toString(36).slice(2, 12);
@@ -586,6 +587,34 @@ describe('PlaylistService (real Postgres)', () => {
     afterEach(async () => {
       await prisma.listeningSession.deleteMany({ where: { memberId: subscriber } });
       await prisma.playlistHistoryDismissal.deleteMany({ where: { memberId: subscriber } });
+    });
+
+    it('stays readable after the subscription lapses — read-only, hasAccess=false', async () => {
+      const { a, b } = await twoPlayed();
+      await prisma.memberSubscription.update({
+        where: { id: subscriptionId },
+        data: { expiresAt: new Date(Date.now() - 1000) },
+      });
+      try {
+        const ctrl = new PlaylistController(service);
+        const call = async (scope: string) => {
+          let body: any;
+          const res = { status: () => res, json: (b: unknown) => { body = b; return res; } } as any;
+          await ctrl.list({ user: { id: subscriber }, query: { scope } } as any, res);
+          return body;
+        };
+        const recent = await call('recent');
+        expect(recent.data.map((r: any) => r.id)).toEqual([b.id, a.id]);
+        expect(recent.meta).toMatchObject({ scope: 'recent', hasAccess: false });
+        const top = await call('top');
+        expect(top.data.map((r: any) => r.id)).toEqual([a.id, b.id]);
+        expect(top.meta).toMatchObject({ scope: 'top', hasAccess: false });
+      } finally {
+        await prisma.memberSubscription.update({
+          where: { id: subscriptionId },
+          data: { expiresAt: new Date(Date.now() + 30 * 24 * 3600 * 1000) },
+        });
+      }
     });
 
     it('orders recent by last play and top by seconds listened', async () => {

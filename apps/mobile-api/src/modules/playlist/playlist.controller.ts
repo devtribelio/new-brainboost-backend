@@ -50,10 +50,13 @@ export class PlaylistController {
     const memberId = req.user!.id;
     const scope = typeof req.query.scope === 'string' ? req.query.scope : 'mine';
 
+    // Every scope is readable without a subscription on purpose: a member whose
+    // plan lapsed must still see what they built and what they played, read-only,
+    // with a renew prompt over it. `hasAccess` is the flag the app renders that
+    // prompt from; the real gate stays on writes and on /media/stream.
+    const hasAccess = await this.playlistService.hasAccess(memberId);
+
     if (scope === 'recent' || scope === 'top') {
-      // History only ever comes from playing, and playing needs a subscription,
-      // so there is nothing to show a lapsed member here.
-      await this.playlistService.assertAccess(memberId);
       const rows =
         scope === 'recent'
           ? await this.playlistService.listRecent(memberId)
@@ -61,7 +64,7 @@ export class PlaylistController {
       return ok(
         res,
         rows.map((r) => serializePlaylistHistory(r, memberId)),
-        { scope },
+        { scope, hasAccess },
       );
     }
 
@@ -69,12 +72,10 @@ export class PlaylistController {
       this.playlistService.listMine(memberId),
       this.playlistService.getQuota(memberId),
     ]);
-    // Readable without a subscription on purpose: a member whose plan lapsed must
-    // still see what they built, read-only, with a renew prompt over it.
     return ok(
       res,
       rows.map((r) => serializePlaylist(r)),
-      { scope: 'mine', quota, hasAccess: await this.playlistService.hasAccess(memberId) },
+      { scope: 'mine', quota, hasAccess },
     );
   };
 

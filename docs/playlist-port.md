@@ -158,7 +158,7 @@ definisi aktif di satu repo = bug pembayaran yang menunggu waktu.
 | play (dapat `streamUrl`) | subscriber |
 | create / rename / add item / reorder / delete | subscriber |
 | save / copy | subscriber |
-| `scope=recent` / `scope=top` | subscriber (riwayat hanya lahir dari play) |
+| `scope=recent` / `scope=top` | bebas dibaca (riwayat play tetap terlihat saat langganan habis, `meta.hasAccess=false`); play-nya sendiri tetap butuh subscriber |
 
 ### Member free-trial TIDAK dapat playlist (keputusan 2026-08-24)
 
