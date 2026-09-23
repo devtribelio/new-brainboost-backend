@@ -1,6 +1,7 @@
 import bcrypt from 'bcryptjs';
 import { createHash } from 'node:crypto';
 import { prisma } from '@bb/db';
+import { Prisma } from '@prisma/client';
 import { badRequest, unauthorized, notFound, ERROR_CODES } from '@bb/common/exceptions';
 import { otpService } from '@bb/common/services/otp.service';
 import { isReusableUnverifiedMember } from '@bb/common/utils/member-state.util';
@@ -14,6 +15,8 @@ import type {
 } from './dto/delete-account.dto';
 import type { GetPaymentTokenQueryDto } from './dto/payment-token.dto';
 import { settingsService, SETTING_KEYS } from '@bb/common/services/settings.service';
+import { splitPlatform } from '@bb/common/utils/platform-header.util';
+import { buildTermsStatus, TERMS_VERSION_DEFAULT } from './terms-status';
 
 /**
  * Fallback grace period, in days, between asking to delete and the purge executing.
@@ -345,6 +348,46 @@ export class AccountService {
       throw badRequest(ERROR_CODES.DELETION_NOT_SCHEDULED);
     }
     return { memberId, recovered: true };
+  }
+
+  /**
+   * Record consent to the live terms version. Idempotent: a second call for the same
+   * version hits the (member, version) unique and is treated as already done. The
+   * version check runs even while `terms.enabled` is false — a client that calls
+   * anyway must still be told the document it showed is stale.
+   */
+  async acceptTerms(memberId: string, version: string, source: string | null) {
+    const currentVersion = await settingsService.get(
+      SETTING_KEYS.termsCurrentVersion,
+      TERMS_VERSION_DEFAULT,
+    );
+    if (version !== currentVersion) {
+      throw badRequest(ERROR_CODES.TERMS_VERSION_STALE, { currentVersion });
+    }
+    const { platform, appVersion } = splitPlatform(source);
+    const acceptedAt = new Date();
+    const member = await prisma.$transaction(async (tx) => {
+      try {
+        await tx.memberTermsAcceptance.create({
+          data: { memberId, termsVersion: version, platform, appVersion, acceptedAt },
+        });
+      } catch (err) {
+        const dup =
+          err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002';
+        if (!dup) throw err;
+        // Already on file for this version: keep the original row (and its timestamp).
+        return tx.member.findUniqueOrThrow({
+          where: { id: memberId },
+          select: { termsVersion: true, termsAcceptedAt: true },
+        });
+      }
+      return tx.member.update({
+        where: { id: memberId },
+        data: { termsVersion: version, termsAcceptedAt: acceptedAt },
+        select: { termsVersion: true, termsAcceptedAt: true },
+      });
+    });
+    return buildTermsStatus(member);
   }
 
   private async verifyPassword(

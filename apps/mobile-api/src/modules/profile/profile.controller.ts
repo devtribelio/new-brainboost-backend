@@ -16,6 +16,7 @@ import {
   UpdateProfileRequestDto,
   UpdateLocationRequestDto,
 } from './dto/profile.dto';
+import { buildTermsStatus } from '../account/terms-status';
 
 @ApiTags('Profile')
 @ApiBearerAuth()
@@ -78,6 +79,10 @@ export class ProfileController {
       // says a deletion is pending; the banner that offers to cancel it has to name
       // the date, and this is where FE reads it. Null whenever nothing is scheduled.
       scheduledDeletionAt: member.scheduledDeletionAt?.toISOString() ?? null,
+      // Additive too. Whether the T&C screen must be shown, and which version to
+      // send back to /account/acceptTerms. Read here rather than on a route of its own
+      // because the app already calls this on login and resume.
+      terms: await buildTermsStatus(member),
       affiliatorCode: member.affiliateCode ?? null,
       haveAffiliateConnect: member.inviterId !== null,
       affiliateConnectedData,

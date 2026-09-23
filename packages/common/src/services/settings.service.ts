@@ -96,6 +96,14 @@ export const SETTING_KEYS = {
   streakDimmedEnabled: 'streak.dimmedEnabled',
   streakAtRiskHour: 'streak.atRiskHour',
   streakDimmedHour: 'streak.dimmedHour',
+  // Terms & conditions. `currentVersion` is a free-form label compared with `!==`
+  // (bump it ONLY when the document changes — an app release alone must not re-prompt
+  // every member). `enabled` ships false: the client gate is the only enforcement, and
+  // flipping it on before the app build with the T&C screen exists would only mark
+  // every member `needsAcceptance` with nothing able to clear it.
+  termsEnabled: 'terms.enabled',
+  termsCurrentVersion: 'terms.currentVersion',
+  termsUrl: 'terms.url',
 } as const;
 
 export class SettingsService {

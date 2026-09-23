@@ -18,6 +18,9 @@ import { ChangePasswordDto } from './dto/change-password.dto';
 import { RequestDeleteAccountDto, VerificationDeleteAccountDto } from './dto/delete-account.dto';
 import { GetPaymentTokenQueryDto } from './dto/payment-token.dto';
 import { AffiliateConnectResultDto } from './dto/affiliate-connect.dto';
+import { AcceptTermsDto } from './dto/accept-terms.dto';
+import { TermsStatusDto } from './dto/terms-status.dto';
+import { platformFrom } from '@bb/common/utils/platform-header.util';
 
 function requireUser(req: Request): AuthenticatedRequest['user'] & { id: string; email: string } {
   const user = (req as AuthenticatedRequest).user;
@@ -117,6 +120,22 @@ export class AccountController {
   recoverAccountScheduled = async (req: Request, res: Response) => {
     const user = requireUser(req);
     const result = await this.accountService.recoverAccountScheduled(user.id);
+    return ok(res, result);
+  };
+
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Accept the current terms & conditions',
+    description:
+      'Records consent to `version` (must equal the live `terms.currentVersion`, read from the `terms` block of /account/profile/info). Idempotent. Optional `x-platform: android/3.3.1+412` header is stored for audit. Returns the same `terms` block the profile carries, so no refetch is needed.',
+  })
+  @ApiBody({ type: () => AcceptTermsDto })
+  @ApiResponse({ status: 200, type: () => TermsStatusDto })
+  @ApiResponse({ status: 400, type: () => ErrorEnvelopeDto, envelope: 'none' })
+  acceptTerms = async (req: Request, res: Response) => {
+    const user = requireUser(req);
+    const { version } = req.body as AcceptTermsDto;
+    const result = await this.accountService.acceptTerms(user.id, version, platformFrom(req));
     return ok(res, result);
   };
 }

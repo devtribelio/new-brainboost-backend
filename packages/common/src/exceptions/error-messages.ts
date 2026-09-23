@@ -110,6 +110,7 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   CONFIRMATION_REQUIRED: 'Konfirmasi diperlukan untuk melanjutkan',
   DELETION_NOT_SCHEDULED: 'Akun tidak sedang dalam proses penghapusan',
   DEVICE_NOT_REGISTERED: 'Perangkat belum terdaftar',
+  TERMS_VERSION_STALE: 'Syarat dan ketentuan sudah diperbarui, muat ulang dan setujui versi terbaru',
 
   // --- affiliate -------------------------------------------------------------
   AFFILIATOR_CODE_REQUIRED: 'Kode afiliasi wajib diisi',

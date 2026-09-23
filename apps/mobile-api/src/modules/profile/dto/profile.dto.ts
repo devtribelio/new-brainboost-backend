@@ -1,4 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@bb/common/openapi/decorators';
+import { TermsStatusDto } from '../../account/dto/terms-status.dto';
 
 /**
  * Request body for POST /member/account/profile/update.
@@ -164,6 +165,10 @@ export class MemberProfileDto {
   /** Deadline of a pending account deletion; null when none is scheduled. */
   @ApiPropertyOptional({ nullable: true, example: '2026-10-03T07:12:00.000Z' })
   scheduledDeletionAt?: string | null;
+
+  /** Terms & conditions gate — additive. See docs/terms-acceptance.md. */
+  @ApiProperty({ type: () => TermsStatusDto })
+  terms!: TermsStatusDto;
 
   @ApiPropertyOptional({ nullable: true, example: 'JD000001' })
   affiliatorCode?: string | null;

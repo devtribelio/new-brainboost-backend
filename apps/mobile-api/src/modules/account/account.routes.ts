@@ -16,6 +16,7 @@ import {
   RequestDeleteAccountDto,
   VerificationDeleteAccountDto,
 } from './dto/delete-account.dto';
+import { AcceptTermsDto } from './dto/accept-terms.dto';
 
 export function accountRoutes(): Router {
   const router = Router();
@@ -84,6 +85,14 @@ export function accountRoutes(): Router {
     path: '/account/recoverAccountScheduled',
     handlerKey: 'recoverAccountScheduled',
     middlewares: [authGuard],
+  });
+  bindRoute({
+    router,
+    controller: ctrl,
+    method: 'post',
+    path: '/account/acceptTerms',
+    handlerKey: 'acceptTerms',
+    middlewares: [authGuard, validateDto(AcceptTermsDto)],
   });
 
   return router;

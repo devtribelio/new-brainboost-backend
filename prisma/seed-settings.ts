@@ -222,6 +222,24 @@ const SETTINGS: Array<{ key: string; value: string; description: string }> = [
     description:
       'Age (hours) after which an unreferenced `kind=post` upload is deleted by the sweep job. Generous by design: deletion is irreversible.',
   },
+  {
+    key: 'terms.enabled',
+    value: 'false',
+    description:
+      "Kill-switch persetujuan syarat & ketentuan di app. 'false' = profil selalu menjawab needsAcceptance=false. Nyalakan HANYA setelah build app yang punya layar T&C sudah rilis — kalau dinyalakan lebih dulu, semua member ditandai wajib setuju tanpa ada layar yang bisa menyelesaikannya.",
+  },
+  {
+    key: 'terms.currentVersion',
+    value: '2026-10-01',
+    description:
+      'Versi dokumen syarat & ketentuan yang berlaku (label bebas, dibandingkan sama/tidak, BUKAN semver). Ubah HANYA saat isi dokumen berubah: setiap perubahan membuat semua member diminta setuju ulang. Rilis app saja tidak boleh mengubah nilai ini.',
+  },
+  {
+    key: 'terms.url',
+    value: 'https://brainboost.id/terms',
+    description:
+      'URL halaman syarat & ketentuan (+ kebijakan privasi, satu dokumen) yang dirender app dalam webview sebelum tombol setuju.',
+  },
 ];
 
 async function main() {

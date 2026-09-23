@@ -110,6 +110,13 @@ model Member {
   /// (0 is NOT unlimited). Only ops writes this; there is no member-facing route.
   playlistQuota Int? @map("playlist_quota")
 
+  // Terms & conditions: version last accepted + when. Read-path cache of the
+  // append-only `member_terms_acceptances` log (same split as kyc* vs kyc_event).
+  // NULL = never accepted. Compared with `!==` against app_settings `terms.currentVersion`;
+  // the version is a free-form label, not semver. See docs/terms-acceptance.md.
+  termsVersion    String?   @map("terms_version")
+  termsAcceptedAt DateTime? @map("terms_accepted_at")
+
   profile                MemberProfile?
   devices                Device[]
   refreshTokens          RefreshToken[]
@@ -131,6 +138,7 @@ model Member {
   commercePayments       CommercePayment[]
   notificationMutes      NotificationMute[]
   kycEvents              KycEvent[]
+  termsAcceptances       MemberTermsAcceptance[]
   ownedSubscriptions     MemberSubscription[]          @relation("MemberSubscriptionOwner")
   subscriptionSeats      SubscriptionSeat[]            @relation("SubscriptionSeatMember")
   playlists              Playlist[]                    @relation("PlaylistOwner")
@@ -158,6 +166,26 @@ model KycEvent {
 
   @@index([memberId, createdAt])
   @@map("kyc_event")
+}
+
+/// Proof of consent: "member X accepted terms version Y at Z". Append-only, one row
+/// per (member, version) — re-accepting the same version is a no-op, a new version is a
+/// new row. Deliberately carries NO IP (behind Cloudflare `req.ip` is the edge, not the
+/// visitor) so the table holds no PII and the account purge never has to touch it.
+/// `appVersion`/`platform` come from the `x-platform` header, audit only.
+/// See docs/terms-acceptance.md.
+model MemberTermsAcceptance {
+  id           String   @id @default(uuid(7)) @db.Uuid
+  memberId     String   @map("member_id") @db.Uuid
+  member       Member   @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  termsVersion String   @map("terms_version")
+  appVersion   String?  @map("app_version")
+  platform     String? // ios | android
+  acceptedAt   DateTime @default(now()) @map("accepted_at")
+
+  @@unique([memberId, termsVersion])
+  @@index([memberId, acceptedAt])
+  @@map("member_terms_acceptances")
 }
 
 model MemberProfile {
