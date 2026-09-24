@@ -17,6 +17,7 @@ import {
   ERROR_CODES,
 } from '@bb/common/exceptions';
 import { assertUuid } from '@bb/common/utils/uuid.util';
+import { verifyClaimToken as verifyClaimTokenSignature } from '@bb/common/utils/claim-token.util';
 import { normalizePhonePair, otpPhoneTarget } from '@bb/common/utils/phone.util';
 import { isReusableUnverifiedMember } from '@bb/common/utils/member-state.util';
 import { claimTicketsByEmail } from '@bb/domain/event/claim';
@@ -31,6 +32,7 @@ import type {
   RequestForgotPasswordDto,
   ValidateOtpDto,
 } from './dto/forgot-password.dto';
+import type { ClaimDto, ClaimVerifyDto } from './dto/claim.dto';
 import type { RegisterByPhoneDto } from './dto/register-by-phone.dto';
 import type { RequestVerificationPhoneDto } from './dto/request-verification-phone.dto';
 import type { ValidateOtpPhoneDto } from './dto/validate-otp-phone.dto';
@@ -1045,6 +1047,86 @@ export class AuthService {
       data: { revokedAt: new Date() },
     });
     return channel === 'email' ? { email: target } : { phone: target };
+  }
+
+  // --------------------------------------------------------------------------
+  // Account claim — an auto-provisioned buyer (passwordAlgo='social', no social
+  // sub, unverified email) has access but no usable password. The post-payment
+  // email links them to `/claim?token=…`; these two endpoints back that page.
+  // --------------------------------------------------------------------------
+
+  /**
+   * Pre-flight for the claim page: is this token good, and who is it for?
+   *
+   * Returns `{ valid:false }` for anything bad/expired/unknown — never a reason,
+   * so the token cannot be probed. `alreadyClaimed:true` (member already has a
+   * real password) lets the page say "already set, please log in" instead of
+   * offering the form. Only `email`/`fullName` leak on a genuinely claimable
+   * token, and only to prefill the form for the person holding the link.
+   */
+  async verifyClaimToken(
+    dto: ClaimVerifyDto,
+  ): Promise<{ valid: boolean; email?: string; fullName?: string; alreadyClaimed?: boolean }> {
+    const payload = verifyClaimTokenSignature(dto.token);
+    if (!payload) return { valid: false };
+
+    const member = await prisma.member.findUnique({
+      where: { id: payload.memberId },
+      select: { id: true, email: true, fullName: true, passwordAlgo: true },
+    });
+    if (!member) return { valid: false };
+
+    // A real password already set → the account was claimed (or the buyer set one
+    // some other way). Say so, but don't offer the form again.
+    if (member.passwordAlgo !== 'social') {
+      return { valid: true, alreadyClaimed: true };
+    }
+
+    return {
+      valid: true,
+      alreadyClaimed: false,
+      email: member.email ?? undefined,
+      fullName: member.fullName ?? undefined,
+    };
+  }
+
+  /**
+   * Consume the claim token: set the buyer's first real password and log them in.
+   *
+   * Single-use in effect — once `passwordAlgo` is no longer 'social' the token is
+   * refused, so replaying a leaked link cannot overwrite a password the member
+   * has since set. Mirrors `forgotPasswordVerification`: bcrypt the password, flip
+   * the member to a real credential + verified email, revoke live refresh tokens,
+   * then issue a fresh session so the response logs them straight in.
+   */
+  async claimAccount(dto: ClaimDto): Promise<TokenBundle> {
+    const payload = verifyClaimTokenSignature(dto.token);
+    if (!payload) throw badRequest(ERROR_CODES.CLAIM_TOKEN_INVALID);
+
+    const member = await prisma.member.findUnique({
+      where: { id: payload.memberId },
+      select: { id: true, email: true, passwordAlgo: true },
+    });
+    if (!member) throw badRequest(ERROR_CODES.CLAIM_TOKEN_INVALID);
+
+    // Single-use guard: a claimed account already has a real password.
+    if (member.passwordAlgo !== 'social') {
+      throw badRequest(ERROR_CODES.CLAIM_ALREADY_CLAIMED);
+    }
+
+    const passwordHash = await bcrypt.hash(dto.newPassword, 10);
+    await prisma.member.update({
+      where: { id: member.id },
+      data: { passwordHash, passwordAlgo: 'bcrypt', isEmailVerified: true },
+    });
+    await prisma.refreshToken.updateMany({
+      where: { memberId: member.id, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+
+    // Claim happens on the web /claim page; issue a web (multi-session) bundle so
+    // completing it never silently kicks a mobile session the buyer may have.
+    return this.issueTokenBundle(member.id, member.email ?? '', 'web');
   }
 
   async validateOtp(dto: ValidateOtpDto) {

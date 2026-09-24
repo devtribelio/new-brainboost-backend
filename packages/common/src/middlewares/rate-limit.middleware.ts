@@ -269,6 +269,19 @@ export const forgotPasswordVerifyRateLimiter: RequestHandler = makeRateLimiter({
   keyGenerator: byEmailOrPhone,
 });
 
+// --- account-claim endpoints — the body is an opaque HMAC token, not an
+//     email/phone, so there is no victim identifier to key on; fall back to IP.
+//     The token is unguessable, so this budget guards against blunt spray, not a
+//     targeted guess. `claim` (set password) is the tighter of the two. --------
+export const claimVerifyRateLimiter: RequestHandler = makeRateLimiter({
+  name: 'claim-verify',
+  limit: 20,
+});
+export const claimRateLimiter: RequestHandler = makeRateLimiter({
+  name: 'claim',
+  limit: 10,
+});
+
 // --- OTP/email SEND endpoints — medium budget; abuse = spamming a victim.
 //     Keyed on the target (memberId / email|phone) being messaged. ------------
 export const forgotPasswordRequestRateLimiter: RequestHandler = makeRateLimiter({

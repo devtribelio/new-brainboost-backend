@@ -1,10 +1,13 @@
+import { prisma } from '@bb/db';
 import { logger } from '@bb/common/config/logger';
 import { commerceEvents } from '@bb/common/events/commerce-events';
 import { affiliateEvents } from '@bb/common/events/affiliate-events';
 import { enqueueComms } from '@bb/common/services/comms-outbox';
 import { settingsService, SETTING_KEYS } from '@bb/common/services/settings.service';
+import { signClaimToken } from '@bb/common/utils/claim-token.util';
 import { loadTrialGrant } from '@bb/domain/commerce/trial';
 import { isEventTicketOrder } from '@bb/domain/event/order';
+import { shopBaseUrl } from '@bb/domain/shop/shop-base-url';
 
 /**
  * Outbound email producer for commerce events. Enqueues a transactional email
@@ -31,6 +34,42 @@ export function registerCommsEmailListeners(): void {
       // a bill for a purchase that never happened. bb-comms resolves the end date
       // itself from paid_at + trial_days.
       const isTrial = e.voucherId ? (await loadTrialGrant(e.voucherId)) != null : false;
+
+      // A non-trial receipt to an auto-provisioned buyer becomes the CLAIM email:
+      // such a member (passwordAlgo='social', unverified email, no social sub) has
+      // access but no usable password, so the standard "Mulai Belajar" CTA leads to
+      // a login they cannot pass. Send them a link to set a password instead.
+      if (!isTrial) {
+        const member = await prisma.member.findUnique({
+          where: { id: e.memberId },
+          select: {
+            id: true,
+            passwordAlgo: true,
+            isEmailVerified: true,
+            googleSub: true,
+            appleSub: true,
+          },
+        });
+        const unclaimed =
+          member != null &&
+          member.passwordAlgo === 'social' &&
+          !member.isEmailVerified &&
+          !member.googleSub &&
+          !member.appleSub;
+        if (unclaimed) {
+          const token = signClaimToken(member.id);
+          const claimUrl = `${await shopBaseUrl()}/claim?token=${encodeURIComponent(token)}`;
+          await enqueueComms({
+            type: 'CoursePaymentSuccessClaim',
+            channel: 'email',
+            priority: 'normal',
+            refId: e.transactionId, // bb-comms reads commerce_transactions by this id
+            payload: { claimUrl }, // the set-password link, not in PG — carried inline
+          });
+          return;
+        }
+      }
+
       await enqueueComms({
         type: isTrial ? 'CourseTrialStarted' : 'CoursePaymentSuccess',
         channel: 'email',
