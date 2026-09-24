@@ -38,6 +38,7 @@ import type { RequestVerificationEmailDto } from './dto/request-verification-ema
 import type { ValidateOtpEmailDto } from './dto/validate-otp-email.dto';
 import { logger } from '@bb/common/config/logger';
 import { VisitService } from '@bb/domain/affiliate/visit.service';
+import { memberProvisioningService } from '@bb/domain/member/provisioning.service';
 
 interface TokenBundle {
   access_token: string;
@@ -425,41 +426,16 @@ export class AuthService {
     return { inviterId: inviter?.id, inviterNetworkId };
   }
 
-  private async generateUniqueMemberCode(): Promise<string> {
-    for (let attempt = 0; attempt < 5; attempt++) {
-      const code = randomUUID().replace(/-/g, '').slice(0, 8).toUpperCase();
-      const exists = await prisma.member.findFirst({
-        where: { OR: [{ code }, { affiliateCode: code }] },
-        select: { id: true },
-      });
-      if (!exists) return code;
-    }
-    throw new Error('Unable to generate unique member code after 5 attempts');
+  // Member-creation primitives now live in the shared MemberProvisioningService
+  // (packages/domain) so the social-login and 3rd-party ingest provisioning paths
+  // build members from one implementation. These stay as thin delegators because
+  // register()/registerByPhone() below still call them.
+  private generateUniqueMemberCode(): Promise<string> {
+    return memberProvisioningService.generateUniqueMemberCode();
   }
 
-  // Auto-join the default community networks (Timeline + Education) on every
-  // new member. Mirrors what mobile MainPage previously triggered via
-  // /api/member/info → /api/network/join, but guarantees the rows exist before
-  // the first feed render. Idempotent: per-network unique violation is swallowed
-  // so a retried registration cannot double-join or double-bump countMember.
-  private async autoJoinCommunityNetworks(memberId: string): Promise<void> {
-    const communities = await prisma.network.findMany({
-      where: { purpose: { in: ['timeline', 'education'] }, isActive: true },
-      select: { id: true },
-    });
-    for (const n of communities) {
-      try {
-        await prisma.$transaction([
-          prisma.networkMember.create({ data: { networkId: n.id, memberId } }),
-          prisma.network.update({
-            where: { id: n.id },
-            data: { countMember: { increment: 1 } },
-          }),
-        ]);
-      } catch (err) {
-        if (!this.isUniqueViolation(err)) throw err;
-      }
-    }
+  private autoJoinCommunityNetworks(memberId: string): Promise<void> {
+    return memberProvisioningService.autoJoinCommunityNetworks(memberId);
   }
 
   private async loginWithPassword(dto: LoginDto): Promise<TokenBundle> {
@@ -775,14 +751,6 @@ export class AuthService {
       }
     }
 
-    // Create path: brand-new social account. Sentinel passwordHash + algo=social
-    // so loginWithPassword (verifyPassword guard) can never authenticate it.
-    // isEmailVerified:true — the provider attested the identity (Apple-verified even
-    // when the email is null / a private relay).
-    const sentinelHash = `${randomUUID()}${randomUUID()}`;
-    const memberCode = await this.generateUniqueMemberCode();
-    const username = await this.deriveUniqueUsernameFromEmail(email ?? `${provider}${sub}`);
-
     // Bind the inviter ONLY here, on first-time signup. Every already-exists
     // path above returned before reaching this point, so an existing account's
     // inviterId is never written — null stays null, set stays set. Mirrors
@@ -797,22 +765,22 @@ export class AuthService {
       if (inviter) inviterId = inviter.id;
     }
 
+    // Create path: brand-new social account. provisionMember supplies the sentinel
+    // passwordHash + algo=social (so loginWithPassword can never authenticate it)
+    // and the unique code/username. isEmailVerified:true — the provider attested
+    // the identity (Apple-verified even when the email is null / a private relay).
+    // usernameSeed covers the Apple private-relay case where email is null.
     try {
-      const created = await prisma.member.create({
+      const created = await memberProvisioningService.provisionMember({
         data: {
           email,
           ...subData,
           fullName: name,
-          username,
-          passwordHash: sentinelHash,
-          passwordAlgo: 'social',
           isEmailVerified: true,
-          code: memberCode,
-          affiliateCode: memberCode,
           inviterId,
         },
+        usernameSeed: `${provider}${sub}`,
       });
-      await this.autoJoinCommunityNetworks(created.id);
       return this.issueTokenBundle(created.id, created.email ?? '', clientType);
     } catch (err) {
       // Race: a concurrent request created the same email/provider-sub first.
@@ -949,25 +917,6 @@ export class AuthService {
       'code' in err &&
       (err as { code?: unknown }).code === 'P2002'
     );
-  }
-
-  private async deriveUniqueUsernameFromEmail(email: string): Promise<string> {
-    const local = email.split('@')[0] ?? 'user';
-    const base =
-      local
-        .toLowerCase()
-        .replace(/[^a-z0-9._]/g, '')
-        .slice(0, 24) || 'user';
-    for (let attempt = 0; attempt < 10; attempt++) {
-      const candidate = attempt === 0 ? base : `${base}${randomUUID().slice(0, 6)}`;
-      const exists = await prisma.member.findUnique({
-        where: { username: candidate },
-        select: { id: true },
-      });
-      if (!exists) return candidate;
-    }
-    // Extremely unlikely; fall back to random.
-    return `${base}${randomUUID().slice(0, 8)}`;
   }
 
   async registerDevice(memberId: string, dto: RegisterDeviceDto) {
