@@ -1,7 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '@bb/db';
 import { badRequest, ERROR_CODES, type ErrorCode } from '@bb/common/exceptions';
-import { isCourseProduct } from './course-product';
+import { isFullCourseProduct } from './course-product';
 
 export type VoucherType = 'PERCENT' | 'AMOUNT' | 'TRIAL';
 
@@ -77,10 +77,13 @@ export class VoucherService {
     // explain rather than hide: they are holding a real code that does not apply
     // here. Scope lives in code, not in `voucher_products`, so a course published
     // after the voucher was issued is still covered by it.
-    if (voucher.campaign === FIRST_PURCHASE_CAMPAIGN && !(await isCourseProduct(productId))) {
+    //
+    // Full courses only — a `mini_course` is refused even though it is course-backed
+    // and enrolls like any other. See `isFullCourseProduct`.
+    if (voucher.campaign === FIRST_PURCHASE_CAMPAIGN && !(await isFullCourseProduct(productId))) {
       return {
         valid: false,
-        reason: 'Voucher only applies to course purchases',
+        reason: 'Voucher only applies to full course purchases',
         errorCode: ERROR_CODES.VOUCHER_COURSE_ONLY,
       };
     }

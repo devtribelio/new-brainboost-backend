@@ -44,11 +44,20 @@ const MAX_ISSUES_PER_TICK = 500;
  * dropped: free courses, 100 %-voucher orders, and TRIAL grants — all of which settle
  * as `amount: 0` rows that are nonetheless `PAID`.
  *
- * `product.course` rather than a product-type test: see `isCourseProduct`. This also
- * silently decides what to do about the third source nobody listed — IAP / Scalev /
- * Lynk.id orders land in this same table via `purchase-ingest.service`, and they
- * count, as they should: paying inside the app is paying. A subscription SKU with no
- * course row behind it does not, because it is not a course purchase.
+ * `product.course` rather than a product-type test. This also silently decides what
+ * to do about the third source nobody listed — IAP / Scalev / Lynk.id orders land in
+ * this same table via `purchase-ingest.service`, and they count, as they should:
+ * paying inside the app is paying. A subscription SKU with no course row behind it
+ * does not, because it is not a course purchase.
+ *
+ * This is DELIBERATELY broader than what the voucher may be spent on
+ * (`isFullCourseProduct`, full courses only — a `mini_course` is refused there).
+ * Do not "fix" the two to match. They answer different questions: this one asks
+ * whether the member has already bought something, and a mini course buyer plainly
+ * has. Narrowing it to `type = 'course'` would re-classify every past mini course
+ * buyer as a brand-new customer and issue them a first-purchase voucher years late.
+ * The cost of the asymmetry is mild and intended: a mini course buyer does receive a
+ * voucher, spendable on a full course.
  *
  * No `paidAt: { not: null }` guard: every writer of `status = 'PAID'` in this repo
  * sets `paid_at` in the same statement.

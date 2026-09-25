@@ -121,11 +121,11 @@ Di `validate()`, setelah cek aktif/masa/quota yang ada:
 ```
 if (voucher.ownerMemberId && voucher.ownerMemberId !== memberId)
   return { valid: false, reason: 'Voucher invalid' }   // errorCode default VOUCHER_INVALID — generik, bukan oracle
-if (voucher.campaign === 'FIRST_PURCHASE' && (await isEventTicketOrder(productId)))
-  return { valid: false, reason: 'Voucher hanya berlaku untuk kursus', errorCode: VOUCHER_COURSE_ONLY }
+if (voucher.campaign === 'FIRST_PURCHASE' && !(await isFullCourseProduct(productId)))
+  return { valid: false, reason: 'Voucher hanya berlaku untuk kursus penuh', errorCode: VOUCHER_COURSE_ONLY }
 ```
 
-Cek kedua boleh spesifik: yang mencoba adalah pemilik sah, jadi pesannya harus menjelaskan, bukan menyembunyikan. `VOUCHER_COURSE_ONLY` = error code baru (ditambah di `ERROR_CODES`), FE menampilkan `reason`. Scope kursus ditegakkan di kode, bukan lewat `voucher_products`, supaya kursus yang terbit setelah voucher dikirim tetap bisa dibeli dengan voucher itu. Voucher tanpa pemilik berperilaku persis seperti sekarang. `redeem()` tidak berubah: quota 1 + `voucher_redemptions` sudah menjamin sekali pakai per order, dan pemilik sudah dipastikan di `validate()` sebelum order dibuat.
+Cek kedua boleh spesifik: yang mencoba adalah pemilik sah, jadi pesannya harus menjelaskan, bukan menyembunyikan. `VOUCHER_COURSE_ONLY` = error code baru (ditambah di `ERROR_CODES`), FE menampilkan `reason`. Scope kursus ditegakkan di kode, bukan lewat `voucher_products`, supaya kursus yang terbit setelah voucher dikirim tetap bisa dibeli dengan voucher itu. Sejak 2026-09-25 scope itu = `products.type === 'course'` saja; `mini_course` ditolak (lihat §14). Voucher tanpa pemilik berperilaku persis seperti sekarang. `redeem()` tidak berubah: quota 1 + `voucher_redemptions` sudah menjamin sekali pakai per order, dan pemilik sudah dipastikan di `validate()` sebelum order dibuat.
 
 ### 4.5 Laporan tanpa tabel baru
 
@@ -470,11 +470,27 @@ terlihat identik dengan kode yang tidak ada, di **setiap** keadaan yang bisa dia
 Jawabannya sekarang satu konstanta `NOT_FOUND` yang dipakai kedua cabang, jadi keduanya tidak
 bisa berpencar pelan-pelan. Ada tes yang membandingkan kedua objek dengan `toEqual`.
 
-**Scope kursus ditegakkan dengan whitelist `product.course != null`, bukan
-`isEventTicketOrder`.** §3 dan §4.4 menyebut `isEventTicketOrder`; itu blacklist, dan tipe
-produk berikutnya yang muncul lolos secara default tanpa ada yang memutuskannya. Helper baru
-`isCourseProduct` juga tidak memakai `type === 'course'` — gate itu sudah pernah rilis dan
-diam-diam membuang `mini_course`.
+**Scope kursus ditegakkan dengan whitelist, bukan `isEventTicketOrder`.** §3 dan §4.4
+menyebut `isEventTicketOrder`; itu blacklist, dan tipe produk berikutnya yang muncul lolos
+secara default tanpa ada yang memutuskannya.
+
+**Dipersempit 2026-09-25: `mini_course` TIDAK dapat diskon.** Helper `isCourseProduct`
+(`product.course != null`) diganti `isFullCourseProduct` (`products.type === 'course'`).
+Versi lama meloloskan mini course, karena mini course punya baris `courses`. Keputusan
+produk: diskon hanya untuk kursus penuh. Bentuknya tetap whitelist satu tipe, jadi
+`bundle`, `book`, `digital`, `event_ticket` dan tipe yang belum ada pun ikut tertolak.
+
+Dua hal yang tidak boleh ikut berubah:
+
+1. **Gate enrollment/akses tetap berbasis baris `courses`.** `payment-success.listener.ts`
+   pernah memakai `type === 'course'` dan diam-diam membuang setiap pembelian
+   `mini_course` — komisi tercatat, enrollment tidak. Pertanyaannya beda, jangan disamakan.
+2. **Filter penerbitan (`PAID_COURSE_ORDER`) sengaja tetap lebih luas.** Ia menjawab
+   "member ini sudah pernah beli apa pun belum?", dan pembeli mini course jelas sudah.
+   Menyempitkannya ke `type = 'course'` akan membuat semua pembeli mini course lama
+   terbaca sebagai pembeli baru dan dikirimi voucher bertahun-tahun terlambat. Ongkos
+   asimetrinya ringan dan disengaja: pembeli mini course tetap menerima voucher, dan
+   voucher itu bisa dipakai untuk kursus penuh.
 
 **Unique-nya polos, bukan partial.** Lihat §13.2.
 

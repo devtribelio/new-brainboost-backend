@@ -47,6 +47,26 @@ async function courseProduct(price = 500_000): Promise<{ productId: string; cour
   return { productId: p.id, courseId: c.id };
 }
 
+/**
+ * A mini course. It HAS a `courses` row and enrolls like any other course, and is
+ * still outside the discount scope — which is the whole reason the gate reads
+ * `products.type` instead of the course row.
+ */
+async function miniCourseProduct(): Promise<string> {
+  const p = await prisma.product.create({
+    data: {
+      type: 'mini_course',
+      title: `FPV mini ${uid()}`,
+      price: 100_000,
+      isActive: true,
+      status: 'active',
+    },
+  });
+  productIds.push(p.id);
+  await prisma.course.create({ data: { productId: p.id } });
+  return p.id;
+}
+
 /** A product with NO `courses` row — stands in for an event ticket. */
 async function ticketProduct(): Promise<string> {
   const p = await prisma.product.create({
@@ -406,6 +426,16 @@ describe('first-purchase voucher (real Postgres)', () => {
       const code = await ownedVoucher(owner);
 
       const result = await voucherService.validate(code, ticket, owner);
+      expect(result.valid).toBe(false);
+      expect(result.errorCode).toBe(ERROR_CODES.VOUCHER_COURSE_ONLY);
+    });
+
+    it('refuses a mini course, course-backed though it is', async () => {
+      const owner = await member();
+      const mini = await miniCourseProduct();
+      const code = await ownedVoucher(owner);
+
+      const result = await voucherService.validate(code, mini, owner);
       expect(result.valid).toBe(false);
       expect(result.errorCode).toBe(ERROR_CODES.VOUCHER_COURSE_ONLY);
     });
