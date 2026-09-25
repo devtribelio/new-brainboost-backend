@@ -1,6 +1,6 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '@bb/db';
-import { badRequest, ERROR_CODES, type ErrorCode } from '@bb/common/exceptions';
+import { badRequest, ERROR_CODES, ERROR_MESSAGES, type ErrorCode } from '@bb/common/exceptions';
 import { isFullCourseProduct } from './course-product';
 
 export type VoucherType = 'PERCENT' | 'AMOUNT' | 'TRIAL';
@@ -19,7 +19,10 @@ export const FIRST_PURCHASE_CAMPAIGN = 'FIRST_PURCHASE';
  * to hide. `reason` is the field that leaks it; keeping one shared constant is what
  * stops the two branches drifting apart later.
  */
-const NOT_FOUND: VoucherCheckResult = Object.freeze({ valid: false, reason: 'Voucher not found' });
+const NOT_FOUND: VoucherCheckResult = Object.freeze({
+  valid: false,
+  reason: 'Voucher tidak ditemukan',
+});
 // Frozen because it is one shared object handed to every caller. Nothing mutates a
 // check result today, but if anything ever did it would edit the constant itself and
 // change the answer for every later request in the process — a cross-request bug with
@@ -34,6 +37,13 @@ export interface VoucherCheckResult {
   maxAmount?: number | null;
   /** TRIAL only: days of access the grant is worth. */
   trialDays?: number | null;
+  /**
+   * Member-facing copy, in Indonesian. `POST /api/member/payment/voucher/validate`
+   * returns this field to the client verbatim, so it is read by a person, not only
+   * by a log. Where an `errorCode` exists the two are kept identical on purpose, so
+   * the same rejection cannot read one way on the voucher screen and another way at
+   * checkout.
+   */
   reason?: string;
   /**
    * Error code the caller should surface instead of the generic VOUCHER_INVALID.
@@ -83,31 +93,31 @@ export class VoucherService {
     if (voucher.campaign === FIRST_PURCHASE_CAMPAIGN && !(await isFullCourseProduct(productId))) {
       return {
         valid: false,
-        reason: 'Voucher only applies to full course purchases',
+        reason: ERROR_MESSAGES.VOUCHER_COURSE_ONLY,
         errorCode: ERROR_CODES.VOUCHER_COURSE_ONLY,
       };
     }
 
-    if (!voucher.isActive) return { valid: false, reason: 'Voucher inactive' };
+    if (!voucher.isActive) return { valid: false, reason: 'Voucher tidak aktif' };
     // Product whitelist: 0 rows = global; >=1 rows = only the listed products.
     if (voucher.products.length > 0 && !voucher.products.some((p) => p.productId === productId)) {
-      return { valid: false, reason: 'Voucher not applicable to this product' };
+      return { valid: false, reason: 'Voucher tidak berlaku untuk produk ini' };
     }
     const now = new Date();
     if (voucher.startsAt && voucher.startsAt > now) {
-      return { valid: false, reason: 'Voucher not yet active' };
+      return { valid: false, reason: 'Voucher belum berlaku' };
     }
     if (voucher.endsAt && voucher.endsAt <= now) {
-      return { valid: false, reason: 'Voucher expired' };
+      return { valid: false, reason: 'Voucher sudah kedaluwarsa' };
     }
     if (voucher.quota != null && voucher.used >= voucher.quota) {
-      return { valid: false, reason: 'Voucher quota exhausted' };
+      return { valid: false, reason: ERROR_MESSAGES.VOUCHER_EXHAUSTED };
     }
     if (voucher.type === 'TRIAL') {
       // Defence in depth against a bad row: the DB CHECK already rejects
       // trial_days <= 0, but a NULL here would silently grant a 0-day trial.
       if (voucher.trialDays == null || voucher.trialDays <= 0) {
-        return { valid: false, reason: 'Trial voucher has no duration' };
+        return { valid: false, reason: 'Voucher uji coba tidak punya masa aktif' };
       }
       // The once-per-member record is the ENROLLMENT, not a redemption row: it
       // already carries member_id, and — unlike a redemption — it survives expiry,
@@ -120,7 +130,7 @@ export class VoucherService {
       if (prior) {
         return {
           valid: false,
-          reason: 'Trial already used by this member',
+          reason: ERROR_MESSAGES.VOUCHER_TRIAL_ALREADY_USED,
           errorCode: ERROR_CODES.VOUCHER_TRIAL_ALREADY_USED,
         };
       }

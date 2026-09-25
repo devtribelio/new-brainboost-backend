@@ -112,8 +112,11 @@ export class CheckoutService {
         input.productId,
         input.memberId,
       );
-      // voucherService.validate() reports an internal English reason — keep it as
-      // diagnostics, don't surface it as copy.
+      // `reason` is member-facing Indonesian copy, not a log string. The displayed
+      // message still comes from `errorCode` where validate() set one; `reason` rides
+      // along in `details` so the cases that have no code of their own (expired,
+      // inactive, wrong product, quota) are not lost behind the generic
+      // VOUCHER_INVALID text.
       if (!check.valid) {
         throw badRequest(check.errorCode ?? ERROR_CODES.VOUCHER_INVALID, { reason: check.reason });
       }
