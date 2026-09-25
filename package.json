@@ -6,7 +6,7 @@
   "type": "commonjs",
   "pnpm": {
     "overrides": {
-      "qs@>=6.11.1 <=6.15.1": ">=6.15.2",
+      "qs@>=6.11.1 <6.16.0": "^6.16.0",
       "body-parser@<1.20.6": "^1.20.6",
       "brace-expansion@<2.0.0": "^1.1.18",
       "brace-expansion@>=2.0.0 <5.0.9": "^5.0.9",
@@ -65,6 +65,7 @@
     "issue:credential": "tsx scripts/issue-credential.ts",
     "seed:revenuecat-iap": "tsx scripts/seed-revenuecat-iap.ts",
     "seed:test-account": "tsx scripts/seed-test-account.ts",
+    "seed:event": "tsx scripts/seed-event.ts",
     "digest:run": "tsx --conditions=development scripts/run-topic-digest.ts",
     "void:stray-affiliate-commissions": "tsx scripts/void-stray-affiliate-commissions.ts"
   },

@@ -15,6 +15,13 @@ function optional(name: string, fallback: string): string {
   return value && value.trim() !== '' ? value : fallback;
 }
 
+/** A PEM given raw, or base64 of the PEM (one line). Empty stays empty. */
+function pem(value: string): string {
+  const v = value.trim();
+  if (!v || v.includes('-----BEGIN')) return v;
+  return Buffer.from(v, 'base64').toString('utf8').trim();
+}
+
 const nodeEnv = optional('NODE_ENV', 'development') as NodeEnv;
 
 export const env = {
@@ -258,6 +265,16 @@ export const env = {
     // downloads don't outlive the token. Applies to the opaque media token AND
     // the Bunny CDN signed URL.
     downloadTtlSeconds: Number.parseInt(optional('MEDIA_DOWNLOAD_TTL_SECONDS', '86400'), 10),
+    // CloudFront signed URLs for the `private/audio/*` parts served by
+    // /media/audio-playlist. All three set = sign `https://<host>/<key>` with the
+    // key pair; any of them empty = fall back to an S3 presigned GET (tests, and a
+    // staging without the CDN). The PEM may be given raw or base64-encoded — a
+    // multi-line value does not survive every .env loader / secret store.
+    cdn: {
+      host: optional('MEDIA_CDN_HOST', ''),
+      keyPairId: optional('MEDIA_CDN_KEY_PAIR_ID', ''),
+      privateKey: pem(optional('MEDIA_CDN_PRIVATE_KEY', '')),
+    },
   },
   // Amazon SQS — comms outbox publisher (bb-comms worker consumes). Only
   // CONNECTION params live here; queue NAMES are code constants in mq/topology.ts

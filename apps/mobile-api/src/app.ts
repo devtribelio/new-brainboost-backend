@@ -6,6 +6,7 @@ import cookieParser from 'cookie-parser';
 import { errorHandler, notFoundHandler } from '@bb/common/middlewares/error.middleware';
 import { requestLogger } from '@bb/common/middlewares/request-logger.middleware';
 import { registerModules } from '@/core/register-modules';
+import { shortlinkRouter } from '@/shortlink';
 import { mountSwagger } from '@bb/common/openapi/swagger.middleware';
 import { ok } from '@bb/common/utils/response.util';
 import { env } from '@bb/common/config/env';
@@ -77,6 +78,11 @@ export function buildApp(): Express {
   // Uploads now live in S3 (public/* served via CDN) — no local static serving.
 
   app.get('/health', (_req, res) => ok(res, { status: 'ok', service: env.appName }));
+
+  // Public shortlink redirect. Root-mounted like /health: it answers a 302 to a
+  // human's browser, not JSON to the mobile client, so it is not an AppModule
+  // (those all live under /api).
+  app.use('/s', shortlinkRouter());
 
   app.use('/api', registerModules());
 

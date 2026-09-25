@@ -19,6 +19,7 @@ import {
 import { assertUuid } from '@bb/common/utils/uuid.util';
 import { normalizePhonePair, otpPhoneTarget } from '@bb/common/utils/phone.util';
 import { isReusableUnverifiedMember } from '@bb/common/utils/member-state.util';
+import { claimTicketsByEmail } from '@bb/domain/event/claim';
 import { otpService } from '@bb/common/services/otp.service';
 import type { GoogleIdTokenPayload } from './social/google-verifier';
 import { verifyAppleIdentityToken } from './social/apple-verifier';
@@ -153,11 +154,19 @@ export class AuthService {
   }
 
   async register(dto: RegisterDto) {
+    // Canonical phone BEFORE the conflict lookup. `members.phone` is stored
+    // national-form (no dial code), so matching the raw E.164 the client sends
+    // ('+6287875439433') found nothing while the row held '87875439433' — the
+    // register fell through to the insert and the unique violation surfaced as
+    // a bare 409 CONFLICT instead of PHONE_ALREADY_REGISTERED.
+    const normalizedPhone = dto.phone ? normalizePhonePair(dto.phone, dto.phoneCode ?? '') : null;
+    const phone = normalizedPhone?.phone ?? dto.phone;
+
     const conflicts = await prisma.member.findMany({
       where: {
         OR: [
           { email: dto.email },
-          dto.phone ? { phone: dto.phone } : undefined,
+          phone ? { phone } : undefined,
           dto.username ? { username: dto.username } : undefined,
         ].filter((c): c is NonNullable<typeof c> => c !== undefined),
       },
@@ -179,7 +188,7 @@ export class AuthService {
     for (const row of conflicts) {
       if (isReusableUnverifiedMember(row)) continue;
       if (row.email === dto.email) throw badRequest(ERROR_CODES.EMAIL_ALREADY_REGISTERED);
-      if (dto.phone && row.phone === dto.phone) {
+      if (phone && row.phone === phone) {
         throw badRequest(ERROR_CODES.PHONE_ALREADY_REGISTERED);
       }
       if (dto.username && row.username === dto.username) {
@@ -193,12 +202,12 @@ export class AuthService {
     // the create/update below can't hit P2002.
     const reuseRow =
       conflicts.find((r) => r.email === dto.email) ??
-      conflicts.find((r) => dto.phone && r.phone === dto.phone) ??
+      conflicts.find((r) => phone && r.phone === phone) ??
       null;
     for (const row of conflicts) {
       if (row.id === reuseRow?.id) continue;
       const release: { phone?: null; username?: null } = {};
-      if (dto.phone && row.phone === dto.phone) release.phone = null;
+      if (phone && row.phone === phone) release.phone = null;
       if (dto.username && row.username === dto.username) release.username = null;
       if (Object.keys(release).length === 0) continue;
       await prisma.member.update({ where: { id: row.id }, data: release });
@@ -212,27 +221,7 @@ export class AuthService {
       if (ageYears < 13) throw badRequest(ERROR_CODES.AGE_BELOW_MINIMUM);
     }
 
-    let inviterId: string | undefined;
-    let inviterNetworkId: string | undefined;
-    if (dto.affiliateCode) {
-      const codePart = dto.affiliateCode.slice(0, 8);
-      const networkLegacyPart = dto.affiliateCode.slice(8);
-      const inviter = await prisma.member.findUnique({
-        where: { affiliateCode: codePart },
-        select: { id: true },
-      });
-      if (inviter) inviterId = inviter.id;
-      if (networkLegacyPart) {
-        const networkLegacyId = Number.parseInt(networkLegacyPart, 10);
-        if (Number.isFinite(networkLegacyId)) {
-          const net = await prisma.network.findUnique({
-            where: { legacyId: networkLegacyId },
-            select: { id: true },
-          });
-          if (net) inviterNetworkId = net.id;
-        }
-      }
-    }
+    let { inviterId, inviterNetworkId } = await this.resolveAffiliateCode(dto.affiliateCode);
 
     // Pre-registration carry-over: if this register call didn't carry an
     // affiliate code (e.g. mobile flow that only attached the code at the
@@ -249,6 +238,7 @@ export class AuthService {
           OR: [
             dto.email ? { email: dto.email } : undefined,
             dto.phone ? { phone: dto.phone } : undefined,
+            phone && phone !== dto.phone ? { phone } : undefined,
           ].filter((c): c is NonNullable<typeof c> => c !== undefined),
         },
         orderBy: { createdAt: 'desc' },
@@ -272,7 +262,8 @@ export class AuthService {
 
     // Same canonical phone forms as registerByPhone (the DTO even documents
     // E.164 in `phone` — strip the duplicated dial code before storing).
-    const normalizedPhone = dto.phone ? normalizePhonePair(dto.phone, dto.phoneCode ?? '') : null;
+    // `normalizedPhone` is computed at the top of this method, before the
+    // conflict lookup that has to match on the stored form.
     if (normalizedPhone && normalizedPhone.phone.length < 6) {
       throw badRequest(ERROR_CODES.PHONE_INVALID);
     }
@@ -285,7 +276,7 @@ export class AuthService {
       passwordHash,
       passwordAlgo: 'bcrypt',
       fullName: dto.fullName,
-      phone: normalizedPhone?.phone ?? dto.phone,
+      phone,
       phoneCode: normalizedPhone ? normalizedPhone.phoneCode || null : dto.phoneCode,
       username: dto.username,
       gender: dto.gender,
@@ -398,6 +389,40 @@ export class AuthService {
       email: dto.email,
       expired_date: expiresAt.toISOString(),
     };
+  }
+
+  /**
+   * Affiliate code wire format: first 8 chars = inviter member code, remainder
+   * = network legacyId (optional). Both new codes (`randomUUID` slice) and
+   * legacy ones (base36 in [36^7, 36^8)) are exactly 8 chars, so the split is
+   * fixed. Shared by the email and phone register paths so the two can't drift
+   * on how the code is parsed.
+   */
+  private async resolveAffiliateCode(affiliateCode: string | undefined): Promise<{
+    inviterId?: string;
+    inviterNetworkId?: string;
+  }> {
+    if (!affiliateCode) return {};
+
+    const inviter = await prisma.member.findUnique({
+      where: { affiliateCode: affiliateCode.slice(0, 8) },
+      select: { id: true },
+    });
+
+    let inviterNetworkId: string | undefined;
+    const networkLegacyPart = affiliateCode.slice(8);
+    if (networkLegacyPart) {
+      const networkLegacyId = Number.parseInt(networkLegacyPart, 10);
+      if (Number.isFinite(networkLegacyId)) {
+        const net = await prisma.network.findUnique({
+          where: { legacyId: networkLegacyId },
+          select: { id: true },
+        });
+        if (net) inviterNetworkId = net.id;
+      }
+    }
+
+    return { inviterId: inviter?.id, inviterNetworkId };
   }
 
   private async generateUniqueMemberCode(): Promise<string> {
@@ -1021,6 +1046,13 @@ export class AuthService {
         where: { OR: candidates.map((phone) => ({ phone })) },
       });
       if (!member?.phone) return null;
+      // A phone nobody proved must not open the account behind it. Numbers reach
+      // `members.phone` from places that never verify them — register-by-phone
+      // before its OTP, and the ticket checkout filling an empty profile — so
+      // without this, one mistyped digit hands password reset to whoever owns
+      // the number that was actually typed. Same silent null as an unknown
+      // number: the caller must not learn which case it hit.
+      if (!member.isPhoneVerified) return null;
       return {
         member,
         target: otpPhoneTarget(member.phoneCode ?? '+62', member.phone),
@@ -1110,6 +1142,13 @@ export class AuthService {
 
     const passwordHash = await bcrypt.hash(dto.password, 10);
 
+    // Affiliate attribution, same wire format as the email register path. The
+    // code reaches here from the invite deeplink the FE carries into the phone
+    // register form; without it `inviter_id` stays NULL and the click is lost.
+    // Network suffix is parsed but unused here — phone-register joins only the
+    // community networks below.
+    const { inviterId } = await this.resolveAffiliateCode(dto.affiliateCode);
+
     let member;
     if (existing) {
       // Abandoned-at-OTP placeholder: overwrite in place instead of erroring.
@@ -1122,6 +1161,10 @@ export class AuthService {
           passwordAlgo: 'bcrypt',
           fullName: dto.name,
           phoneCode,
+          // undefined when no code was sent (or it resolved to nothing) —
+          // Prisma skips the column, so an inviter already on the placeholder
+          // survives. Mirrors the email register path.
+          inviterId,
         },
         select: { id: true, legacyId: true, phone: true, phoneCode: true },
       });
@@ -1139,6 +1182,7 @@ export class AuthService {
             phoneCode,
             code: memberCode,
             affiliateCode: memberCode,
+            inviterId,
             isActive: false,
             isEmailVerified: false,
             isPhoneVerified: false,
@@ -1346,6 +1390,15 @@ export class AuthService {
         ...(member.scheduledDeletionAt === null ? { isActive: true } : {}),
       },
     });
+
+    // This mailbox is now proven, so hand over any event ticket addressed to it.
+    // Only here, never on the phone-verification path: that one proves a phone
+    // number, and the email on such an account is still just something someone
+    // typed. Best-effort — a failure must not turn a successful verification
+    // into an error, and the tickets stay claimable on the next one.
+    await claimTicketsByEmail(member.id, member.email).catch((err) =>
+      logger.error({ err, memberId: member.id }, '[auth] ticket claim failed'),
+    );
 
     return { member_id: member.legacyId ?? member.id, verified: true };
   }

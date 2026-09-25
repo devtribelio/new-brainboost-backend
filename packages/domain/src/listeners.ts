@@ -1,6 +1,7 @@
 import { registerCommerceListeners } from './commerce/listeners/payment-success.listener';
 import { registerNotificationListeners } from './notification/listeners/register';
 import { registerCommsEmailListeners } from './comms/listeners/commerce-email.listener';
+import { registerEventTicketListeners } from './event/listeners/ticket-issue.listener';
 
 /**
  * Wire all domain event listeners (commerce payment side-effects +
@@ -12,4 +13,5 @@ export function registerDomainListeners(): void {
   registerCommerceListeners();
   registerNotificationListeners();
   registerCommsEmailListeners();
+  registerEventTicketListeners();
 }

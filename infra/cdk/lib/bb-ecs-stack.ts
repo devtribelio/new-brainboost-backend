@@ -37,7 +37,7 @@ export class BbEcsStack extends cdk.Stack {
     const vpc = ec2.Vpc.fromLookup(this, 'Vpc', { isDefault: true });
 
     const cluster = new ecs.Cluster(this, 'Cluster', {
-      vpc, clusterName: 'bb-prod', containerInsightsV2: ecs.ContainerInsights.ENABLED,
+      vpc, clusterName: 'bb-prod', containerInsightsV2: ecs.ContainerInsights.DISABLED,
     });
 
     // === Secret app (DATABASE_URL pakai bb_app, SQS urls, dst) ===
@@ -64,6 +64,12 @@ export class BbEcsStack extends cdk.Stack {
       BASE_URL: sm('BASE_URL'),                        // domain prod (default env.ts = localhost → WAJIB override)
       MEDIA_TOKEN_SECRET: sm('MEDIA_TOKEN_SECRET'),
       MEDIA_MODE: sm('MEDIA_MODE'),                    // 'proxy' | 'signed' — media serving mode (env.ts default 'proxy')
+      // CloudFront signed URL untuk bagian audio di private/audio/* (cdn.brainboost.id).
+      // Ketiganya WAJIB sudah ada di secret bb/prod/app sebelum deploy, atau task gagal
+      // start. Kosong/absen di env.ts = backend jatuh ke S3 presign (lihat docs/media-port.md §9.x).
+      MEDIA_CDN_HOST: sm('MEDIA_CDN_HOST'),
+      MEDIA_CDN_KEY_PAIR_ID: sm('MEDIA_CDN_KEY_PAIR_ID'),
+      MEDIA_CDN_PRIVATE_KEY: sm('MEDIA_CDN_PRIVATE_KEY'), // base64 PEM; pasangan public key infra/cdk/cdn-keys/prod.public.pem
       SQS_COMMS_URGENT_URL: sm('SQS_COMMS_URGENT_URL'),
       SQS_COMMS_NORMAL_URL: sm('SQS_COMMS_NORMAL_URL'),
       // --- VENDOR (nama key sudah dicocokkan ke env.ts) ---
@@ -73,11 +79,20 @@ export class BbEcsStack extends cdk.Stack {
       XENDIT_CALLBACK_TOKEN: sm('XENDIT_CALLBACK_TOKEN'),
       XENDIT_INVOICE_SUCCESS_URL: sm('XENDIT_INVOICE_SUCCESS_URL'), // redirect after pay (default localhost → override)
       XENDIT_INVOICE_FAILURE_URL: sm('XENDIT_INVOICE_FAILURE_URL'),
+      // Token ?t= di redirect invoice event TIDAK punya key sendiri di sini: dia
+      // diturunkan dari JWT_ACCESS_SECRET (lihat event-order-token.util.ts), dan URL
+      // redirect-nya ada di app_settings (shop.baseUrl + event.orderPath). Jadi tidak
+      // ada yang perlu ditambah ke secret bb/prod/app untuk fitur itu.
       REVENUECAT_WEBHOOK_AUTH: sm('REVENUECAT_WEBHOOK_AUTH'),
 
       // Bunny: cuma 2 yang DIPAKAI media module (streamApiKey & libraryId itu dead field).
       BUNNY_STREAM_TOKEN_KEY: sm('BUNNY_STREAM_TOKEN_KEY'),
       BUNNY_STREAM_CDN_HOST: sm('BUNNY_STREAM_CDN_HOST'),
+      // Cadangan ke Bunny untuk audio yang diunggah dari backoffice (job migrateAudioToStorage).
+      // LIBRARY_ID wajib ikut: tanpa itu env.ts memakai default 157244 (library lama), dan
+      // cadangan akan dikirim ke library yang salah. Keduanya WAJIB ada di bb/prod/app.
+      BUNNY_STREAM_API_KEY: sm('BUNNY_STREAM_API_KEY'),   // API Key LIBRARY (Stream > library > API), bukan token key
+      BUNNY_STREAM_LIBRARY_ID: sm('BUNNY_STREAM_LIBRARY_ID'),
 
       // Didit KYC (gantiin Sumsub, PR #98). apiKey & webhookSecret = rahasia;
       // workflowId = UUID workflow (account-specific, taruh di secret biar nggak hardcode di git).
@@ -292,7 +307,9 @@ export class BbEcsStack extends cdk.Stack {
     //  - Cron (hourly): affiliate PENDING->BALANCE + expire stale payments +
     //    topic digest (aman tiap jam: no-op kecuali jam WIB == notification.digestHour)
     //    + streak reminder (dua jam sendiri: streak.atRiskHour / streak.dimmedHour,
-    //    plus saklar streak.atRiskEnabled / streak.dimmedEnabled yang ship false).
+    //    plus saklar streak.atRiskEnabled / streak.dimmedEnabled yang ship false)
+    //    + voucher pembeli pertama (no-op kecuali firstPurchaseVoucher.enabled true
+    //    DAN launchAt terisi; keduanya ship kosong/false).
     //  - CronDisburse (tiap 5 mnt): sweep payout yang sudah di-approve backoffice ke
     //    Xendit, biar approval MANUAL nggak nunggu sampai jam berikutnya. Idempotent —
     //    cuma ambil row PENDING dengan approvedAt terisi, overlap antar lane aman.
@@ -319,6 +336,7 @@ export class BbEcsStack extends cdk.Stack {
           'expirePendingPayments',
           'topicDigest',
           'streakReminder',
+          'firstPurchaseVoucher',
         ]),
       },
     });
@@ -328,7 +346,16 @@ export class BbEcsStack extends cdk.Stack {
       subnetSelection: { subnetType: ec2.SubnetType.PUBLIC },
       securityGroups: [appSg],
       scheduledFargateTaskDefinitionOptions: {
-        taskDefinition: makeCronLane('CronDisburse', 'cron-disburse', ['executeApprovedDisbursements']),
+        // expireEventTicketOrders rides this lane, not the hourly one: the ticket
+        // payment window is 30 minutes by default, and an hourly sweep would hold
+        // a seat for up to 90 — a lag three times the limit it enforces.
+        taskDefinition: makeCronLane('CronDisburse', 'cron-disburse', [
+          'executeApprovedDisbursements',
+          'expireEventTicketOrders',
+          // Antrean "Migrasi ke S3" dari backoffice. Terakhir di lane ini: satu-satunya
+          // job yang bisa jalan bermenit-menit. Butuh ffmpeg di image (Dockerfile).
+          'migrateAudioToStorage',
+        ]),
       },
     });
     // CATATAN: ScheduledFargateTask nggak set assignPublicIp. Kalau cron gagal pull image
@@ -346,21 +373,38 @@ export class BbEcsStack extends cdk.Stack {
       // SES_FROM = display-name + alamat pengirim (RFC 5322). Bukan rahasia → plain env.
       // Prod nggak baca .env, jadi tanpa ini Go service jatuh ke default 'no-reply@brainboost.id'
       // (tanpa nama). Nilai disamakan dengan staging bb-notification-service/.env.
-      environment: { ...env, AWS_REGION: 'ap-southeast-1', SES_FROM: 'BrainBoost <no-reply@brainboost.id>' },
-      // Qontak (WhatsApp OTP) — dipakai bb-comms SAJA, jadi di-scope ke container ini
-      // (bukan shared `secrets` map yang kena mobile-api/relay/cron juga). CLIENT_ID/
-      // SECRET/USERNAME/PASSWORD = kredensial (Go baca via os.Getenv, tanpa default →
-      // wajib ada). BASE_URL/CHANNEL_INTEGRATION_ID/OTP_TEMPLATE_ID punya default di
-      // config.go tapi di-override dari secret. Semua 7 key sudah ada di bb/prod/app.
+      // SHOP_BASE_URL = origin web shop untuk link di email tiket event ("Buka pesanan").
+      // config.go default-nya 'https://brainboost.id' (landing, bukan shop) → tanpa ini
+      // setiap email tiket menunjuk halaman yang tidak ada. Bukan rahasia → plain env.
+      environment: {
+        ...env,
+        AWS_REGION: 'ap-southeast-1',
+        SES_FROM: 'BrainBoost <no-reply@brainboost.id>',
+        SHOP_BASE_URL: 'https://shop.brainboost.id',
+      },
+      // Kredensial provider WhatsApp — dipakai bb-comms SAJA, jadi di-scope ke
+      // container ini (bukan shared `secrets` map yang kena mobile-api/relay/cron).
+      // Dibaca `wa.EnvCredentials` lewat pemindaian prefix `QONTAK_`, jadi provider
+      // berikutnya cukup menambah blok `CEKAT_*` di sini tanpa perubahan kode.
+      //
+      // BASE_URL / CHANNEL_INTEGRATION_ID / OTP_TEMPLATE_ID SENGAJA TIDAK ADA lagi:
+      // ketiganya bukan rahasia dan pindah ke `app_settings` (`wa.qontak.*`) supaya
+      // template yang ditolak Meta atau provider yang bermasalah bisa diganti ops
+      // tanpa deploy. Key-nya masih ada di bb/prod/app — dibiarkan, tidak dibaca.
+      // Lihat docs/wa-provider-switch.md.
+      //
+      // Kredensial tetap di env untuk sekarang (§10 dokumen itu). Rotasi masih
+      // berarti restart task; pemindahan ke Secrets Manager/Parameter Store menyusul.
       secrets: {
         ...secrets,
-        QONTAK_BASE_URL: sm('QONTAK_BASE_URL'),
         QONTAK_CLIENT_ID: sm('QONTAK_CLIENT_ID'),
         QONTAK_CLIENT_SECRET: sm('QONTAK_CLIENT_SECRET'),
         QONTAK_USERNAME: sm('QONTAK_USERNAME'),
         QONTAK_PASSWORD: sm('QONTAK_PASSWORD'),
-        QONTAK_CHANNEL_INTEGRATION_ID: sm('QONTAK_CHANNEL_INTEGRATION_ID'),
-        QONTAK_OTP_TEMPLATE_ID: sm('QONTAK_OTP_TEMPLATE_ID'),
+        // Cekat: satu API key statis, tanpa OAuth. Key-nya harus ditambahkan ke
+        // bb/prod/app lebih dulu — `sm()` merujuk key di dalam secret itu, dan key
+        // yang tidak ada bikin task gagal start.
+        CEKAT_API_KEY: sm('CEKAT_API_KEY'),
       },
       logging: ecs.LogDrivers.awsLogs({ streamPrefix: 'bb-comms', logGroup: logGroup('bb-comms') }),
     });

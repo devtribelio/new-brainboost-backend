@@ -4,6 +4,7 @@ import { prisma } from '@bb/db';
 import { notFound, ERROR_CODES } from '@bb/common/exceptions';
 import { activeEnrollment } from '@bb/domain/commerce/enrollment';
 import type { PaginationParams } from '@bb/common/utils/pagination.util';
+import { LISTABLE_PRODUCT_TYPES } from './dto/list-query.dto';
 import type { Ownership, ProductMedia, ProductSort } from './dto/list-query.dto';
 
 interface ListQuery {
@@ -51,7 +52,13 @@ export class ProductService {
 
     const where: Prisma.ProductWhereInput = { isActive: true };
     if (q.keyword) where.title = { contains: q.keyword, mode: 'insensitive' };
-    if (q.type) where.type = q.type;
+    // The catalog is course-only. `products` also holds rows that are not
+    // catalog items — an event ticket is one product per ticket kind, so a
+    // single webinar would otherwise put three entries in the mobile catalog,
+    // each opening a course detail page that has no course behind it.
+    // Restricting here rather than excluding `event_ticket` keeps the rule
+    // additive: a future non-catalog type is hidden by default.
+    where.type = q.type ?? { in: [...LISTABLE_PRODUCT_TYPES] };
     if (q.ownership === 'not_purchased' && q.memberId) {
       // `activeEnrollment()` in the `none` filter is what makes a refunded course
       // reappear in the catalog — otherwise the cancelled row keeps hiding it and
@@ -106,7 +113,15 @@ export class ProductService {
   private async listRaw(p: PaginationParams, q: ListQuery) {
     const conds: Prisma.Sql[] = [Prisma.sql`p.is_active = true`];
     if (q.keyword) conds.push(Prisma.sql`p.title ILIKE ${`%${q.keyword}%`}`);
-    if (q.type) conds.push(Prisma.sql`p.type = ${q.type}`);
+    // Same catalog restriction as the typed path — both are reachable from the
+    // same endpoint (this one serves `sort=top_rated` and the `media` filters),
+    // so a rule applied to only one of them shows different products depending
+    // on how the list happens to be sorted.
+    conds.push(
+      q.type
+        ? Prisma.sql`p.type = ${q.type}`
+        : Prisma.sql`p.type IN (${Prisma.join([...LISTABLE_PRODUCT_TYPES])})`,
+    );
     if (q.ownership === 'not_purchased' && q.memberId) {
       conds.push(Prisma.sql`NOT EXISTS (
         SELECT 1 FROM courses c

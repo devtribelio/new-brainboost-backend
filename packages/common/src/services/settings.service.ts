@@ -24,6 +24,20 @@ export const SETTING_KEYS = {
   // The client sends ?platform=&version= on /data/banner; a newer build gets an empty list.
   bannerMaxVersionAndroid: 'banner.maxVersionAndroid',
   bannerMaxVersionIos: 'banner.maxVersionIos',
+  // Minutes a buyer has to pay for event tickets before the seats go back on
+  // sale. Separate from the 24h course window on purpose: a course has no quota,
+  // so an abandoned checkout costs nobody anything, while an abandoned ticket
+  // checkout holds a seat somebody else wanted. Runtime-configurable because the
+  // right number depends on the event — a webinar that sells out in minutes wants
+  // a tighter hold than a workshop selling for weeks.
+  eventCheckoutExpiryMinutes: 'event.checkoutExpiryMinutes',
+  // Path of the order page on the web shop, appended to `shop.baseUrl` to build
+  // the post-payment redirect of an event invoice. A setting and not a constant
+  // because the FE route is not settled: moving it (to `/ticket`, say) is then one
+  // UPDATE, with no redeploy and no rebuilt invoice code. Covers the REDIRECT only
+  // — bb-comms builds its email link from its own SHOP_BASE_URL plus a hardcoded
+  // `/event/order/`, so flipping this does NOT move the links already in inboxes.
+  eventOrderPath: 'event.orderPath',
   disbursementAutoEnabled: 'disbursement.autoEnabled',
   disbursementAutoApproveMax: 'disbursement.autoApproveMax',
   disbursementFee: 'disbursement.fee',
@@ -33,11 +47,35 @@ export const SETTING_KEYS = {
   // above the FX API, which is the ops kill-switch when the provider misbehaves.
   fxUsdIdr: 'fx.usdIdr',
   fxUsdIdrPinned: 'fx.usdIdrPinned',
+  // First-purchase voucher program. Five of the six config values ship EMPTY and the
+  // switch ships false: the discount, its cap and how long it lives are a business
+  // decision the internal team makes in the backoffice, and a dev-chosen default is
+  // how a placeholder quietly becomes the number that went out to thousands of
+  // buyers. The job refuses to issue anything until they are all filled.
+  //
+  // `launchAt` is also the blast radius control: only purchases at or after it count,
+  // it is stamped by the backoffice when the program is first switched on, and it can
+  // never be moved backwards — a past date would mail every historical buyer at once.
+  firstPurchaseVoucherEnabled: 'firstPurchaseVoucher.enabled',
+  firstPurchaseVoucherLaunchAt: 'firstPurchaseVoucher.launchAt',
+  firstPurchaseVoucherType: 'firstPurchaseVoucher.type',
+  firstPurchaseVoucherValue: 'firstPurchaseVoucher.value',
+  firstPurchaseVoucherMaxAmount: 'firstPurchaseVoucher.maxAmount',
+  firstPurchaseVoucherValidityDays: 'firstPurchaseVoucher.validityDays',
+  // Sweep watermark, written by the job itself — not an operator setting. Kept in
+  // `app_settings` rather than `sync_state` because that table belongs to
+  // apps/resync-worker, which is deleted at cutover.
+  firstPurchaseVoucherLastSweepAt: 'firstPurchaseVoucher.lastSweepAt',
   kycMinBalance: 'kyc.minBalance',
   notificationUnopenedPushLimit: 'notification.unopenedPushLimit',
   notificationDigestEnabled: 'notification.digestEnabled',
   notificationDigestHour: 'notification.digestHour',
   salesAlertEmail: 'sales.alertEmail',
+  // Origin of the web shop, used to build the target of a shortlink redirect and
+  // the URLs shown on the backoffice Tracking Link page. ONE row read by both
+  // apps: a second copy in backoffice config is how the redirect starts pointing
+  // somewhere the operator never sees.
+  shopBaseUrl: 'shop.baseUrl',
   // Listening days a member may miss before the streak resets to 0. The window is
   // measured from today, so only a recent gap is forgiven — see tracker.constants.ts.
   streakGraceDays: 'streak.graceDays',

@@ -24,6 +24,15 @@ export interface CommsMessage {
   refId?: string;
   /** Direct recipient when no PG lookup (OTP). */
   to?: string;
-  /** Inline data. OTP only: { code, name?, ttl? }. */
+  /**
+   * Inline data. OTP: { code, name?, ttl? }. `OtpTest`: { provider } — which
+   * WhatsApp provider to force the send through, honoured by that message type
+   * ONLY, so a stray value can never redirect live OTP traffic.
+   *
+   * It rides in the payload rather than as a top-level field because the relay
+   * maps exactly {type, channel, refId, recipient, payload} out of
+   * `notification_outbox` — a top-level field would need a new column, a migration
+   * and a relay change to carry one string for one message type.
+   */
   payload?: Record<string, unknown>;
 }

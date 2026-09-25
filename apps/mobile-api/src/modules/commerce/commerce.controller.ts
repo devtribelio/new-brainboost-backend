@@ -50,6 +50,16 @@ export class CommerceController {
       productId: dto.productId,
       voucherCode: dto.voucherCode,
       affiliatorCode: dto.affiliatorCode ?? cookieAff,
+      // Reporting source, kept in its own object so it can never be mistaken
+      // for an input to the commission path above.
+      source: {
+        guestId: dto.guestId,
+        utmSource: dto.utmSource,
+        utmMedium: dto.utmMedium,
+        utmCampaign: dto.utmCampaign,
+        utmContent: dto.utmContent,
+        utmTerm: dto.utmTerm,
+      },
     });
     return okCreated(res, result);
   };

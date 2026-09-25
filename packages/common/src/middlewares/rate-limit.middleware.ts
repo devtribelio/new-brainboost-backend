@@ -4,7 +4,7 @@ import type { Request, RequestHandler } from 'express';
 import type { IncrementResponse, Options, Store } from 'express-rate-limit';
 import { RedisStore, type RedisReply } from 'rate-limit-redis';
 import { Redis } from 'ioredis';
-import { fail } from '@bb/common/utils/response.util';
+import { fail, ok } from '@bb/common/utils/response.util';
 import { ERROR_CODES, messageFor } from '@bb/common/exceptions';
 import { env } from '@bb/common/config/env';
 import { logger } from '@bb/common/config/logger';
@@ -182,6 +182,11 @@ const byRegisterTarget = byIdentifier('register', (b) => {
 });
 // Pre-registration: the email the OTP will be mailed to.
 const byEmail = byIdentifier('email', (b) => str(b.email)?.toLowerCase());
+// Event checkout: the payer's email, which sits one level down in the body.
+const byBuyerEmail = byIdentifier('buyer', (b) => {
+  const buyer = b.buyer as Record<string, unknown> | undefined;
+  return buyer ? str(buyer.email)?.toLowerCase() : undefined;
+});
 // Forgot-password: email, or a digits-normalized phone (no phoneCode field here).
 const byEmailOrPhone = byIdentifier('reset', (b) => {
   const email = str(b.email)?.toLowerCase();
@@ -206,6 +211,7 @@ export const _keyers = {
   byPhoneTarget,
   byRegisterTarget,
   byEmailOrPhone,
+  byBuyerEmail,
 };
 
 /**
@@ -307,6 +313,42 @@ export const registerByPhoneRateLimiter: RequestHandler = makeRateLimiter({
   keyGenerator: byPhoneTarget,
 });
 
+// --- Event checkout — UNAUTHENTICATED and expensive: it writes a member row
+//     and calls Xendit to mint an invoice. Two buckets, both must pass: one per
+//     payer email (a single person retrying a card), one per IP (a script). ---
+export const eventCheckoutEmailRateLimiter: RequestHandler = makeRateLimiter({
+  name: 'event-checkout-email',
+  limit: 10,
+  keyGenerator: byBuyerEmail,
+});
+export const eventCheckoutIpRateLimiter: RequestHandler = makeRateLimiter({
+  name: 'event-checkout-ip',
+  limit: 30,
+});
+
+// --- Event price quote — PUBLIC, unauthenticated, and the cheapest endpoint in
+//     the event module: three indexed reads and arithmetic, no writes and no seat
+//     count. The budget is therefore generous on purpose. It exists to stop a
+//     script pointlessly spinning the database, not to ration buyers.
+//
+//     Per-minute rather than the 15-minute default, and 300 rather than 60,
+//     because Indonesian mobile carriers NAT a lot of people behind few egress
+//     IPs — the same reason the note below sends volumetric per-IP defence to the
+//     edge. A webinar link goes to a broadcast list and hundreds open the page at
+//     once; at 60/min a handful of carrier IPs would lock real buyers out of
+//     seeing a price during exactly the spike the event exists for. A bot at 5
+//     req/s still gets cut within seconds.
+//
+//     Over budget answers 429, NOT a fake 200 the way `shopVisitRateLimiter`
+//     does: a missed visit row is invisible, whereas a missed price renders an
+//     empty or stale total in front of a buyer. The client can hold the last
+//     figure and retry.
+export const eventQuoteRateLimiter: RequestHandler = makeRateLimiter({
+  name: 'event-quote',
+  limit: 300,
+  windowMs: 60 * 1000,
+});
+
 // --- Login — keyed per-account (username); only FAILED attempts count, so a
 //     colleague logging in successfully never spends a shared budget. Social /
 //     refresh grants carry no username -> IP fallback (they can't brute-force). --
@@ -354,5 +396,24 @@ export const mediaDownloadRateLimiter: RequestHandler = rateLimit({
   },
   ...storeOption('media-download'),
   handler: tooManyRequestsHandler,
+  skip: skipInTest,
+});
+
+// --- Shop tracking-link visit — PUBLIC and unauthenticated, so keyed per-IP
+//     (there is no account to key on). Deliberately does NOT use the shared 429
+//     handler: this endpoint's contract is that it never answers 4xx/5xx, since
+//     a marketing link that errors loses the click it exists to measure. Over
+//     budget therefore answers 200 with `status: "error"` — the caller ignores
+//     the value and the row is simply not written.
+export const shopVisitRateLimiter: RequestHandler = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: clientIp,
+  ...storeOption('shop-visit'),
+  handler: (_req, res) => {
+    ok(res, { status: 'error' });
+  },
   skip: skipInTest,
 });
