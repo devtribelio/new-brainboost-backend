@@ -122,6 +122,41 @@ describe('purchase ingestion: member auto-provisioning', () => {
     expect(tx?.memberId).toBe(created!.id);
   });
 
+  it('(f) phone already on another member → provisioned WITHOUT phone, still committed', async () => {
+    const otherEmail = `${TAG}-phoneowner@t.local`;
+    const email = `${TAG}-phoneconflict@t.local`;
+    emails.push(otherEmail, email);
+    const sharedPhone = `8${Date.now().toString().slice(-9)}`;
+    // An existing (different) account already owns this phone number.
+    await prisma.member.create({
+      data: { email: otherEmail, passwordHash: 'x', phone: sharedPhone, phoneCode: '+62' },
+    });
+
+    const cred = await credentialService.verify(keyProvision);
+    const res = await purchaseIngestService.ingest(
+      {
+        providerEventId: `${TAG}-f`,
+        type: 'PURCHASE',
+        memberRef: { byEmail: email, name: 'Phone Conflict Buyer', phone: sharedPhone, phoneCode: '+62' },
+        productRef: { byId: productId },
+        grossAmount: 100_000,
+      },
+      cred!,
+    );
+
+    // Access is still granted; the new member is created without the phone.
+    expect(res.status).toBe('committed');
+    const created = await prisma.member.findUnique({ where: { email } });
+    expect(created).not.toBeNull();
+    expect(created!.phone).toBeNull();
+    expect(created!.passwordAlgo).toBe('social');
+    const tx = await prisma.commerceTransaction.findUnique({
+      where: { id: res.transactionId! },
+      select: { memberId: true },
+    });
+    expect(tx?.memberId).toBe(created!.id);
+  });
+
   it('(c) flag OFF → still member_not_found, no member created', async () => {
     const email = `${TAG}-off@t.local`;
     const before = await prisma.member.count();
