@@ -174,7 +174,7 @@ async function migrateOne(
 
     // Never write into a prefix that holds anything: those keys are served
     // `immutable`, so reusing one would leave the CDN and the bucket disagreeing.
-    const existing = await prisma.mediaAudioSource.findUnique({ where: { guid }, select: { version: true } });
+    const existing = await prisma.mediaAudioSource.findUnique({ where: { guid }, select: { version: true, hasBunnyCopy: true } });
     let version = (existing?.version ?? 0) + 1;
     while (await storage.prefixExists(`private/audio/${guid}/${version}/`)) version += 1;
     const prefix = `private/audio/${guid}/${version}`;
@@ -196,7 +196,13 @@ async function migrateOne(
     // and a Bunny outage must not block a lesson from going live.
     let bunnyCopy = sourceKey === null;
     let warning: string | undefined;
-    if (sourceKey !== null) {
+    // A RE-CUT of an upload that is already backed up changes only how our copy is
+    // sliced — the audio on Bunny is the same. Pushing again is refused by Bunny
+    // (400: the video already has a file) and used to flip has_bunny_copy to false,
+    // hiding a rollback that still works.
+    if (sourceKey !== null && existing?.hasBunnyCopy) {
+      bunnyCopy = true;
+    } else if (sourceKey !== null) {
       try {
         bunnyCopy = await pushToBunny(guid, full, work);
       } catch (err) {

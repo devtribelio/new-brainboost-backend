@@ -483,3 +483,12 @@ no Bunny copy (no key in that env, guid minted locally → Bunny answers 404, or
 failed), where `is_active = false` would be an outage, not a rollback. Bunny needs a few
 minutes to transcode after the push; a rollback inside that window plays nothing.
 Three different Bunny credentials are in play — see CLAUDE.md §5 Media access.
+
+**Part count: 12 → 120 (2026-09-22).** 12 fitted one downloader batch of app 3.3.3,
+on the theory that MIUI/HyperOS kills the app between batches. Measured on staging
+with a POCO behind a 1 Mbit/s cap, screen locked from the first second: 119 parts
+(10 batches) finished in ~9 minutes, no stall. Meanwhile 12 had a visible cost: the
+app draws progress as parts done / total and downloads a batch in parallel, so on a
+slow link the bar sat at 0% then jumped in 8% steps. Default is now 120 (range
+1..200). Stored audio keeps its parts until re-cut from Audio Storage. Rollback:
+`ALTER TABLE media_audio_migration_jobs ALTER COLUMN parts SET DEFAULT 12` + re-cut.

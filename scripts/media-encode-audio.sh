@@ -2,7 +2,7 @@
 # Siapkan SATU aset audio untuk `media_audio_sources`: encode, potong jadi
 # beberapa bagian, unggah ke S3 (privat), cetak SQL.
 #
-#   ./scripts/media-encode-audio.sh <guid> <input-audio-or-video> [--env staging|prod] [--parts 12] [--reencode 96k]
+#   ./scripts/media-encode-audio.sh <guid> <input-audio-or-video> [--env staging|prod] [--parts 120] [--reencode 96k]
 #
 # Kenapa DIPOTONG (default 8 bagian), bukan satu file:
 #   pengunduh di aplikasi versi toko mengambil segmen per batch (12 di 3.3.3, 8 di 3.4.0)
@@ -23,7 +23,7 @@
 set -euo pipefail
 
 GUID="${1:-}"; INPUT="${2:-}"; shift 2 || true
-ENV_NAME=staging; REENCODE=""; PARTS=12
+ENV_NAME=staging; REENCODE=""; PARTS=120
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --env) ENV_NAME="$2"; shift 2 ;;
@@ -38,7 +38,7 @@ die(){ printf '\033[1;31m[x] %s\033[0m\n' "$*" >&2; exit 1; }
 
 [[ "$GUID" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || die "guid harus UUID Bunny (36 char), dapat: '$GUID'"
 [[ -f "$INPUT" ]] || die "file input tidak ada: $INPUT"
-[[ "$PARTS" =~ ^[0-9]+$ && "$PARTS" -ge 1 && "$PARTS" -le 12 ]] || die "--parts harus 1..12 (12 = batch versi toko; lebih dari itu = batch kedua yang bisa macet di MIUI)"
+[[ "$PARTS" =~ ^[0-9]+$ && "$PARTS" -ge 1 && "$PARTS" -le 200 ]] || die "--parts harus 1..200 (default 120; lihat migrasi 20260922120000)"
 command -v ffmpeg >/dev/null && command -v ffprobe >/dev/null || die "butuh ffmpeg + ffprobe (brew install ffmpeg)"
 command -v aws >/dev/null && command -v python3 >/dev/null || die "butuh aws cli + python3"
 
