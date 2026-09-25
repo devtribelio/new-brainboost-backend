@@ -262,6 +262,10 @@ model CommsDelivery {
   type             String
   recipient        String?
   status           String /// SENT | FAILED
+  /// Which WhatsApp provider ran ('qontak', 'cekat'). NULL for email, and for a
+  /// failure that happened before a provider was picked — which reads as "never got
+  /// that far", not as "provider unknown".
+  provider         String?
   providerResponse String?  @map("provider_response")
   attempt          Int      @default(1)
   createdAt        DateTime @default(now()) @map("created_at")
@@ -1329,6 +1333,25 @@ model Voucher {
   startsAt  DateTime? @map("starts_at")
   endsAt    DateTime? @map("ends_at")
   isActive  Boolean   @default(true) @map("is_active")
+
+  // --- automated program columns (first-purchase voucher) ---------------------
+  // Member this code is locked to; NULL = a public code, which is every voucher ops
+  // authors by hand. `VoucherService.validate` refuses a non-owner with the exact
+  // answer an unknown code gets, so a forwarded screenshot learns nothing. No FK,
+  // mirroring AffiliateAttributionClaim: deleting a member must not fail on, or
+  // cascade into, a voucher row.
+  ownerMemberId String? @map("owner_member_id") @db.Uuid
+  // Program that issued this row ('FIRST_PURCHASE'). NULL = authored by ops, which is
+  // what the backoffice Voucher page filters on. Free text on purpose: the next
+  // automated program (birthday, reactivation) adds a value, not a schema change.
+  campaign      String?
+  // 'APP' | 'LEGACY' — whether the purchase that earned it came through the new
+  // stack or arrived from Tribelio via resync. Reporting only.
+  ownerSource   String? @map("owner_source")
+  // 'email' | 'whatsapp' — channel chosen at issue time (email first, phone as
+  // fallback). Reporting, and what tells ops which members got a WhatsApp message.
+  sentChannel   String? @map("sent_channel")
+
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt @map("updated_at")
 
@@ -1338,6 +1361,13 @@ model Voucher {
   products     VoucherProduct[]
   transactions CommerceTransaction[]
 
+  // One automated voucher per member per program, for life. A PLAIN unique, not the
+  // partial `WHERE owner_member_id IS NOT NULL` the spec first asked for: Postgres
+  // treats NULLs as distinct in a unique index, so ops codes (owner NULL) stay
+  // unlimited either way — and a partial index cannot be expressed in this schema,
+  // so it would have to be raw SQL that `prisma migrate diff` then reports as drift.
+  @@unique([ownerMemberId, campaign])
+  @@index([campaign, createdAt])
   @@map("vouchers")
 }
 
@@ -1499,6 +1529,7 @@ model ThirdPartyCredential {
   isActive          Boolean   @default(true) @map("is_active") // master on/off
   triggersAffiliate Boolean   @default(false) @map("triggers_affiliate") // may generate affiliate commission (SAFE DEFAULT off)
   canIngestRefund   Boolean   @default(false) @map("can_ingest_refund") // may void commissions on refund events
+  canProvisionMember Boolean  @default(false) @map("can_provision_member") // may auto-create a Member when the buyer has no account yet (SAFE DEFAULT off)
   lastUsedAt        DateTime? @map("last_used_at")
   createdAt         DateTime  @default(now()) @map("created_at")
   updatedAt         DateTime  @updatedAt @map("updated_at")

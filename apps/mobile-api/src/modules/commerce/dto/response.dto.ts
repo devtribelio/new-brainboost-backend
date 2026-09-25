@@ -210,6 +210,7 @@ export class VoucherValidateResultDto {
   @ApiPropertyOptional({ example: 7 })
   trialDays?: number | null;
 
-  @ApiPropertyOptional({ example: 'Voucher quota exhausted' })
+  /** Member-facing copy in Indonesian, returned verbatim — render it, don't map it. */
+  @ApiPropertyOptional({ example: 'Kuota voucher sudah habis' })
   reason?: string;
 }

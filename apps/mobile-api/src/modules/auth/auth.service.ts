@@ -17,6 +17,7 @@ import {
   ERROR_CODES,
 } from '@bb/common/exceptions';
 import { assertUuid } from '@bb/common/utils/uuid.util';
+import { verifyClaimToken as verifyClaimTokenSignature } from '@bb/common/utils/claim-token.util';
 import { normalizePhonePair, otpPhoneTarget } from '@bb/common/utils/phone.util';
 import { isReusableUnverifiedMember } from '@bb/common/utils/member-state.util';
 import { claimTicketsByEmail } from '@bb/domain/event/claim';
@@ -31,6 +32,7 @@ import type {
   RequestForgotPasswordDto,
   ValidateOtpDto,
 } from './dto/forgot-password.dto';
+import type { ClaimDto, ClaimVerifyDto } from './dto/claim.dto';
 import type { RegisterByPhoneDto } from './dto/register-by-phone.dto';
 import type { RequestVerificationPhoneDto } from './dto/request-verification-phone.dto';
 import type { ValidateOtpPhoneDto } from './dto/validate-otp-phone.dto';
@@ -38,6 +40,7 @@ import type { RequestVerificationEmailDto } from './dto/request-verification-ema
 import type { ValidateOtpEmailDto } from './dto/validate-otp-email.dto';
 import { logger } from '@bb/common/config/logger';
 import { VisitService } from '@bb/domain/affiliate/visit.service';
+import { memberProvisioningService } from '@bb/domain/member/provisioning.service';
 
 interface TokenBundle {
   access_token: string;
@@ -425,41 +428,16 @@ export class AuthService {
     return { inviterId: inviter?.id, inviterNetworkId };
   }
 
-  private async generateUniqueMemberCode(): Promise<string> {
-    for (let attempt = 0; attempt < 5; attempt++) {
-      const code = randomUUID().replace(/-/g, '').slice(0, 8).toUpperCase();
-      const exists = await prisma.member.findFirst({
-        where: { OR: [{ code }, { affiliateCode: code }] },
-        select: { id: true },
-      });
-      if (!exists) return code;
-    }
-    throw new Error('Unable to generate unique member code after 5 attempts');
+  // Member-creation primitives now live in the shared MemberProvisioningService
+  // (packages/domain) so the social-login and 3rd-party ingest provisioning paths
+  // build members from one implementation. These stay as thin delegators because
+  // register()/registerByPhone() below still call them.
+  private generateUniqueMemberCode(): Promise<string> {
+    return memberProvisioningService.generateUniqueMemberCode();
   }
 
-  // Auto-join the default community networks (Timeline + Education) on every
-  // new member. Mirrors what mobile MainPage previously triggered via
-  // /api/member/info → /api/network/join, but guarantees the rows exist before
-  // the first feed render. Idempotent: per-network unique violation is swallowed
-  // so a retried registration cannot double-join or double-bump countMember.
-  private async autoJoinCommunityNetworks(memberId: string): Promise<void> {
-    const communities = await prisma.network.findMany({
-      where: { purpose: { in: ['timeline', 'education'] }, isActive: true },
-      select: { id: true },
-    });
-    for (const n of communities) {
-      try {
-        await prisma.$transaction([
-          prisma.networkMember.create({ data: { networkId: n.id, memberId } }),
-          prisma.network.update({
-            where: { id: n.id },
-            data: { countMember: { increment: 1 } },
-          }),
-        ]);
-      } catch (err) {
-        if (!this.isUniqueViolation(err)) throw err;
-      }
-    }
+  private autoJoinCommunityNetworks(memberId: string): Promise<void> {
+    return memberProvisioningService.autoJoinCommunityNetworks(memberId);
   }
 
   private async loginWithPassword(dto: LoginDto): Promise<TokenBundle> {
@@ -775,14 +753,6 @@ export class AuthService {
       }
     }
 
-    // Create path: brand-new social account. Sentinel passwordHash + algo=social
-    // so loginWithPassword (verifyPassword guard) can never authenticate it.
-    // isEmailVerified:true — the provider attested the identity (Apple-verified even
-    // when the email is null / a private relay).
-    const sentinelHash = `${randomUUID()}${randomUUID()}`;
-    const memberCode = await this.generateUniqueMemberCode();
-    const username = await this.deriveUniqueUsernameFromEmail(email ?? `${provider}${sub}`);
-
     // Bind the inviter ONLY here, on first-time signup. Every already-exists
     // path above returned before reaching this point, so an existing account's
     // inviterId is never written — null stays null, set stays set. Mirrors
@@ -797,22 +767,22 @@ export class AuthService {
       if (inviter) inviterId = inviter.id;
     }
 
+    // Create path: brand-new social account. provisionMember supplies the sentinel
+    // passwordHash + algo=social (so loginWithPassword can never authenticate it)
+    // and the unique code/username. isEmailVerified:true — the provider attested
+    // the identity (Apple-verified even when the email is null / a private relay).
+    // usernameSeed covers the Apple private-relay case where email is null.
     try {
-      const created = await prisma.member.create({
+      const created = await memberProvisioningService.provisionMember({
         data: {
           email,
           ...subData,
           fullName: name,
-          username,
-          passwordHash: sentinelHash,
-          passwordAlgo: 'social',
           isEmailVerified: true,
-          code: memberCode,
-          affiliateCode: memberCode,
           inviterId,
         },
+        usernameSeed: `${provider}${sub}`,
       });
-      await this.autoJoinCommunityNetworks(created.id);
       return this.issueTokenBundle(created.id, created.email ?? '', clientType);
     } catch (err) {
       // Race: a concurrent request created the same email/provider-sub first.
@@ -951,25 +921,6 @@ export class AuthService {
     );
   }
 
-  private async deriveUniqueUsernameFromEmail(email: string): Promise<string> {
-    const local = email.split('@')[0] ?? 'user';
-    const base =
-      local
-        .toLowerCase()
-        .replace(/[^a-z0-9._]/g, '')
-        .slice(0, 24) || 'user';
-    for (let attempt = 0; attempt < 10; attempt++) {
-      const candidate = attempt === 0 ? base : `${base}${randomUUID().slice(0, 6)}`;
-      const exists = await prisma.member.findUnique({
-        where: { username: candidate },
-        select: { id: true },
-      });
-      if (!exists) return candidate;
-    }
-    // Extremely unlikely; fall back to random.
-    return `${base}${randomUUID().slice(0, 8)}`;
-  }
-
   async registerDevice(memberId: string, dto: RegisterDeviceDto) {
     // Single active device: enrolling a device on app start makes it THE push
     // target. Clear fcmToken on every OTHER device of this member so a phone that
@@ -1096,6 +1047,86 @@ export class AuthService {
       data: { revokedAt: new Date() },
     });
     return channel === 'email' ? { email: target } : { phone: target };
+  }
+
+  // --------------------------------------------------------------------------
+  // Account claim — an auto-provisioned buyer (passwordAlgo='social', no social
+  // sub, unverified email) has access but no usable password. The post-payment
+  // email links them to `/claim?token=…`; these two endpoints back that page.
+  // --------------------------------------------------------------------------
+
+  /**
+   * Pre-flight for the claim page: is this token good, and who is it for?
+   *
+   * Returns `{ valid:false }` for anything bad/expired/unknown — never a reason,
+   * so the token cannot be probed. `alreadyClaimed:true` (member already has a
+   * real password) lets the page say "already set, please log in" instead of
+   * offering the form. Only `email`/`fullName` leak on a genuinely claimable
+   * token, and only to prefill the form for the person holding the link.
+   */
+  async verifyClaimToken(
+    dto: ClaimVerifyDto,
+  ): Promise<{ valid: boolean; email?: string; fullName?: string; alreadyClaimed?: boolean }> {
+    const payload = verifyClaimTokenSignature(dto.token);
+    if (!payload) return { valid: false };
+
+    const member = await prisma.member.findUnique({
+      where: { id: payload.memberId },
+      select: { id: true, email: true, fullName: true, passwordAlgo: true },
+    });
+    if (!member) return { valid: false };
+
+    // A real password already set → the account was claimed (or the buyer set one
+    // some other way). Say so, but don't offer the form again.
+    if (member.passwordAlgo !== 'social') {
+      return { valid: true, alreadyClaimed: true };
+    }
+
+    return {
+      valid: true,
+      alreadyClaimed: false,
+      email: member.email ?? undefined,
+      fullName: member.fullName ?? undefined,
+    };
+  }
+
+  /**
+   * Consume the claim token: set the buyer's first real password and log them in.
+   *
+   * Single-use in effect — once `passwordAlgo` is no longer 'social' the token is
+   * refused, so replaying a leaked link cannot overwrite a password the member
+   * has since set. Mirrors `forgotPasswordVerification`: bcrypt the password, flip
+   * the member to a real credential + verified email, revoke live refresh tokens,
+   * then issue a fresh session so the response logs them straight in.
+   */
+  async claimAccount(dto: ClaimDto): Promise<TokenBundle> {
+    const payload = verifyClaimTokenSignature(dto.token);
+    if (!payload) throw badRequest(ERROR_CODES.CLAIM_TOKEN_INVALID);
+
+    const member = await prisma.member.findUnique({
+      where: { id: payload.memberId },
+      select: { id: true, email: true, passwordAlgo: true },
+    });
+    if (!member) throw badRequest(ERROR_CODES.CLAIM_TOKEN_INVALID);
+
+    // Single-use guard: a claimed account already has a real password.
+    if (member.passwordAlgo !== 'social') {
+      throw badRequest(ERROR_CODES.CLAIM_ALREADY_CLAIMED);
+    }
+
+    const passwordHash = await bcrypt.hash(dto.newPassword, 10);
+    await prisma.member.update({
+      where: { id: member.id },
+      data: { passwordHash, passwordAlgo: 'bcrypt', isEmailVerified: true },
+    });
+    await prisma.refreshToken.updateMany({
+      where: { memberId: member.id, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+
+    // Claim happens on the web /claim page; issue a web (multi-session) bundle so
+    // completing it never silently kicks a mobile session the buyer may have.
+    return this.issueTokenBundle(member.id, member.email ?? '', 'web');
   }
 
   async validateOtp(dto: ValidateOtpDto) {

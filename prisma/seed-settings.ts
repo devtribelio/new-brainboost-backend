@@ -152,6 +152,122 @@ const SETTINGS: Array<{ key: string; value: string; description: string }> = [
     description:
       'Comma-separated email address(es) that receive a SaleAlert email on every successful (non-subscription) sale. Empty = off.',
   },
+  // --- voucher pembeli pertama -------------------------------------------------
+  // Lima nilai program sengaja DIKOSONGKAN. Angkanya keputusan tim internal lewat
+  // backoffice, dan default pilihan dev adalah cara sebuah placeholder diam-diam jadi
+  // angka yang benar-benar terkirim. Job menolak menerbitkan apa pun sampai semuanya
+  // terisi, jadi seed kosong = program mati dengan aman, bukan program setengah jadi.
+  {
+    key: 'firstPurchaseVoucher.enabled',
+    value: 'false',
+    description:
+      'Saklar program voucher pembeli pertama. false = job tidak menerbitkan apa pun. Dinyalakan tim internal dari backoffice setelah tipe/nilai/cap/masa berlaku terisi.',
+  },
+  {
+    key: 'firstPurchaseVoucher.launchAt',
+    value: '',
+    description:
+      'ISO datetime. Hanya pembelian kursus berbayar pada atau setelah waktu ini yang dihitung; member yang sudah pernah beli sebelumnya TIDAK pernah dapat. Kosong = job tidak jalan. Diisi otomatis saat program pertama kali dinyalakan dan tidak boleh dimundurkan — tanggal di masa lalu berarti email massal ke ribuan pembeli lama.',
+  },
+  {
+    key: 'firstPurchaseVoucher.type',
+    value: '',
+    description: "PERCENT | AMOUNT. Kosong = program dianggap belum dikonfigurasi.",
+  },
+  {
+    key: 'firstPurchaseVoucher.value',
+    value: '',
+    description:
+      'Persen (kalau type=PERCENT) atau rupiah (kalau type=AMOUNT). Disalin ke baris voucher saat terbit, jadi mengubahnya tidak mengubah voucher yang sudah dikirim.',
+  },
+  {
+    key: 'firstPurchaseVoucher.maxAmount',
+    value: '',
+    description:
+      'Batas rupiah untuk voucher PERCENT. Kosong = tanpa batas. Satu-satunya nilai program yang boleh kosong.',
+  },
+  {
+    key: 'firstPurchaseVoucher.validityDays',
+    value: '',
+    description: 'Berapa hari voucher berlaku sejak diterbitkan (ends_at = terbit + N hari).',
+  },
+  {
+    key: 'firstPurchaseVoucher.lastSweepAt',
+    value: '',
+    description:
+      'Watermark sweep, DITULIS OLEH JOB — bukan setelan operator. Jangan diedit manual: memundurkannya menyuruh job memindai ulang (aman, unique guard), memajukannya melewatkan pembeli secara permanen.',
+  },
+  // --- provider WhatsApp ------------------------------------------------------
+  // Provider aktif + template id-nya hidup di sini, BUKAN di env, supaya template
+  // yang ditolak Meta atau provider yang bermasalah bisa diganti ops dalam hitungan
+  // menit tanpa deploy. Kredensialnya TETAP di env untuk sekarang (lihat
+  // docs/wa-provider-switch.md §10) — yang pindah ke sini hanya yang tidak rahasia.
+  {
+    key: 'wa.provider',
+    value: 'qontak',
+    description:
+      'Provider WhatsApp aktif untuk SEMUA pesan WhatsApp (OTP + voucher). Harus salah satu yang adaptornya sudah dideploy di bb-comms — nama tak dikenal membuat setiap kiriman WhatsApp gagal ke DLQ. Perubahan terbaca bb-comms <= 60 detik, tanpa deploy.',
+  },
+  {
+    key: 'wa.qontak.baseUrl',
+    value: 'https://service-chat.qontak.com',
+    description: 'Origin API Qontak. Kosong = pakai default di adaptor.',
+  },
+  {
+    key: 'wa.qontak.channelIntegrationId',
+    value: '9fe63a0f-e6c7-4a2e-b1ad-d12e69b5706c',
+    description: 'Pengenal integrasi channel WhatsApp di Qontak. Bukan rahasia.',
+  },
+  {
+    key: 'wa.qontak.template.otp',
+    value: '453e330c-64d6-434c-ba3e-900afd0da366',
+    description:
+      'ID template OTP di Qontak — UUID terbitan QONTAK, bukan ID numerik Meta (dua namespace berbeda; hanya UUID yang diterima endpoint broadcast). Satu template ini melayani SEMUA keperluan OTP; variabelnya cuma kodenya, jadi pesannya tidak bisa menyebut OTP itu untuk apa.',
+  },
+  // --- Cekat: provider kedua, adaptornya SUDAH ada di bb-comms -----------------
+  // `wa.provider` tetap qontak sampai build yang memuat adaptor itu dideploy DAN
+  // ada uji yang berhasil. Dua gerbang terpisah, dan keduanya nyata:
+  //   - backoffice menolak provider yang tidak ada di `wa.supportedProviders`,
+  //     daftar yang ditulis bb-comms saat start — jadi build lama tidak bisa
+  //     dipilih walau barisnya sudah ada di sini;
+  //   - tombol "Jadikan aktif" terkunci sampai ada OtpTest berstatus SENT dalam
+  //     24 jam terakhir.
+  // Kedua template di bawah sudah diuji kirim ke nomor sungguhan (21 Sep 2026).
+  {
+    key: 'wa.cekat.baseUrl',
+    value: 'https://api.cekat.ai',
+    description: 'Origin API Cekat. Auth-nya API key statis di header `api_key`, bukan OAuth seperti Qontak.',
+  },
+  {
+    key: 'wa.cekat.wabaId',
+    value: '1878086816553498',
+    description:
+      'WhatsApp Business Account yang memayungi nomor inbox ini. TIDAK pernah dikirim dalam request — Cekat tidak memintanya. Satu-satunya pembacanya adalah pesan error 132001, yang menyebutkan nilai ini supaya bisa dibandingkan dengan waba_id dari GET /templates. Justru gunanya bisa BERBEDA dari kenyataan: itulah cara perpindahan WABA memberi tahu dirinya sendiri. Nomor ini pindah dari 1368529094981820 pada 19 Sep 2026, dan seluruh template lama mati bersamanya.',
+  },
+  {
+    key: 'wa.cekat.inboxId',
+    value: 'ddd687f2-95ce-41ae-b3a1-f30757257d4f',
+    description:
+      'Inbox Cekat = SATU nomor WhatsApp Business. Menentukan pesan keluar dari nomor mana — salah inbox berarti OTP datang dari nomor yang bukan nomor resmi, dan itu terkirim tanpa error. Padanan channel_integration_id di Qontak.',
+  },
+  {
+    key: 'wa.cekat.template.otp',
+    value: '2548823212252868',
+    description:
+      "wa_template_id template `template_otp2` di Cekat (APPROVED, AUTHENTICATION, bahasa id) di WABA 1878086816553498. BELUM PERNAH DIUJI lewat adaptor: template AUTHENTICATION Meta berbentuk lain — body_placeholder kosong walau body memuat {{1}}, dan tombolnya bertipe otp/copy_code, bukan URL. Uji lewat halaman Provider WhatsApp sebelum Cekat dijadikan provider aktif.",
+  },
+  {
+    key: 'wa.cekat.template.firstPurchaseVoucher',
+    value: '1483010856991046',
+    description:
+      "wa_template_id template `first_time_buyer` di Cekat (APPROVED, kategori MARKETING, bahasa id, 4 variabel). Angka — bentuknya berbeda dengan UUID milik Qontak; tiap provider punya namespace sendiri, jadi id ini TIDAK bisa dipakai di baris wa.qontak.*. Jangan tertukar dengan waba_id (1368529094981820), yang menunjuk akun WhatsApp Business, bukan template.",
+  },
+  {
+    key: 'wa.qontak.template.firstPurchaseVoucher',
+    value: '',
+    description:
+      'ID template voucher pembeli pertama di Qontak. Kosong = kiriman WhatsApp-nya dilewati dengan log, bukan DLQ — template ini kategori MARKETING dan harus lolos review Meta dulu. Isi setelah disetujui.',
+  },
 ];
 
 async function main() {

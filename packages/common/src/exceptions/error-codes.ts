@@ -92,6 +92,10 @@ export const ERROR_CODES = {
   EMAIL_OR_PHONE_ALREADY_REGISTERED: 'EMAIL_OR_PHONE_ALREADY_REGISTERED',
   EMAIL_OR_PHONE_REQUIRED: 'EMAIL_OR_PHONE_REQUIRED',
 
+  // --- account claim (auto-provisioned buyer sets first password) -------------
+  CLAIM_TOKEN_INVALID: 'CLAIM_TOKEN_INVALID',
+  CLAIM_ALREADY_CLAIMED: 'CLAIM_ALREADY_CLAIMED',
+
   // --- contact verification --------------------------------------------------
   EMAIL_ALREADY_VERIFIED: 'EMAIL_ALREADY_VERIFIED',
   PHONE_ALREADY_VERIFIED: 'PHONE_ALREADY_VERIFIED',
@@ -170,6 +174,7 @@ export const ERROR_CODES = {
   VOUCHER_INVALID: 'VOUCHER_INVALID',
   VOUCHER_EXHAUSTED: 'VOUCHER_EXHAUSTED',
   VOUCHER_TRIAL_ALREADY_USED: 'VOUCHER_TRIAL_ALREADY_USED',
+  VOUCHER_COURSE_ONLY: 'VOUCHER_COURSE_ONLY',
 
   // --- event ticketing --------------------------------------------------------
   EVENT_NOT_ON_SALE: 'EVENT_NOT_ON_SALE',
