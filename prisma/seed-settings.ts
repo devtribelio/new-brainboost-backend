@@ -196,6 +196,7 @@ const SETTINGS: Array<{ key: string; value: string; description: string }> = [
     value: '',
     description:
       'Watermark sweep, DITULIS OLEH JOB — bukan setelan operator. Jangan diedit manual: memundurkannya menyuruh job memindai ulang (aman, unique guard), memajukannya melewatkan pembeli secara permanen.',
+  },
   // --- provider WhatsApp ------------------------------------------------------
   // Provider aktif + template id-nya hidup di sini, BUKAN di env, supaya template
   // yang ditolak Meta atau provider yang bermasalah bisa diganti ops dalam hitungan
@@ -223,14 +224,25 @@ const SETTINGS: Array<{ key: string; value: string; description: string }> = [
     description:
       'ID template OTP di Qontak — UUID terbitan QONTAK, bukan ID numerik Meta (dua namespace berbeda; hanya UUID yang diterima endpoint broadcast). Satu template ini melayani SEMUA keperluan OTP; variabelnya cuma kodenya, jadi pesannya tidak bisa menyebut OTP itu untuk apa.',
   },
-  // --- Cekat: provider kedua, adaptornya BELUM ada di bb-comms -----------------
-  // Nilai-nilai ini boleh diisi lebih dulu; `wa.provider` tetap qontak sampai
-  // adaptornya dideploy DAN ada uji yang berhasil. Memilih 'cekat' sebelum itu
-  // ditolak backoffice (tidak ada di `wa.supportedProviders`).
+  // --- Cekat: provider kedua, adaptornya SUDAH ada di bb-comms -----------------
+  // `wa.provider` tetap qontak sampai build yang memuat adaptor itu dideploy DAN
+  // ada uji yang berhasil. Dua gerbang terpisah, dan keduanya nyata:
+  //   - backoffice menolak provider yang tidak ada di `wa.supportedProviders`,
+  //     daftar yang ditulis bb-comms saat start — jadi build lama tidak bisa
+  //     dipilih walau barisnya sudah ada di sini;
+  //   - tombol "Jadikan aktif" terkunci sampai ada OtpTest berstatus SENT dalam
+  //     24 jam terakhir.
+  // Kedua template di bawah sudah diuji kirim ke nomor sungguhan (21 Sep 2026).
   {
     key: 'wa.cekat.baseUrl',
     value: 'https://api.cekat.ai',
     description: 'Origin API Cekat. Auth-nya API key statis di header `api_key`, bukan OAuth seperti Qontak.',
+  },
+  {
+    key: 'wa.cekat.wabaId',
+    value: '1878086816553498',
+    description:
+      'WhatsApp Business Account yang memayungi nomor inbox ini. TIDAK pernah dikirim dalam request — Cekat tidak memintanya. Satu-satunya pembacanya adalah pesan error 132001, yang menyebutkan nilai ini supaya bisa dibandingkan dengan waba_id dari GET /templates. Justru gunanya bisa BERBEDA dari kenyataan: itulah cara perpindahan WABA memberi tahu dirinya sendiri. Nomor ini pindah dari 1368529094981820 pada 19 Sep 2026, dan seluruh template lama mati bersamanya.',
   },
   {
     key: 'wa.cekat.inboxId',
@@ -240,13 +252,13 @@ const SETTINGS: Array<{ key: string; value: string; description: string }> = [
   },
   {
     key: 'wa.cekat.template.otp',
-    value: '',
+    value: '2548823212252868',
     description:
-      'wa_template_id template OTP di Cekat. KOSONG: belum ada template OTP yang disetujui di sana, jadi Cekat belum bisa mengambil alih OTP. Isi setelah templatnya lolos review Meta di bawah akun Cekat — template tidak berpindah antar provider.',
+      "wa_template_id template `template_otp2` di Cekat (APPROVED, AUTHENTICATION, bahasa id) di WABA 1878086816553498. BELUM PERNAH DIUJI lewat adaptor: template AUTHENTICATION Meta berbentuk lain — body_placeholder kosong walau body memuat {{1}}, dan tombolnya bertipe otp/copy_code, bukan URL. Uji lewat halaman Provider WhatsApp sebelum Cekat dijadikan provider aktif.",
   },
   {
     key: 'wa.cekat.template.firstPurchaseVoucher',
-    value: '2285965248914372',
+    value: '1483010856991046',
     description:
       "wa_template_id template `first_time_buyer` di Cekat (APPROVED, kategori MARKETING, bahasa id, 4 variabel). Angka — bentuknya berbeda dengan UUID milik Qontak; tiap provider punya namespace sendiri, jadi id ini TIDAK bisa dipakai di baris wa.qontak.*. Jangan tertukar dengan waba_id (1368529094981820), yang menunjuk akun WhatsApp Business, bukan template.",
   },
