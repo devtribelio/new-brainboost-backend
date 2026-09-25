@@ -92,6 +92,10 @@ export const ERROR_CODES = {
   EMAIL_OR_PHONE_ALREADY_REGISTERED: 'EMAIL_OR_PHONE_ALREADY_REGISTERED',
   EMAIL_OR_PHONE_REQUIRED: 'EMAIL_OR_PHONE_REQUIRED',
 
+  // --- account claim (auto-provisioned buyer sets first password) -------------
+  CLAIM_TOKEN_INVALID: 'CLAIM_TOKEN_INVALID',
+  CLAIM_ALREADY_CLAIMED: 'CLAIM_ALREADY_CLAIMED',
+
   // --- contact verification --------------------------------------------------
   EMAIL_ALREADY_VERIFIED: 'EMAIL_ALREADY_VERIFIED',
   PHONE_ALREADY_VERIFIED: 'PHONE_ALREADY_VERIFIED',

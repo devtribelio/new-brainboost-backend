@@ -76,6 +76,10 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   EMAIL_OR_PHONE_ALREADY_REGISTERED: 'Email atau nomor telepon sudah terdaftar',
   EMAIL_OR_PHONE_REQUIRED: 'Email atau nomor telepon wajib diisi',
 
+  // --- account claim (auto-provisioned buyer sets first password) -------------
+  CLAIM_TOKEN_INVALID: 'Tautan tidak valid atau sudah kedaluwarsa, minta tautan baru',
+  CLAIM_ALREADY_CLAIMED: 'Akun sudah memiliki password, silakan masuk seperti biasa',
+
   // --- contact verification --------------------------------------------------
   EMAIL_ALREADY_VERIFIED: 'Email sudah terverifikasi',
   PHONE_ALREADY_VERIFIED: 'Nomor telepon sudah terverifikasi',

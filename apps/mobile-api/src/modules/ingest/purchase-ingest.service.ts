@@ -7,6 +7,7 @@ import { fxRateService } from '@bb/common/services/fx-rate.service';
 import { generateOrderCode } from '@bb/domain/commerce/utils/generate-order-code';
 import { attributionService } from '@bb/domain/affiliate/attribution.service';
 import { COMMISSION_STATUS } from '@bb/domain/affiliate/constants';
+import { memberProvisioningService } from '@bb/domain/member/provisioning.service';
 import type { VerifiedCredential } from './credential.service';
 
 /** Provider-agnostic purchase shape. Adapters (edge functions) map their payload to this. */
@@ -22,7 +23,12 @@ export interface NormalizedPurchase {
    */
   attributionKey?: string;
   type: 'PURCHASE' | 'REFUND';
-  memberRef: { byId?: string; byEmail?: string };
+  /**
+   * How to find (or, when `canProvisionMember` is on, create) the buyer's Member.
+   * `name`/`phone`/`phoneCode` are only consumed by the auto-provision path (B3) —
+   * they seed the new row and are ignored when an existing member is matched.
+   */
+  memberRef: { byId?: string; byEmail?: string; name?: string; phone?: string; phoneCode?: string };
   productRef: { byId?: string; bySku?: string };
   grossAmount: number;
   /**
@@ -84,6 +90,15 @@ interface NormalizedAmounts {
 const FX_SANITY_MIN = 0.25;
 const FX_SANITY_MAX = 4;
 
+// Field defaults for a Member auto-created by a channel ingest (canProvisionMember,
+// M1). These are PROVISIONAL product decisions:
+//  - active immediately: the buyer paid, so the account must be usable right away.
+//  - email NOT verified: the buyer paid but never proved the address; the later
+//    claim flow is what verifies it. Keeping it false means the account can't yet
+//    ride the email-verified link path (linkSocialToExistingMember) — intended.
+const PROVISIONED_MEMBER_IS_ACTIVE = true;
+const PROVISIONED_MEMBER_IS_EMAIL_VERIFIED = false;
+
 export interface IngestResult {
   status:
     | 'committed'
@@ -107,8 +122,14 @@ export class PurchaseIngestService {
 
     if (input.type === 'REFUND') return this.handleRefund(input, cred);
 
-    const memberId = await this.resolveMember(input.memberRef);
-    if (!memberId) return { status: 'member_not_found' };
+    let memberId = await this.resolveMember(input.memberRef);
+    if (!memberId) {
+      // No existing account. Auto-provision one only when THIS credential is
+      // flagged for it AND we have an email to key the new account on. Anything
+      // else keeps the original member_not_found behaviour (no side effect).
+      memberId = await this.provisionMember(input.memberRef, cred);
+      if (!memberId) return { status: 'member_not_found' };
+    }
     const product = await this.resolveProduct(input.productRef);
     if (!product) return { status: 'product_not_found' };
     const productId = product.id;
@@ -477,6 +498,56 @@ export class PurchaseIngestService {
       if (m) return m.id;
     }
     return null;
+  }
+
+  /**
+   * Auto-provision a Member for a purchase whose buyer has no account yet (M1).
+   *
+   * Gated on `cred.canProvisionMember` (per-credential opt-in, SAFE DEFAULT off)
+   * AND on having an email to key the account on — without one there is no stable
+   * identity to create or later claim, so we fall back to member_not_found. The
+   * new row is built by the shared `memberProvisioningService` (same primitives as
+   * social login), so a provisioned member is indistinguishable from a
+   * social-created one apart from the field defaults above.
+   *
+   * Returns the new (or race-winning existing) member id, or null when
+   * provisioning is not permitted / not possible.
+   */
+  private async provisionMember(
+    ref: NormalizedPurchase['memberRef'],
+    cred: VerifiedCredential,
+  ): Promise<string | null> {
+    if (!cred.canProvisionMember) return null;
+    if (!ref?.byEmail) return null;
+    const email = ref.byEmail.toLowerCase();
+
+    try {
+      const created = await memberProvisioningService.provisionMember({
+        data: {
+          email,
+          fullName: ref.name ?? null,
+          phone: ref.phone ?? null,
+          phoneCode: ref.phoneCode ?? null,
+          isActive: PROVISIONED_MEMBER_IS_ACTIVE,
+          isEmailVerified: PROVISIONED_MEMBER_IS_EMAIL_VERIFIED,
+        },
+      });
+      logger.info(
+        { memberId: created.id, channel: cred.name },
+        '[ingest] auto-provisioned member for purchase',
+      );
+      return created.id;
+    } catch (err) {
+      // Email-unique race: a concurrent ingest (or the buyer's own signup) created
+      // this email first. Re-resolve by email and use that id — mirrors the
+      // social-login create race guard. (A collision on another unique column,
+      // e.g. phone, is not an email race → rethrow so it surfaces, not silently
+      // attributes the purchase to the wrong account.)
+      if (!memberProvisioningService.isUniqueViolation(err)) throw err;
+      const existing = await prisma.member.findUnique({ where: { email }, select: { id: true } });
+      if (existing) return existing.id;
+      throw err;
+    }
   }
 
   /**

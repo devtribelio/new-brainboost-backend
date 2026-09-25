@@ -2,9 +2,10 @@
 /**
  * Issue (or rotate) a 3rd-party ingestion credential.
  *
- *   pnpm issue:credential <name> [--affiliate] [--refund]
+ *   pnpm issue:credential <name> [--affiliate] [--refund] [--provision]
  *   e.g. pnpm issue:credential revenuecat --affiliate
- *        pnpm issue:credential scalev                 (purchase only, no affiliate)
+ *        pnpm issue:credential scalev --provision      (purchase only, may auto-create members)
+ *        pnpm issue:credential scalev                  (purchase only, no affiliate)
  *
  * Prints the plaintext key ONCE (only the hash is stored). Re-running rotates the key.
  */
@@ -22,20 +23,21 @@ async function main() {
   const args = process.argv.slice(2);
   const name = args[0];
   if (!name || name.startsWith('--')) {
-    console.error('usage: pnpm issue:credential <name> [--affiliate] [--refund]');
+    console.error('usage: pnpm issue:credential <name> [--affiliate] [--refund] [--provision]');
     process.exit(1);
   }
   const triggersAffiliate = args.includes('--affiliate');
   const canIngestRefund = args.includes('--refund');
+  const canProvisionMember = args.includes('--provision');
   const key = `bbk_${crypto.randomBytes(24).toString('hex')}`;
 
   await prisma.thirdPartyCredential.upsert({
     where: { name },
-    create: { name, keyHash: hashKey(key), triggersAffiliate, canIngestRefund },
-    update: { keyHash: hashKey(key), triggersAffiliate, canIngestRefund },
+    create: { name, keyHash: hashKey(key), triggersAffiliate, canIngestRefund, canProvisionMember },
+    update: { keyHash: hashKey(key), triggersAffiliate, canIngestRefund, canProvisionMember },
   });
 
-  console.log(`credential "${name}" issued — triggersAffiliate=${triggersAffiliate} canIngestRefund=${canIngestRefund}`);
+  console.log(`credential "${name}" issued — triggersAffiliate=${triggersAffiliate} canIngestRefund=${canIngestRefund} canProvisionMember=${canProvisionMember}`);
   console.log(`KEY (store securely, shown once): ${key}`);
 }
 
