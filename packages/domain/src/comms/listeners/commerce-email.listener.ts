@@ -5,6 +5,7 @@ import { affiliateEvents } from '@bb/common/events/affiliate-events';
 import { enqueueComms } from '@bb/common/services/comms-outbox';
 import { settingsService, SETTING_KEYS } from '@bb/common/services/settings.service';
 import { signClaimToken } from '@bb/common/utils/claim-token.util';
+import { otpPhoneTarget } from '@bb/common/utils/phone.util';
 import { loadTrialGrant } from '@bb/domain/commerce/trial';
 import { isEventTicketOrder } from '@bb/domain/event/order';
 import { shopBaseUrl } from '@bb/domain/shop/shop-base-url';
@@ -48,6 +49,9 @@ export function registerCommsEmailListeners(): void {
             isEmailVerified: true,
             googleSub: true,
             appleSub: true,
+            phone: true,
+            phoneCode: true,
+            fullName: true,
           },
         });
         const unclaimed =
@@ -66,6 +70,22 @@ export function registerCommsEmailListeners(): void {
             refId: e.transactionId, // bb-comms reads commerce_transactions by this id
             payload: { claimUrl }, // the set-password link, not in PG — carried inline
           });
+          // Also nudge the claim over WhatsApp when we have a number: the email may
+          // sit unread, but the claim link is the only way this buyer reaches the
+          // course they paid for. Email is always sent (above); WhatsApp is an
+          // additional channel, best-effort like the email. The recipient is built
+          // through the same helper the OTP whatsapp path uses so the E.164 form
+          // matches (national `phone` + dial `phoneCode` → `+62…`).
+          if (member.phone) {
+            await enqueueComms({
+              type: 'CoursePaymentSuccessClaim',
+              channel: 'whatsapp',
+              priority: 'normal',
+              refId: e.transactionId,
+              recipient: otpPhoneTarget(member.phoneCode ?? '', member.phone),
+              payload: { claimUrl, name: member.fullName ?? '' },
+            });
+          }
           return;
         }
       }
