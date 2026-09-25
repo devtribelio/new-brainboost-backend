@@ -538,15 +538,30 @@ export class PurchaseIngestService {
       );
       return created.id;
     } catch (err) {
-      // Email-unique race: a concurrent ingest (or the buyer's own signup) created
-      // this email first. Re-resolve by email and use that id — mirrors the
-      // social-login create race guard. (A collision on another unique column,
-      // e.g. phone, is not an email race → rethrow so it surfaces, not silently
-      // attributes the purchase to the wrong account.)
       if (!memberProvisioningService.isUniqueViolation(err)) throw err;
+      // Email-unique race: a concurrent ingest (or the buyer's own signup) created
+      // this email first → reuse the winner.
       const existing = await prisma.member.findUnique({ where: { email }, select: { id: true } });
       if (existing) return existing.id;
-      throw err;
+      // Not an email conflict → the phone is already registered to a DIFFERENT
+      // account (same person, different email). Provision WITHOUT the phone so the
+      // buyer still GETS ACCESS; the email claim still fires, and WhatsApp is
+      // skipped for this buyer (the number belongs to another account — don't
+      // message it). Better than failing the ingest and leaving a paid buyer with
+      // no access.
+      const created = await memberProvisioningService.provisionMember({
+        data: {
+          email,
+          fullName: ref.name ?? null,
+          isActive: PROVISIONED_MEMBER_IS_ACTIVE,
+          isEmailVerified: PROVISIONED_MEMBER_IS_EMAIL_VERIFIED,
+        },
+      });
+      logger.warn(
+        { memberId: created.id, channel: cred.name },
+        '[ingest] provisioned WITHOUT phone (phone already registered to another member)',
+      );
+      return created.id;
     }
   }
 
