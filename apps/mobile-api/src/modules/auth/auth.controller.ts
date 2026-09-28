@@ -8,6 +8,7 @@ import {
   RequestForgotPasswordDto,
   ValidateOtpDto,
 } from './dto/forgot-password.dto';
+import { ClaimDto, ClaimVerifyDto } from './dto/claim.dto';
 import { PhoneVerificationResponseDto, RegisterByPhoneDto } from './dto/register-by-phone.dto';
 import { RequestVerificationPhoneDto } from './dto/request-verification-phone.dto';
 import { ValidateOtpPhoneDto } from './dto/validate-otp-phone.dto';
@@ -150,6 +151,43 @@ export class AuthController {
   validateOtp = async (req: Request, res: Response) => {
     const result = await this.authService.validateOtp(req.body as ValidateOtpDto);
     return ok(res, result);
+  };
+
+  @ApiOperation({
+    summary: 'Check an account-claim token (pre-flight for the /claim page)',
+    description: [
+      'Verify the opaque claim token from an auto-provisioned buyer’s receipt email.',
+      'Returns `{valid, email?, fullName?, alreadyClaimed?}`. `alreadyClaimed=true` means',
+      'the account already has a password — the page should route to login instead of the',
+      'set-password form. No reason is given for an invalid token.',
+    ].join(' '),
+  })
+  @ApiBody({ type: () => ClaimVerifyDto })
+  @ApiResponse({ status: 200, type: () => GenericOkDto })
+  claimVerify = async (req: Request, res: Response) => {
+    const result = await this.authService.verifyClaimToken(req.body as ClaimVerifyDto);
+    return ok(res, result);
+  };
+
+  @ApiOperation({
+    summary: 'Claim an account — set the first password and log in',
+    description: [
+      'Consume the claim token: set the buyer’s password, mark the email verified, revoke',
+      'live sessions, and issue a fresh token bundle so the response logs them in. Single-use',
+      '— a token for an already-claimed account is rejected.',
+    ].join(' '),
+  })
+  @ApiBody({ type: () => ClaimDto })
+  @ApiResponse({ status: 200, description: 'Claimed, tokens issued', type: () => TokenBundleDto })
+  @ApiResponse({
+    status: 400,
+    description: 'Invalid/expired token or already claimed',
+    type: () => ErrorEnvelopeDto,
+    envelope: 'none',
+  })
+  claim = async (req: Request, res: Response) => {
+    const tokens = await this.authService.claimAccount(req.body as ClaimDto);
+    return ok(res, tokens);
   };
 
   @ApiOperation({

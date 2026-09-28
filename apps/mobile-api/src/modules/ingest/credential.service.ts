@@ -6,6 +6,7 @@ export interface VerifiedCredential {
   name: string;
   triggersAffiliate: boolean;
   canIngestRefund: boolean;
+  canProvisionMember: boolean;
 }
 
 /** API keys are high-entropy random → a fast SHA-256 hash is sufficient (and allows unique-index lookup). */
@@ -19,7 +20,7 @@ export class CredentialService {
     if (!key) return null;
     const cred = await prisma.thirdPartyCredential.findUnique({
       where: { keyHash: hashKey(key) },
-      select: { id: true, name: true, isActive: true, triggersAffiliate: true, canIngestRefund: true },
+      select: { id: true, name: true, isActive: true, triggersAffiliate: true, canIngestRefund: true, canProvisionMember: true },
     });
     if (!cred || !cred.isActive) return null;
     void prisma.thirdPartyCredential
@@ -30,6 +31,7 @@ export class CredentialService {
       name: cred.name,
       triggersAffiliate: cred.triggersAffiliate,
       canIngestRefund: cred.canIngestRefund,
+      canProvisionMember: cred.canProvisionMember ?? false,
     };
   }
 
@@ -44,7 +46,7 @@ export class CredentialService {
     if (!presentedKey) return null;
     const cred = await prisma.thirdPartyCredential.findUnique({
       where: { name },
-      select: { id: true, name: true, keyHash: true, isActive: true, triggersAffiliate: true, canIngestRefund: true },
+      select: { id: true, name: true, keyHash: true, isActive: true, triggersAffiliate: true, canIngestRefund: true, canProvisionMember: true },
     });
     if (!cred || !cred.isActive) return null;
 
@@ -62,6 +64,7 @@ export class CredentialService {
       name: cred.name,
       triggersAffiliate: cred.triggersAffiliate,
       canIngestRefund: cred.canIngestRefund,
+      canProvisionMember: cred.canProvisionMember ?? false,
     };
   }
 
@@ -73,7 +76,7 @@ export class CredentialService {
   async verifyByName(name: string): Promise<VerifiedCredential | null> {
     const cred = await prisma.thirdPartyCredential.findUnique({
       where: { name },
-      select: { id: true, name: true, isActive: true, triggersAffiliate: true, canIngestRefund: true },
+      select: { id: true, name: true, isActive: true, triggersAffiliate: true, canIngestRefund: true, canProvisionMember: true },
     });
     if (!cred || !cred.isActive) return null;
     void prisma.thirdPartyCredential
@@ -84,13 +87,14 @@ export class CredentialService {
       name: cred.name,
       triggersAffiliate: cred.triggersAffiliate,
       canIngestRefund: cred.canIngestRefund,
+      canProvisionMember: cred.canProvisionMember ?? false,
     };
   }
 
   /** Issue a new credential. Returns the PLAINTEXT key ONCE (only the hash is stored). */
   async issue(
     name: string,
-    opts?: { triggersAffiliate?: boolean; canIngestRefund?: boolean },
+    opts?: { triggersAffiliate?: boolean; canIngestRefund?: boolean; canProvisionMember?: boolean },
   ): Promise<{ name: string; key: string }> {
     const key = `bbk_${crypto.randomBytes(24).toString('hex')}`;
     await prisma.thirdPartyCredential.create({
@@ -99,6 +103,7 @@ export class CredentialService {
         keyHash: hashKey(key),
         triggersAffiliate: opts?.triggersAffiliate ?? false,
         canIngestRefund: opts?.canIngestRefund ?? false,
+        canProvisionMember: opts?.canProvisionMember ?? false,
       },
     });
     return { name, key };

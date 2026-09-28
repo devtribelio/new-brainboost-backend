@@ -10,6 +10,8 @@ import {
   registerByPhoneRateLimiter,
   forgotPasswordRequestRateLimiter,
   forgotPasswordVerifyRateLimiter,
+  claimVerifyRateLimiter,
+  claimRateLimiter,
   requestVerificationPhoneRateLimiter,
   requestVerificationEmailRateLimiter,
   validateOtpRateLimiter,
@@ -24,6 +26,7 @@ import {
   RequestForgotPasswordDto,
   ValidateOtpDto,
 } from './dto/forgot-password.dto';
+import { ClaimDto, ClaimVerifyDto } from './dto/claim.dto';
 import { RegisterByPhoneDto } from './dto/register-by-phone.dto';
 import { RequestVerificationPhoneDto } from './dto/request-verification-phone.dto';
 import { ValidateOtpPhoneDto } from './dto/validate-otp-phone.dto';
@@ -91,6 +94,26 @@ export function authRoutes(): Router {
     path: '/auth/validateOtp',
     handlerKey: 'validateOtp',
     middlewares: [validateOtpRateLimiter, validateDto(ValidateOtpDto)],
+  });
+
+  // Account-claim flow: an auto-provisioned buyer sets their first password from
+  // the `/claim?token=…` link in the post-payment email. `verify` is the page
+  // pre-flight; `claim` consumes the token, sets the password and logs them in.
+  bindRoute({
+    router,
+    controller: ctrl,
+    method: 'post',
+    path: '/auth/claim/verify',
+    handlerKey: 'claimVerify',
+    middlewares: [claimVerifyRateLimiter, validateDto(ClaimVerifyDto)],
+  });
+  bindRoute({
+    router,
+    controller: ctrl,
+    method: 'post',
+    path: '/auth/claim',
+    handlerKey: 'claim',
+    middlewares: [claimRateLimiter, validateDto(ClaimDto)],
   });
 
   // Phone-register flow (T1.1-T1.3, audit #2/#3/#4).

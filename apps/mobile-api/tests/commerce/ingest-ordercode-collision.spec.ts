@@ -23,6 +23,7 @@ const cred: VerifiedCredential = {
   name: 'revenuecat',
   triggersAffiliate: false,
   canIngestRefund: false,
+  canProvisionMember: false,
 };
 
 describe('PurchaseIngestService order-code collision', () => {

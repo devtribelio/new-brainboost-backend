@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { ERROR_MESSAGES } from '@bb/common/exceptions';
 import { VoucherService } from '@bb/domain/commerce/voucher.service';
 import { prisma } from '@bb/db';
 
@@ -127,19 +128,19 @@ describe('VoucherService', () => {
   it('returns invalid for unknown code', async () => {
     const r = await service.validate('DOES-NOT-EXIST', productAId, memberId);
     expect(r.valid).toBe(false);
-    expect(r.reason).toMatch(/not found/i);
+    expect(r.reason).toMatch(/tidak ditemukan/i);
   });
 
   it('returns invalid for inactive voucher', async () => {
     const r = await service.validate(codes.inactive, productAId, memberId);
     expect(r.valid).toBe(false);
-    expect(r.reason).toMatch(/inactive/i);
+    expect(r.reason).toMatch(/tidak aktif/i);
   });
 
   it('returns invalid when voucher scoped to different product', async () => {
     const r = await service.validate(codes.wrongProduct, productAId, memberId);
     expect(r.valid).toBe(false);
-    expect(r.reason).toMatch(/applicable/i);
+    expect(r.reason).toMatch(/tidak berlaku untuk produk/i);
   });
 
   it('accepts a multi-product voucher for every whitelisted product, rejects others', async () => {
@@ -149,25 +150,25 @@ describe('VoucherService', () => {
     expect(b.valid).toBe(true);
     const other = await service.validate(codes.multiProduct, randomUUID(), memberId);
     expect(other.valid).toBe(false);
-    expect(other.reason).toMatch(/applicable/i);
+    expect(other.reason).toMatch(/tidak berlaku untuk produk/i);
   });
 
   it('returns invalid for expired voucher', async () => {
     const r = await service.validate(codes.expired, productAId, memberId);
     expect(r.valid).toBe(false);
-    expect(r.reason).toMatch(/expired/i);
+    expect(r.reason).toMatch(/kedaluwarsa/i);
   });
 
   it('returns invalid for not-yet-active voucher', async () => {
     const r = await service.validate(codes.notYet, productAId, memberId);
     expect(r.valid).toBe(false);
-    expect(r.reason).toMatch(/yet active/i);
+    expect(r.reason).toMatch(/belum berlaku/i);
   });
 
   it('returns invalid when quota exhausted', async () => {
     const r = await service.validate(codes.exhausted, productAId, memberId);
     expect(r.valid).toBe(false);
-    expect(r.reason).toMatch(/exhaust/i);
+    expect(r.reason).toBe(ERROR_MESSAGES.VOUCHER_EXHAUSTED);
   });
 
   it('returns valid for valid voucher', async () => {
@@ -254,7 +255,7 @@ describe('VoucherService', () => {
 
     const r = await service.validate(codes.trialTwo, productAId, memberId);
     expect(r.valid).toBe(false);
-    expect(r.reason).toMatch(/already used/i);
+    expect(r.reason).toBe(ERROR_MESSAGES.VOUCHER_TRIAL_ALREADY_USED);
     expect(r.errorCode).toBe('VOUCHER_TRIAL_ALREADY_USED');
   });
 

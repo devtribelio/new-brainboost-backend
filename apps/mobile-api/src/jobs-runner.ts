@@ -13,6 +13,7 @@ import { subscriptionRenewalReminder } from '@bb/domain/jobs/subscription-renewa
 import { subscriptionSeatChoiceReminder } from '@bb/domain/jobs/subscription-seat-choice-reminder';
 import { topicDigest } from '@bb/domain/jobs/topic-digest';
 import { purgeScheduledDeletions } from '@bb/domain/jobs/purge-scheduled-deletions';
+import { firstPurchaseVoucher } from '@bb/domain/jobs/first-purchase-voucher';
 import { streakReminder } from './modules/tracker/streak-reminder.job';
 import { migrateAudioToStorage } from './modules/media/audio-migration.job';
 
@@ -75,6 +76,10 @@ const JOBS: Array<{ name: string; run: () => Promise<unknown> }> = [
   // send times stay editable in `app_settings`. No-ops while `streak.reminderEnabled`
   // is false, which is how it ships.
   { name: 'streakReminder', run: () => streakReminder() },
+  // Safe on every tick and cheap when idle: it returns immediately unless
+  // `firstPurchaseVoucher.enabled` is true AND `launchAt` is set, and it ships with
+  // both off. It writes outbox rows, never money.
+  { name: 'firstPurchaseVoucher', run: () => firstPurchaseVoucher() },
   // Drains the backoffice's "Migrasi ke S3" queue. LAST on its lane on purpose:
   // it is the only job here that can run for minutes (download + ffmpeg + upload),
   // and money jobs must not wait behind it. Needs ffmpeg/ffprobe on the host.
