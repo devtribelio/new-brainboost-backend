@@ -54,7 +54,12 @@ export function registerCommerceListeners(): void {
       // pre-voucher base so `computeAmount` can subtract it again (legacy
       // shape). When acceptedAmount is absent, falls back to gross (web /
       // voucher bypass behavior unchanged).
-      const commissionBase = e.acceptedAmount ?? e.amount;
+      //
+      // PPN is stripped first: `amount` is tax-inclusive since checkout tax
+      // shipped, and tax is money forwarded to the state, not revenue — an
+      // affiliator must earn the same on a course whether the rate is 0 or 11.
+      // Absent on ingest channels (never billed here) → 0, so IAP net is untouched.
+      const commissionBase = (e.acceptedAmount ?? e.amount) - (e.taxAmount ?? 0);
       await affiliatorService
         .commitCommissionsForPayment({
           paymentId: e.paymentId,

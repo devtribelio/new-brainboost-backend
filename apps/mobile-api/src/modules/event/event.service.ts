@@ -2,6 +2,8 @@ import { prisma } from '@bb/db';
 import { badRequest, notFound, ERROR_CODES } from '@bb/common/exceptions';
 import { verifyEventOrderToken } from '@bb/common/utils/event-order-token.util';
 import { computeTicketItemTotal, type PriceLine } from '@bb/domain/event/price-tier';
+import { computeTotals } from '@bb/domain/commerce/utils/compute-totals';
+import { resolveTaxRate } from '@bb/domain/commerce/tax';
 
 /** Ticket statuses that occupy a seat. See docs/event-ticketing.md K-1. */
 const SEAT_TAKEN = ['RESERVED', 'ISSUED'];
@@ -16,6 +18,13 @@ export interface TicketQuoteView {
   qty: number;
   itemTotal: number;
   breakdown: PriceLine[];
+  /** Always 0: no voucher on a public quote. Present so the shape matches checkout. */
+  voucherAmount: number;
+  taxRate: number;
+  /** On `itemTotal`; the lines in `breakdown` stay pre-tax. */
+  taxAmount: number;
+  /** Tax-inclusive. */
+  amount: number;
 }
 
 export interface TicketTypeView {
@@ -64,6 +73,10 @@ export interface EventListItemView {
 export interface EventOrderView {
   transactionCode: string;
   status: string;
+  /** As frozen on the order — a rate change after purchase never moves these. */
+  taxRate: number;
+  taxAmount: number;
+  /** Tax-inclusive. */
   amount: number;
   paidAt: Date | null;
   expiredAt: Date | null;
@@ -307,7 +320,24 @@ export class EventService {
     }
 
     const priced = computeTicketItemTotal(type.product.price, type.priceTiers, n);
-    return { qty: n, itemTotal: priced.itemTotal, breakdown: priced.breakdown };
+    // Same arithmetic checkout runs (`CheckoutService.start` → `computeTotals`),
+    // minus the voucher it cannot know: a quote the buyer is then taxed
+    // differently for is worse than no quote.
+    const totals = computeTotals({
+      unitPrice: type.product.price,
+      qty: n,
+      itemTotal: priced.itemTotal,
+      taxRate: await resolveTaxRate(),
+    });
+    return {
+      qty: n,
+      itemTotal: priced.itemTotal,
+      breakdown: priced.breakdown,
+      voucherAmount: 0,
+      taxRate: totals.taxRate,
+      taxAmount: totals.taxAmount,
+      amount: totals.amount,
+    };
   }
 
   /**
@@ -342,6 +372,8 @@ export class EventService {
       select: {
         code: true,
         status: true,
+        taxRate: true,
+        taxAmount: true,
         amount: true,
         paidAt: true,
         expiredAt: true,
@@ -380,6 +412,8 @@ export class EventService {
     return {
       transactionCode: order.code,
       status: order.status,
+      taxRate: order.taxRate,
+      taxAmount: order.taxAmount,
       amount: order.amount,
       paidAt: order.paidAt,
       expiredAt: order.expiredAt,

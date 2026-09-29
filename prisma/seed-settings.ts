@@ -93,6 +93,12 @@ const SETTINGS: Array<{ key: string; value: string; description: string }> = [
       "Pin the USD→IDR rate to fx.usdIdr ('true' to enable), overriding the FX API and RevenueCat-derived rates. Use when the live rate is wrong or the providers are down.",
   },
   {
+    key: 'tax.rate',
+    value: '0',
+    description:
+      'PPN applied at checkout, in percent (11 = 11%). 0 = tax off. Frozen on each order at creation; changing it never moves an existing order.',
+  },
+  {
     key: 'kyc.minBalance',
     value: '55000',
     description:

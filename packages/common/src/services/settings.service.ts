@@ -87,6 +87,11 @@ export const SETTING_KEYS = {
   streakDimmedEnabled: 'streak.dimmedEnabled',
   streakAtRiskHour: 'streak.atRiskHour',
   streakDimmedHour: 'streak.dimmedHour',
+  // PPN applied at checkout, in percent (11 = 11%). Ships 0 = tax off; flipping
+  // it is a PRODUCT switch, not a knob: every new order from that minute is billed
+  // tax-inclusive with no redeploy. Frozen per order, so orders already placed
+  // never move. See docs/checkout-tax.md.
+  taxRate: 'tax.rate',
 } as const;
 
 export class SettingsService {

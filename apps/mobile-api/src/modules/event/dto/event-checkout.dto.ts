@@ -191,7 +191,16 @@ export class EventCheckoutResultDto {
   @ApiProperty({ example: 60000 })
   voucherAmount!: number;
 
-  @ApiProperty({ example: 240000, description: 'Amount due' })
+  @ApiProperty({ example: 11, description: 'PPN percent frozen on the order; 0 while tax is off.' })
+  taxRate!: number;
+
+  @ApiProperty({
+    example: 26400,
+    description: 'Tax on `itemTotal − voucherAmount`, one line for the order. 0 = hide the row.',
+  })
+  taxAmount!: number;
+
+  @ApiProperty({ example: 266400, description: 'Amount due, tax-inclusive' })
   amount!: number;
 
   @ApiProperty({ example: '2026-09-09T14:00:00.000Z', description: 'Seats are released after this' })
