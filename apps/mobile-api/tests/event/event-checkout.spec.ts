@@ -954,12 +954,15 @@ describe('bundle pricing', () => {
 
   describe('tax (PPN) with tax.rate = 11 — event tickets are exempt', () => {
     async function withRate<T>(rate: string, fn: () => Promise<T>): Promise<T> {
+      await settingsService.set(SETTING_KEYS.taxEnabled, 'true');
       await settingsService.set(SETTING_KEYS.taxRate, rate);
       SettingsService.clearCache();
       try {
         return await fn();
       } finally {
-        await prisma.appSetting.deleteMany({ where: { key: SETTING_KEYS.taxRate } });
+        await prisma.appSetting.deleteMany({
+          where: { key: { in: [SETTING_KEYS.taxEnabled, SETTING_KEYS.taxRate] } },
+        });
         SettingsService.clearCache();
       }
     }

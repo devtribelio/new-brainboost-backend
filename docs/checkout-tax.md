@@ -114,7 +114,14 @@ Tidak ada tabel baru. Dua kolom di `commerce_transactions`:
 | `tax_rate` | `DOUBLE PRECISION` (Prisma `Float`) | `0` | Rate yang berlaku saat order dibuat, **dibekukan** |
 | `tax_amount` | `INT` | `0` | Rupiah pajak, **dibekukan** |
 
-Migration `20260929120000_commerce_tax`. Plus satu baris seed `app_settings` (`tax.rate` = `0`, `prisma/seed-settings.ts`) — data, bukan DDL.
+Migration `20260929120000_commerce_tax`. Plus dua baris seed `app_settings` (`prisma/seed-settings.ts`) — data, bukan DDL:
+
+| Key | Seed | Fungsi |
+|---|---|---|
+| `tax.enabled` | `false` | **Saklar.** Mati = semua order baru rate 0, apa pun `tax.rate`. Dicek pertama di `resolveTaxRate`. |
+| `tax.rate` | `0` | Persen (11 = 11%). Boleh diisi lebih dulu sebelum go-live. |
+
+Dua key supaya rate bisa disiapkan sebelum go-live dan mematikan pajak = satu flip tanpa kehilangan rate. Go-live = `UPDATE app_settings SET value='true' WHERE key='tax.enabled'` (rate sudah 11), berlaku ≤60 detik. Rollback = `'false'`. Order yang sudah dibuat tidak bergerak dua arah.
 
 `Float`, bukan `NUMERIC(5,2)` seperti draft awal: `GET /payment/commerce/list` mengembalikan raw Prisma row, dan `Decimal` Prisma ter-serialisasi ke JSON sebagai **string** — melanggar "semua amount number". Rate 11 / 11.5 / 12 eksak di double; perkalian `taxBase × rate` dilakukan dulu, baru satu kali dibagi 100, supaya `.5` eksak tetap eksak sebelum `Math.round`.
 
@@ -195,7 +202,7 @@ Migration 2 kolom, `computeTotals` + setting `tax.rate` (seed 0), field baru di 
 File yang disentuh:
 
 - `prisma/schema.prisma` + migration `20260929120000_commerce_tax` — 2 kolom (§5).
-- `packages/common/src/services/settings.service.ts` — `SETTING_KEYS.taxRate = 'tax.rate'`; `prisma/seed-settings.ts` seed `'0'`.
+- `packages/common/src/services/settings.service.ts` — `SETTING_KEYS.taxEnabled = 'tax.enabled'` (seed `false`) + `SETTING_KEYS.taxRate = 'tax.rate'` (seed `0`); `prisma/seed-settings.ts`.
 - `packages/domain/src/commerce/tax.ts` — `resolveTaxRate(productId)`; 0 untuk `event_ticket` via `isEventTicketOrder`, else `tax.rate`. Dipanggil dari course price, event quote, dan kernel ingest.
 - `apps/mobile-api/src/modules/ingest/purchase-ingest.service.ts` — `taxOnProceeds?` di input; `taxAmount = round(accepted × r/100)`, simpan + emit hanya saat flag ada. `apps/mobile-api/src/modules/webhook/revenuecat.handler.ts` — set flag. Scalev/Lynk.id tidak diubah (§6.3).
 - `packages/domain/src/commerce/utils/compute-totals.ts` — input `taxRate`, output `taxRate`, `taxAmount`, `amount` tax-inclusive. Tanpa `taxRate` hasilnya byte-identik dengan fungsi lama (ada test).

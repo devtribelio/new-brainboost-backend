@@ -184,13 +184,32 @@ describe('commerce checkout flow', () => {
     });
   });
 
-  describe('with tax.rate = 11', () => {
+  it('a configured rate bills nothing while tax.enabled is off', async () => {
+    try {
+      await settingsService.set(SETTING_KEYS.taxRate, '11');
+      SettingsService.clearCache();
+      const r = await request(app)
+        .post('/api/member/product/checkout/quote')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send({ productId });
+      expect(r.status).toBe(200);
+      expect(r.body.data).toMatchObject({ taxRate: 0, taxAmount: 0, amount: 500_000 });
+    } finally {
+      await prisma.appSetting.deleteMany({ where: { key: SETTING_KEYS.taxRate } });
+      SettingsService.clearCache();
+    }
+  });
+
+  describe('with tax.enabled = true, tax.rate = 11', () => {
     beforeAll(async () => {
+      await settingsService.set(SETTING_KEYS.taxEnabled, 'true');
       await settingsService.set(SETTING_KEYS.taxRate, '11');
       SettingsService.clearCache();
     });
     afterAll(async () => {
-      await prisma.appSetting.deleteMany({ where: { key: SETTING_KEYS.taxRate } });
+      await prisma.appSetting.deleteMany({
+        where: { key: { in: [SETTING_KEYS.taxEnabled, SETTING_KEYS.taxRate] } },
+      });
       SettingsService.clearCache();
     });
 

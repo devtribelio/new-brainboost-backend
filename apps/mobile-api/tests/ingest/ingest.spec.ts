@@ -132,11 +132,14 @@ describe('purchase ingestion kernel', () => {
   // Last on purpose: the idempotency case above counts this buyer's commissions.
   describe('PPN on store proceeds (RevenueCat) with tax.rate = 11', () => {
     beforeAll(async () => {
+      await settingsService.set(SETTING_KEYS.taxEnabled, 'true');
       await settingsService.set(SETTING_KEYS.taxRate, '11');
       SettingsService.clearCache();
     });
     afterAll(async () => {
-      await prisma.appSetting.deleteMany({ where: { key: SETTING_KEYS.taxRate } });
+      await prisma.appSetting.deleteMany({
+        where: { key: { in: [SETTING_KEYS.taxEnabled, SETTING_KEYS.taxRate] } },
+      });
       SettingsService.clearCache();
     });
 

@@ -63,8 +63,9 @@ amount    = taxBase + taxAmount                  (tax-inclusive)
 - Every change is **additive**. No request body changes. No field is renamed
   or removed. Only `amount` changes meaning (tax-inclusive).
 - FE reads `taxAmount ?? 0` and `taxRate ?? 0` so either side can deploy first.
-- BE ships with the rate at **0** → nothing changes for buyers until the rate
-  is flipped in config (no redeploy). Rows render only when `taxAmount > 0`.
+- BE ships with tax **switched off** (`tax.enabled = false`, rate 0) → nothing
+  changes for buyers until ops flips the switch in config (no redeploy). Rows
+  render only when `taxAmount > 0`.
 - Catalog prices (`product/list`, `product/course/detail`, event `/on-sale`
   and `/:slug`) stay pre-tax and are **not touched**. If legal wants "Harga
   belum termasuk PPN", that copy belongs on the **event page too**, not only
