@@ -43,16 +43,6 @@ export interface NormalizedPurchase {
    * platform cost to Brainboost, not a deduction the affiliator should bear.
    */
   netAmount?: number;
-  /**
-   * Brainboost owes PPN on what the store pays out (finance, 2026-09-30:
-   * "11% dari uang masuk Apple") — Apple does not remit it for us. Web checkout
-   * adds tax on top of the catalog price; an App Store price is one number the
-   * buyer sees, so the tax is booked here instead: `tax_amount = netAmount ×
-   * rate` (our liability, same meaning as a web row), and the affiliate base
-   * is the proceeds after that tax. Set by the RevenueCat adapter only. Absent
-   * (Scalev, Lynk.id) = no tax booked on the order, exactly as before.
-   */
-  taxOnProceeds?: boolean;
   voucherAmount?: number;
   /**
    * Currency `grossAmount`/`netAmount` are denominated in. Absent or 'IDR' means they
@@ -160,13 +150,26 @@ export class PurchaseIngestService {
     const money = await this.normalizeToIdr(input, product);
     const { gross, accepted } = money;
 
-    // PPN on the store's payout to us (RevenueCat): rate × accepted, half-up.
-    // Same resolver as checkout, so an event ticket or a rate of 0 books
-    // nothing; channels that never set the flag keep tax 0 and are
-    // byte-for-byte unchanged. One rate for every storefront: the PPN we owe
-    // is Indonesian whatever currency the buyer paid in.
-    const taxRate = input.taxOnProceeds ? await resolveTaxRate(productId) : 0;
-    const taxAmount = taxRate > 0 ? Math.round((accepted * taxRate) / 100) : 0;
+    // PPN on every ingested purchase (RevenueCat, Scalev, Lynk.id): none of
+    // these stores can add a tax line, the price is raised to cover it instead,
+    // and Brainboost remits the PPN itself (finance, 2026-09-30). Two shapes,
+    // told apart by whether the store kept a cut:
+    //  - store cut present (accepted < gross — Apple/Google): finance's rule,
+    //    tax = rate × payout, exclusive ("11% dari uang masuk Apple");
+    //  - no store cut (accepted == gross — Scalev, Lynk.id): the price is one
+    //    we set inclusive, exactly like web, so the tax is the share INSIDE it,
+    //    gross × r / (100 + r). Taxing that gross at a flat 11% would bill the
+    //    PPN twice against a price that already contains it.
+    // Same resolver as checkout: an event ticket or the switch being off books
+    // 0. One rate for every storefront: the PPN we owe is Indonesian whatever
+    // currency the buyer paid in.
+    const taxRate = await resolveTaxRate(productId);
+    const taxAmount =
+      taxRate <= 0
+        ? 0
+        : accepted < gross
+          ? Math.round((accepted * taxRate) / 100)
+          : Math.round((gross * taxRate) / (100 + taxRate));
 
     // RevenueCat can deliver a burst of events in the same instant (IAP restore
     // flood). The order code is count-derived → concurrent inserts collide on
@@ -301,9 +304,9 @@ export class PurchaseIngestService {
       // takehome). For events without a net signal, leave undefined → listener
       // falls back to `amount` (gross) and existing channels are unaffected.
       acceptedAmount: input.netAmount != null ? accepted : undefined,
-      // PPN owed on this settle (0 unless the channel flagged it). The listener
-      // subtracts it from `acceptedAmount`, so the commission base is the
-      // proceeds after tax.
+      // PPN owed on this settle (0 while the switch is off). The listener
+      // subtracts it from `acceptedAmount ?? amount`, so the commission base is
+      // the proceeds after tax.
       taxAmount,
       voucherAmount,
       voucherId: null,

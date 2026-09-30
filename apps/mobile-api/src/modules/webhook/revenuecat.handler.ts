@@ -173,11 +173,6 @@ export class RevenueCatWebhookHandler {
       // RevenueCat's own USD conversion of the same purchase — the single bridge that
       // lets one USD/IDR rate serve every storefront.
       amountUsd: event.price,
-      // Brainboost remits PPN on Apple's payout itself (finance, 2026-09-30:
-      // "11% dari uang masuk Apple"), so ingest books `tax_amount = net × rate`
-      // on the order (our liability) and the affiliate base is the proceeds
-      // after that tax.
-      taxOnProceeds: true,
       isRenewal: event.type === 'RENEWAL',
       occurredAt,
       raw: event,

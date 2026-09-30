@@ -130,7 +130,7 @@ describe('purchase ingestion kernel', () => {
   });
 
   // Last on purpose: the idempotency case above counts this buyer's commissions.
-  describe('PPN on store proceeds (RevenueCat) with tax.rate = 11', () => {
+  describe('PPN on store proceeds (every ingest channel) with tax.rate = 11', () => {
     beforeAll(async () => {
       await settingsService.set(SETTING_KEYS.taxEnabled, 'true');
       await settingsService.set(SETTING_KEYS.taxRate, '11');
@@ -143,7 +143,7 @@ describe('purchase ingestion kernel', () => {
       SettingsService.clearCache();
     });
 
-    it('books 11% of Apple proceeds as tax and commissions the remainder', async () => {
+    it('RevenueCat: books 11% of Apple proceeds as tax and commissions the remainder', async () => {
       const cred = await credentialService.verify(keyAff);
       // Real prod shape: App Store price 399_000, Apple net 0.7 → 279_300.
       const res = await purchaseIngestService.ingest(
@@ -154,7 +154,6 @@ describe('purchase ingestion kernel', () => {
           productRef: { bySku: `${TAG}-sku` },
           grossAmount: 399_000,
           netAmount: 279_300,
-          taxOnProceeds: true,
         },
         cred!,
       );
@@ -169,7 +168,7 @@ describe('purchase ingestion kernel', () => {
       expect(comm?.amount).toBe(Math.floor(248_577 * 0.2));
     });
 
-    it('a channel that does not flag the price books no tax and is unchanged', async () => {
+    it('a channel with no store cut (Scalev-style) books the PPN inside its inclusive price, like web', async () => {
       const cred = await credentialService.verify(keyAff);
       const res = await purchaseIngestService.ingest(
         {
@@ -184,10 +183,12 @@ describe('purchase ingestion kernel', () => {
       expect(res.status).toBe('committed');
 
       const tx = await prisma.commerceTransaction.findUnique({ where: { id: res.transactionId } });
-      expect(tx).toMatchObject({ amount: 399_000, taxRate: 0, taxAmount: 0 });
+      // no store cut → price is ours and inclusive → tax = round(399_000 × 11/111) = 39_541,
+      // the same figure a web checkout at 399_000 would carry.
+      expect(tx).toMatchObject({ amount: 399_000, taxRate: 11, taxAmount: 39_541 });
 
       const comm = await waitForCommission({ buyerMemberId: buyerId, paymentId: res.paymentId });
-      expect(comm?.amount).toBe(79_800); // 20% of the full gross, exactly as today
+      expect(comm?.amount).toBe(Math.floor((399_000 - 39_541) * 0.2)); // 71_891
     });
   });
 });

@@ -155,13 +155,15 @@ Contract FE memasukkan event (§2.5–2.7, T-07/T-08), tapi itu asumsi FE, bukan
 
 **Status: DIPUTUSKAN 2026-09-30 — tiket event TIDAK kena PPN. Diimplementasikan:** `resolveTaxRate(productId)` mengembalikan 0 kalau `isEventTicketOrder(productId)` (dibaca dari `products.type`, bukan flag dari pemanggil — flag opsional yang lupa dikirim terbaca sebagai "bukan event" dan menagih pajak). Berlaku untuk event quote, event checkout, dan halaman order. Test: `event-checkout.spec.ts` "event tickets are exempt" (rate 11 → tiket tetap 0, course tetap 11). Field `taxRate`/`taxAmount` tetap ada di semua response event, nilainya 0 → FE sembunyikan baris.
 
-### 6.3 Pembelian iOS (RevenueCat): PPN 11% dari uang masuk Apple
+### 6.3 Pembelian lewat store (RevenueCat, Scalev, Lynk.id): PPN 11% dari uang masuk
 
-**Diputuskan finance 2026-09-30: PPN atas penjualan iOS dibayar Brainboost sendiri, DPP = uang yang masuk dari Apple** (`accepted_amount`), bukan harga konsumen. Harga iOS **tidak** dinaikkan.
+**Diputuskan finance 2026-09-30: PPN atas penjualan lewat store dibayar Brainboost sendiri, DPP = uang yang masuk** (`accepted_amount`; untuk channel yang tidak melaporkan net = gross), bukan harga konsumen. Store-store ini tidak bisa menambah baris PPN — harganya yang dinaikkan (inklusif). Awalnya hanya RevenueCat (user: "jangan sentuh Scalev"), lalu **diperluas ke semua channel ingest** pada hari yang sama ("pada pembayaran revenuecat dan scalev itu tidak ada ppn terpisah … handle untuk transaksi tersebut").
 
-Mekanisme, **hanya jalur RevenueCat** (`/api/webhook/revenuecat` → kernel ingest); Scalev/Lynk.id sengaja tidak disentuh:
-- `revenuecat.handler.ts` set `taxOnProceeds: true` pada input yang dinormalkan.
-- Kernel `purchase-ingest.service.ts`: kalau flag ada → `taxRate = resolveTaxRate(productId)` (0 untuk event, 0 sebelum flip), `taxAmount = round(accepted × r / 100)`. Disimpan beku di `tax_rate`/`tax_amount`, di-emit di event. Tanpa flag → 0, byte-identik dengan sebelumnya. **Satu rate untuk semua storefront** (SGD/USD/…): PPN yang kita bayar adalah PPN Indonesia, apa pun mata uang pembeli.
+Mekanisme, di **kernel ingest** (`purchase-ingest.service.ts`), tanpa flag per adapter — berlaku untuk `/api/webhook/revenuecat` dan `/api/ingest/purchase` (Scalev, Lynk.id) sekaligus. `taxRate = resolveTaxRate(productId)` (0 saat saklar mati, 0 untuk event); **dua bentuk, dibedakan dari ada-tidaknya potongan store** (opsi B, 2026-09-30):
+- **Ada potongan store** (`accepted < gross`, Apple/Google): aturan finance, `tax = round(accepted × r/100)` — eksklusif atas payout. RC 439.000 → payout 307.300 → PPN 33.803.
+- **Tanpa potongan store** (`accepted == gross`, Scalev/Lynk.id): harga itu kita yang set, inklusif, persis seperti web → `tax = round(gross × r/(100+r))`, porsi **di dalam** harga. Scalev 330.780 → PPN 32.780, **identik dengan web** pada harga yang sama. Mengenakan 11% flat di sini = pajak dobel atas harga yang sudah mengandung PPN (bug yang sempat ada: 36.386).
+
+Disimpan beku di `tax_rate`/`tax_amount`, di-emit di event. **Satu rate untuk semua storefront** (SGD/USD/…): PPN yang kita bayar adalah PPN Indonesia, apa pun mata uang pembeli. Kalau kelak Scalev melaporkan net setelah fee-nya (`accepted < gross`), baris itu otomatis pindah ke bentuk pertama.
 - Listener komisi: base = `(acceptedAmount ?? amount) − taxAmount`, satu pengurangan flat untuk web dan IAP, karena `taxAmount` selalu dinyatakan atas angka yang sama dengan base-nya (web: atas `amount`; IAP: atas `accepted`).
 - `tax_amount` di baris IAP = kewajiban PPN **kita**, sama maknanya dengan baris web → laporan PPN backoffice boleh `SUM(tax_amount)` lintas provider.
 
@@ -204,7 +206,7 @@ File yang disentuh:
 - `prisma/schema.prisma` + migration `20260929120000_commerce_tax` — 2 kolom (§5).
 - `packages/common/src/services/settings.service.ts` — `SETTING_KEYS.taxEnabled = 'tax.enabled'` (seed `false`) + `SETTING_KEYS.taxRate = 'tax.rate'` (seed `0`); `prisma/seed-settings.ts`.
 - `packages/domain/src/commerce/tax.ts` — `resolveTaxRate(productId)`; 0 untuk `event_ticket` via `isEventTicketOrder`, else `tax.rate`. Dipanggil dari course price, event quote, dan kernel ingest.
-- `apps/mobile-api/src/modules/ingest/purchase-ingest.service.ts` — `taxOnProceeds?` di input; `taxAmount = round(accepted × r/100)`, simpan + emit hanya saat flag ada. `apps/mobile-api/src/modules/webhook/revenuecat.handler.ts` — set flag. Scalev/Lynk.id tidak diubah (§6.3).
+- `apps/mobile-api/src/modules/ingest/purchase-ingest.service.ts` — `taxAmount = round(accepted × r/100)` untuk SEMUA purchase ingest (RC, Scalev, Lynk.id), simpan + emit. Tidak ada flag per adapter (§6.3).
 - `packages/domain/src/commerce/utils/compute-totals.ts` — input `taxRate`, output `taxRate`, `taxAmount`, `amount` tax-inclusive. Tanpa `taxRate` hasilnya byte-identik dengan fungsi lama (ada test).
 - `packages/domain/src/commerce/checkout.service.ts` — guard + aritmetika dipindah ke `price()` privat; `start()` dan `quote()` baru sama-sama lewat situ, jadi quote tidak bisa beda dengan submit. `start()` simpan `taxRate`/`taxAmount`.
 - `packages/common/src/events/commerce-events.ts` — `taxAmount?` di `CommercePaymentSuccessEvent`. `packages/domain/src/commerce/listeners/payment-success.listener.ts` — base komisi `(acceptedAmount ?? amount) − (taxAmount ?? 0)` (§6.1, §6.3).
@@ -222,6 +224,28 @@ File yang disentuh:
 6. Flip `tax.rate` di stage → QA T-01..T-11 → prod.
 
 ---
+
+## 8b. Backoffice-bb (branch `feat/checkout-tax` di repo itu, 2026-09-30)
+
+Hampir semua angka "revenue" di backoffice sudah `item_total − voucher_amount` (pre-tax) → tidak berubah. Yang diubah:
+
+| Halaman / file | Perubahan |
+|---|---|
+| `/settings` → card **Pajak (PPN)** (`components/settings-tax.tsx`, `lib/tax-settings-queries.ts`, `app/api/settings/route.ts`) | Toggle `tax.enabled` + tarif `tax.rate`, perm `settings.view`/`settings.manage`, audit `settings.update` target `tax` dengan before/after. Peringatan saat menyalakan. |
+| `/finance` | KPI baru **PPN Terutang** (`SUM(tax_amount)` PAID, + jumlah order); card "Revenue Bruto" → **"Harga Jual (sebelum diskon)"** (isinya pre-diskon + pre-PPN, dan kata "Bruto" di tabel kini berarti termasuk PPN); card **"Biaya Channel" dibuang** (`fee_total` selalu 0 → selamanya Rp 0); Outstanding/Gagal-Expired dan donut status diubah dari `SUM(amount)` → `item_total − voucher_amount` (satu basis pre-tax); subtitle "Revenue per Metode Bayar" diberi "(termasuk PPN)". Tetap 12 card. |
+| `/transactions/[code]` | Baris **PPN r%** sebelum Biaya channel, **Tagihan pembeli = `amount`**; untuk RC: baris "PPN atas payout Apple (setoran kita)" di bawah total + sub-baris "PPN → bersih" di Estimasi Diterima. |
+| `/transactions` KPI | Card baru **PPN** (Σ `tax_amount` order lunas dalam filter aktif + jumlah order) dan **Netto Lunas** (Σ Netto = payout/dibayar − PPN, dasar komisi; sub-teks selisih vs Nilai Lunas = potongan store + kredit prorata + PPN). **Nilai Lunas** tetap nilai penjualan `item_total − voucher` (sama dengan Revenue Bersih di Finance). **Estimasi Diterima IAP** = `accepted − tax`. Grid 5 kolom (2 baris). Diukur di staging Sep 2026: Nilai Lunas 99,79 jt vs Netto 73,81 jt — selisih = potongan Apple 13,47 jt + prorata upgrade langganan 12,38 jt + PPN 0,13 jt. |
+| `/transactions` + export CSV | Kolom Nilai diganti **Bruto** (`amount`, tagihan yang dibayar; sub-teks `PPN 11%`, RC: `PPN 11% atas payout`; tanpa sub-teks bila 0; nominal PPN hanya di detail + export) dan **Netto** (`item_total − voucher`, sub-teks potongan voucher). Tidak ada kolom PPN sendiri. Export kolom baru `PPN (%)`, `PPN (IDR)`, `Total Tagihan (IDR)`. |
+| `/members/[id]` pembelian | Kolom Net diganti **Bruto · Netto**, bentuk sama. |
+| Marketing first-purchase-voucher "Omzet" | `SUM(t.amount)` → `item_total − voucher_amount`. |
+| `/affiliate` card Revenue Affiliate (+ App) | Baris `bruto` → **`harga jual`** (isinya pre-tax); baris baru **`PPN payout (iOS)`** = Σ `tax_amount` baris RevenueCat (join `commerce_transactions` via `pay.transaction_id`, `taxExpr()`), dikurangkan ke angka utama → "bersih" iOS = `accepted − tax` = dasar komisi backend. Web tidak berubah (dasar komisi sudah pre-tax). Empat tabel atribusi (Top Affiliator, per produk, export) **tidak** dikurangi — memang tidak menjumlah ke card. |
+| Transaksi Terbaru (finance) | Nilai = pre-tax, konsisten dengan tabel lain. |
+
+**Definisi Netto (2026-09-30, koreksi):** `Netto = (accepted_amount jika > 0, else amount) − tax_amount` = **dasar komisi backend**. Web: `amount − tax` = `item_total − voucher` (angka lama, tidak bergerak). Store (RC/Scalev/Lynk.id): `payout store − PPN` — potongan Apple dan pajak sudah keluar. Contoh staging: RC 439.000 → netto 273.497; Scalev 330.780 → netto 298.000 (= web pada harga yang sama); web 330.780 → netto 298.000. Dipakai oleh list `/transactions` (kolom Netto + sort "amount"), KPI **Nilai Lunas**/AOV, export kolom `Nilai`, tabel pembelian `/members/[id]` dan `totalSpend` member. Sebelumnya `item_total − voucher` untuk semua baris, yang untuk baris store = harga store penuh (belum dikurangi apa pun).
+
+Aturan tampil: PPN hanya muncul bila `tax_amount > 0`; label tarif dari `tax_rate` row, bukan konstanta. Di baris store `amount − tax_amount` **bukan** harga pre-tax — UI tidak pernah menurunkannya.
+
+**Prasyarat runtime:** migration backend `20260929120000_commerce_tax` harus sudah ada di DB yang sama, kalau tidak query yang menyebut `tax_amount` gagal saat render (drift gotcha). Deploy backoffice ini **setelah** migration. Tidak perlu `pnpm db:setup` (tidak ada permission baru).
 
 ## 8. QA cases yang relevan BE (dari contract, tanpa subscription)
 
