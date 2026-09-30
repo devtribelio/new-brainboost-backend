@@ -1,20 +1,42 @@
 import { ApiProperty, ApiPropertyOptional } from '@bb/common/openapi/decorators';
 
-export class StartCheckoutResultDto {
+/**
+ * The price summary, identical between quote and submit. Render the card from
+ * these five numbers; never recompute one from the others.
+ */
+export class CheckoutQuoteResultDto {
+  @ApiProperty({ example: 500_000, description: 'Catalog price, pre-tax.' })
+  itemTotal!: number;
+
+  @ApiProperty({ example: 50_000, description: 'Discount on `itemTotal`.' })
+  voucherAmount!: number;
+
+  @ApiProperty({
+    example: 11,
+    description:
+      'PPN rate in percent (11 = 11%), for the label only. 0 while tax is off — hide the tax row when `taxAmount` is 0.',
+  })
+  taxRate!: number;
+
+  @ApiProperty({
+    example: 49_500,
+    description: 'round((itemTotal − voucherAmount) × taxRate / 100), half-up, whole rupiah.',
+  })
+  taxAmount!: number;
+
+  @ApiProperty({
+    example: 499_500,
+    description: 'Amount due, TAX-INCLUSIVE: itemTotal − voucherAmount + taxAmount. What the invoice is for.',
+  })
+  amount!: number;
+}
+
+export class StartCheckoutResultDto extends CheckoutQuoteResultDto {
   @ApiProperty({ format: 'uuid' })
   transactionId!: string;
 
   @ApiProperty({ example: 'BB-20260513-0042' })
   transactionCode!: string;
-
-  @ApiProperty({ example: 500_000 })
-  itemTotal!: number;
-
-  @ApiProperty({ example: 50_000 })
-  voucherAmount!: number;
-
-  @ApiProperty({ example: 450_000 })
-  amount!: number;
 
   @ApiProperty({ format: 'date-time' })
   expiredAt!: string;
@@ -103,7 +125,19 @@ export class TransactionStatusResultDto {
   })
   status!: string;
 
-  @ApiProperty({ example: 450_000 })
+  @ApiProperty({ example: 500_000, description: 'Pre-tax price, as frozen on the order.' })
+  itemTotal!: number;
+
+  @ApiProperty({ example: 50_000 })
+  voucherAmount!: number;
+
+  @ApiProperty({ example: 11, description: 'Percent frozen at creation; 0 for orders that predate tax.' })
+  taxRate!: number;
+
+  @ApiProperty({ example: 49_500, description: '0 for orders that predate tax.' })
+  taxAmount!: number;
+
+  @ApiProperty({ example: 499_500, description: 'Tax-inclusive total.' })
   amount!: number;
 
   @ApiPropertyOptional({ nullable: true, format: 'date-time' })
@@ -153,7 +187,20 @@ export class CommerceTransactionListItemDto {
   @ApiProperty({ type: 'integer', example: 50_000 })
   voucherAmount!: number;
 
-  @ApiProperty({ type: 'integer', example: 450_000, description: 'Grand total' })
+  @ApiProperty({
+    example: 11,
+    description: 'PPN percent frozen at creation. 0 for orders placed before tax existed.',
+  })
+  taxRate!: number;
+
+  @ApiProperty({
+    type: 'integer',
+    example: 49_500,
+    description: 'Tax on itemTotal − voucherAmount. 0 for pre-tax orders. NOT part of feeTotal.',
+  })
+  taxAmount!: number;
+
+  @ApiProperty({ type: 'integer', example: 499_500, description: 'Grand total, tax-inclusive' })
   amount!: number;
 
   @ApiPropertyOptional({ nullable: true, example: 'PROMO50' })

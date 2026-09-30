@@ -64,7 +64,13 @@ export class EventOrderResultDto {
   @ApiProperty({ enum: ['PENDING', 'PAID', 'EXPIRED', 'CANCELED'], example: 'PAID' })
   status!: string;
 
-  @ApiProperty({ example: 240000 })
+  @ApiProperty({ example: 11, description: 'PPN percent frozen on the order; 0 = no tax.' })
+  taxRate!: number;
+
+  @ApiProperty({ example: 26400, description: 'Tax included in `amount`; 0 = no tax row.' })
+  taxAmount!: number;
+
+  @ApiProperty({ example: 266400, description: 'Tax-inclusive total.' })
   amount!: number;
 
   @ApiPropertyOptional({ nullable: true, example: '2026-09-09T07:12:00.000Z' })

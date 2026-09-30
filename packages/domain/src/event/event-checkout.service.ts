@@ -63,6 +63,11 @@ export interface EventCheckoutResult {
   itemTotal: number;
   breakdown: PriceLine[];
   voucherAmount: number;
+  /** Percent, frozen on the order. 0 while tax is off — see docs/checkout-tax.md. */
+  taxRate: number;
+  /** On `itemTotal − voucherAmount`; one line for the order, never per package. */
+  taxAmount: number;
+  /** Tax-inclusive. */
   amount: number;
   expiredAt: Date;
   payment: {
@@ -161,6 +166,8 @@ export class EventCheckoutService {
       itemTotal: order.itemTotal,
       breakdown: priced.breakdown,
       voucherAmount: order.voucherAmount,
+      taxRate: order.taxRate,
+      taxAmount: order.taxAmount,
       amount: order.amount,
       expiredAt: order.expiredAt,
       payment: {

@@ -93,6 +93,18 @@ const SETTINGS: Array<{ key: string; value: string; description: string }> = [
       "Pin the USD→IDR rate to fx.usdIdr ('true' to enable), overriding the FX API and RevenueCat-derived rates. Use when the live rate is wrong or the providers are down.",
   },
   {
+    key: 'tax.enabled',
+    value: 'false',
+    description:
+      "Checkout PPN switch ('true' to bill tax). Off = every new order is taxed at 0 whatever tax.rate says. Frozen per order; flipping never moves an existing order.",
+  },
+  {
+    key: 'tax.rate',
+    value: '0',
+    description:
+      'PPN percent (11 = 11%) applied when tax.enabled is true: added on top for web checkout, 11% of Apple payout for iOS. Frozen on each order at creation.',
+  },
+  {
     key: 'kyc.minBalance',
     value: '55000',
     description:

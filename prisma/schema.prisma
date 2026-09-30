@@ -1144,7 +1144,16 @@ model CommerceTransaction {
   shippingTotal                Int                       @default(0) @map("shipping_total") // reserved; 0 for course MVP
   feeTotal                     Int                       @default(0) @map("fee_total")
   voucherAmount                Int                       @default(0) @map("voucher_amount")
-  amount                       Int                       @default(0) // grand total
+  /// PPN frozen on the order at creation, in percent (11 = 11%). A later rate
+  /// change must not move an existing order's history row or receipt — same
+  /// reason the UTM snapshot below is never updated. `Float`, not `Decimal`:
+  /// the list endpoint returns the raw row and a Prisma Decimal serialises as
+  /// a JSON string, which would break "every amount is a number". 0 = no tax
+  /// (every order before the change, and every order while the rate is unset).
+  taxRate                      Float                     @default(0) @map("tax_rate")
+  /// Rupiah of tax on `itemTotal − voucherAmount`, half-up. Included in `amount`.
+  taxAmount                    Int                       @default(0) @map("tax_amount")
+  amount                       Int                       @default(0) // grand total, tax-inclusive
   voucherCode                  String?                   @map("voucher_code")
   voucherId                    String?                   @map("voucher_id") @db.Uuid
   affiliatorId                 String?                   @map("affiliator_id") @db.Uuid
