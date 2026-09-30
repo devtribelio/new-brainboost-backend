@@ -9,6 +9,7 @@ import { prisma } from '@bb/db';
 import { registerCommerceListeners } from '@bb/domain/commerce/listeners/payment-success.listener';
 import { purchaseIngestService } from '@/modules/ingest/purchase-ingest.service';
 import { credentialService } from '@/modules/ingest/credential.service';
+import { SETTING_KEYS, SettingsService, settingsService } from '@bb/common/services/settings.service';
 
 const TAG = `ingest-${Date.now()}`;
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -126,5 +127,64 @@ describe('purchase ingestion kernel', () => {
       where: { buyerMemberId: buyerId, paymentId: res.paymentId },
     });
     expect(comm).toBeNull(); // toggle off → enrollment-only, no commission
+  });
+
+  // Last on purpose: the idempotency case above counts this buyer's commissions.
+  describe('PPN on store proceeds (RevenueCat) with tax.rate = 11', () => {
+    beforeAll(async () => {
+      await settingsService.set(SETTING_KEYS.taxRate, '11');
+      SettingsService.clearCache();
+    });
+    afterAll(async () => {
+      await prisma.appSetting.deleteMany({ where: { key: SETTING_KEYS.taxRate } });
+      SettingsService.clearCache();
+    });
+
+    it('books 11% of Apple proceeds as tax and commissions the remainder', async () => {
+      const cred = await credentialService.verify(keyAff);
+      // Real prod shape: App Store price 399_000, Apple net 0.7 → 279_300.
+      const res = await purchaseIngestService.ingest(
+        {
+          providerEventId: `${TAG}-evt-tax-rc`,
+          type: 'PURCHASE',
+          memberRef: { byId: buyerId },
+          productRef: { bySku: `${TAG}-sku` },
+          grossAmount: 399_000,
+          netAmount: 279_300,
+          taxOnProceeds: true,
+        },
+        cred!,
+      );
+      expect(res.status).toBe('committed');
+
+      const tx = await prisma.commerceTransaction.findUnique({ where: { id: res.transactionId } });
+      // tax = round(279_300 × 11%) = 30_723 — on the payout, not on the 399_000 price
+      expect(tx).toMatchObject({ amount: 399_000, taxRate: 11, taxAmount: 30_723 });
+
+      const comm = await waitForCommission({ buyerMemberId: buyerId, paymentId: res.paymentId });
+      // base = 279_300 − 30_723 = 248_577 → 20% = 49_715
+      expect(comm?.amount).toBe(Math.floor(248_577 * 0.2));
+    });
+
+    it('a channel that does not flag the price books no tax and is unchanged', async () => {
+      const cred = await credentialService.verify(keyAff);
+      const res = await purchaseIngestService.ingest(
+        {
+          providerEventId: `${TAG}-evt-tax-plain`,
+          type: 'PURCHASE',
+          memberRef: { byId: buyerId },
+          productRef: { bySku: `${TAG}-sku` },
+          grossAmount: 399_000,
+        },
+        cred!,
+      );
+      expect(res.status).toBe('committed');
+
+      const tx = await prisma.commerceTransaction.findUnique({ where: { id: res.transactionId } });
+      expect(tx).toMatchObject({ amount: 399_000, taxRate: 0, taxAmount: 0 });
+
+      const comm = await waitForCommission({ buyerMemberId: buyerId, paymentId: res.paymentId });
+      expect(comm?.amount).toBe(79_800); // 20% of the full gross, exactly as today
+    });
   });
 });

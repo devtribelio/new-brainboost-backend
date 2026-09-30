@@ -148,11 +148,31 @@ Contract FE memasukkan event (§2.5–2.7, T-07/T-08), tapi itu asumsi FE, bukan
 
 **Status: DIPUTUSKAN 2026-09-30 — tiket event TIDAK kena PPN. Diimplementasikan:** `resolveTaxRate(productId)` mengembalikan 0 kalau `isEventTicketOrder(productId)` (dibaca dari `products.type`, bukan flag dari pemanggil — flag opsional yang lupa dikirim terbaca sebagai "bukan event" dan menagih pajak). Berlaku untuk event quote, event checkout, dan halaman order. Test: `event-checkout.spec.ts` "event tickets are exempt" (rate 11 → tiket tetap 0, course tetap 11). Field `taxRate`/`taxAmount` tetap ada di semua response event, nilainya 0 → FE sembunyikan baris.
 
-### 6.3 Pembelian iOS (RevenueCat) — DIREVERT, keputusan terbuka
+### 6.3 Pembelian iOS (RevenueCat): PPN 11% dari uang masuk Apple
 
-Jalur ingest (RC / Scalev / Lynk.id) **tidak disentuh**: tidak lewat `computeTotals`, `tax_*` = 0, listener kurangi 0, base komisi tetap `acceptedAmount ?? amount`.
+**Diputuskan finance 2026-09-30: PPN atas penjualan iOS dibayar Brainboost sendiri, DPP = uang yang masuk dari Apple** (`accepted_amount`), bukan harga konsumen. Harga iOS **tidak** dinaikkan.
 
-**Temuan prod 2026-09-30** (176 order RC di `bb_backend`, query via dbx, read-only):
+Mekanisme, **hanya jalur RevenueCat** (`/api/webhook/revenuecat` → kernel ingest); Scalev/Lynk.id sengaja tidak disentuh:
+- `revenuecat.handler.ts` set `taxOnProceeds: true` pada input yang dinormalkan.
+- Kernel `purchase-ingest.service.ts`: kalau flag ada → `taxRate = resolveTaxRate(productId)` (0 untuk event, 0 sebelum flip), `taxAmount = round(accepted × r / 100)`. Disimpan beku di `tax_rate`/`tax_amount`, di-emit di event. Tanpa flag → 0, byte-identik dengan sebelumnya. **Satu rate untuk semua storefront** (SGD/USD/…): PPN yang kita bayar adalah PPN Indonesia, apa pun mata uang pembeli.
+- Listener komisi: base = `(acceptedAmount ?? amount) − taxAmount`, satu pengurangan flat untuk web dan IAP, karena `taxAmount` selalu dinyatakan atas angka yang sama dengan base-nya (web: atas `amount`; IAP: atas `accepted`).
+- `tax_amount` di baris IAP = kewajiban PPN **kita**, sama maknanya dengan baris web → laporan PPN backoffice boleh `SUM(tax_amount)` lintas provider.
+
+Contoh row prod nyata (BB-20260929-0049), rate affiliator 20%:
+
+| | Nilai |
+|---|---|
+| Harga App Store (`amount`) | 399.000 |
+| `accepted_amount` (RC takehome 0,7) | 279.300 |
+| `tax_amount` = 279.300 × 11% | 30.723 |
+| Base komisi = 279.300 − 30.723 | 248.577 |
+| Komisi 20% | 49.715 (sebelumnya 55.860) |
+
+Turun ~11%: selama ini affiliator IAP dibayar dari PPN yang harus kita setor. Alternatif yang dipertimbangkan lalu ditolak finance: DPP = harga konsumen (399.000 × 11/111 = 39.541, base `accepted ÷ 1,11` = 251.621).
+
+**Catatan untuk finance, bukan kode:** akurasi `accepted_amount` sendiri (RC `takehome 0.7` vs `commission 0.2703 = 0,3 × (1 − 0.0991)` saling tidak konsisten soal siapa memotong pajak) hanya bisa direkonsiliasi dengan laporan payout App Store Connect. Rumus komisi di atas benar relatif terhadap `accepted_amount` apa pun nilainya.
+
+**Data prod 2026-09-30** (176 order RC di `bb_backend`, query via dbx, read-only) yang mendasari:
 
 | Currency | n | RC `tax_percentage` | = |
 |---|---|---|---|
@@ -160,11 +180,7 @@ Jalur ingest (RC / Scalev / Lynk.id) **tidak disentuh**: tidak lewat `computeTot
 | SGD / MYR / AUD / AED | 8 | 0.0826 / 0.0741 / 0.0909 / 0.0476 | GST/VAT lokal masing-masing |
 | USD / HKD | 8 | 0 | tanpa VAT |
 
-`commission_percentage 0.2703 = 0,30 × (1 − 0.0991)`: komisi Apple 30% dihitung dari harga **setelah** pajak dilepas. Definisi RC `takehome_percentage` (0.7) = porsi developer setelah komisi, **sebelum** pajak. Jadi untuk gross 399.000: `accepted_amount` kita = 279.300, net Apple sebenarnya ≈ 399.000 × 0,9009 × 0,7 = 251.622. **`accepted_amount` overstated ~10% oleh porsi PPN yang Apple setor**, dan komisi affiliator IAP hari ini dihitung dari angka itu.
-
-Konsekuensi: **jangan naikkan harga iOS untuk PPN** (pembeli kena dua kali).
-
-Sempat dibangun lalu **direvert atas permintaan user** (belum diputuskan): adapter RC set `priceIncludesTax`, kernel ingest `taxAmount = round(gross × r/(100+r))` beku di order, listener base = `paid − round(paid × taxAmount/amount)` (mengupas porsi PPN dari `acceptedAmount`). Untuk row di atas: base 251.621 = net Apple sebenarnya. Pertanyaan yang tersisa kalau dilanjutkan: (a) 11% seragam dari `app_settings` untuk semua storefront, atau (b) `tax_percentage` dari payload RC per storefront (SGD 9%, USD 0%). Dan: `tax_amount` di baris IAP = PPN yang **Apple** setor, bukan kewajiban kita — laporan PPN backoffice harus filter `provider IS NULL`.
+RC `tax_percentage` per storefront = tarif pajak lokal dalam bentuk inklusif (IDR 11/111, SGD 9/109, …). Sempat dibaca sebagai "Apple sudah memungut PPN"; finance mengonfirmasi **tidak** — kewajibannya di kita. Implementasi tetap memakai satu rate dari `app_settings`, bukan `tax_percentage` RC, karena yang kita setor adalah PPN Indonesia.
 
 ### Semua sudah masuk
 
@@ -180,10 +196,11 @@ File yang disentuh:
 
 - `prisma/schema.prisma` + migration `20260929120000_commerce_tax` — 2 kolom (§5).
 - `packages/common/src/services/settings.service.ts` — `SETTING_KEYS.taxRate = 'tax.rate'`; `prisma/seed-settings.ts` seed `'0'`.
-- `packages/domain/src/commerce/tax.ts` — `resolveTaxRate(productId)`; 0 untuk `event_ticket` via `isEventTicketOrder`, else `tax.rate`. Dipanggil dari course price + event quote. Ingest tidak memanggilnya (§6.3).
+- `packages/domain/src/commerce/tax.ts` — `resolveTaxRate(productId)`; 0 untuk `event_ticket` via `isEventTicketOrder`, else `tax.rate`. Dipanggil dari course price, event quote, dan kernel ingest.
+- `apps/mobile-api/src/modules/ingest/purchase-ingest.service.ts` — `taxOnProceeds?` di input; `taxAmount = round(accepted × r/100)`, simpan + emit hanya saat flag ada. `apps/mobile-api/src/modules/webhook/revenuecat.handler.ts` — set flag. Scalev/Lynk.id tidak diubah (§6.3).
 - `packages/domain/src/commerce/utils/compute-totals.ts` — input `taxRate`, output `taxRate`, `taxAmount`, `amount` tax-inclusive. Tanpa `taxRate` hasilnya byte-identik dengan fungsi lama (ada test).
 - `packages/domain/src/commerce/checkout.service.ts` — guard + aritmetika dipindah ke `price()` privat; `start()` dan `quote()` baru sama-sama lewat situ, jadi quote tidak bisa beda dengan submit. `start()` simpan `taxRate`/`taxAmount`.
-- `packages/common/src/events/commerce-events.ts` — `taxAmount?` di `CommercePaymentSuccessEvent`. `packages/domain/src/commerce/listeners/payment-success.listener.ts` — base komisi `(acceptedAmount ?? amount) − (taxAmount ?? 0)` (§6.1).
+- `packages/common/src/events/commerce-events.ts` — `taxAmount?` di `CommercePaymentSuccessEvent`. `packages/domain/src/commerce/listeners/payment-success.listener.ts` — base komisi `(acceptedAmount ?? amount) − (taxAmount ?? 0)` (§6.1, §6.3).
 - `packages/domain/src/commerce/payment.service.ts` — `getTransactionStatus` return `itemTotal`, `voucherAmount`, `taxRate`, `taxAmount`; bypass emit `taxAmount`. `apps/mobile-api/src/modules/webhook/xendit.handler.ts` emit `taxAmount`.
 - `apps/mobile-api/src/modules/commerce/` — route + controller `quoteCheckout` (`authGuard` + `voucherValidateRateLimiter` + `CheckoutQuoteDto`), `CheckoutQuoteResultDto` (di-extend `StartCheckoutResultDto`), field baru di `TransactionStatusResultDto` + `CommerceTransactionListItemDto`.
 - `apps/mobile-api/src/modules/event/` — `EventService.quote()` sekarang lewat `computeTotals` + `resolveTaxRate()` dan mengembalikan `voucherAmount/taxRate/taxAmount/amount` sendiri (controller tidak lagi menambal `amount = itemTotal`); `getOrderByCode()` select + return 2 kolom; DTO quote/order/checkout. `packages/domain/src/event/event-checkout.service.ts` teruskan 2 field dari order.

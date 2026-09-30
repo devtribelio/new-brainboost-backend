@@ -13,6 +13,13 @@ Companion: `docs/event-ticketing-contract.md` (§2b quote, §3 checkout, §4 ord
 - **Scope: course checkout + event tickets + transaction history.**
   Subscription is OUT of scope — `feat/subscription` is not on `main`, so
   `prorationCredit` does not exist in any response below.
+- **iOS in-app purchases (RevenueCat):** Brainboost remits PPN on Apple's
+  payout itself, so BE books `taxAmount = rate × Apple net` on the order.
+  Consequence for FE: once the rate is on, an IAP order in
+  `/payment/commerce/list` and detail carries `taxAmount > 0` like a web
+  order — render the same row (note `amount` there is the store price, so
+  `amount − taxAmount` is NOT a pre-tax price on IAP rows; just show the two
+  numbers). Nothing to send; Apple's checkout is Apple's.
 - **Event tickets are NOT taxed** (decided 2026-09-30). The event endpoints
   still carry `taxRate`/`taxAmount` for shape parity, and they are always `0`
   for a ticket order, so the tax row never renders there. See §5.

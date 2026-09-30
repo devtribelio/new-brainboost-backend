@@ -55,10 +55,13 @@ export function registerCommerceListeners(): void {
       // shape). When acceptedAmount is absent, falls back to gross (web /
       // voucher bypass behavior unchanged).
       //
-      // PPN is stripped first: `amount` is tax-inclusive since checkout tax
-      // shipped, and tax is money forwarded to the state, not revenue — an
-      // affiliator must earn the same on a course whether the rate is 0 or 11.
-      // Absent on ingest channels (never billed here) → 0, so IAP net is untouched.
+      // PPN is stripped first — tax is money forwarded to the state, not
+      // revenue, so an affiliator must earn the same on a course whether the
+      // rate is 0 or 11. `taxAmount` is always expressed on the same figure
+      // the base comes from: on the web path it is the tax added on top of
+      // `amount`; on IAP the ingest kernel books it as rate × `acceptedAmount`
+      // (Apple's payout). So one flat subtraction is right for both. 0 (or
+      // absent) on every channel that books no tax.
       const commissionBase = (e.acceptedAmount ?? e.amount) - (e.taxAmount ?? 0);
       await affiliatorService
         .commitCommissionsForPayment({
