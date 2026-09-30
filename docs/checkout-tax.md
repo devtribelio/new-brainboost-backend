@@ -1,7 +1,7 @@
 # Checkout Tax (PPN) — analisa contract FE & rencana BE
 
 > Hasil review contract FE `checkout-tax-contract.md` (ditulis FE 2026-09-28) terhadap kode `main` per 2026-09-28.
-> Status: **DIBANGUN 2026-09-29** di branch `feat/checkout-tax` (rate ship `0`, belum di-merge, migration belum di-apply). Base komisi pre-tax **diputuskan + dikodekan** (§6.1). Satu keputusan masih pending: tiket event kena PPN atau tidak (§6.2) — sengaja **belum** dikodekan.
+> Status: **DIBANGUN 2026-09-29/30** di branch `feat/checkout-tax` (rate ship `0`, belum di-merge, migration belum di-apply). Kedua keputusan bisnis sudah masuk: base komisi pre-tax (§6.1) dan **tiket event bebas PPN** (§6.2). Tidak ada keputusan pending di sisi BE.
 > Scope: course checkout, event tickets, riwayat transaksi. **Subscription di luar scope** (`feat/subscription` belum merge ke `main`; `prorationCredit` tidak ada di `main`).
 > Dokumen terkait: `docs/commerce-port.md` (checkout + Xendit + voucher bypass), `docs/event-ticketing.md` §17 (price ladder), `docs/event-ticketing-contract.md`, CLAUDE.md §5.
 
@@ -146,25 +146,41 @@ Selisih 22.000/order = komisi dibayar atas pajak yang disetor ke negara, bukan p
 
 Contract FE memasukkan event (§2.5–2.7, T-07/T-08), tapi itu asumsi FE, bukan keputusan pajak. Webinar/workshop berbayar umumnya jasa kena pajak → PPN; event hiburan kena **pajak hiburan / PBJT daerah**, bukan PPN; pendidikan formal bebas PPN, non-formal tidak. Keputusan finance/legal.
 
-Kode tidak memaksa satu jawaban: event sudah lewat `computeTotals`. Kalau tidak kena → rate untuk `products.type === 'event_ticket'` = 0 (satu cabang saat resolve rate).
+**Status: DIPUTUSKAN 2026-09-30 — tiket event TIDAK kena PPN. Diimplementasikan:** `resolveTaxRate(productId)` mengembalikan 0 kalau `isEventTicketOrder(productId)` (dibaca dari `products.type`, bukan flag dari pemanggil — flag opsional yang lupa dikirim terbaca sebagai "bukan event" dan menagih pajak). Berlaku untuk event quote, event checkout, dan halaman order. Test: `event-checkout.spec.ts` "event tickets are exempt" (rate 11 → tiket tetap 0, course tetap 11). Field `taxRate`/`taxAmount` tetap ada di semua response event, nilainya 0 → FE sembunyikan baris.
 
-**Status: belum diputuskan.**
+### 6.3 Pembelian iOS (RevenueCat) — DIREVERT, keputusan terbuka
 
-### Yang sudah jalan tanpa menunggu §6.2
+Jalur ingest (RC / Scalev / Lynk.id) **tidak disentuh**: tidak lewat `computeTotals`, `tax_*` = 0, listener kurangi 0, base komisi tetap `acceptedAmount ?? amount`.
 
-Migration 2 kolom, `computeTotals` + setting `tax.rate` (seed 0), field baru di semua response, endpoint quote 2.2, base komisi pre-tax. Rate 0 = perilaku tidak berubah. §6.2 tinggal satu cabang di `resolveTaxRate()`.
+**Temuan prod 2026-09-30** (176 order RC di `bb_backend`, query via dbx, read-only):
+
+| Currency | n | RC `tax_percentage` | = |
+|---|---|---|---|
+| IDR | 159 | 0.0991 | 11/111 → PPN 11% **sudah di dalam** harga App Store |
+| SGD / MYR / AUD / AED | 8 | 0.0826 / 0.0741 / 0.0909 / 0.0476 | GST/VAT lokal masing-masing |
+| USD / HKD | 8 | 0 | tanpa VAT |
+
+`commission_percentage 0.2703 = 0,30 × (1 − 0.0991)`: komisi Apple 30% dihitung dari harga **setelah** pajak dilepas. Definisi RC `takehome_percentage` (0.7) = porsi developer setelah komisi, **sebelum** pajak. Jadi untuk gross 399.000: `accepted_amount` kita = 279.300, net Apple sebenarnya ≈ 399.000 × 0,9009 × 0,7 = 251.622. **`accepted_amount` overstated ~10% oleh porsi PPN yang Apple setor**, dan komisi affiliator IAP hari ini dihitung dari angka itu.
+
+Konsekuensi: **jangan naikkan harga iOS untuk PPN** (pembeli kena dua kali).
+
+Sempat dibangun lalu **direvert atas permintaan user** (belum diputuskan): adapter RC set `priceIncludesTax`, kernel ingest `taxAmount = round(gross × r/(100+r))` beku di order, listener base = `paid − round(paid × taxAmount/amount)` (mengupas porsi PPN dari `acceptedAmount`). Untuk row di atas: base 251.621 = net Apple sebenarnya. Pertanyaan yang tersisa kalau dilanjutkan: (a) 11% seragam dari `app_settings` untuk semua storefront, atau (b) `tax_percentage` dari payload RC per storefront (SGD 9%, USD 0%). Dan: `tax_amount` di baris IAP = PPN yang **Apple** setor, bukan kewajiban kita — laporan PPN backoffice harus filter `provider IS NULL`.
+
+### Semua sudah masuk
+
+Migration 2 kolom, `computeTotals` + setting `tax.rate` (seed 0), field baru di semua response, endpoint quote 2.2, base komisi pre-tax, event exempt. Rate 0 = perilaku tidak berubah; flip ke 11% hanya menagih course.
 
 ---
 
 ## 7. Implementasi BE (selesai 2026-09-29, branch `feat/checkout-tax`)
 
-Yang **belum** dikodekan, sengaja: cabang rate per tipe produk (§6.2). Sudah disiapkan satu-baris: `resolveTaxRate()` (`packages/domain/src/commerce/tax.ts`) adalah satu-satunya tempat rate dibaca. Base komisi pre-tax (§6.1) sudah masuk: `CommercePaymentSuccessEvent.taxAmount` di-emit oleh kedua jalur commerce (bypass + webhook Xendit) dan dikurangkan di listener.
+`resolveTaxRate(productId)` (`packages/domain/src/commerce/tax.ts`) adalah satu-satunya tempat rate dibaca, dan satu-satunya tempat aturan "event tidak kena" hidup (§6.2). Base komisi pre-tax (§6.1): `CommercePaymentSuccessEvent.taxAmount` di-emit oleh kedua jalur commerce (bypass + webhook Xendit) dan dikurangkan di listener.
 
 File yang disentuh:
 
 - `prisma/schema.prisma` + migration `20260929120000_commerce_tax` — 2 kolom (§5).
 - `packages/common/src/services/settings.service.ts` — `SETTING_KEYS.taxRate = 'tax.rate'`; `prisma/seed-settings.ts` seed `'0'`.
-- `packages/domain/src/commerce/tax.ts` — `resolveTaxRate()`; dipanggil dari course price + event quote.
+- `packages/domain/src/commerce/tax.ts` — `resolveTaxRate(productId)`; 0 untuk `event_ticket` via `isEventTicketOrder`, else `tax.rate`. Dipanggil dari course price + event quote. Ingest tidak memanggilnya (§6.3).
 - `packages/domain/src/commerce/utils/compute-totals.ts` — input `taxRate`, output `taxRate`, `taxAmount`, `amount` tax-inclusive. Tanpa `taxRate` hasilnya byte-identik dengan fungsi lama (ada test).
 - `packages/domain/src/commerce/checkout.service.ts` — guard + aritmetika dipindah ke `price()` privat; `start()` dan `quote()` baru sama-sama lewat situ, jadi quote tidak bisa beda dengan submit. `start()` simpan `taxRate`/`taxAmount`.
 - `packages/common/src/events/commerce-events.ts` — `taxAmount?` di `CommercePaymentSuccessEvent`. `packages/domain/src/commerce/listeners/payment-success.listener.ts` — base komisi `(acceptedAmount ?? amount) − (taxAmount ?? 0)` (§6.1).

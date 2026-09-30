@@ -952,7 +952,7 @@ describe('bundle pricing', () => {
     });
   });
 
-  describe('tax (PPN) with tax.rate = 11', () => {
+  describe('tax (PPN) with tax.rate = 11 — event tickets are exempt', () => {
     async function withRate<T>(rate: string, fn: () => Promise<T>): Promise<T> {
       await settingsService.set(SETTING_KEYS.taxRate, rate);
       SettingsService.clearCache();
@@ -964,7 +964,7 @@ describe('bundle pricing', () => {
       }
     }
 
-    it('T-07 quotes one tax line on the ladder total; breakdown stays pre-tax', () =>
+    it('quotes a ticket with NO tax even while courses are taxed at 11%', () =>
       withRate('11', async () => {
         const { type } = await withLadder();
         const res = await request(app)
@@ -973,16 +973,16 @@ describe('bundle pricing', () => {
           .expect(200);
 
         expect(res.body.data.itemTotal).toBe(850_000);
-        expect(res.body.data.taxRate).toBe(11);
-        expect(res.body.data.taxAmount).toBe(93_500);
-        expect(res.body.data.amount).toBe(943_500);
+        expect(res.body.data.taxRate).toBe(0);
+        expect(res.body.data.taxAmount).toBe(0);
+        expect(res.body.data.amount).toBe(850_000);
         expect(res.body.data.breakdown).toEqual([
           { label: 'Trio', qty: 3, amount: 500_000 },
           { label: 'Duo', qty: 2, amount: 350_000 },
         ]);
       }));
 
-    it('T-08/T-10 checkout freezes the tax on the order, invoices the inclusive total, and the order page shows it', () =>
+    it('checkout freezes tax 0 on a ticket order, invoices the pre-tax total, and the order page agrees', () =>
       withRate('11', async () => {
         const { type } = await withLadder();
         const email = `tax-${Date.now()}@test.local`;
@@ -994,20 +994,20 @@ describe('bundle pricing', () => {
         });
         track((await prisma.member.findUnique({ where: { email } }))!.id);
 
-        // Trio + single = 700k; × 11% = 77k.
+        // Trio + single = 700k, and that is the whole bill: no PPN on a ticket.
         expect(result.itemTotal).toBe(700_000);
-        expect(result.taxRate).toBe(11);
-        expect(result.taxAmount).toBe(77_000);
-        expect(result.amount).toBe(777_000);
+        expect(result.taxRate).toBe(0);
+        expect(result.taxAmount).toBe(0);
+        expect(result.amount).toBe(700_000);
 
         const payment = await prisma.commercePayment.findUnique({ where: { id: result.payment.paymentId } });
-        expect(payment!.amount).toBe(777_000);
+        expect(payment!.amount).toBe(700_000);
 
         const page = await request(app)
           .get(`/api/event/order/${result.transactionCode}`)
           .query({ email })
           .expect(200);
-        expect(page.body.data).toMatchObject({ taxRate: 11, taxAmount: 77_000, amount: 777_000 });
+        expect(page.body.data).toMatchObject({ taxRate: 0, taxAmount: 0, amount: 700_000 });
       }));
 
     it('a free ticket stays free: nothing to tax, no invoice', () =>

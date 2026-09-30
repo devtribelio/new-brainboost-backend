@@ -221,7 +221,7 @@ export class CheckoutService {
       qty: Math.max(1, Math.floor(input.qty ?? 1)),
       itemTotal: input.itemTotal,
       voucher: voucherMeta,
-      taxRate: await resolveTaxRate(),
+      taxRate: await resolveTaxRate(product.id),
     });
 
     return { product, voucherId, totals };

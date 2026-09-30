@@ -13,9 +13,9 @@ Companion: `docs/event-ticketing-contract.md` (§2b quote, §3 checkout, §4 ord
 - **Scope: course checkout + event tickets + transaction history.**
   Subscription is OUT of scope — `feat/subscription` is not on `main`, so
   `prorationCredit` does not exist in any response below.
-- ⚠️ **Event tickets: PENDING.** The endpoints are specified here so FE can
-  type against them, but whether tickets are subject to PPN at all is a
-  finance/legal call that has not been made. See §5.
+- **Event tickets are NOT taxed** (decided 2026-09-30). The event endpoints
+  still carry `taxRate`/`taxAmount` for shape parity, and they are always `0`
+  for a ticket order, so the tax row never renders there. See §5.
 
 ---
 
@@ -171,31 +171,28 @@ No new fields. The Xendit invoice is created for the tax-inclusive `amount`.
 | 3 | Affiliate commission base | **Decided + built:** pre-tax (`amount − taxAmount`). An affiliator earns the same on a course whatever the rate. Not FE-visible. |
 | 4 | Course quote endpoint | Yes, same release (§3.2). |
 | 5 | Old orders | `taxAmount: 0`, `taxRate: 0`, fields always present. No backfill. |
-| 6 | Per-product exemptions | None today. If event tickets turn out not to be taxable (§5) the resolved `taxRate` for those orders is simply `0`; FE logic is identical. |
+| 6 | Per-product exemptions | One: `event_ticket` products resolve `taxRate = 0` (§5). FE logic is identical — the row hides on `taxAmount = 0`. |
 | 7 | Invoice / receipt lines | Xendit invoice page: no breakdown for now (deferred). Email receipts (bb-comms) **will** show the PPN line — that repo is in the release train. |
 
 ---
 
-## 5. ⚠️ Event tickets — PENDING decision
+## 5. Event tickets — NOT taxed (decided 2026-09-30)
 
-The proposal assumes event tickets are taxed like courses (§2.5–2.7, QA
-T-07/T-08). **That is not decided.** Whether a ticket is subject to PPN is a
-finance/legal question: a paid webinar or workshop is generally a taxable
-service, an entertainment event falls under regional entertainment tax
-(PBJT) rather than PPN, formal education is PPN-exempt.
+The proposal assumed event tickets are taxed like courses (§2.5–2.7, QA
+T-07/T-08). **They are not.** BE resolves `taxRate = 0` for any `event_ticket`
+product regardless of the configured rate, so on every event endpoint
+`taxRate` and `taxAmount` are always `0` and `amount === itemTotal −
+voucherAmount`.
 
 What this means for FE:
 
-- Build the event screens against §3.4–3.6 **exactly as written**. The
-  fields will exist either way.
-- If the decision is "not taxable", BE resolves `taxRate = 0` for ticket
-  orders and FE sees `taxAmount = 0` → row hidden. **No FE change.**
-- Do not put the "Harga belum termasuk PPN" copy on event pages until the
-  decision lands.
-- QA cases T-07 / T-08 are on hold until then.
+- Build the event screens against §3.4–3.6 as written; the fields exist for
+  shape parity and read `0`. The tax row therefore never shows on an event.
+- Do **not** put the "Harga belum termasuk PPN" copy on event pages.
+- QA T-07 / T-08 change meaning: assert `taxAmount = 0` and no tax row on a
+  ticket order **while** a course order in the same environment shows PPN.
 
-This is the only open decision; the commission base (§4 Q3) is settled. It does
-not block BE from shipping the fields at rate 0.
+No open decisions remain on the BE side.
 
 ---
 
@@ -204,9 +201,7 @@ not block BE from shipping the fields at rate 0.
 1. BE: migration (2 columns, default 0) + bb-comms reads them.
 2. BE: all fields above, rate `0`. FE verifies field presence on stage.
 3. FE: new rows + types, hidden while `taxAmount = 0`.
-4. Decisions in §5 land.
-5. BE flips the rate on stage → QA T-01…T-11 (T-07/T-08 only if events are
-   in) → prod.
+4. BE flips the rate on stage → QA T-01…T-12 → prod.
 
 ### QA cases (BE-relevant, subscription removed)
 
@@ -216,8 +211,8 @@ not block BE from shipping the fields at rate 0.
 | T-02 | Course | 50 % voucher | tax on half price |
 | T-03 | Course | AMOUNT voucher ≥ price | tax 0, total 0, PAID without invoice |
 | T-04 | Course | TRIAL voucher | tax 0, total 0, trial days shown |
-| T-07 ⚠️ | Event | qty 5 with ladder | tax on ladder total, single tax row, breakdown pre-tax |
-| T-08 ⚠️ | Event | guest checkout | order page shows tax row |
+| T-07 | Event | qty 5 with ladder, rate 11 % | `taxAmount = 0`, no tax row, `amount = itemTotal`, breakdown unchanged |
+| T-08 | Event | guest checkout, rate 11 % | order page shows no tax row; a course bought in the same env does |
 | T-09 | History | pre-change order | no tax row, total unchanged |
 | T-10 | Any | Xendit invoice | equals tax-inclusive `amount` on the card |
 | T-11 | Any | product page, ticket list | price unchanged, no tax anywhere |

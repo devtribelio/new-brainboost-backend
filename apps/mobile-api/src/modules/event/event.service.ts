@@ -308,6 +308,7 @@ export class EventService {
       where: { id: ticketTypeId },
       select: {
         maxPerOrder: true,
+        productId: true,
         product: { select: { price: true } },
         priceTiers: { select: { minQty: true, totalPrice: true, label: true } },
       },
@@ -322,12 +323,14 @@ export class EventService {
     const priced = computeTicketItemTotal(type.product.price, type.priceTiers, n);
     // Same arithmetic checkout runs (`CheckoutService.start` → `computeTotals`),
     // minus the voucher it cannot know: a quote the buyer is then taxed
-    // differently for is worse than no quote.
+    // differently for is worse than no quote. `resolveTaxRate` answers 0 for a
+    // ticket product — event tickets are not taxed — but it is still asked
+    // rather than hardcoded, so the rule lives in exactly one place.
     const totals = computeTotals({
       unitPrice: type.product.price,
       qty: n,
       itemTotal: priced.itemTotal,
-      taxRate: await resolveTaxRate(),
+      taxRate: await resolveTaxRate(type.productId),
     });
     return {
       qty: n,
