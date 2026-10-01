@@ -191,6 +191,10 @@ export const ERROR_CODES = {
   MEDIA_HLS_UNAVAILABLE: 'MEDIA_HLS_UNAVAILABLE',
   COURSE_NOT_ENROLLED: 'COURSE_NOT_ENROLLED',
 
+  // --- b2b app ---------------------------------------------------------------
+  /** Uniform 404 for a company the member has no active seat at (also unknown ids). */
+  B2B_COMPANY_NOT_FOUND: 'B2B_COMPANY_NOT_FOUND',
+
   // --- bonus -----------------------------------------------------------------
   BONUS_NOT_FOUND: 'BONUS_NOT_FOUND',
   BONUS_ID_INVALID: 'BONUS_ID_INVALID',

@@ -174,6 +174,7 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   COURSE_NOT_ENROLLED: 'Belum terdaftar di kelas ini',
 
   // --- bonus -----------------------------------------------------------------
+  B2B_COMPANY_NOT_FOUND: 'Perusahaan tidak ditemukan',
   BONUS_NOT_FOUND: 'Bonus tidak ditemukan',
   BONUS_ID_INVALID: 'Bonus tidak dipilih',
 
