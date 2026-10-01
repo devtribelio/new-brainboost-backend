@@ -78,13 +78,13 @@ export class LoginDto {
   client_secret?: string;
 
   @ApiPropertyOptional({
-    enum: ['mobile', 'web'],
+    enum: ['mobile', 'web', 'b2b'],
     example: 'mobile',
     description:
-      'Session bucket. Mobile logins kick prior mobile sessions; web logins are multi-session and never kick mobile. Defaults to "mobile" when absent for backward compat with deployed apps.',
+      'Session bucket. Mobile logins kick prior mobile sessions; "b2b" (company app) logins kick prior b2b sessions only; web logins are multi-session and never kick either. Defaults to "mobile" when absent for backward compat with deployed apps.',
   })
   @IsOptional()
   @IsString()
-  @IsIn(['mobile', 'web'])
-  client_type?: 'mobile' | 'web';
+  @IsIn(['mobile', 'web', 'b2b'])
+  client_type?: 'mobile' | 'web' | 'b2b';
 }

@@ -1,3 +1,4 @@
+import type { DeviceApp } from '@bb/common/utils/device-app.util';
 import bcrypt from 'bcryptjs';
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import passport from 'passport';
@@ -70,7 +71,7 @@ function timingSafeStringEqual(a: string, b: string): boolean {
   return timingSafeEqual(ab, bb);
 }
 
-type ClientType = 'mobile' | 'web';
+type ClientType = 'mobile' | 'web' | 'b2b';
 
 type RefreshTokenRow = Pick<
   RefreshToken,
@@ -92,13 +93,15 @@ class RotationLostError extends Error {}
 const MAX_SUPERSESSION_HOPS = 5;
 
 /**
- * Resolve session bucket. `web` only when explicitly signaled; everything else
- * (including legacy `ios`/`android` from RegisterDto.registerFrom, missing
+ * Resolve session bucket. `web` / `b2b` only when explicitly signaled; everything
+ * else (including legacy `ios`/`android` from RegisterDto.registerFrom, missing
  * field, or unknown value) falls into the `mobile` bucket so deployed apps
- * keep single-login behavior.
+ * keep single-login behavior. `b2b` is the company app (brainboost-b2b): its own
+ * single-session bucket, so logging into it never kicks the regular app.
  */
 function normalizeClientType(raw: string | null | undefined): ClientType {
-  return raw === 'web' ? 'web' : 'mobile';
+  if (raw === 'web' || raw === 'b2b') return raw;
+  return 'mobile';
 }
 
 function mapDtoPurpose(
@@ -921,18 +924,21 @@ export class AuthService {
     );
   }
 
-  async registerDevice(memberId: string, dto: RegisterDeviceDto) {
-    // Single active device: enrolling a device on app start makes it THE push
-    // target. Clear fcmToken on every OTHER device of this member so a phone that
-    // got session-revoked by a newer login (issueTokenBundle single-session kick)
-    // stops receiving push. fcm.sendToMember targets by memberId + fcmToken != null,
-    // so nulling the token here is what actually severs delivery.
+  async registerDevice(memberId: string, dto: RegisterDeviceDto, app: DeviceApp = 'brainboost') {
+    // Single active device PER APP: enrolling a device on app start makes it THE
+    // push target of that app. Clear fcmToken on every OTHER device of this member
+    // in the SAME app so a phone that got session-revoked by a newer login
+    // (issueTokenBundle single-session kick) stops receiving push. Scoped by `app`
+    // so installing the company app never silences the regular app (and back).
+    // fcm.sendToMember targets by memberId + app + fcmToken != null, so nulling the
+    // token here is what actually severs delivery.
     const [device] = await prisma.$transaction([
       prisma.device.upsert({
         where: { memberId_deviceId: { memberId, deviceId: dto.deviceId } },
         update: {
           platform: dto.platform,
           fcmToken: dto.fcmToken,
+          app,
           lastSeenAt: new Date(),
         },
         create: {
@@ -940,10 +946,11 @@ export class AuthService {
           deviceId: dto.deviceId,
           platform: dto.platform,
           fcmToken: dto.fcmToken,
+          app,
         },
       }),
       prisma.device.updateMany({
-        where: { memberId, deviceId: { not: dto.deviceId }, fcmToken: { not: null } },
+        where: { memberId, app, deviceId: { not: dto.deviceId }, fcmToken: { not: null } },
         data: { fcmToken: null },
       }),
     ]);
@@ -951,28 +958,31 @@ export class AuthService {
     return { cloudMessagingId: device.fcmToken, deviceId: device.id };
   }
 
-  async registerCloudMessaging(memberId: string, dto: CloudMessagingDto) {
+  async registerCloudMessaging(memberId: string, dto: CloudMessagingDto, app: DeviceApp = 'brainboost') {
     const device = dto.deviceId
       ? await prisma.device.findUnique({
           where: { memberId_deviceId: { memberId, deviceId: dto.deviceId } },
         })
       : await prisma.device.findFirst({
-          where: { memberId },
+          where: { memberId, app },
           orderBy: { lastSeenAt: 'desc' },
         });
     if (!device) {
       throw notFound(ERROR_CODES.DEVICE_NOT_REGISTERED);
     }
 
-    // Same single-active-device rule as registerDevice: token rotation re-asserts
-    // this device as THE push target, so drop fcmToken on every other device.
+    // Same single-active-device-per-app rule as registerDevice: token rotation
+    // re-asserts this device as THE push target of its app, so drop fcmToken on
+    // every other device of that same app. The device's stored app wins over the
+    // header (a row enrolled by the company app stays a company-app row).
+    const deviceApp = (device.app as DeviceApp | null) ?? app;
     await prisma.$transaction([
       prisma.device.update({
         where: { id: device.id },
         data: { fcmToken: dto.cloudMessagingId, lastSeenAt: new Date() },
       }),
       prisma.device.updateMany({
-        where: { memberId, id: { not: device.id }, fcmToken: { not: null } },
+        where: { memberId, app: deviceApp, id: { not: device.id }, fcmToken: { not: null } },
         data: { fcmToken: null },
       }),
     ]);
@@ -1040,7 +1050,10 @@ export class AuthService {
     const passwordHash = await bcrypt.hash(dto.newPassword, 10);
     await prisma.member.update({
       where: { id: member.id },
-      data: { passwordHash, passwordAlgo: 'bcrypt' },
+      // The OTP just proved the member owns this email, so mark it verified — same
+      // as the claim flow. Without it a B2B-provisioned employee who set a password
+      // this way could still never use Google (link-by-email needs a verified email).
+      data: { passwordHash, passwordAlgo: 'bcrypt', ...(channel === 'email' ? { isEmailVerified: true } : {}) },
     });
     await prisma.refreshToken.updateMany({
       where: { memberId: member.id, revokedAt: null },
@@ -1448,15 +1461,17 @@ export class AuthService {
 
     // Bucket-scoped single-session:
     //  - mobile login revokes prior live mobile sessions (kicks other phones)
+    //  - b2b login (company app) revokes prior live b2b sessions only — the two
+    //    apps never kick each other
     //  - web login is multi-session (skip revoke; many browsers may coexist)
     // Both run atomically so a concurrent login can't slip a row through.
     const create = prisma.refreshToken.create({
       data: { id: tokenId, memberId, token: refreshToken, expiresAt, clientType },
     });
-    if (clientType === 'mobile') {
+    if (clientType === 'mobile' || clientType === 'b2b') {
       await prisma.$transaction([
         prisma.refreshToken.updateMany({
-          where: { memberId, clientType: 'mobile', revokedAt: null },
+          where: { memberId, clientType, revokedAt: null },
           data: { revokedAt: new Date() },
         }),
         create,

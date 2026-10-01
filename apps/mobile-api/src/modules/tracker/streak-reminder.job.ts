@@ -214,6 +214,8 @@ export async function streakReminder(
           // not push the same nudge twice.
           dedupeKey: `${type}:${p.memberId}:${runDay}`,
           payload: { streakDays: p.days },
+          // Learning nudge, not marketing: both the regular and the company app show it.
+          pushApp: 'all',
         }),
       ),
     );

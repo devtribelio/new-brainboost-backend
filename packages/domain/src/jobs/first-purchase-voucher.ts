@@ -1,3 +1,4 @@
+import { filterOutB2bManaged } from '../b2b/managed-member';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '@bb/db';
 import { logger } from '@bb/common/config/logger';
@@ -264,9 +265,11 @@ async function collectCandidates(
     }),
   ]);
 
-  const memberIds = [
+  // B2B-managed members (company-created accounts that still hold a seat) are not
+  // retail customers: no first-purchase voucher while they are B2B.
+  const memberIds = await filterOutB2bManaged([
     ...new Set([...recentOrders, ...recentEnrollments].map((r) => r.memberId)),
-  ];
+  ]);
   if (memberIds.length === 0) return [];
 
   const [orderHistory, enrollmentHistory, undated, alreadyHeld] = await Promise.all([

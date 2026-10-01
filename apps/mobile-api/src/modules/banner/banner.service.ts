@@ -1,3 +1,4 @@
+import { isB2bManagedMember } from '@bb/domain/b2b/managed-member';
 import { prisma } from '@bb/db';
 import type { PaginationParams } from '@bb/common/utils/pagination.util';
 import { settingsService, SETTING_KEYS } from '@bb/common/services/settings.service';
@@ -7,6 +8,8 @@ import { compareSemver } from '../app-version/version.util';
 export interface BannerClientInfo {
   platform?: string;
   version?: string;
+  /** Logged-in member, when the request carried a valid bearer token. */
+  memberId?: string;
 }
 
 const MAX_VERSION_KEY: Record<string, string> = {
@@ -17,6 +20,9 @@ const MAX_VERSION_KEY: Record<string, string> = {
 export class BannerService {
   async listActive(p: PaginationParams, filter?: { isPopup?: boolean }, client?: BannerClientInfo) {
     if (await this.isHiddenForClient(client)) return { rows: [], total: 0 };
+    // Banners are promotional: none for B2B-managed members (company-created
+    // accounts that still hold a seat). Anonymous requests are unchanged.
+    if (client?.memberId && (await isB2bManagedMember(client.memberId))) return { rows: [], total: 0 };
 
     const now = new Date();
     const where = {

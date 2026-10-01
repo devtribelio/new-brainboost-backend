@@ -1,7 +1,13 @@
+import type { DeviceApp } from '@bb/common/utils/device-app.util';
 import { GoogleAuth } from 'google-auth-library';
 import { prisma } from '@bb/db';
 import { env } from '@bb/common/config/env';
 import { logger } from '@bb/common/config/logger';
+
+export interface SendToMemberOptions {
+  /** Which app's devices receive it. Default `'brainboost'` (the regular app). */
+  app?: DeviceApp | 'all';
+}
 
 interface FcmPayload {
   title: string;
@@ -55,14 +61,21 @@ export class FcmService {
     return this.enabled;
   }
 
-  async sendToMember(memberId: string, payload: FcmPayload): Promise<void> {
+  /**
+   * Push to the member's devices of ONE app — the regular app by default, so every
+   * existing producer stays consumer-only and never reaches the company (B2B) app.
+   * Push meant for the company app must say `{ app: 'b2b' }`; `'all'` is for the
+   * few messages both apps should show (streak reminders).
+   */
+  async sendToMember(memberId: string, payload: FcmPayload, opts: SendToMemberOptions = {}): Promise<void> {
     if (!this.enabled || !this.auth) return;
+    const app = opts.app ?? 'brainboost';
     const devices = await prisma.device.findMany({
-      where: { memberId, fcmToken: { not: null } },
+      where: { memberId, fcmToken: { not: null }, ...(app === 'all' ? {} : { app }) },
       select: { id: true, fcmToken: true },
     });
     if (devices.length === 0) {
-      logger.info({ memberId }, '[fcm] no devices with fcmToken — push skipped');
+      logger.info({ memberId, app }, '[fcm] no devices with fcmToken — push skipped');
       return;
     }
 

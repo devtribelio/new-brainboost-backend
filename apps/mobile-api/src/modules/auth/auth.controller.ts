@@ -1,3 +1,4 @@
+import { resolveDeviceApp } from '@bb/common/utils/device-app.util';
 import type { Request, Response } from 'express';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
@@ -100,7 +101,11 @@ export class AuthController {
   registerDevice = async (req: Request, res: Response) => {
     const user = (req as AuthenticatedRequest).user;
     if (!user) throw unauthorized(ERROR_CODES.AUTH_REQUIRED);
-    const result = await this.authService.registerDevice(user.id, req.body as RegisterDeviceDto);
+    const result = await this.authService.registerDevice(
+      user.id,
+      req.body as RegisterDeviceDto,
+      resolveDeviceApp(req.headers['x-app']),
+    );
     return ok(res, result);
   };
 
@@ -121,6 +126,7 @@ export class AuthController {
     const result = await this.authService.registerCloudMessaging(
       user.id,
       req.body as CloudMessagingDto,
+      resolveDeviceApp(req.headers['x-app']),
     );
     return ok(res, result);
   };

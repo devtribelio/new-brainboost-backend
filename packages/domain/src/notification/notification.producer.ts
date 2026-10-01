@@ -1,3 +1,5 @@
+import type { DeviceApp } from '@bb/common/utils/device-app.util';
+import { isB2bManagedMember, b2bManagedMemberIds } from '../b2b/managed-member';
 import { prisma } from '@bb/db';
 import { logger } from '@bb/common/config/logger';
 import { settingsService, SETTING_KEYS } from '@bb/common/services/settings.service';
@@ -44,7 +46,33 @@ export interface CreateNotificationInput {
    * that dropped muted members used to delete the notification outright.
    */
   muteScopes?: Array<{ scope: MuteScope; refId: string }>;
+  /**
+   * Which app's devices get the PUSH. Default `'brainboost'` (regular app): the
+   * company (B2B) app must never show consumer pushes. `'all'` only for messages
+   * both apps should show (streak reminders). The feed row is written either way.
+   */
+  pushApp?: DeviceApp | 'all';
 }
+
+/**
+ * Community / consumer-engagement pushes. B2B-managed members (accounts the
+ * company created, while they still hold a seat) do not get these — they are not
+ * in the consumer community through their employer. The feed row is still
+ * written; only the push is skipped. Transactional types and streak reminders are
+ * not in this set.
+ */
+const COMMUNITY_PUSH_TYPES: ReadonlySet<ActionLabel> = new Set<ActionLabel>([
+  ActionLabel.NewPost,
+  ActionLabel.NewComment,
+  ActionLabel.NewReply,
+  ActionLabel.NewLike,
+  ActionLabel.Tag,
+  ActionLabel.RequestJoin,
+  ActionLabel.ApproveJoin,
+  ActionLabel.MemberJoin,
+  ActionLabel.TopicDigest,
+  ActionLabel.TribeDigest,
+]);
 
 export class NotificationProducer {
   private readonly resolver = new RecipientResolver();
@@ -53,12 +81,13 @@ export class NotificationProducer {
     const pushMuted = input.muteScopes?.length
       ? (await this.resolver.mutedMemberIds([input.memberId], input.muteScopes)).has(input.memberId)
       : false;
-    return this.create(input, pushMuted);
+    const b2bManaged = COMMUNITY_PUSH_TYPES.has(input.type) ? await isB2bManagedMember(input.memberId) : false;
+    return this.create(input, pushMuted, b2bManaged);
   }
 
   // `pushMuted` is resolved by the caller so a fan-out pays one mute query for
   // the whole batch instead of one per member.
-  private async create(input: CreateNotificationInput, pushMuted: boolean) {
+  private async create(input: CreateNotificationInput, pushMuted: boolean, b2bManaged = false) {
     const member = await prisma.member.findUnique({
       where: { id: input.memberId },
       select: { notificationsEnabled: true, isActive: true },
@@ -109,7 +138,7 @@ export class NotificationProducer {
         { notificationId: row.id, memberId: input.memberId, type: input.type, networkId: input.networkId ?? undefined },
         '[notification] created',
       );
-      this.dispatchPush(display, row.id, pushMuted);
+      this.dispatchPush(display, row.id, pushMuted, b2bManaged);
       return row;
     } catch (err) {
       const code = (err as { code?: string }).code;
@@ -125,6 +154,8 @@ export class NotificationProducer {
     const muted = base.muteScopes?.length
       ? await this.resolver.mutedMemberIds(memberIds, base.muteScopes)
       : new Set<string>();
+    // One query for the whole fan-out, same as the mute lookup.
+    const managed = COMMUNITY_PUSH_TYPES.has(base.type) ? await b2bManagedMemberIds(memberIds) : new Set<string>();
 
     const results = await Promise.allSettled(
       memberIds.map((memberId) =>
@@ -135,6 +166,7 @@ export class NotificationProducer {
             dedupeKey: dedupePrefix ? `${dedupePrefix}:${memberId}` : undefined,
           },
           muted.has(memberId),
+          managed.has(memberId),
         ),
       ),
     );
@@ -207,7 +239,22 @@ export class NotificationProducer {
     }
   }
 
-  private dispatchPush(input: CreateNotificationInput, notificationId: string, pushMuted: boolean): void {
+  private dispatchPush(
+    input: CreateNotificationInput,
+    notificationId: string,
+    pushMuted: boolean,
+    b2bManaged = false,
+  ): void {
+    // Community push is not for B2B-managed members (company-created accounts that
+    // still hold a seat). Resolved by the caller, like `pushMuted`, so the check
+    // never delays or spends the unopened-push budget.
+    if (b2bManaged && COMMUNITY_PUSH_TYPES.has(input.type)) {
+      logger.info(
+        { notificationId, memberId: input.memberId, type: input.type },
+        '[notification] push skipped — b2b-managed member (community push)',
+      );
+      return;
+    }
     // Checked before claimPushSlot on purpose: a push the member asked not to
     // receive must not spend their unopened-push budget, or muting one busy
     // topic would silence the topics they still care about.
@@ -252,7 +299,7 @@ export class NotificationProducer {
         }
       }
       fcmService
-        .sendToMember(input.memberId, { title: input.title, body: input.body, data })
+        .sendToMember(input.memberId, { title: input.title, body: input.body, data }, { app: input.pushApp ?? 'brainboost' })
         .catch((err) => logger.warn({ err, notificationId }, '[notification] fcm dispatch failed'));
     });
   }

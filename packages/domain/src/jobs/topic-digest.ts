@@ -1,3 +1,4 @@
+import { filterOutB2bManaged } from '../b2b/managed-member';
 import { Prisma } from '@prisma/client';
 import { prisma } from '@bb/db';
 import { logger } from '@bb/common/config/logger';
@@ -129,7 +130,9 @@ export async function collectDigests(memberId?: string): Promise<DigestPlan> {
     list.push({ topicId: r.topic_id, unread: Number(r.unread) });
     perMember.set(r.member_id, list);
   }
-  const memberIds = [...perMember.keys()];
+  // B2B-managed members (company-created accounts that still hold a seat) get no
+  // community digest — it is consumer engagement, not their employer's content.
+  const memberIds = await filterOutB2bManaged([...perMember.keys()]);
   const topicIds = [...new Set(rows.map((r) => r.topic_id))];
 
   const [topics, mutes] = await Promise.all([
