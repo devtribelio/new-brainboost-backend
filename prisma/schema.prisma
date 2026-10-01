@@ -129,6 +129,7 @@ model Member {
   eventTicketsBought     EventTicket[]           @relation("EventTicketBuyer")
   eventTicketsClaimed    EventTicket[]           @relation("EventTicketAttendee")
   b2bGrants              B2bMemberGrant[]
+  b2bListeningHistory    B2bListeningHistory[]
 
   @@map("members")
 }
@@ -431,11 +432,12 @@ model Course {
   programDays    Int      @default(30) @map("program_days") // listening-challenge duration in days (90/60/30); challenge `target`
   updatedAt      DateTime @updatedAt @map("updated_at")
 
-  product     Product            @relation(fields: [productId], references: [id], onDelete: Cascade)
-  sections    CourseSection[]
-  enrollments CourseEnrollment[]
-  bonuses     CourseBonus[]
-  b2bGrants   B2bMemberGrant[]
+  product             Product               @relation(fields: [productId], references: [id], onDelete: Cascade)
+  sections            CourseSection[]
+  enrollments         CourseEnrollment[]
+  bonuses             CourseBonus[]
+  b2bGrants           B2bMemberGrant[]
+  b2bListeningHistory B2bListeningHistory[]
 
   @@map("courses")
 }
@@ -2035,6 +2037,7 @@ model B2bCustomer {
   invoices                  B2bInvoice[]
   subscriptionNotifications B2bSubscriptionNotification[]
   grants                    B2bMemberGrant[]
+  listeningHistory          B2bListeningHistory[]
 
   @@index([industryId])
   @@map("b2b_customer")
@@ -2340,4 +2343,47 @@ model B2bMemberGrant {
   @@index([customerId])
   @@index([paymentPlanId, isActive])
   @@map("b2b_member_grant")
+}
+
+/// Read-only ARCHIVE of B2B listening analytics recorded before this database
+/// existed: the old Supabase `analytics_events` (fed daily from Firebase/BigQuery
+/// by the retired b2b-workers data-sync), copied ONCE by the B2B one-shot
+/// migration. Already B2B-scoped at ingest (email × product with company access),
+/// so it is filtered by `customer_id` directly. Only events BEFORE the member's
+/// first `listening_session` are copied, so dashboards can `UNION ALL` this with
+/// `listening_session` without double counting. Never written after the copy.
+/// `member_id` / `course_id` are null when the legacy id / product code could not
+/// be resolved; the row still counts for company-level totals.
+model B2bListeningHistory {
+  id                     String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  customerId             String   @map("customer_id") @db.Uuid
+  memberId               String?  @map("member_id") @db.Uuid
+  courseId               String?  @map("course_id") @db.Uuid
+  /// `${event_timestamp}:${legacy member_id}:${event_name}` — the old unique key; makes the copy idempotent.
+  sourceEventKey         String   @unique @map("source_event_key")
+  eventName              String   @map("event_name")
+  occurredAt             DateTime @map("occurred_at") @db.Timestamptz(6)
+  listenedSec            Int      @default(0) @map("listened_sec")
+  legacyMemberId         Int?     @map("legacy_member_id")
+  email                  String?
+  productCode            String?  @map("product_code")
+  productName            String?  @map("product_name")
+  deviceId               String?  @map("device_id")
+  operatingSystem        String?  @map("operating_system")
+  operatingSystemVersion String?  @map("operating_system_version")
+  mobileBrandName        String?  @map("mobile_brand_name")
+  mobileModelName        String?  @map("mobile_model_name")
+  mobileMarketingName    String?  @map("mobile_marketing_name")
+  city                   String?
+  country                String?
+  createdAt              DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  customer B2bCustomer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  member   Member?     @relation(fields: [memberId], references: [id], onDelete: SetNull)
+  course   Course?     @relation(fields: [courseId], references: [id], onDelete: SetNull)
+
+  @@index([customerId, occurredAt])
+  @@index([memberId, occurredAt])
+  @@index([courseId])
+  @@map("b2b_listening_history")
 }
