@@ -28,6 +28,14 @@ export class BannerDto {
   @ApiProperty({ type: 'boolean', example: false })
   isPopup!: boolean;
 
+  @ApiProperty({
+    enum: ['external', 'webview'],
+    example: 'external',
+    description:
+      'How a tap opens the link: `external` = system browser, `webview` = in-app browser. Any other value is treated as `external` by the app.',
+  })
+  openMode!: string;
+
   @ApiPropertyOptional({
     nullable: true,
     format: 'date-time',
