@@ -180,6 +180,11 @@ model Device {
   deviceId   String   @map("device_id")
   platform   String
   fcmToken   String?  @map("fcm_token")
+  /// Which app this install is: 'brainboost' (default — every build already in the
+  /// stores) or 'b2b' (the company app, sends `x-app: b2b`). Push and the
+  /// single-active-device rule are scoped per app, so the two apps never mute or
+  /// receive each other's notifications.
+  app        String   @default("brainboost")
   lastSeenAt DateTime @default(now()) @map("last_seen_at")
   createdAt  DateTime @default(now()) @map("created_at")
   updatedAt  DateTime @updatedAt @map("updated_at")
@@ -187,6 +192,7 @@ model Device {
   member Member @relation(fields: [memberId], references: [id], onDelete: Cascade)
 
   @@unique([memberId, deviceId])
+  @@index([memberId, app])
   @@map("devices")
 }
 
@@ -2038,6 +2044,7 @@ model B2bCustomer {
   subscriptionNotifications B2bSubscriptionNotification[]
   grants                    B2bMemberGrant[]
   listeningHistory          B2bListeningHistory[]
+  branding                  B2bCompanyBranding?
 
   @@index([industryId])
   @@map("b2b_customer")
@@ -2386,4 +2393,28 @@ model B2bListeningHistory {
   @@index([memberId, occurredAt])
   @@index([courseId])
   @@map("b2b_listening_history")
+}
+
+/// Per-company look of the B2B app. Written by the B2B portal (company admins),
+/// read by mobile-api `/api/b2b-app/*`. One row per customer; absent = defaults
+/// (customer name, Brainboost colors, no announcements).
+model B2bCompanyBranding {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  customerId    String   @unique @map("customer_id") @db.Uuid
+  displayName   String?  @map("display_name") @db.VarChar(120)
+  logoUrl       String?  @map("logo_url")
+  /// `#RRGGBB`
+  primaryColor  String?  @map("primary_color") @db.VarChar(7)
+  welcomeText   String?  @map("welcome_text") @db.VarChar(500)
+  /// `[{ title, course_ids: [courses.id…] }]` in display order; courses not listed go to a trailing default group.
+  courseLayout  Json?    @map("course_layout")
+  /// `[{ id, title, body, starts_at, ends_at }]`; only those active "now" are served.
+  announcements Json?
+  updatedBy     String?  @map("updated_by") @db.Uuid
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  customer B2bCustomer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@map("b2b_company_branding")
 }
