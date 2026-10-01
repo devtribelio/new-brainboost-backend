@@ -48,6 +48,7 @@ Semua perubahan **additive**. Request body tidak ada yang berubah. Semua field a
 | Method | Path | Auth | Body | Response |
 |---|---|---|---|---|
 | `POST` | `/api/member/product/checkout/quote` | bearer + rate limiter | `{productId, voucherCode?}` | Sama seperti submit **minus** `transactionId`, `transactionCode`, `expiredAt`. Tanpa write, tanpa reserve voucher. Voucher invalid → 400 yang sama dengan submit. |
+| `POST` | `/api/member/product/checkout/quote/public` | **tanpa auth** + rate limiter per IP (ditambah 2026-10-01) | `{productId, voucherCode?}` | Bentuk dan angka sama persis dengan quote ber-auth untuk produk + voucher publik yang sama. Guard already-owned dilewati; voucher ber-`ownerMemberId`/`campaign` dijawab identik dengan kode yang tidak ada; voucher `TRIAL` ditolak dengan alasan "masuk dulu". Tidak pernah 401. Kontrak FE: `docs/checkout-quote-public-contract.md`. |
 
 **Berubah (7):**
 

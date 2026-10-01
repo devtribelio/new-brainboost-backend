@@ -55,6 +55,22 @@ export class CommerceController {
     return ok(res, result);
   };
 
+  @ApiOperation({
+    summary: 'Quote a checkout as a guest — same numbers as the authed quote, no login',
+    description:
+      'Public. Prices a product for a visitor who has not logged in: same product guards, arithmetic and tax as the authed quote, writes nothing. The already-owned check is skipped (nobody to check). A voucher that belongs to a member or a campaign answers exactly like an unknown code; a free-trial voucher is refused with a reason asking the visitor to log in. Unusable voucher → 400 VOUCHER_INVALID with `details.reason`. Rate limited per IP.',
+  })
+  @ApiBody({ type: () => CheckoutQuoteDto })
+  @ApiResponse({ status: 200, type: () => CheckoutQuoteResultDto })
+  quoteCheckoutPublic = async (req: Request, res: Response) => {
+    const dto = req.body as CheckoutQuoteDto;
+    const result = await this.checkout.quotePublic({
+      productId: dto.productId,
+      voucherCode: dto.voucherCode,
+    });
+    return ok(res, result);
+  };
+
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Start checkout — create PENDING transaction' })
   @ApiBody({ type: () => StartCheckoutDto })

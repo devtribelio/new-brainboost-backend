@@ -27,6 +27,17 @@ export function commerceRoutes(): Router {
     handlerKey: 'quoteCheckout',
     middlewares: [authGuard, voucherValidateRateLimiter, validateDto(CheckoutQuoteDto)],
   });
+  // Guest quote for the web shop. No authGuard on purpose — not even the optional
+  // one: a visitor's stale bearer must not turn a price lookup into a 401. With no
+  // `req.user` the limiter keys on the client IP.
+  bindRoute({
+    router,
+    controller: ctrl,
+    method: 'post',
+    path: '/product/checkout/quote/public',
+    handlerKey: 'quoteCheckoutPublic',
+    middlewares: [voucherValidateRateLimiter, validateDto(CheckoutQuoteDto)],
+  });
   bindRoute({
     router,
     controller: ctrl,
