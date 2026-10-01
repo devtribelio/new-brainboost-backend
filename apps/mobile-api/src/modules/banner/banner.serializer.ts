@@ -9,6 +9,7 @@ export function serializeBanner(b: Banner): Record<string, unknown> {
     link: b.linkUrl ?? '',
     image: [b.imageUrl],
     isPopup: b.isPopup,
+    openMode: b.openMode,
     startedAt: b.startedAt ? b.startedAt.toISOString() : null,
     endedAt: b.endedAt ? b.endedAt.toISOString() : null,
   };

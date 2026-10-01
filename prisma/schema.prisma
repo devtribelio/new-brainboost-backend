@@ -373,6 +373,9 @@ model Banner {
   position  Int       @default(0)
   isActive  Boolean   @default(true) @map("is_active")
   isPopup   Boolean   @default(false) @map("is_popup")
+  // "external" (system browser, the behaviour before this column) | "webview" (in-app
+  // browser). Free text: the app treats any value it does not know as "external".
+  openMode  String    @default("external") @map("open_mode")
   startedAt DateTime? @map("started_at") // window open; null = no lower bound
   endedAt   DateTime? @map("ended_at") // window close; null = no upper bound
   createdAt DateTime  @default(now()) @map("created_at")
@@ -408,6 +411,7 @@ model Product {
   affiliateCommissions AffiliateCommission[]
   commerceTransactions CommerceTransaction[]
   voucherProducts      VoucherProduct[]
+  promoProducts        PromoProduct[]
   eventTicketType      EventTicketType?
 
   @@map("products")
@@ -1369,6 +1373,7 @@ model Voucher {
   // column (migration 20260719120000_voucher_multi_product).
   products     VoucherProduct[]
   transactions CommerceTransaction[]
+  promos       Promo[]
 
   // One automated voucher per member per program, for life. A PLAIN unique, not the
   // partial `WHERE owner_member_id IS NOT NULL` the spec first asked for: Postgres
@@ -1389,6 +1394,41 @@ model VoucherProduct {
 
   @@id([voucherId, productId])
   @@map("voucher_products")
+}
+
+/// A promo landing page (`/promo/{slug}` on the marketplace): a title, ONE public
+/// voucher, and the products to show under it. It holds no price of its own — the
+/// promo price is the voucher applied to `products.price`, so the card and the
+/// checkout quote cannot drift. Authored by the backoffice over plain SQL, which
+/// must supply `id` and `updated_at` itself (both defaults are Prisma-Client-side).
+model Promo {
+  id        String    @id @default(uuid(7)) @db.Uuid
+  slug      String    @unique
+  title     String
+  subtitle  String?
+  voucherId String    @map("voucher_id") @db.Uuid
+  position  Int       @default(0)
+  isActive  Boolean   @default(true) @map("is_active")
+  startsAt  DateTime? @map("starts_at")
+  endsAt    DateTime? @map("ends_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+
+  voucher  Voucher        @relation(fields: [voucherId], references: [id])
+  products PromoProduct[]
+
+  @@map("promos")
+}
+
+model PromoProduct {
+  promoId   String  @map("promo_id") @db.Uuid
+  productId String  @map("product_id") @db.Uuid
+  position  Int     @default(0)
+  promo     Promo   @relation(fields: [promoId], references: [id], onDelete: Cascade)
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@id([promoId, productId])
+  @@map("promo_products")
 }
 
 /// Idempotency guard for voucher redemption. One row per order (CommerceTransaction)
