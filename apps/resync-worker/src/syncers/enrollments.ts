@@ -7,6 +7,8 @@
  * KEY    legacyId = course_enrollment_id; also @@unique(memberId, courseId).
  * No new-system conflict — new purchases create their own rows with legacyId=null.
  * DELETE legacy `status = 0` -> isCanceled (see below).
+ * GUARD  rows with `via_b2b_grant_id` belong to the B2B backend and are never updated
+ *        or cancelled here — a mass revoke in Tribe must not kill B2B-app access.
  * See docs/legacy-resync-plan.md §6.
  */
 import type { RowDataPacket } from 'mysql2/promise';
@@ -18,6 +20,9 @@ const BB_COURSES = `course_id IN (SELECT course_id FROM course WHERE client = 'b
 
 /** Stamped on rows cancelled because legacy removed them, so support can tell them apart from a refund. */
 const LEGACY_CANCEL_REASON = 'legacy_removed';
+
+/** Existing enrollment for a (member, course) pair; `b2b` = carries `via_b2b_grant_id`. */
+type PairRow = { id: string; legacyId: number | null; b2b: boolean };
 
 export const enrollmentsSyncer: Syncer = {
   name: 'enrollments',
@@ -57,11 +62,11 @@ export const enrollmentsSyncer: Syncer = {
     // collide on the pair (e.g. a loser+winner enrolled in the same course, or a member
     // who bought the same course twice). Decide update/create/skip in memory so no P2002
     // is ever thrown, and never clobber a new-system enrollment's progress (legacyId=null).
-    const byPair = new Map<string, { id: string; legacyId: number | null }>();
+    const byPair = new Map<string, PairRow>();
     for (const e of await ctx.prisma.courseEnrollment.findMany({
-      select: { id: true, memberId: true, courseId: true, legacyId: true },
+      select: { id: true, memberId: true, courseId: true, legacyId: true, viaB2bGrantId: true },
     })) {
-      byPair.set(`${e.memberId}|${e.courseId}`, { id: e.id, legacyId: e.legacyId });
+      byPair.set(`${e.memberId}|${e.courseId}`, { id: e.id, legacyId: e.legacyId, b2b: e.viaB2bGrantId !== null });
     }
 
     let watermark = ctx.since;
@@ -104,13 +109,16 @@ export const enrollmentsSyncer: Syncer = {
       // read-decide-claim synchronously (no await between get and set) so a concurrent
       // row for the same pair sees the claim and takes the skip path, not a create race.
       const existing = byPair.get(pairKey);
-      if (!existing) byPair.set(pairKey, { id: 'new', legacyId }); // dedup further in-run rows for this pair
+      if (!existing) byPair.set(pairKey, { id: 'new', legacyId, b2b: false }); // dedup further in-run rows for this pair
       try {
         if (existing) {
           // Member already has access. Only refresh mutable fields when this row IS that
           // enrollment (same legacyId); otherwise skip — don't fight over the pair or
           // overwrite a new-system row's progress with stale legacy data.
-          if (existing.legacyId === legacyId) {
+          if (existing.b2b) {
+            // B2B-owned projection: expired_date / marker are the B2B backend's.
+            stats.skipped += 1;
+          } else if (existing.legacyId === legacyId) {
             await ctx.prisma.courseEnrollment.update({
               where: { id: existing.id },
               data: {
@@ -160,7 +168,7 @@ export const enrollmentsSyncer: Syncer = {
 async function cancelRemoved(
   ctx: SyncerCtx,
   stats: Stats,
-  byPair: Map<string, { id: string; legacyId: number | null }>,
+  byPair: Map<string, PairRow>,
   r: any,
   legacyId: number,
   courseByLegacy: Map<number, string>,
@@ -176,6 +184,12 @@ async function cancelRemoved(
   // purchase) is not ours to revoke.
   const existing = byPair.get(`${memberId}|${courseId}`);
   if (!existing || existing.legacyId !== legacyId) {
+    stats.skipped += 1;
+    return;
+  }
+  // The B2B cutover revokes every company seat in Tribe in one go; that removal
+  // must NOT propagate here, or the B2B app loses the very access it just took over.
+  if (existing.b2b) {
     stats.skipped += 1;
     return;
   }

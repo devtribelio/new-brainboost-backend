@@ -114,9 +114,13 @@ async function grantCourseEnrollment(
   // trial rows, so a redelivered event for a live paid enrollment updates 0 rows
   // instead of resetting a member's progress to zero. For a trial it also excludes
   // its own voucher, so a redelivered trial event cannot extend `expired_date`.
+  //
+  // B2B seats (`viaB2bGrantId` set) are deliberately NOT in this set: converting
+  // one must keep the member's progress, so it is handled separately below.
   const target: Prisma.CourseEnrollmentWhereInput = {
     memberId,
     courseId: product.course.id,
+    viaB2bGrantId: null,
     OR: [
       { isCanceled: true },
       trial ? { viaVoucherId: { not: null, notIn: [trial.voucherId] } } : { viaVoucherId: { not: null } },
@@ -140,7 +144,27 @@ async function grantCourseEnrollment(
       ...grant,
     },
   });
-  if (revived.count === 0) {
+  // B2B seat → personal purchase. The row becomes permanent and leaves the B2B
+  // backend's reach (marker cleared, so a later company revoke never touches it),
+  // but `progress` / certificate / dateStart stay: the member keeps what they
+  // earned on the company seat (PRD b2b-db-consolidation, decision 2026-10-01).
+  // Only a PAID grant converts — a trial on top of a company seat is a no-op.
+  let converted = 0;
+  if (!trial) {
+    const res = await prisma.courseEnrollment.updateMany({
+      where: { memberId, courseId: product.course.id, viaB2bGrantId: { not: null } },
+      data: {
+        viaB2bGrantId: null,
+        viaVoucherId: null,
+        expiredDate: null,
+        isCanceled: false,
+        cancelationReason: null,
+        canceledAt: null,
+      },
+    });
+    converted = res.count;
+  }
+  if (revived.count + converted === 0) {
     await prisma.courseEnrollment.createMany({
       data: [{ memberId, courseId: product.course.id, dateStart: now, ...grant }],
       skipDuplicates: true,

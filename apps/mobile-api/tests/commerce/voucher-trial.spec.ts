@@ -8,6 +8,7 @@
  * ever honoured for trial rows (a retail/legacy row carrying a date must keep
  * working forever). Requires a real Postgres.
  */
+import { randomUUID } from 'node:crypto';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import * as bcrypt from 'bcryptjs';
 import { prisma } from '@bb/db';
@@ -201,5 +202,47 @@ describe('free-trial voucher', () => {
       await wait(120);
     }
     throw new Error('trial row was never converted to a paid enrollment');
+  });
+
+  it('buying a course held as a B2B seat clears the marker but KEEPS progress', async () => {
+    // Simulate a company seat (brainboost-b2b-be projection): marked, time-boxed, in progress.
+    const grantId = randomUUID();
+    await prisma.courseEnrollment.update({
+      where: { memberId_courseId: { memberId, courseId } },
+      data: {
+        viaB2bGrantId: grantId,
+        viaVoucherId: null,
+        expiredDate: new Date(Date.now() + 30 * 24 * 3600 * 1000),
+        progress: 42,
+      },
+    });
+
+    const tx = await checkout.start({ memberId, productId }); // a dated seat is "not purchased" → checkout allowed
+    await prisma.commerceTransaction.update({
+      where: { id: tx.transactionId },
+      data: { status: 'PAID', paidAt: new Date() },
+    });
+    const { commerceEvents } = await import('@bb/common/events/commerce-events');
+    commerceEvents.emit('commerce.payment.success', {
+      paymentId: tx.transactionId,
+      transactionId: tx.transactionId,
+      memberId,
+      productId,
+      amount: 300_000,
+      voucherAmount: 0,
+      voucherId: null,
+    });
+
+    for (let i = 0; i < 25; i++) {
+      const row = await prisma.courseEnrollment.findFirst({ where: { memberId, courseId } });
+      if (row?.viaB2bGrantId === null) {
+        expect(row.expiredDate).toBeNull(); // permanent now
+        expect(row.progress).toBe(42); // what was earned on the seat survives
+        expect(await hasActiveEnrollment(memberId, courseId)).toBe(true);
+        return;
+      }
+      await wait(120);
+    }
+    throw new Error('B2B seat row was never converted to a paid enrollment');
   });
 });

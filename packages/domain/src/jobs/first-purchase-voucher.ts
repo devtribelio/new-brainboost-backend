@@ -71,7 +71,9 @@ const PAID_COURSE_ORDER = {
 /**
  * A paid course enrollment carried over from Tribelio.
  *
- * `expiredDate: null` excludes free trials (any dated grant is time-boxed), and
+ * `expiredDate: null` excludes free trials (any dated grant is time-boxed),
+ * `viaB2bGrantId: null` excludes company seats (a DIRECT_SALES seat is permanent
+ * but was never bought by the member), and
  * `isCanceled: false` excludes rows legacy removed — the resync maps the Cresenity
  * soft-delete `status = 0` onto a cancel. Both filters are load-bearing: without
  * them every expired legacy trial and every admin-removed enrollment reads as a
@@ -85,6 +87,7 @@ const PAID_COURSE_ORDER = {
 const LEGACY_PAID_ENROLLMENT = {
   legacyId: { not: null },
   expiredDate: null,
+  viaB2bGrantId: null,
   isCanceled: false,
   course: { product: { price: { gt: 0 } } },
 } satisfies Prisma.CourseEnrollmentWhereInput;
