@@ -98,6 +98,14 @@ model Member {
   // docs/legacy-resync-plan.md §6.
   legacySyncedAt DateTime? @map("legacy_synced_at")
 
+  /// Birth fact, NOT a status and NOT an access gate. Written ONCE at creation.
+  /// 'b2b' = created by the B2B backend (brainboost-b2b-be) for an employee who
+  /// had no account yet; null = every other path (register / social / legacy /
+  /// channel ingest — those do not stamp it yet). Never overwritten: a 'b2b'-born
+  /// member who later leaves the company and buys retail stays 'b2b'. "Is this
+  /// member B2B right now?" is answered by active `b2b_member_grant` rows.
+  signupSource String? @map("signup_source")
+
   profile                MemberProfile?
   devices                Device[]
   refreshTokens          RefreshToken[]
@@ -120,6 +128,7 @@ model Member {
   kycEvents              KycEvent[]
   eventTicketsBought     EventTicket[]           @relation("EventTicketBuyer")
   eventTicketsClaimed    EventTicket[]           @relation("EventTicketAttendee")
+  b2bGrants              B2bMemberGrant[]
 
   @@map("members")
 }
@@ -409,6 +418,7 @@ model Product {
   commerceTransactions CommerceTransaction[]
   voucherProducts      VoucherProduct[]
   eventTicketType      EventTicketType?
+  b2bModuleProducts    B2bModuleProduct[]
 
   @@map("products")
 }
@@ -425,6 +435,7 @@ model Course {
   sections    CourseSection[]
   enrollments CourseEnrollment[]
   bonuses     CourseBonus[]
+  b2bGrants   B2bMemberGrant[]
 
   @@map("courses")
 }
@@ -476,6 +487,13 @@ model CourseEnrollment {
   // expiredDate. No FK by design (mirrors AffiliateAttributionClaim): deleting a
   // voucher must not delete or lock the enrollment it granted.
   viaVoucherId       String?   @map("via_voucher_id") @db.Uuid
+  // B2B seat marker: the `b2b_member_grant` that granted this row (no FK, same
+  // pattern as viaVoucherId). Filled = access came from a company plan; the B2B
+  // backend may ONLY touch rows where this is filled. Cleared (together with
+  // expiredDate) by the payment-success listener when the member buys the course
+  // themselves, so a later B2B revoke never touches a paid row. Not an access gate
+  // and not what the B2B app lists from (that is the grant table).
+  viaB2bGrantId      String?   @map("via_b2b_grant_id") @db.Uuid
   isCanceled         Boolean   @default(false) @map("is_canceled")
   cancelationReason  String?   @map("cancelation_reason")
   canceledAt         DateTime? @map("canceled_at")
@@ -490,6 +508,7 @@ model CourseEnrollment {
   @@unique([memberId, courseId])
   @@index([memberId, createdAt])
   @@index([viaVoucherId])
+  @@index([viaB2bGrantId])
   @@map("course_enrollment")
 }
 
@@ -524,7 +543,7 @@ model Lesson {
   createdAt      DateTime @default(now()) @map("created_at")
   updatedAt      DateTime @updatedAt @map("updated_at")
 
-  section CourseSection @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  section      CourseSection      @relation(fields: [sectionId], references: [id], onDelete: Cascade)
   audioSources MediaAudioSource[]
 
   @@index([sectionId, order])
@@ -1361,8 +1380,8 @@ model Voucher {
   // fallback). Reporting, and what tells ops which members got a WhatsApp message.
   sentChannel   String? @map("sent_channel")
 
-  createdAt DateTime  @default(now()) @map("created_at")
-  updatedAt DateTime  @updatedAt @map("updated_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   // Product scope whitelist: 0 rows = global (all products), >=1 rows = only those
   // products (VoucherService.validate). Replaced the old single nullable product_id
@@ -1468,37 +1487,37 @@ model AppVersionConfig {
 /// backend-generated single-segment playlist pointing at `audio_key`; absent or
 /// inactive = Bunny exactly as before. Rollback per asset = `is_active=false`.
 model MediaAudioSource {
-  id          String   @id @default(uuid(7)) @db.Uuid
-  guid        String   @unique // Bunny Stream guid — the lookup key; lessons reference media only inside slides_data JSON, so there is no lesson column to FK to
-  audioKey    String   @map("audio_key") // S3 key, e.g. private/audio/<guid>/1.aac (private/ prefix = presigned/CDN-signed only, per S3StorageService convention)
-  version     Int      @default(1) // bump on re-encode; new key, old file untouched while downloads finish
-  codec       String   @default("aac") // aac (track copied) | aac-96k (re-encoded)
-  durationSec Int      @map("duration_sec") // for EXTINF / TARGETDURATION; from ffprobe
-  bytes       Int
-  sha256      String
+  id           String   @id @default(uuid(7)) @db.Uuid
+  guid         String   @unique // Bunny Stream guid — the lookup key; lessons reference media only inside slides_data JSON, so there is no lesson column to FK to
+  audioKey     String   @map("audio_key") // S3 key, e.g. private/audio/<guid>/1.aac (private/ prefix = presigned/CDN-signed only, per S3StorageService convention)
+  version      Int      @default(1) // bump on re-encode; new key, old file untouched while downloads finish
+  codec        String   @default("aac") // aac (track copied) | aac-96k (re-encoded)
+  durationSec  Int      @map("duration_sec") // for EXTINF / TARGETDURATION; from ffprobe
+  bytes        Int
+  sha256       String
   // Optional split into a few files: [{key, durationSec, bytes}, ...] in play order.
   // Why a handful (8) and not one: the store app's downloader fetches segments in
   // batches (12 in 3.3.3, 8 in 3.4.0) and the Dart loop that schedules the NEXT
   // batch freezes when the app is backgrounded on MIUI — so ≤ 8 segments means one
   // batch, no second batch to stall, per-segment retry, and a progress bar that
   // moves. null = single file at `audio_key` (rows created before this column).
-  segments    Json?
-  isActive    Boolean  @default(true) @map("is_active")
-  encodedAt   DateTime @map("encoded_at")
-  createdAt   DateTime @default(now()) @map("created_at")
+  segments     Json?
+  isActive     Boolean  @default(true) @map("is_active")
+  encodedAt    DateTime @map("encoded_at")
+  createdAt    DateTime @default(now()) @map("created_at")
   // "Whose asset is this" for ops. Nullable + SET NULL: the runtime lookup is by
   // guid, never by this column, so it can only inform, never gate. Filled from
   // slides_data at insert time; the view media_audio_source_lessons recomputes
   // the truth and shows when the two disagree (guid reused, lesson re-authored).
-  lessonId    String?  @map("lesson_id") @db.Uuid
-  lesson      Lesson?  @relation(fields: [lessonId], references: [id], onDelete: SetNull)
+  lessonId     String?  @map("lesson_id") @db.Uuid
+  lesson       Lesson?  @relation(fields: [lessonId], references: [id], onDelete: SetNull)
   // Master file this was cut from when it was UPLOADED from the backoffice
   // (private/audio-uploads/<guid>/source.<ext>); null = migrated from Bunny. An
   // upload has no Bunny copy, so is_active=false is not a rollback for it.
-  sourceKey   String?  @map("source_key")
+  sourceKey    String?  @map("source_key")
   // Is there a Bunny copy to fall back to? Decides whether is_active=false is a
   // rollback or an outage. false only for an upload that never reached Bunny.
-  hasBunnyCopy Boolean @default(true) @map("has_bunny_copy")
+  hasBunnyCopy Boolean  @default(true) @map("has_bunny_copy")
 
   @@index([lessonId])
   @@map("media_audio_sources")
@@ -1532,16 +1551,16 @@ model MediaAudioMigrationJob {
 /// Auth + per-channel capability toggles for 3rd-party ingestion (IAP/Scalev/Lynk.id) via
 /// POST /ingest/purchase. Key is stored hashed. Toggles are plain booleans (easy manual edit).
 model ThirdPartyCredential {
-  id                String    @id @default(uuid(7)) @db.Uuid
-  name              String    @unique // "revenuecat", "scalev", "lynkid"
-  keyHash           String    @unique @map("key_hash") // hash of the API key (never store plaintext)
-  isActive          Boolean   @default(true) @map("is_active") // master on/off
-  triggersAffiliate Boolean   @default(false) @map("triggers_affiliate") // may generate affiliate commission (SAFE DEFAULT off)
-  canIngestRefund   Boolean   @default(false) @map("can_ingest_refund") // may void commissions on refund events
-  canProvisionMember Boolean  @default(false) @map("can_provision_member") // may auto-create a Member when the buyer has no account yet (SAFE DEFAULT off)
-  lastUsedAt        DateTime? @map("last_used_at")
-  createdAt         DateTime  @default(now()) @map("created_at")
-  updatedAt         DateTime  @updatedAt @map("updated_at")
+  id                 String    @id @default(uuid(7)) @db.Uuid
+  name               String    @unique // "revenuecat", "scalev", "lynkid"
+  keyHash            String    @unique @map("key_hash") // hash of the API key (never store plaintext)
+  isActive           Boolean   @default(true) @map("is_active") // master on/off
+  triggersAffiliate  Boolean   @default(false) @map("triggers_affiliate") // may generate affiliate commission (SAFE DEFAULT off)
+  canIngestRefund    Boolean   @default(false) @map("can_ingest_refund") // may void commissions on refund events
+  canProvisionMember Boolean   @default(false) @map("can_provision_member") // may auto-create a Member when the buyer has no account yet (SAFE DEFAULT off)
+  lastUsedAt         DateTime? @map("last_used_at")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
 
   @@map("third_party_credentials")
 }
@@ -1947,4 +1966,378 @@ model EventVisit {
   @@index([eventId, createdAt])
   @@index([utmSource, utmCampaign, createdAt])
   @@map("event_visits")
+}
+
+// ============================================================================
+// B2B (owned by brainboost-b2b-be — this app NEVER writes these tables)
+// ============================================================================
+//
+// The B2B backend (repo `brainboost-b2b-be`, Express + Prisma 7) shares this
+// database. Every `b2b_*` table is ITS data: it introspects this schema with
+// `prisma db pull`; only THIS repo runs migrations. Column names are snake_case
+// exactly as the B2B code already queries them, and every `id` carries a DB
+// default (gen_random_uuid) because the B2B app inserts without minting ids.
+// `updated_at` is a DB default too (no @updatedAt): the B2B client is a different
+// Prisma client and sets it itself.
+//
+// Contract on the SHARED tables (PRD: brainboost-b2b-be/.claude/prds/b2b-db-consolidation.prd.md):
+//  - `members.signup_source`: B2B writes 'b2b' once when it creates a Member for
+//    an employee with no account. Birth fact — never a status, never a gate.
+//  - `members`: B2B never updates / deactivates / deletes a row after creation.
+//    Removing an employee from B2B = revoking grants only.
+//  - `course_enrollment`: gains ONE nullable column, `via_b2b_grant_id`. B2B
+//    upserts a PROJECTION of its active `b2b_member_grant` rows and may only
+//    modify rows whose `via_b2b_grant_id` is filled (golden rule). Grant: no row →
+//    insert with marker, expired_date = plan end (SUBSCRIPTION) or null (DIRECT
+//    SALES); paid row (marker null, expired_date null) → untouched; dated row
+//    without marker (trial/expired) → taken over; row of another grant → the later
+//    date wins (null wins) and the marker points at that grant. Revoke: only if the
+//    marker points at the revoked grant → move marker+date to another active grant,
+//    else expired_date = now() (row kept, progress kept). The payment-success
+//    listener clears the marker together with expired_date when the member buys the
+//    course themselves. The legacy resync enrollments syncer MUST skip rows with a
+//    marker. Unique (member_id, course_id) unchanged.
+//  - `products` / `courses`: read-only for B2B (`b2b_module_product` points at
+//    them; B2B can no longer create products of its own).
+
+/// Industry lookup for customers (seeded by B2B).
+model B2bIndustry {
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name      String    @db.VarChar(255)
+  isActive  Boolean?  @default(true) @map("is_active")
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime? @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  customers B2bCustomer[]
+
+  @@map("b2b_industry")
+}
+
+/// A B2B customer (company) that buys Brainboost access for its employees.
+model B2bCustomer {
+  id                  String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  companyName         String?   @map("company_name") @db.VarChar
+  companyBusinessName String?   @map("company_business_name") @db.VarChar
+  address             String?   @db.VarChar
+  city                String?   @db.VarChar
+  ownerName           String?   @map("owner_name") @db.VarChar
+  ownerEmail          String?   @map("owner_email") @db.VarChar
+  ownerPhoneNumber    String?   @map("owner_phone_number") @db.VarChar
+  industryId          String?   @map("industry_id") @db.Uuid
+  isActive            Boolean?  @default(true) @map("is_active")
+  createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime? @default(now()) @map("updated_at") @db.Timestamp(6)
+
+  industry                  B2bIndustry?                  @relation(fields: [industryId], references: [id], onDelete: SetNull)
+  users                     B2bUser[]
+  teamMembers               B2bTeamCustomer[]
+  paymentPlans              B2bPaymentPlan[]
+  invoices                  B2bInvoice[]
+  subscriptionNotifications B2bSubscriptionNotification[]
+  grants                    B2bMemberGrant[]
+
+  @@index([industryId])
+  @@map("b2b_customer")
+}
+
+/// Customer-side team member profile (owner / admin / sales); linked 1:1 from B2bUser.teamCustomerId.
+model B2bTeamCustomer {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  customerId  String?   @map("customer_id") @db.Uuid
+  name        String?
+  email       String?   @unique
+  phoneNumber String?   @map("phone_number")
+  address     String?
+  role        String?
+  isActive    Boolean?  @map("is_active")
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime? @default(now()) @map("updated_at") @db.Timestamp(6)
+
+  customer B2bCustomer? @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  users    B2bUser[]
+
+  @@index([customerId])
+  @@map("b2b_team_customer")
+}
+
+/// Brainboost-side (management persona) user extension: phone + address.
+model B2bManagement {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  phoneNumber String?   @map("phone_number") @db.VarChar
+  address     String?   @db.VarChar
+  isActive    Boolean?  @default(true) @map("is_active")
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime? @default(now()) @map("updated_at") @db.Timestamp(6)
+
+  users B2bUser[]
+
+  @@map("b2b_management")
+}
+
+/// Single-row "company profile" of Brainboost shown in the B2B portal.
+model B2bProfile {
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name      String?   @db.VarChar
+  email     String?   @db.VarChar
+  phone     String?   @db.VarChar
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime? @default(now()) @map("updated_at") @db.Timestamp(6)
+
+  @@map("b2b_profile")
+}
+
+/// B2B portal login. NOT a Member (mobile) and NOT an Admin (backoffice).
+/// type = 'management' | 'customer'; role per persona (Super Admin/admin/sales, owner/admin/sales).
+model B2bUser {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  customerId        String?   @map("customer_id") @db.Uuid
+  managementId      String?   @map("management_id") @db.Uuid
+  teamCustomerId    String?   @map("team_customer") @db.Uuid
+  name              String?   @db.VarChar
+  email             String?   @db.VarChar
+  password          String?   @db.VarChar
+  role              String?   @db.VarChar
+  type              String?   @db.VarChar
+  isActive          Boolean?  @default(true) @map("is_active")
+  /// Legacy single-session token, superseded by b2b_user_session. Kept for the data copy; drop once B2B code stops reading it.
+  refreshToken      String?   @map("refresh_token") @db.VarChar
+  passwordChangedAt DateTime? @map("password_changed_at") @db.Timestamp(6)
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime? @default(now()) @map("updated_at") @db.Timestamp(6)
+
+  customer            B2bCustomer?            @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  management          B2bManagement?          @relation(fields: [managementId], references: [id], onDelete: SetNull)
+  teamCustomer        B2bTeamCustomer?        @relation(fields: [teamCustomerId], references: [id], onDelete: SetNull)
+  sessions            B2bUserSession[]
+  passwordResetTokens B2bPasswordResetToken[]
+  invoicesCreated     B2bInvoice[]            @relation("B2bInvoiceCreatedBy")
+  invoicesUpdated     B2bInvoice[]            @relation("B2bInvoiceUpdatedBy")
+  grantsGiven         B2bMemberGrant[]
+
+  @@index([email])
+  @@index([customerId])
+  @@index([managementId])
+  @@index([teamCustomerId])
+  @@map("b2b_user")
+}
+
+/// Per-device refresh session of a B2B portal user.
+model B2bUserSession {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId       String   @map("user_id") @db.Uuid
+  refreshToken String   @unique @map("refresh_token")
+  userAgent    String?  @map("user_agent")
+  ipAddress    String?  @map("ip_address") @db.VarChar(45)
+  lastActive   DateTime @default(now()) @map("last_active") @db.Timestamp(6)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+
+  user B2bUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("b2b_user_session")
+}
+
+model B2bPasswordResetToken {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId        String?   @map("user_id") @db.Uuid
+  token         String?
+  expiresAt     DateTime? @map("expires_at") @db.Timestamptz(6)
+  isUsed        Boolean?  @map("is_used")
+  invalidatedAt DateTime? @map("invalidated_at") @db.Timestamptz(6)
+  lastRequestAt DateTime? @map("last_request_at") @db.Timestamptz(6)
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user B2bUser? @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([token])
+  @@map("b2b_password_reset_token")
+}
+
+/// A sellable bundle of products offered to B2B customers.
+model B2bModule {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name        String?
+  description String?
+  isActive    Boolean? @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  products     B2bModuleProduct[]
+  paymentPlans B2bPaymentPlanModule[]
+
+  @@index([name])
+  @@map("b2b_module")
+}
+
+/// Module ↔ Product. Replaces the old `module_product.brainboost_id` (B2B's own product mirror).
+model B2bModuleProduct {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  moduleId  String   @map("module_id") @db.Uuid
+  productId String   @map("product_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  module  B2bModule @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+  product Product   @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@unique([moduleId, productId])
+  @@index([productId])
+  @@map("b2b_module_product")
+}
+
+/// A customer's plan. package = 'subscription' | 'direct sales'. The latest paid invoice is the active period.
+model B2bPaymentPlan {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  customerId String    @map("customer_id") @db.Uuid
+  name       String    @db.VarChar(255)
+  package    String    @db.VarChar(50)
+  isActive   Boolean?  @default(true) @map("is_active")
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime? @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  customer                  B2bCustomer                   @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  modules                   B2bPaymentPlanModule[]
+  invoices                  B2bInvoice[]
+  subscriptionNotifications B2bSubscriptionNotification[]
+  grants                    B2bMemberGrant[]
+
+  @@index([customerId])
+  @@index([isActive])
+  @@map("b2b_payment_plan")
+}
+
+model B2bPaymentPlanModule {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  paymentPlanId String   @map("payment_plan_id") @db.Uuid
+  moduleId      String   @map("module_id") @db.Uuid
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  paymentPlan B2bPaymentPlan @relation(fields: [paymentPlanId], references: [id], onDelete: Cascade)
+  module      B2bModule      @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+
+  @@unique([paymentPlanId, moduleId])
+  @@map("b2b_payment_plan_module")
+}
+
+/// Paid period + seat quota of a plan. `quota` / `used_quota` drive how many grants a plan may hold.
+model B2bInvoice {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  invoiceNumber     String    @map("invoice_number") @db.VarChar(255)
+  customerId        String    @map("customer_id") @db.Uuid
+  paymentPlanId     String    @map("payment_plan_id") @db.Uuid
+  /// Denormalised plan package label at issue time (legacy column name).
+  paymentPlan       String    @map("payment_plan") @db.VarChar(50)
+  amount            Decimal   @db.Decimal(10, 2)
+  currency          String    @default("IDR") @db.VarChar(10)
+  status            String    @default("paid") @db.VarChar(20)
+  duration          String?   @db.VarChar(50)
+  startDate         DateTime? @map("start_date") @db.Timestamp(6)
+  endDate           DateTime? @map("end_date") @db.Timestamp(6)
+  quota             Int       @default(0)
+  usedQuota         Int       @default(0) @map("used_quota")
+  paymentMethod     String?   @map("payment_method") @db.VarChar(255)
+  bank              String?   @db.VarChar(255)
+  accountHolderName String?   @map("account_holder_name") @db.VarChar(255)
+  accountNumber     String?   @map("account_number") @db.VarChar(255)
+  issuedAt          DateTime  @default(now()) @map("issued_at") @db.Timestamp(6)
+  createdBy         String    @map("created_by") @db.Uuid
+  updatedBy         String    @map("updated_by") @db.Uuid
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt         DateTime  @default(now()) @map("updated_at") @db.Timestamp(6)
+
+  customer       B2bCustomer    @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  paymentPlanRef B2bPaymentPlan @relation(fields: [paymentPlanId], references: [id], onDelete: Cascade)
+  creator        B2bUser        @relation("B2bInvoiceCreatedBy", fields: [createdBy], references: [id], onDelete: Restrict)
+  updater        B2bUser        @relation("B2bInvoiceUpdatedBy", fields: [updatedBy], references: [id], onDelete: Restrict)
+
+  @@index([paymentPlanId])
+  @@index([customerId])
+  @@index([paymentPlanId, status, endDate(sort: Desc)])
+  @@map("b2b_invoice")
+}
+
+/// Audit of expiry-reminder emails sent per customer/plan (dedup for the daily scheduler).
+model B2bSubscriptionNotification {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  customerId       String   @map("customer_id") @db.Uuid
+  paymentPlanId    String?  @map("payment_plan_id") @db.Uuid
+  notificationType String   @map("notification_type") @db.VarChar(20)
+  recipientCount   Int      @default(0) @map("recipient_count")
+  sentAt           DateTime @default(now()) @map("sent_at") @db.Timestamptz(6)
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  customer    B2bCustomer     @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  paymentPlan B2bPaymentPlan? @relation(fields: [paymentPlanId], references: [id], onDelete: Cascade)
+
+  @@index([customerId])
+  @@index([paymentPlanId])
+  @@index([customerId, paymentPlanId, notificationType, sentAt])
+  @@index([customerId, notificationType, sentAt])
+  @@map("b2b_subscription_notification")
+}
+
+/// CSV member-import batch tracking (status: pending | processing | completed | failed).
+model B2bMemberImportJob {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  jobId      String   @unique @map("job_id")
+  customerId String   @map("customer_id") @db.Uuid
+  fileUrl    String   @map("file_url")
+  rowCount   Int      @map("row_count")
+  status     String   @default("pending")
+  error      String?
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt  DateTime @default(now()) @map("updated_at") @db.Timestamp(6)
+
+  @@index([customerId])
+  @@index([status])
+  @@map("b2b_member_import_job")
+}
+
+/// Copy-members-between-plans batch tracking.
+model B2bMemberCopyJob {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  jobId        String   @unique @map("job_id")
+  customerId   String   @map("customer_id") @db.Uuid
+  sourcePlanId String   @map("source_plan_id") @db.Uuid
+  targetPlanId String   @map("target_plan_id") @db.Uuid
+  status       String   @default("pending") @db.VarChar(20)
+  error        String?
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt    DateTime @default(now()) @map("updated_at") @db.Timestamp(6)
+
+  @@index([customerId])
+  @@index([status])
+  @@map("b2b_member_copy_job")
+}
+
+/// SOURCE OF TRUTH for B2B access: one row per (plan, member, course). Replaces
+/// the old `member_access`. Seat quota, plan attribution and revoke all live
+/// here; `course_enrollment` is only a projection the B2B backend maintains
+/// (rows it owns carry `via_b2b_grant_id` = this id). FK to members/courses is
+/// RESTRICT on purpose: a member or course with live B2B grants must not
+/// silently disappear.
+model B2bMemberGrant {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  customerId    String    @map("customer_id") @db.Uuid
+  paymentPlanId String    @map("payment_plan_id") @db.Uuid
+  memberId      String    @map("member_id") @db.Uuid
+  courseId      String    @map("course_id") @db.Uuid
+  isActive      Boolean   @default(true) @map("is_active")
+  grantedBy     String?   @map("granted_by") @db.Uuid
+  revokedAt     DateTime? @map("revoked_at") @db.Timestamptz(6)
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  customer    B2bCustomer    @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  paymentPlan B2bPaymentPlan @relation(fields: [paymentPlanId], references: [id], onDelete: Cascade)
+  member      Member         @relation(fields: [memberId], references: [id], onDelete: Restrict)
+  course      Course         @relation(fields: [courseId], references: [id], onDelete: Restrict)
+  granter     B2bUser?       @relation(fields: [grantedBy], references: [id], onDelete: SetNull)
+
+  @@unique([paymentPlanId, memberId, courseId])
+  @@index([memberId, courseId])
+  @@index([customerId])
+  @@index([paymentPlanId, isActive])
+  @@map("b2b_member_grant")
 }
