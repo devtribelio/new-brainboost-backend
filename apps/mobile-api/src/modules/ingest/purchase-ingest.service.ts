@@ -5,6 +5,7 @@ import { isUuid } from '@bb/common/utils/uuid.util';
 import { commerceEvents } from '@bb/common/events/commerce-events';
 import { fxRateService } from '@bb/common/services/fx-rate.service';
 import { generateOrderCode } from '@bb/domain/commerce/utils/generate-order-code';
+import { resolveTaxRate } from '@bb/domain/commerce/tax';
 import { attributionService } from '@bb/domain/affiliate/attribution.service';
 import { COMMISSION_STATUS } from '@bb/domain/affiliate/constants';
 import { memberProvisioningService } from '@bb/domain/member/provisioning.service';
@@ -149,6 +150,27 @@ export class PurchaseIngestService {
     const money = await this.normalizeToIdr(input, product);
     const { gross, accepted } = money;
 
+    // PPN on every ingested purchase (RevenueCat, Scalev, Lynk.id): none of
+    // these stores can add a tax line, the price is raised to cover it instead,
+    // and Brainboost remits the PPN itself (finance, 2026-09-30). Two shapes,
+    // told apart by whether the store kept a cut:
+    //  - store cut present (accepted < gross — Apple/Google): finance's rule,
+    //    tax = rate × payout, exclusive ("11% dari uang masuk Apple");
+    //  - no store cut (accepted == gross — Scalev, Lynk.id): the price is one
+    //    we set inclusive, exactly like web, so the tax is the share INSIDE it,
+    //    gross × r / (100 + r). Taxing that gross at a flat 11% would bill the
+    //    PPN twice against a price that already contains it.
+    // Same resolver as checkout: an event ticket or the switch being off books
+    // 0. One rate for every storefront: the PPN we owe is Indonesian whatever
+    // currency the buyer paid in.
+    const taxRate = await resolveTaxRate(productId);
+    const taxAmount =
+      taxRate <= 0
+        ? 0
+        : accepted < gross
+          ? Math.round((accepted * taxRate) / 100)
+          : Math.round((gross * taxRate) / (100 + taxRate));
+
     // RevenueCat can deliver a burst of events in the same instant (IAP restore
     // flood). The order code is count-derived → concurrent inserts collide on
     // the `code` unique. A blanket "any P2002 → duplicate" is WRONG: a code
@@ -171,6 +193,10 @@ export class PurchaseIngestService {
               itemTotal: gross,
               amount: gross,
               voucherAmount,
+              // Frozen with the order, like the web path: a later rate change
+              // never moves a settled IAP row.
+              taxRate,
+              taxAmount,
               provider: cred.name,
               providerEventId: input.providerEventId,
               attributionKey: input.attributionKey ?? input.providerEventId,
@@ -278,6 +304,10 @@ export class PurchaseIngestService {
       // takehome). For events without a net signal, leave undefined → listener
       // falls back to `amount` (gross) and existing channels are unaffected.
       acceptedAmount: input.netAmount != null ? accepted : undefined,
+      // PPN owed on this settle (0 while the switch is off). The listener
+      // subtracts it from `acceptedAmount ?? amount`, so the commission base is
+      // the proceeds after tax.
+      taxAmount,
       voucherAmount,
       voucherId: null,
       affiliatorId: null,

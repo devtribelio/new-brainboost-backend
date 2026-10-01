@@ -12,11 +12,12 @@ import {
 import type { CheckoutService } from '@bb/domain/commerce/checkout.service';
 import type { PaymentService } from '@bb/domain/commerce/payment.service';
 import type { VoucherService } from '@bb/domain/commerce/voucher.service';
-import { StartCheckoutDto } from './dto/start-checkout.dto';
+import { CheckoutQuoteDto, StartCheckoutDto } from './dto/start-checkout.dto';
 import { AFFILIATE_COOKIE_NAME } from '@bb/domain/affiliate/constants';
 import { PayDto, CancelTransactionDto, ValidateVoucherDto } from './dto/pay.dto';
 import { ListTransactionsQueryDto } from './dto/list-transactions.dto';
 import {
+  CheckoutQuoteResultDto,
   CommerceTransactionListItemDto,
   CreatePaymentResultDto,
   StartCheckoutResultDto,
@@ -35,6 +36,24 @@ export class CommerceController {
     private readonly payment: PaymentService,
     private readonly voucher: VoucherService,
   ) {}
+
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Quote a checkout — price, discount, tax, total; writes nothing',
+    description:
+      'Same guards and arithmetic as submit, without creating an order or touching the voucher quota. An invalid voucher or an already-owned product fails exactly as submit would (same 400 codes), so the card never shows a price submit will refuse.',
+  })
+  @ApiBody({ type: () => CheckoutQuoteDto })
+  @ApiResponse({ status: 200, type: () => CheckoutQuoteResultDto })
+  quoteCheckout = async (req: ReqWithUser, res: Response) => {
+    const dto = req.body as CheckoutQuoteDto;
+    const result = await this.checkout.quote({
+      memberId: req.user!.id,
+      productId: dto.productId,
+      voucherCode: dto.voucherCode,
+    });
+    return ok(res, result);
+  };
 
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Start checkout — create PENDING transaction' })

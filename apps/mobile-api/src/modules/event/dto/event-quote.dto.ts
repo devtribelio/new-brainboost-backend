@@ -55,8 +55,21 @@ export class EventQuoteResultDto {
   voucherAmount!: number;
 
   @ApiProperty({
-    example: 700000,
-    description: 'Equal to `itemTotal` — present so the shape matches the checkout response.',
+    example: 11,
+    description:
+      'PPN percent, label only. 0 while tax is off (hide the tax row when `taxAmount` is 0). Whether tickets are taxed at all is a pending business decision — build the row either way.',
+  })
+  taxRate!: number;
+
+  @ApiProperty({
+    example: 77000,
+    description: 'Tax on `itemTotal`, one line for the order. The `breakdown` lines stay pre-tax.',
+  })
+  taxAmount!: number;
+
+  @ApiProperty({
+    example: 777000,
+    description: '`itemTotal + taxAmount` — tax-inclusive, same shape as the checkout response.',
   })
   amount!: number;
 }

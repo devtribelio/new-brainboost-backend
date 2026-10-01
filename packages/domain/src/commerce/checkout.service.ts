@@ -7,6 +7,7 @@ import { generateOrderCode } from './utils/generate-order-code';
 import { VoucherService } from './voucher.service';
 import { attributionService } from '@bb/domain/affiliate/attribution.service';
 import { OWNED_FOR_PURCHASE } from './enrollment';
+import { resolveTaxRate } from './tax';
 
 export interface StartCheckoutInput {
   memberId: string;
@@ -65,19 +66,108 @@ export interface TrackingSource {
   utmTerm?: string;
 }
 
-export interface StartCheckoutResult {
-  transactionId: string;
-  transactionCode: string;
+/** What a checkout costs. Same numbers whether it was quoted or submitted. */
+export interface CheckoutQuoteResult {
   itemTotal: number;
   voucherAmount: number;
+  /** Percent (11 = 11%). Frozen on the order at submit. */
+  taxRate: number;
+  taxAmount: number;
+  /** Tax-inclusive. */
   amount: number;
+}
+
+export interface StartCheckoutResult extends CheckoutQuoteResult {
+  transactionId: string;
+  transactionCode: string;
   expiredAt: Date;
 }
+
+type PriceInput = Pick<StartCheckoutInput, 'memberId' | 'productId' | 'voucherCode' | 'qty' | 'itemTotal'>;
 
 export class CheckoutService {
   constructor(private readonly voucherService: VoucherService = new VoucherService()) {}
 
+  /**
+   * Price a course checkout without writing anything: no order, no order number,
+   * no voucher slot. Runs the exact guards and arithmetic `start()` runs, so the
+   * summary card shows the numbers submit will charge — the alternative, a
+   * client-side estimate with a tax estimate on top, is where one-rupiah drifts
+   * come from. Same errors as submit, on purpose: a quote for a purchase submit
+   * would refuse is not a price.
+   */
+  async quote(input: PriceInput): Promise<CheckoutQuoteResult> {
+    const { totals } = await this.price(input);
+    return totals;
+  }
+
   async start(input: StartCheckoutInput): Promise<StartCheckoutResult> {
+    const { product, voucherId, totals } = await this.price(input);
+    const qty = Math.max(1, Math.floor(input.qty ?? 1));
+
+    const attribution = await this.resolveAttribution(input.memberId, input.productId);
+    const attributedAffiliatorMemberId = await attributionService.resolveOverrideAffiliatorMemberId(
+      input.memberId,
+      input.affiliatorCode,
+      input.productId, // per-product attribution (B-5): prefer a visit for THIS product
+    );
+
+    const expiryMs =
+      input.expiryMinutes && input.expiryMinutes > 0
+        ? input.expiryMinutes * 60 * 1000
+        : env.commerce.transactionExpiryHours * 3600 * 1000;
+    const expiredAt = new Date(Date.now() + expiryMs);
+
+    // `generateOrderCode` derives its sequence by COUNTING today's orders, so two
+    // checkouts in the same instant read the same count and mint the same code —
+    // the unique index then rejects one with P2002. Rare for a course, routine
+    // for an event: a webinar link goes out to a broadcast list and the whole
+    // audience presses buy at once. Retry with a jittered code, same as the
+    // ingest path does for an IAP-restore burst.
+    const tx = await this.createTransactionWithRetry((code) => ({
+        code,
+        memberId: input.memberId,
+        productId: product.id,
+        qty,
+        itemTotal: totals.itemTotal,
+        voucherAmount: totals.voucherAmount,
+        voucherCode: input.voucherCode,
+        voucherId,
+        // Frozen with the order: a later rate change must not move this row.
+        taxRate: totals.taxRate,
+        taxAmount: totals.taxAmount,
+        amount: totals.amount,
+        affiliatorId: attribution.affiliatorId,
+        programId: attribution.programId,
+        attributedAffiliatorMemberId,
+        // Frozen at creation, never updated: the shop cookie is last-touch, so
+        // reading the source back through shop_visits would retro-move a paid
+        // order onto whatever campaign the buyer clicked next.
+        buyerPhone: input.buyerPhone ?? null,
+        buyerEmail: input.buyerEmail ?? null,
+        guestId: input.source?.guestId,
+        utmSource: input.source?.utmSource,
+        utmMedium: input.source?.utmMedium,
+        utmCampaign: input.source?.utmCampaign,
+        utmContent: input.source?.utmContent,
+        utmTerm: input.source?.utmTerm,
+        status: 'PENDING',
+        expiredAt,
+    }));
+
+    return {
+      transactionId: tx.id,
+      transactionCode: tx.code,
+      ...totals,
+      expiredAt,
+    };
+  }
+
+  /**
+   * Guards + arithmetic shared by `quote()` and `start()`. Anything that decides
+   * the price or refuses the sale lives here, so the two can never disagree.
+   */
+  private async price(input: PriceInput) {
     const product = await prisma.product.findUnique({
       where: { id: input.productId },
       select: { id: true, price: true, isActive: true, status: true },
@@ -126,69 +216,15 @@ export class CheckoutService {
       voucherMeta = { type: check.type!, value: check.voucherAmount!, maxAmount: check.maxAmount };
     }
 
-    const qty = Math.max(1, Math.floor(input.qty ?? 1));
     const totals = computeTotals({
       unitPrice: product.price,
-      qty,
+      qty: Math.max(1, Math.floor(input.qty ?? 1)),
       itemTotal: input.itemTotal,
       voucher: voucherMeta,
+      taxRate: await resolveTaxRate(product.id),
     });
 
-    const attribution = await this.resolveAttribution(input.memberId, input.productId);
-    const attributedAffiliatorMemberId = await attributionService.resolveOverrideAffiliatorMemberId(
-      input.memberId,
-      input.affiliatorCode,
-      input.productId, // per-product attribution (B-5): prefer a visit for THIS product
-    );
-
-    const expiryMs =
-      input.expiryMinutes && input.expiryMinutes > 0
-        ? input.expiryMinutes * 60 * 1000
-        : env.commerce.transactionExpiryHours * 3600 * 1000;
-    const expiredAt = new Date(Date.now() + expiryMs);
-
-    // `generateOrderCode` derives its sequence by COUNTING today's orders, so two
-    // checkouts in the same instant read the same count and mint the same code —
-    // the unique index then rejects one with P2002. Rare for a course, routine
-    // for an event: a webinar link goes out to a broadcast list and the whole
-    // audience presses buy at once. Retry with a jittered code, same as the
-    // ingest path does for an IAP-restore burst.
-    const tx = await this.createTransactionWithRetry((code) => ({
-        code,
-        memberId: input.memberId,
-        productId: input.productId,
-        qty,
-        itemTotal: totals.itemTotal,
-        voucherAmount: totals.voucherAmount,
-        voucherCode: input.voucherCode,
-        voucherId,
-        amount: totals.amount,
-        affiliatorId: attribution.affiliatorId,
-        programId: attribution.programId,
-        attributedAffiliatorMemberId,
-        // Frozen at creation, never updated: the shop cookie is last-touch, so
-        // reading the source back through shop_visits would retro-move a paid
-        // order onto whatever campaign the buyer clicked next.
-        buyerPhone: input.buyerPhone ?? null,
-        buyerEmail: input.buyerEmail ?? null,
-        guestId: input.source?.guestId,
-        utmSource: input.source?.utmSource,
-        utmMedium: input.source?.utmMedium,
-        utmCampaign: input.source?.utmCampaign,
-        utmContent: input.source?.utmContent,
-        utmTerm: input.source?.utmTerm,
-        status: 'PENDING',
-        expiredAt,
-    }));
-
-    return {
-      transactionId: tx.id,
-      transactionCode: tx.code,
-      itemTotal: totals.itemTotal,
-      voucherAmount: totals.voucherAmount,
-      amount: totals.amount,
-      expiredAt,
-    };
+    return { product, voucherId, totals };
   }
 
   /**

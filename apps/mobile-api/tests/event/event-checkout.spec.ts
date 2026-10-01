@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import request from 'supertest';
 import bcrypt from 'bcryptjs';
 import { prisma } from '@bb/db';
-import { SETTING_KEYS, SettingsService } from '@bb/common/services/settings.service';
+import { SETTING_KEYS, SettingsService, settingsService } from '@bb/common/services/settings.service';
 import type { XenditGateway } from '@bb/common/services/xendit-gateway';
 import type { CreateInvoiceRequest, Invoice } from 'xendit-node/invoice/models';
 import { PaymentService } from '@bb/domain/commerce/payment.service';
@@ -906,6 +906,8 @@ describe('bundle pricing', () => {
       expect(res.body.data.itemTotal).toBe(850_000);
       expect(res.body.data.amount).toBe(850_000);
       expect(res.body.data.voucherAmount).toBe(0);
+      expect(res.body.data.taxRate).toBe(0);
+      expect(res.body.data.taxAmount).toBe(0);
       expect(res.body.data.breakdown).toEqual([
         { label: 'Trio', qty: 3, amount: 500_000 },
         { label: 'Duo', qty: 2, amount: 350_000 },
@@ -948,6 +950,85 @@ describe('bundle pricing', () => {
       expect(result.itemTotal).toBe(quoted.body.data.itemTotal);
       expect(result.breakdown).toEqual(quoted.body.data.breakdown);
     });
+  });
+
+  describe('tax (PPN) with tax.rate = 11 — event tickets are exempt', () => {
+    async function withRate<T>(rate: string, fn: () => Promise<T>): Promise<T> {
+      await settingsService.set(SETTING_KEYS.taxEnabled, 'true');
+      await settingsService.set(SETTING_KEYS.taxRate, rate);
+      SettingsService.clearCache();
+      try {
+        return await fn();
+      } finally {
+        await prisma.appSetting.deleteMany({
+          where: { key: { in: [SETTING_KEYS.taxEnabled, SETTING_KEYS.taxRate] } },
+        });
+        SettingsService.clearCache();
+      }
+    }
+
+    it('quotes a ticket with NO tax even while courses are taxed at 11%', () =>
+      withRate('11', async () => {
+        const { type } = await withLadder();
+        const res = await request(app)
+          .get('/api/event/quote')
+          .query({ ticketTypeId: type.id, qty: 5 })
+          .expect(200);
+
+        expect(res.body.data.itemTotal).toBe(850_000);
+        expect(res.body.data.taxRate).toBe(0);
+        expect(res.body.data.taxAmount).toBe(0);
+        expect(res.body.data.amount).toBe(850_000);
+        expect(res.body.data.breakdown).toEqual([
+          { label: 'Trio', qty: 3, amount: 500_000 },
+          { label: 'Duo', qty: 2, amount: 350_000 },
+        ]);
+      }));
+
+    it('checkout freezes tax 0 on a ticket order, invoices the pre-tax total, and the order page agrees', () =>
+      withRate('11', async () => {
+        const { type } = await withLadder();
+        const email = `tax-${Date.now()}@test.local`;
+
+        const result = await service().start({
+          ticketTypeId: type.id,
+          buyer: { name: 'Rina', email },
+          attendees: [attendee(1), attendee(2), attendee(3), attendee(4)],
+        });
+        track((await prisma.member.findUnique({ where: { email } }))!.id);
+
+        // Trio + single = 700k, and that is the whole bill: no PPN on a ticket.
+        expect(result.itemTotal).toBe(700_000);
+        expect(result.taxRate).toBe(0);
+        expect(result.taxAmount).toBe(0);
+        expect(result.amount).toBe(700_000);
+
+        const payment = await prisma.commercePayment.findUnique({ where: { id: result.payment.paymentId } });
+        expect(payment!.amount).toBe(700_000);
+
+        const page = await request(app)
+          .get(`/api/event/order/${result.transactionCode}`)
+          .query({ email })
+          .expect(200);
+        expect(page.body.data).toMatchObject({ taxRate: 0, taxAmount: 0, amount: 700_000 });
+      }));
+
+    it('a free ticket stays free: nothing to tax, no invoice', () =>
+      withRate('11', async () => {
+        const { type } = await createTicketType({ price: 0 });
+        const email = `tax-free-${Date.now()}@test.local`;
+
+        const result = await service().start({
+          ticketTypeId: type.id,
+          buyer: { name: 'Rina', email },
+          attendees: [attendee(1)],
+        });
+        track((await prisma.member.findUnique({ where: { email } }))!.id);
+
+        expect(result.taxAmount).toBe(0);
+        expect(result.amount).toBe(0);
+        expect(result.payment.status).toBe('SUCCESS');
+      }));
   });
 });
 
