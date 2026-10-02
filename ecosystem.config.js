@@ -97,7 +97,9 @@ module.exports = {
       // migrateAudioToStorage rides here too (the backoffice button should not
       // wait an hour) and runs last; it stops claiming work after 3 minutes so it
       // is idle before the next cron_restart. Host needs ffmpeg (apt install ffmpeg).
-      args: 'executeApprovedDisbursements expireEventTicketOrders migrateAudioToStorage',
+      // moderatePosts (tribe post moderation safety net) sits before the audio job:
+      // a held post should not wait behind minutes of ffmpeg.
+      args: 'executeApprovedDisbursements expireEventTicketOrders moderatePosts migrateAudioToStorage',
       exec_mode: 'fork',
       instances: 1,
       autorestart: false,

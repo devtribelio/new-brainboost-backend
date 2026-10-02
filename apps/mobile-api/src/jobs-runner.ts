@@ -8,6 +8,7 @@ import { expirePendingPayments } from '@bb/domain/jobs/expire-pending-payments';
 import { expireEventTicketOrders } from '@bb/domain/jobs/expire-event-ticket-orders';
 import { topicDigest } from '@bb/domain/jobs/topic-digest';
 import { firstPurchaseVoucher } from '@bb/domain/jobs/first-purchase-voucher';
+import { moderatePosts } from '@bb/domain/jobs/moderate-posts';
 import { streakReminder } from './modules/tracker/streak-reminder.job';
 import { migrateAudioToStorage } from './modules/media/audio-migration.job';
 
@@ -53,6 +54,10 @@ const JOBS: Array<{ name: string; run: () => Promise<unknown> }> = [
   // `firstPurchaseVoucher.enabled` is true AND `launchAt` is set, and it ships with
   // both off. It writes outbox rows, never money.
   { name: 'firstPurchaseVoucher', run: () => firstPurchaseVoucher() },
+  // Safety net for tribe post moderation: checks posts the inline call never got
+  // to and re-checks the ones published fail-open. Idle (one indexed query) while
+  // moderation is off. Bounded batch, so it stays ahead of the slow job below.
+  { name: 'moderatePosts', run: () => moderatePosts() },
   // Drains the backoffice's "Migrasi ke S3" queue. LAST on its lane on purpose:
   // it is the only job here that can run for minutes (download + ffmpeg + upload),
   // and money jobs must not wait behind it. Needs ffmpeg/ffprobe on the host.

@@ -7,6 +7,14 @@
  */
 export const PUBLISHED_STATUS = 'PUBLISHED';
 
+/**
+ * Moderation states (docs/tribe-moderation.md). Neither is in PUBLISHED_STATUSES,
+ * so every published gate already hides them: IN_REVIEW = held until the AI
+ * check answers, REJECTED = the check (or an admin) refused it.
+ */
+export const IN_REVIEW_STATUS = 'IN_REVIEW';
+export const REJECTED_STATUS = 'REJECTED';
+
 /** All status values that count as publicly visible / published. */
 export const PUBLISHED_STATUSES: string[] = [PUBLISHED_STATUS, 'PUBLISH'];
 

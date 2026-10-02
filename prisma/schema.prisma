@@ -679,6 +679,42 @@ model Post {
   @@map("posts")
 }
 
+/// What the AI is told to filter out of the tribe. Authored by the backoffice over
+/// plain SQL: `description` is the instruction handed to the model verbatim.
+/// A plain-SQL writer must supply `id` itself (`uuid(7)` is Prisma-Client-side).
+model ModerationCategory {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  name        String   @unique
+  description String
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@map("moderation_categories")
+}
+
+/// One row per moderated post (docs/tribe-moderation.md). `postId` is a plain
+/// scalar with no FK, same rule as `voucher_redemptions`: the row is an audit
+/// trail and must survive whatever happens to the post. `decidedBy = 'ADMIN'`
+/// is written by the backoffice and is final — the app never touches that row.
+model PostModeration {
+  id           String    @id @default(uuid(7)) @db.Uuid
+  postId       String    @unique @map("post_id") @db.Uuid
+  status       String // PENDING | APPROVED | REJECTED | ERROR
+  categoryName String?   @map("category_name")
+  reason       String?
+  decidedBy    String    @default("AI") @map("decided_by") // AI | ADMIN
+  model        String?
+  attempts     Int       @default(0)
+  lastError    String?   @map("last_error")
+  checkedAt    DateTime? @map("checked_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  @@index([status])
+  @@map("post_moderations")
+}
+
 model PostLike {
   id        String   @id @default(uuid(7)) @db.Uuid
   postId    String   @map("post_id") @db.Uuid

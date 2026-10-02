@@ -4,11 +4,15 @@ import { badRequest, forbidden, notFound, ERROR_CODES } from '@bb/common/excepti
 import type { PaginationParams } from '@bb/common/utils/pagination.util';
 import { notificationEvents } from '@bb/common/events/notification-events';
 import { assertUuid } from '@bb/common/utils/uuid.util';
+import { logger } from '@bb/common/config/logger';
 import {
+  IN_REVIEW_STATUS,
   PUBLISHED_STATUS,
   PUBLISHED_STATUS_FILTER,
+  REJECTED_STATUS,
   isPublished,
 } from '@bb/common/utils/post-status.util';
+import { loadModerationConfig, moderatePost } from '../moderation/post-moderation';
 
 interface PostListQuery {
   keyword?: string;
@@ -164,6 +168,8 @@ export class PostService {
   ): Promise<{ isLiked: boolean; countLike: number }> {
     const post = await this.resolveByAnyId(postId);
     if (!post) throw notFound(ERROR_CODES.POST_NOT_FOUND);
+    // Held / rejected posts take no likes — not even from their author.
+    if (!isPublished(post.publishStatus)) throw forbidden(ERROR_CODES.POST_NOT_PUBLISHED);
     if (post.networkId) await this.assertNetworkAccess(post.networkId, memberId);
 
     const result = await prisma.$transaction(async (tx) => {
@@ -253,28 +259,50 @@ export class PostService {
         content,
         createdAt: { gte: dupSince },
         isDeleted: false,
+        // A rejected post must not block the author from trying again.
+        publishStatus: { not: REJECTED_STATUS },
       },
       select: { id: true },
     });
     if (dup) throw badRequest(ERROR_CODES.POST_DUPLICATE);
 
-    const post = await prisma.post.create({
-      data: {
-        authorId: memberId,
-        topicId: dto.topicId ?? null,
-        networkId: dto.networkId ?? null,
-        title: dto.title ?? null,
-        content,
-        postType: dto.postType ?? 'status',
-        excerpt: content.slice(0, 200),
-        imageUrls,
-        videoUrl: dto.videoUrl ?? null,
-        embedUrl: dto.embedUrl ?? null,
-        publishStatus: PUBLISHED_STATUS,
-        engagedAt: new Date(),
-      },
-      include: postInclude,
-    });
+    // Image posts wait for the AI check when moderation is on (docs/tribe-moderation.md).
+    // `isAdminPost` is never set on this path, so every post here is a member post.
+    const held = imageUrls.length > 0 && (await loadModerationConfig()) !== null;
+
+    const data = {
+      authorId: memberId,
+      topicId: dto.topicId ?? null,
+      networkId: dto.networkId ?? null,
+      title: dto.title ?? null,
+      content,
+      postType: dto.postType ?? 'status',
+      excerpt: content.slice(0, 200),
+      imageUrls,
+      videoUrl: dto.videoUrl ?? null,
+      embedUrl: dto.embedUrl ?? null,
+      publishStatus: held ? IN_REVIEW_STATUS : PUBLISHED_STATUS,
+      engagedAt: new Date(),
+    };
+
+    if (held) {
+      const post = await prisma.$transaction(async (tx) => {
+        const created = await tx.post.create({ data, include: postInclude });
+        await tx.postModeration.create({ data: { postId: created.id, status: 'PENDING' } });
+        return created;
+      });
+      // After the response. `post.published` is NOT emitted here: nobody is told
+      // about a post they cannot open — moderatePost emits it on release. If this
+      // process dies first, the moderatePosts job picks the PENDING row up.
+      setImmediate(() => {
+        moderatePost(post.id).catch((err) =>
+          logger.error({ err, postId: post.id }, '[moderation] inline check failed'),
+        );
+      });
+      return post;
+    }
+
+    const post = await prisma.post.create({ data, include: postInclude });
     notificationEvents.emit('post.published', {
       postId: post.id,
       authorId: post.authorId,

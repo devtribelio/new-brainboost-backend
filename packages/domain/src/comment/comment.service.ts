@@ -74,6 +74,13 @@ export class CommentService {
   async listForPost(p: PaginationParams, postIdInput: string) {
     const postId = await this.resolvePostId(postIdInput);
     if (!postId) return { rows: [], total: 0 };
+    // A post published fail-open and rejected later may already carry comments;
+    // they go dark with it.
+    const post = await prisma.post.findUnique({
+      where: { id: postId },
+      select: { publishStatus: true },
+    });
+    if (!isPublished(post?.publishStatus)) return { rows: [], total: 0 };
     const where = { postId, parentId: null, isDeleted: false };
     const [rows, total] = await Promise.all([
       prisma.comment.findMany({

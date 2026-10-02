@@ -352,6 +352,9 @@ export class BbEcsStack extends cdk.Stack {
         taskDefinition: makeCronLane('CronDisburse', 'cron-disburse', [
           'executeApprovedDisbursements',
           'expireEventTicketOrders',
+          // Jaring pengaman moderasi post tribe (docs/tribe-moderation.md). Sebelum
+          // job audio supaya post yang ditahan tidak menunggu ffmpeg.
+          'moderatePosts',
           // Antrean "Migrasi ke S3" dari backoffice. Terakhir di lane ini: satu-satunya
           // job yang bisa jalan bermenit-menit. Butuh ffmpeg di image (Dockerfile).
           'migrateAudioToStorage',

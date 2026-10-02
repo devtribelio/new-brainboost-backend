@@ -105,6 +105,28 @@ const SETTINGS: Array<{ key: string; value: string; description: string }> = [
       'PPN percent (11 = 11%) applied when tax.enabled is true: added on top for web checkout, 11% of Apple payout for iOS. Frozen on each order at creation.',
   },
   {
+    key: 'moderation.enabled',
+    value: 'false',
+    description:
+      "AI moderation of tribe image posts ('true' to hold image posts until the model clears them). Also needs baseUrl, model, apiKey and at least one active moderation category.",
+  },
+  {
+    key: 'moderation.baseUrl',
+    value: '',
+    description:
+      'Base URL of an OpenAI-compatible API, without /chat/completions (e.g. https://api.openai.com/v1).',
+  },
+  {
+    key: 'moderation.model',
+    value: '',
+    description: 'Vision-capable model id sent to the moderation provider.',
+  },
+  {
+    key: 'moderation.apiKey',
+    value: '',
+    description: 'Bearer API key for the moderation provider. Secret.',
+  },
+  {
     key: 'kyc.minBalance',
     value: '55000',
     description:

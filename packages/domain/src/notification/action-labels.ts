@@ -12,6 +12,9 @@ export const ActionLabel = {
   RequestJoin: 'requestJoin',
   ApproveJoin: 'approveJoin',
   MemberJoin: 'memberJoin',
+  // Sent to the AUTHOR only, when moderation rejects their post
+  // (docs/tribe-moderation.md). FROZEN once shipped, same rule as the digest values.
+  PostRejected: 'postRejected',
   PaymentSuccess: 'paymentSuccess',
   // Free-trial voucher grant. Separate from PaymentSuccess because the member did
   // not pay and the only thing worth telling them is when access stops. Safe to add

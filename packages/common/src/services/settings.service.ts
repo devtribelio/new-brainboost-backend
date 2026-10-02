@@ -67,6 +67,15 @@ export const SETTING_KEYS = {
   // apps/resync-worker, which is deleted at cutover.
   firstPurchaseVoucherLastSweepAt: 'firstPurchaseVoucher.lastSweepAt',
   kycMinBalance: 'kyc.minBalance',
+  // AI moderation of tribe image posts (docs/tribe-moderation.md). Any
+  // OpenAI-compatible chat-completions endpoint. ON only when `enabled` is true,
+  // the other three are non-empty AND at least one moderation category is active;
+  // anything less and posts publish exactly as before. The API key lives here, in
+  // the DB, by product decision — never log it.
+  moderationEnabled: 'moderation.enabled',
+  moderationBaseUrl: 'moderation.baseUrl',
+  moderationModel: 'moderation.model',
+  moderationApiKey: 'moderation.apiKey',
   notificationUnopenedPushLimit: 'notification.unopenedPushLimit',
   notificationDigestEnabled: 'notification.digestEnabled',
   notificationDigestHour: 'notification.digestHour',
