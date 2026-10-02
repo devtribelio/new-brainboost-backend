@@ -69,6 +69,15 @@ export async function loadModerationConfig(): Promise<ModerationConfig | null> {
   return { baseUrl, model, apiKey, categories };
 }
 
+/**
+ * What the model is given to read: title + content as one line of plain text.
+ * Empty (markup-only content, or a bare video/embed post) means a post without
+ * images has nothing to check — `PostService.create` publishes it directly.
+ */
+export function moderationText(post: { title?: string | null; content: string }): string {
+  return toPlainText([post.title, post.content].filter(Boolean).join('\n'));
+}
+
 // The first balanced `{…}` in the text, string-aware so a brace inside the
 // model's `reason` does not end the object early.
 function firstJsonObject(text: string): string | null {
@@ -120,7 +129,7 @@ export function parseVerdict(text: unknown): ModerationVerdict | null {
 function systemPrompt(categories: ModerationConfig['categories']): string {
   return [
     'You are a content moderator for an online learning community.',
-    'You are given one post: its text and its images. Decide whether the post falls into any of the prohibited categories below.',
+    'You are given one post: its text and, when it has any, its images. Decide whether the post falls into any of the prohibited categories below.',
     '',
     'Prohibited categories:',
     ...categories.map((c) => `- ${c.name}: ${c.description}`),
@@ -134,11 +143,12 @@ function systemPrompt(categories: ModerationConfig['categories']): string {
 
 async function askModel(
   config: ModerationConfig,
-  post: { content: string; imageUrls: string[] },
+  post: { title: string | null; content: string; imageUrls: string[] },
   timeoutMs: number,
 ): Promise<ModerationVerdict> {
   // Post images are permanent public CDN URLs (docs/upload-s3-port.md), so the
-  // provider fetches them itself — no download + base64 on our side.
+  // provider fetches them itself — no download + base64 on our side. A post
+  // with no images is simply a text-only request.
   const res = await fetch(`${config.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
     method: 'POST',
     headers: {
@@ -152,7 +162,7 @@ async function askModel(
         {
           role: 'user',
           content: [
-            { type: 'text', text: `Post text:\n${toPlainText(post.content) || '(no text)'}` },
+            { type: 'text', text: `Post text:\n${moderationText(post) || '(no text)'}` },
             ...post.imageUrls.map((url) => ({ type: 'image_url', image_url: { url } })),
           ],
         },
@@ -209,6 +219,7 @@ export async function moderatePost(
       authorId: true,
       topicId: true,
       networkId: true,
+      title: true,
       content: true,
       excerpt: true,
       imageUrls: true,

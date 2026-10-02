@@ -1,7 +1,7 @@
 # Tribe post moderation (AI "kurasi")
 
-Image posts by members are checked by a vision model before they appear in the
-tribe. Ops define what to filter (categories) and which provider to use from the
+Every member post — text-only or with images — is checked by an AI model before
+it appears in the tribe. Ops define what to filter (categories) and which provider to use from the
 backoffice; this repo holds the check, the state machine and the safety-net job.
 
 Code: `packages/domain/src/moderation/post-moderation.ts`,
@@ -18,14 +18,19 @@ All of these, read per post (settings are cached ~30 s per process):
 |---|---|---|
 | `moderation.enabled` | `false` | master switch |
 | `moderation.baseUrl` | `''` | OpenAI-compatible base URL, **without** `/chat/completions` (e.g. `https://api.openai.com/v1`) |
-| `moderation.model` | `''` | vision-capable model id |
+| `moderation.model` | `''` | model id — must be vision-capable, image posts go to the same model |
 | `moderation.apiKey` | `''` | bearer key (in the DB by product decision; never logged) |
 
 …plus **at least one** `moderation_categories` row with `is_active = true`.
 Anything less = OFF: no `post_moderations` row is written, nothing is held, and
 `PostService.create` behaves exactly as it did before this feature.
 
-Scope: posts with a non-empty `imageUrls`. Text-only posts publish immediately.
+Scope: **every** post created through the member endpoint, with or without
+images (widened 2026-10-02; the first cut held image posts only). One exception:
+a post with **nothing to check** — no images, and title + content empty after
+`toPlainText` (a bare video/embed post, or markup-only content) — is published
+directly with no `post_moderations` row and no model call. Comments and replies
+are out of scope.
 `isAdminPost` is never set by the member create endpoint (it is a backoffice
 flag), so every post on that path is a member post.
 
@@ -55,7 +60,7 @@ does **not** fan out the "new post" notification — that only happens in-app.
 ## 3. Flow
 
 ```
-create (image post, moderation ON)
+create (any member post, moderation ON)
   └─ tx: posts(IN_REVIEW) + post_moderations(PENDING)      → 201, publishStatus "IN_REVIEW"
        └─ setImmediate → moderatePost(postId)
             clean      → post PUBLISHED, row APPROVED, emit post.published (topic fan-out)
@@ -82,8 +87,9 @@ create (image post, moderation ON)
 `POST {baseUrl}/chat/completions`, `Authorization: Bearer {apiKey}`. System
 prompt = the active categories (`name: description`) + "answer with one JSON
 object `{"violation": boolean, "category": string|null, "reason": string}`".
-User content = the post text through `toPlainText` + one `image_url` part per
-image. Images go as **URLs**: post images are permanent public CDN URLs
+User content = title + content through `toPlainText` (`moderationText`) + one
+`image_url` part per image; a post without images is a text-only request (a
+single `text` part). Images go as **URLs**: post images are permanent public CDN URLs
 (`public/posts/…`, docs/upload-s3-port.md), so the provider fetches them.
 No provider-specific JSON mode, no `temperature` (some models reject it).
 
@@ -128,8 +134,9 @@ Flat pino lines: `moderation.approved`, `moderation.rejected`,
   post again.
 - **Fail-open then rejected:** subscribers were already notified; their
   notification now opens a `403`. Comments on it are hidden, counters untouched.
-- **Only images + text are sent.** `videoUrl` / `embedUrl` are not checked, and a
-  video-only post is not moderated.
+- **Only images + text are sent.** The video / embed behind `videoUrl` /
+  `embedUrl` is never checked. A video or embed post is held and checked on its
+  title/content only; one with no text at all is published unchecked.
 - **Image URLs are client-supplied strings.** A URL the provider cannot fetch is
   a provider error → fail-open. There is no check that the URL is on our CDN.
 - **Push from the cron process:** rows are written, but FCM dispatch is
@@ -140,5 +147,6 @@ Flat pino lines: `moderation.approved`, `moderation.rejected`,
 - **Legacy drafts:** the like and comment-list gates now also apply to any
   pre-existing non-published post (previously likeable). Intentional.
 - Settings cache (30 s) means a switch flip takes up to 30 s per process.
-- Cost/latency: one model call per image post, no per-member rate limit beyond
-  the existing duplicate guard.
+- Cost/latency: one model call per post (text posts included), no per-member
+  rate limit beyond the existing duplicate guard. Every post is now invisible to
+  others for the length of that call.

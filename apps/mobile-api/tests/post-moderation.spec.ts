@@ -185,13 +185,16 @@ describe('tribe post moderation', () => {
         'no category is active',
         () => prisma.moderationCategory.updateMany({ where: { name: CATEGORY }, data: { isActive: false } }),
       ],
-    ])('publishes an image post straight away while %s', async (_name, turnOff) => {
+    ])('publishes image and text posts straight away while %s', async (_name, turnOff) => {
       await turnOff();
       try {
         const post = await imagePost();
         expect(post.publishStatus).toBe('PUBLISHED');
         expect(await row(post.id)).toBeNull();
         expect(await until(() => followerNotifs(post.id), (n) => n > 0)).toBe(1);
+        const text = await postService.create(authorId, { content: `teks ${uid()}`, topicId });
+        expect(text.publishStatus).toBe('PUBLISHED');
+        expect(await row(text.id)).toBeNull();
         expect(requests).toHaveLength(0);
       } finally {
         await prisma.moderationCategory.updateMany({ where: { name: CATEGORY }, data: { isActive: true } });
@@ -199,12 +202,66 @@ describe('tribe post moderation', () => {
     });
   });
 
-  it('does not moderate a text-only post', async () => {
-    const post = await postService.create(authorId, { content: `teks saja ${uid()}`, topicId });
-    expect(post.publishStatus).toBe('PUBLISHED');
-    expect(await row(post.id)).toBeNull();
-    expect(await until(() => followerNotifs(post.id), (n) => n > 0)).toBe(1);
-    expect(requests).toHaveLength(0);
+  describe('text-only posts', () => {
+    const textPost = () =>
+      postService.create(authorId, { title: `Judul ${uid()}`, content: `<p>teks saja ${uid()}</p>`, topicId });
+
+    it('holds a text-only post and publishes it once cleared, sending no image parts', async () => {
+      const post = await textPost();
+      expect(post.publishStatus).toBe('IN_REVIEW');
+      expect(await settled(post.id)).toMatchObject({ status: 'APPROVED', attempts: 0 });
+      expect(await status(post.id)).toBe('PUBLISHED');
+      expect(await until(() => followerNotifs(post.id), (n) => n > 0)).toBe(1);
+
+      expect(requests).toHaveLength(1);
+      const parts = requests[0].body.messages[1].content;
+      expect(parts).toHaveLength(1);
+      expect(parts[0].type).toBe('text');
+      expect(parts[0].text).toContain('Judul');
+      expect(parts[0].text).toContain('teks saja');
+      expect(parts[0].text).not.toContain('<p>');
+    });
+
+    it('rejects a violating text-only post and tells only the author', async () => {
+      respond = answer(violation);
+      const post = await textPost();
+      expect(await settled(post.id)).toMatchObject({ status: 'REJECTED', categoryName: CATEGORY });
+      expect(await status(post.id)).toBe('REJECTED');
+      expect(await inFeedOf(otherId, post.id)).toBe(false);
+      await expect(postService.detail(post.id, otherId)).rejects.toBeInstanceOf(ForbiddenException);
+      expect((await postService.detail(post.id, authorId)).id).toBe(post.id);
+      expect(
+        await until(
+          () => prisma.notification.count({ where: { memberId: authorId, dedupeKey: `postRejected:${post.id}` } }),
+          (n) => n > 0,
+        ),
+      ).toBe(1);
+      await wait(150);
+      expect(await followerNotifs(post.id)).toBe(0);
+    });
+
+    it('fails open on a provider error, and the job re-check can still reject it', async () => {
+      respond = () => ({ status: 500, content: '' });
+      const post = await textPost();
+      expect(await settled(post.id)).toMatchObject({ status: 'ERROR', attempts: 1 });
+      expect(await status(post.id)).toBe('PUBLISHED');
+      expect(await until(() => followerNotifs(post.id), (n) => n > 0)).toBe(1);
+
+      respond = answer(violation);
+      expect(await moderatePosts(new Date(), { postIds: [post.id] })).toMatchObject({ rejected: 1 });
+      expect(await status(post.id)).toBe('REJECTED');
+    });
+
+    it.each([
+      ['a bare video post', { content: '', videoUrl: 'https://cdn.test.local/clip.mp4' }],
+      ['markup-only content', { content: '<p> &nbsp; </p>', videoUrl: 'https://cdn.test.local/clip.mp4' }],
+    ])('publishes %s directly: no text and no images means nothing to check', async (_name, dto) => {
+      const post = await postService.create(authorId, { ...dto, topicId });
+      expect(post.publishStatus).toBe('PUBLISHED');
+      expect(await row(post.id)).toBeNull();
+      expect(await until(() => followerNotifs(post.id), (n) => n > 0)).toBe(1);
+      expect(requests).toHaveLength(0);
+    });
   });
 
   it('holds an image post, then publishes and announces it once the model clears it', async () => {

@@ -12,7 +12,7 @@ import {
   REJECTED_STATUS,
   isPublished,
 } from '@bb/common/utils/post-status.util';
-import { loadModerationConfig, moderatePost } from '../moderation/post-moderation';
+import { loadModerationConfig, moderatePost, moderationText } from '../moderation/post-moderation';
 
 interface PostListQuery {
   keyword?: string;
@@ -266,9 +266,13 @@ export class PostService {
     });
     if (dup) throw badRequest(ERROR_CODES.POST_DUPLICATE);
 
-    // Image posts wait for the AI check when moderation is on (docs/tribe-moderation.md).
+    // Every member post waits for the AI check when moderation is on
+    // (docs/tribe-moderation.md) — unless it has nothing to check: no images and
+    // no readable text (a bare video/embed post), which is not worth a model call.
     // `isAdminPost` is never set on this path, so every post here is a member post.
-    const held = imageUrls.length > 0 && (await loadModerationConfig()) !== null;
+    const checkable =
+      imageUrls.length > 0 || moderationText({ title: dto.title, content }) !== '';
+    const held = checkable && (await loadModerationConfig()) !== null;
 
     const data = {
       authorId: memberId,

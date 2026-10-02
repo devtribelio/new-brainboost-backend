@@ -108,7 +108,7 @@ const SETTINGS: Array<{ key: string; value: string; description: string }> = [
     key: 'moderation.enabled',
     value: 'false',
     description:
-      "AI moderation of tribe image posts ('true' to hold image posts until the model clears them). Also needs baseUrl, model, apiKey and at least one active moderation category.",
+      "AI moderation of tribe posts ('true' to hold every member post until the model clears it). Also needs baseUrl, model, apiKey and at least one active moderation category.",
   },
   {
     key: 'moderation.baseUrl',
