@@ -339,7 +339,22 @@ describe('first-purchase voucher (real Postgres)', () => {
   });
 
   describe('job: delivery channel', () => {
-    it('falls back to WhatsApp for a member with no email', async () => {
+    it('prefers WhatsApp when the member has a phone AND an email', async () => {
+      // The rule this locks down: phone wins. Nothing else in the suite covers it,
+      // because every other member fixture has a phone of null, so flipping the
+      // preference back would otherwise leave the whole suite green.
+      const m = await member({ email: true, phone: true });
+      const { productId } = await courseProduct();
+      await paidOrder(m, productId, AFTER_LAUNCH);
+
+      expect((await firstPurchaseVoucher(NOW, { memberId: m })).issued).toBe(1);
+      const [voucher] = await vouchersOf(m);
+      expect(voucher!.sentChannel).toBe('whatsapp');
+      const outbox = await prisma.notificationOutbox.findMany({ where: { refId: voucher!.id } });
+      expect(outbox[0]!.channel).toBe('whatsapp');
+    });
+
+    it('sends WhatsApp to a member with a phone and no email', async () => {
       const m = await member({ email: false, phone: true });
       const { productId } = await courseProduct();
       await paidOrder(m, productId, AFTER_LAUNCH);
@@ -349,6 +364,18 @@ describe('first-purchase voucher (real Postgres)', () => {
       expect(voucher!.sentChannel).toBe('whatsapp');
       const outbox = await prisma.notificationOutbox.findMany({ where: { refId: voucher!.id } });
       expect(outbox[0]!.channel).toBe('whatsapp');
+    });
+
+    it('falls back to email for a member with no phone', async () => {
+      const m = await member({ email: true, phone: false });
+      const { productId } = await courseProduct();
+      await paidOrder(m, productId, AFTER_LAUNCH);
+
+      expect((await firstPurchaseVoucher(NOW, { memberId: m })).issued).toBe(1);
+      const [voucher] = await vouchersOf(m);
+      expect(voucher!.sentChannel).toBe('email');
+      const outbox = await prisma.notificationOutbox.findMany({ where: { refId: voucher!.id } });
+      expect(outbox[0]!.channel).toBe('email');
     });
 
     it('issues nothing to a member with neither email nor phone', async () => {

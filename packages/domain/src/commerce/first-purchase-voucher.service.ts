@@ -121,14 +121,24 @@ export async function issueForMember(
   });
   if (!member) return 'no_contact';
 
-  // Email first, WhatsApp only as fallback (P10). WhatsApp is deliberately not the
-  // primary channel: this is a MARKETING-category template sharing a business number
-  // with OTP, so reports and blocks from recipients drag down the quality rating that
-  // OTP delivery depends on.
-  const channel: CommsChannel | null = member.email
-    ? 'email'
-    : member.phone
-      ? 'whatsapp'
+  // WhatsApp first, email only as fallback. Reversed 2026-10-02 at product's
+  // request; it used to be the other way round (P10).
+  //
+  // The reason for the old order has NOT gone away — it is now an accepted risk
+  // rather than an oversight. This is a MARKETING-category template on the same
+  // business number as OTP, so reports and blocks from recipients drag down the
+  // quality rating OTP delivery depends on, and under this order nearly every
+  // member goes through it: far more members have a phone than an email. Watch the
+  // provider's quality rating in the first week after the program is switched on.
+  //
+  // Second consequence of the order, same cause: an empty
+  // `wa.<provider>.template.firstPurchaseVoucher` makes bb-comms skip the send and
+  // still report success, so a missing template now silently swallows almost every
+  // voucher instead of almost none. Check that row before enabling the program.
+  const channel: CommsChannel | null = member.phone
+    ? 'whatsapp'
+    : member.email
+      ? 'email'
       : null;
   if (!channel) return 'no_contact';
 
