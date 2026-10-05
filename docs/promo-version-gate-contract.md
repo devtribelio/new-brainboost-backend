@@ -82,10 +82,9 @@ promo is ready or the minimum is raised.
 - **Visibility, not access control.** Anyone can put
   `?platform=android&version=99.0.0` on the URL, and the voucher code still works at
   checkout for whoever has it.
-- **Banners are separate.** This window only covers the promo endpoint. Banners keep
-  their own gate on `GET /api/member/data/banner` (maximum version only, all banners
-  at once). A test banner that links to a hidden promo is still shown to everyone
-  unless that gate also hides it; tapping it opens the "not found or ended" state.
+- **Banners are separate.** This window only covers the promo endpoint. A test
+  banner that links to a hidden promo is scoped with the banner's own version window
+  — see `docs/banner-version-window-contract.md`.
 
 ## 6. What BE needs back from FE
 

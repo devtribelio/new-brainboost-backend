@@ -45,6 +45,24 @@ export function compareSemver(a: string, b: string): -1 | 0 | 1 | null {
 }
 
 /**
+ * `min <= version <= max`, both bounds INCLUSIVE; an empty/blank bound is unbounded.
+ * Fails CLOSED: once a bound is set, a missing or unparseable version — or an
+ * unparseable bound — is outside the window. Callers use it to keep content away from
+ * builds they cannot place.
+ */
+export function isWithinVersionWindow(
+  version: string | undefined,
+  min: string | null | undefined,
+  max: string | null | undefined,
+): boolean {
+  const lo = min?.trim();
+  const hi = max?.trim();
+  if (lo && (compareSemver(version ?? '', lo) ?? -1) < 0) return false;
+  if (hi && (compareSemver(version ?? '', hi) ?? 1) > 0) return false;
+  return true;
+}
+
+/**
  * The verdict, in the order the contract specifies:
  *   version < forceBelow     -> force
  *   version < latestVersion  -> soft

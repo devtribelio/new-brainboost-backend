@@ -3,7 +3,7 @@ import { prisma } from '@bb/db';
 import type { ProductService } from '@/modules/product/product.service';
 import { LISTABLE_PRODUCT_TYPES } from '@/modules/product/dto/list-query.dto';
 import { settingsService, SETTING_KEYS } from '@bb/common/services/settings.service';
-import { compareSemver } from '../app-version/version.util';
+import { isWithinVersionWindow } from '../app-version/version.util';
 
 /** What the client tells us about itself on `GET /promo/public`. Both optional. */
 export interface PromoClientInfo {
@@ -122,16 +122,10 @@ export class PromoService {
     if (!keys) return false;
 
     const [min, max] = await Promise.all([
-      settingsService.get(keys.min, '').then((v) => v.trim()),
-      settingsService.get(keys.max, '').then((v) => v.trim()),
+      settingsService.get(keys.min, ''),
+      settingsService.get(keys.max, ''),
     ]);
-    if (!min && !max) return false; // gate off
-
-    const version = client?.version ?? '';
-    // compareSemver returns null when either side is unparseable -> hidden.
-    if (min && (compareSemver(version, min) ?? -1) < 0) return true;
-    if (max && (compareSemver(version, max) ?? 1) > 0) return true;
-    return false;
+    return !isWithinVersionWindow(client?.version, min, max);
   }
 }
 

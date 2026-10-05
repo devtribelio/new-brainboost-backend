@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { compareSemver, parseVersion, resolveVerdict } from '@/modules/app-version/version.util';
+import {
+  compareSemver,
+  isWithinVersionWindow,
+  parseVersion,
+  resolveVerdict,
+} from '@/modules/app-version/version.util';
 
 describe('compareSemver', () => {
   const cases: Array<[string, string, -1 | 0 | 1 | null]> = [
@@ -64,5 +69,30 @@ describe('resolveVerdict', () => {
   it('treats an unparseable installed version as none, never as force', () => {
     expect(resolveVerdict('v3.1.0', config)).toBe('none');
     expect(resolveVerdict('', config)).toBe('none');
+  });
+});
+
+describe('isWithinVersionWindow', () => {
+  const cases: Array<[string | undefined, string | null, string | null, boolean]> = [
+    // No bound: always inside, even with no version.
+    [undefined, null, null, true],
+    ['3.3.0', '', '  ', true],
+    // Both bounds inclusive.
+    ['3.3.2', '3.3.2', '3.4.0', true],
+    ['3.4.0', '3.3.2', '3.4.0', true],
+    ['3.3.1', '3.3.2', '3.4.0', false],
+    ['3.4.1', '3.3.2', '3.4.0', false],
+    // One-sided.
+    ['9.9.9', '3.3.2', null, true],
+    ['1.0.0', null, '3.4.0', true],
+    // Numeric, not lexicographic.
+    ['3.10.0', '3.3.2', '3.9.0', false],
+    // Fails closed once a bound is set.
+    [undefined, '3.3.2', null, false],
+    ['nightly', null, '3.4.0', false],
+    ['3.3.2', 'garbage', null, false],
+  ];
+  it.each(cases)('version=%s min=%s max=%s -> %s', (version, min, max, expected) => {
+    expect(isWithinVersionWindow(version, min, max)).toBe(expected);
   });
 });
