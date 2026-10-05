@@ -87,6 +87,58 @@ including rating, `isPurchased` and the commission preview) plus `promoPrice`.
 
 `voucherCode` is never null today: every promo has a voucher.
 
+### Version gate (mobile only)
+
+To run a promo on prod where only an unreleased internal build sees it. Global, not per
+promo: four `app_settings` rows, seeded empty (= off), cached ~30s, so an SQL edit lands
+with no redeploy.
+
+| key | meaning |
+|---|---|
+| `promo.minVersionAndroid` / `promo.maxVersionAndroid` | Android window, both INCLUSIVE, empty = unbounded |
+| `promo.minVersionIos` / `promo.maxVersionIos` | iOS window, same rules |
+
+The caller sends `?platform=android|ios&version=3.3.2` (same params as `/data/banner`).
+The caller is the marketplace promo page, not the app: the app appends both to the
+webview URL and the page forwards them. FE contract: `docs/promo-version-gate-contract.md`.
+
+- No `platform`, or one that is not `android`/`ios` = the web shop: **never gated**.
+- Mobile with a bound set: listed only when `min <= version <= max` (numeric semver).
+  A missing or unparseable `version` gets `[]` — fail CLOSED, the opposite of the banner
+  gate, because hiding from builds we cannot place is the point, and no build older than
+  this endpoint calls it.
+- Hidden = the whole list is `[]` (200), shape unchanged.
+
+Example: store is on 3.3.1, internal build 3.3.2 → set both `minVersion*` to `3.3.2`, leave
+`maxVersion*` empty. Clear both (or ship 3.3.2) to go live. Before releasing 3.3.2 to the
+store, either the promo is ready or `minVersion*` is raised.
+
+Not access control: `version` is client-supplied, and the voucher stays redeemable at
+checkout by anyone who knows the code. The banner that links to the promo is gated
+separately — see "Banner version window" below.
+
+### Banner version window (per banner)
+
+Migration `20261005120000_banner_version_window`: four nullable TEXT columns on
+`banners` — `min_version_android`, `max_version_android`, `min_version_ios`,
+`max_version_ios`. Both bounds INCLUSIVE, NULL/empty = unbounded. Written by the
+backoffice; not exposed in the response. Applied in `BannerService.listActive` on top
+of the global `banner.maxVersion*` gate (that one still hides ALL banners on newer builds).
+
+- All four NULL: shown as before. Every existing row.
+- Any bound set: shown only to `?platform=android|ios` with a `version` inside that
+  platform's pair (an empty pair for that platform = unbounded).
+- Any bound set and no `platform` (or not android/ios): **hidden**. Unlike the promo
+  gate, which treats no-platform as the web: `/data/banner` is also called by app
+  builds older than the banner gate, which send nothing, and BE cannot tell them from
+  the web.
+- Missing or unparseable `version`, or an unparseable bound: hidden.
+- Semver cannot be compared in SQL, so `listActive` now loads the active rows, filters,
+  then pages in memory (`total` counts what the client actually sees).
+
+Shared helper: `isWithinVersionWindow` (`app-version/version.util.ts`), also used by the
+promo gate. FE contract: `docs/banner-version-window-contract.md`.
+
 ### Known limits
 
 - The quota check is a read, not a reservation: the last seat can sell between the
