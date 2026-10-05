@@ -23,6 +23,8 @@ export class AttributionService {
     buyerMemberId: string,
     explicitCode?: string | null,
     productId?: string | null,
+    /** Resolve as of this moment: later clicks are ignored and the window counts back from it. */
+    asOf: Date = new Date(),
   ): Promise<string | null> {
     if (explicitCode) {
       const code = explicitCode.slice(0, 8); // first 8 chars = member code (rest = network suffix)
@@ -37,7 +39,7 @@ export class AttributionService {
       SETTING_KEYS.affiliateCookieDays,
       AFFILIATE_COOKIE_DAYS_DEFAULT,
     );
-    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+    const since = new Date(asOf.getTime() - days * 24 * 60 * 60 * 1000);
 
     // Own-code clicks are excluded IN the query, not after it: picking the latest
     // click and then rejecting it as self stopped the search, so an affiliator's
@@ -47,7 +49,7 @@ export class AttributionService {
         where: {
           memberId: buyerMemberId,
           affiliatorMemberId: { not: buyerMemberId },
-          createdAt: { gte: since },
+          createdAt: { gte: since, lte: asOf },
           ...where,
         },
         orderBy: { createdAt: 'desc' },
