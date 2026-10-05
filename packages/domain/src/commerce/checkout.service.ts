@@ -285,6 +285,7 @@ export class CheckoutService {
     const visit = await prisma.affiliateVisit.findFirst({
       where: {
         memberId,
+        affiliatorMemberId: { not: memberId }, // an own-code click attributes nothing
         createdAt: { gte: since },
         program: { productId },
       },
