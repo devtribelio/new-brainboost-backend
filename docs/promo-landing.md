@@ -87,6 +87,36 @@ including rating, `isPurchased` and the commission preview) plus `promoPrice`.
 
 `voucherCode` is never null today: every promo has a voucher.
 
+### Version gate (mobile only)
+
+To run a promo on prod where only an unreleased internal build sees it. Global, not per
+promo: four `app_settings` rows, seeded empty (= off), cached ~30s, so an SQL edit lands
+with no redeploy.
+
+| key | meaning |
+|---|---|
+| `promo.minVersionAndroid` / `promo.maxVersionAndroid` | Android window, both INCLUSIVE, empty = unbounded |
+| `promo.minVersionIos` / `promo.maxVersionIos` | iOS window, same rules |
+
+The caller sends `?platform=android|ios&version=3.3.2` (same params as `/data/banner`).
+The caller is the marketplace promo page, not the app: the app appends both to the
+webview URL and the page forwards them. FE contract: `docs/promo-version-gate-contract.md`.
+
+- No `platform`, or one that is not `android`/`ios` = the web shop: **never gated**.
+- Mobile with a bound set: listed only when `min <= version <= max` (numeric semver).
+  A missing or unparseable `version` gets `[]` — fail CLOSED, the opposite of the banner
+  gate, because hiding from builds we cannot place is the point, and no build older than
+  this endpoint calls it.
+- Hidden = the whole list is `[]` (200), shape unchanged.
+
+Example: store is on 3.3.1, internal build 3.3.2 → set both `minVersion*` to `3.3.2`, leave
+`maxVersion*` empty. Clear both (or ship 3.3.2) to go live. Before releasing 3.3.2 to the
+store, either the promo is ready or `minVersion*` is raised.
+
+Not access control: `version` is client-supplied, and the voucher stays redeemable at
+checkout by anyone who knows the code. The banner that links to the promo is gated
+separately (`banner.maxVersion*`, upper bound only, all banners at once).
+
 ### Known limits
 
 - The quota check is a read, not a reservation: the last seat can sell between the

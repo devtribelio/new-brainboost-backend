@@ -24,6 +24,13 @@ export const SETTING_KEYS = {
   // The client sends ?platform=&version= on /data/banner; a newer build gets an empty list.
   bannerMaxVersionAndroid: 'banner.maxVersionAndroid',
   bannerMaxVersionIos: 'banner.maxVersionIos',
+  // App version range (both INCLUSIVE) that sees promos on /promo/public, one pair per
+  // platform. Mobile only: a request without ?platform=android|ios (the web shop) is never
+  // gated. Empty pair = gate off. Lets a promo run on prod for an internal build only.
+  promoMinVersionAndroid: 'promo.minVersionAndroid',
+  promoMaxVersionAndroid: 'promo.maxVersionAndroid',
+  promoMinVersionIos: 'promo.minVersionIos',
+  promoMaxVersionIos: 'promo.maxVersionIos',
   // Minutes a buyer has to pay for event tickets before the seats go back on
   // sale. Separate from the 24h course window on purpose: a course has no quota,
   // so an abandoned checkout costs nobody anything, while an abandoned ticket
