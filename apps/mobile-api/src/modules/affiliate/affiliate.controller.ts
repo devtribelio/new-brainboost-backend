@@ -227,7 +227,9 @@ export class AffiliateController {
     // Legacy parity: drop a last-touch attribution cookie (web flow). Latest click wins
     // (sticky until overwritten/expired). Apps ignore this and pass affiliateCode explicitly.
     // Duration is runtime-configurable via app_settings (affiliate.cookieDays).
-    if (affiliatorCode) {
+    // Not on an own-code click: checkout reads this cookie as the explicit code, so
+    // writing it would replace a real affiliator's cookie with one checkout rejects.
+    if (affiliatorCode && result.status !== 'skipped') {
       const cookieDays = await settingsService.getNumber(
         SETTING_KEYS.affiliateCookieDays,
         AFFILIATE_COOKIE_DAYS_DEFAULT,

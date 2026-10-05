@@ -39,13 +39,21 @@ export class AttributionService {
     );
     const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
 
+    // Own-code clicks are excluded IN the query, not after it: picking the latest
+    // click and then rejecting it as self stopped the search, so an affiliator's
+    // earlier click inside the window was never seen (BB-20261004-0088).
     const pickVisit = async (where: Record<string, unknown>): Promise<string | null> => {
       const visit = await prisma.affiliateVisit.findFirst({
-        where: { memberId: buyerMemberId, createdAt: { gte: since }, ...where },
+        where: {
+          memberId: buyerMemberId,
+          affiliatorMemberId: { not: buyerMemberId },
+          createdAt: { gte: since },
+          ...where,
+        },
         orderBy: { createdAt: 'desc' },
         select: { affiliatorMemberId: true },
       });
-      return visit && visit.affiliatorMemberId !== buyerMemberId ? visit.affiliatorMemberId : null;
+      return visit?.affiliatorMemberId ?? null;
     };
 
     if (productId !== undefined && productId !== null) {
