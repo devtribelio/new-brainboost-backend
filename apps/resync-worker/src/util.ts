@@ -19,6 +19,45 @@ export function bool(v: any): boolean {
 }
 
 /**
+ * Flatten a loser→winner redirect map so every entry points at the CHAIN TERMINAL.
+ *
+ * Redirects are normally one hop, but a manual seed or a split/merge sequence can leave
+ * A→B→C; resolving a single hop would map the loser A to B, which is itself a loser with
+ * no member row (so the reference would silently resolve to nobody). Walk the chain to
+ * its end. A cycle (A→B→A) has no terminal, so every node on it is folded onto the
+ * smallest id in the cycle — deterministic and terminating. Self-pointing entries are
+ * dropped (a winner is not a loser).
+ */
+export function flattenRedirects(raw: ReadonlyMap<number, number>): Map<number, number> {
+  const flat = new Map<number, number>();
+  for (const start of raw.keys()) {
+    if (flat.has(start)) continue;
+    const path: number[] = [];
+    const at = new Map<number, number>(); // node → index in `path`
+    let current = start;
+    let terminal: number;
+    for (;;) {
+      const seenAt = at.get(current);
+      if (seenAt !== undefined) {
+        terminal = Math.min(...path.slice(seenAt)); // cycle → smallest node on it
+        break;
+      }
+      at.set(current, path.length);
+      path.push(current);
+      const next = raw.get(current);
+      if (next === undefined) {
+        terminal = current; // reached a real winner (no outgoing edge)
+        break;
+      }
+      current = next;
+    }
+    for (const node of path) flat.set(node, terminal);
+  }
+  for (const [loser, winner] of [...flat]) if (loser === winner) flat.delete(loser);
+  return flat;
+}
+
+/**
  * Folds a syncer's scanned rows into the watermark it may checkpoint:
  *
  *   checkpoint = min(maxSeen, runStart, earliestFailed − 1s)   — or null if nothing scanned

@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { buyerLegacyIdSql, PAYMENT_TABLE_BY_MODEL, planCommissionUpdate } from '../src/syncers/commission-rules';
+import {
+  buyerLegacyIdSql,
+  PAYMENT_TABLE_BY_MODEL,
+  planCommissionUpdate,
+  resolveAffiliateBased,
+} from '../src/syncers/commission-rules';
 
 describe('buyerLegacyIdSql', () => {
   it('reads the buyer from the payment row, never from member_downline_id', () => {
@@ -26,10 +31,37 @@ describe('buyerLegacyIdSql', () => {
   });
 });
 
-describe('planCommissionUpdate', () => {
-  const base = { status: 'MIGRATED', amount: 100, commissionRate: 20, buyerMemberId: 'buyer', productId: 'prod' };
+describe('resolveAffiliateBased', () => {
+  it('keeps a known legacy mode', () => {
+    expect(resolveAffiliateBased('GROWTH', 1)).toBe('GROWTH');
+    expect(resolveAffiliateBased('INACTIVE', 3)).toBe('INACTIVE');
+    expect(resolveAffiliateBased('PERFORMANCE', 1)).toBe('PERFORMANCE');
+  });
 
-  it('refreshes buyer and product alongside the legacy-owned money fields', () => {
+  it('maps a NULL mode at level ≥2 to GROWTH (PERFORMANCE pays L1 only)', () => {
+    expect(resolveAffiliateBased(null, 2)).toBe('GROWTH');
+    expect(resolveAffiliateBased(undefined, 4)).toBe('GROWTH');
+    expect(resolveAffiliateBased('', 3)).toBe('GROWTH');
+  });
+
+  it('keeps a NULL level-1 mode as PERFORMANCE', () => {
+    expect(resolveAffiliateBased(null, 1)).toBe('PERFORMANCE');
+  });
+});
+
+describe('planCommissionUpdate', () => {
+  const base = {
+    status: 'MIGRATED',
+    amount: 100,
+    commissionRate: 20,
+    recipientId: 'recip',
+    level: 2,
+    affiliateBased: 'GROWTH',
+    buyerMemberId: 'buyer',
+    productId: 'prod',
+  };
+
+  it('refreshes recipient/level/mode/buyer/product alongside the money fields', () => {
     expect(planCommissionUpdate(base)).toEqual(base);
   });
 
@@ -41,9 +73,16 @@ describe('planCommissionUpdate', () => {
     expect(planCommissionUpdate({ ...base, productId: null })).not.toHaveProperty('productId');
   });
 
-  it('touches nothing else (recipient, level, payment, createdAt stay as created)', () => {
+  it('re-points recipient and level so a redirect/split heals old rows', () => {
+    expect(planCommissionUpdate({ ...base, recipientId: 'other', level: 3 })).toMatchObject({
+      recipientId: 'other',
+      level: 3,
+    });
+  });
+
+  it('touches only the expected keys (payment/createdAt stay as created)', () => {
     expect(Object.keys(planCommissionUpdate(base)).sort()).toEqual(
-      ['amount', 'buyerMemberId', 'commissionRate', 'productId', 'status'],
+      ['affiliateBased', 'amount', 'buyerMemberId', 'commissionRate', 'level', 'productId', 'recipientId', 'status'],
     );
   });
 });

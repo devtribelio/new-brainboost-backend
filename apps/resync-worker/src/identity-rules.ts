@@ -58,3 +58,19 @@ export function decideIdentityMatch(
   // matched on nothing we compare (should not happen: the lookup is by these keys)
   return 'create';
 }
+
+/**
+ * After a split, the winner keeps the KYC its legacy row never owned: `applyKycDecisions`
+ * only writes members that have their OWN APPROVED/REJECTED legacy row, so a winner whose
+ * status came from the loser stays APPROVED with the loser's bank account attached
+ * (audit 08 F12). When the winner has no own legacy KYC and its status is LEGACY-sourced,
+ * the split must hand it back and reset to NONE. App-owned KYC (MANUAL/DIDIT/…) is never
+ * touched, and neither is a winner that has its own legacy KYC.
+ */
+export function shouldResetBorrowedWinnerKyc(input: {
+  loserRows: number;
+  winnerRows: number;
+  winnerSource: string | null;
+}): boolean {
+  return input.loserRows > 0 && input.winnerRows === 0 && input.winnerSource === 'LEGACY';
+}

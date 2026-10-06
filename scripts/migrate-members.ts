@@ -27,7 +27,7 @@ import { randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import type { Connection, RowDataPacket } from 'mysql2/promise';
 import { PrismaClient } from '@prisma/client';
-import { normalizePhonePair } from '@bb/common/utils/phone.util';
+import { normalizeLegacyPhonePair } from '@bb/common/utils/phone.util';
 import { detectPasswordAlgo } from '@bb/common/utils/password-algo.util';
 import { connectLegacyDb } from './legacy-db';
 
@@ -176,7 +176,7 @@ async function fetchMembers(legacy: Connection, scope: Scope): Promise<LegacyMem
       if (email && /@brainboost\.id$/i.test(email)) email = null; // generated → phone identity
 
       const rawPhone = nonEmpty(r.phone);
-      const pair = rawPhone ? normalizePhonePair(rawPhone, '+62') : null;
+      const pair = rawPhone ? normalizeLegacyPhonePair(rawPhone) : null;
       const phone = pair && pair.phone.length >= 6 ? pair.phone : null;
 
       const googleSub = nonEmpty(r.google_id);

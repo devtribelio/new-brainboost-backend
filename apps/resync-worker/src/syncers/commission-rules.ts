@@ -35,26 +35,50 @@ export function buyerLegacyIdSql(): string {
   return `CASE affiliator_commision.payment_model ${whens} ELSE NULL END AS buyer_member_id`;
 }
 
+const AFFILIATE_BASED_VALUES = new Set(['PERFORMANCE', 'GROWTH', 'INACTIVE']);
+
+/**
+ * Recipient mode for a migrated commission (audit 08 F5). Legacy stores `affiliate_based` on
+ * the commission, but older rows have it NULL (the column had no default). PERFORMANCE only
+ * ever pays level 1, so a NULL row at level ≥2 is unambiguously GROWTH — defaulting those to
+ * PERFORMANCE mislabels history and mis-resolves the rate on a re-scan. A NULL at level 1
+ * stays PERFORMANCE: it cannot be told apart from INACTIVE without the payment's own
+ * `affiliate_based`, and PERFORMANCE is the member default.
+ */
+export function resolveAffiliateBased(raw: unknown, level: number): string {
+  const s = typeof raw === 'string' && AFFILIATE_BASED_VALUES.has(raw) ? raw : null;
+  if (s) return s;
+  return level > 1 ? 'GROWTH' : 'PERFORMANCE';
+}
+
 export interface CommissionUpdateInput {
   status: string;
   amount: number;
   commissionRate: number;
+  recipientId: string;
+  level: number;
+  affiliateBased: string;
   buyerMemberId: string | null;
   productId: string | null;
 }
 
 /**
  * The UPDATE branch for an already-migrated legacy commission. Status/amount/rate follow
- * legacy as before; buyer + product are refreshed so a forced re-scan heals old rows.
- * The buyer is always rewritten (the stored value came from member_downline_id and is
- * wrong whenever it differs); a product is never nulled out — an unresolved product means
- * "not migrated (yet)", not "this commission has no product".
+ * legacy as before; recipient/level/mode/buyer/product are refreshed too, so a forced re-scan
+ * (or a redirect/split that moved the recipient) heals old rows. The buyer is always rewritten
+ * (the stored value came from member_downline_id and is wrong whenever it differs); a product
+ * is never nulled out — an unresolved product means "not migrated (yet)", not "this commission
+ * has no product". Migrated rows carry `paymentId = null`, so changing the (payment, recipient,
+ * level) unique key cannot collide with another migrated row.
  */
 export function planCommissionUpdate(f: CommissionUpdateInput): Record<string, unknown> {
   return {
     status: f.status,
     amount: f.amount,
     commissionRate: f.commissionRate,
+    recipientId: f.recipientId,
+    level: f.level,
+    affiliateBased: f.affiliateBased,
     buyerMemberId: f.buyerMemberId,
     ...(f.productId !== null ? { productId: f.productId } : {}),
   };

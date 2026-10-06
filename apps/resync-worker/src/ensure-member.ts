@@ -21,12 +21,13 @@
 import { randomUUID } from 'node:crypto';
 import type { RowDataPacket } from 'mysql2/promise';
 import type { PrismaClient } from '@prisma/client';
-import { normalizePhonePair } from '@bb/common/utils/phone.util';
+import { normalizeLegacyPhonePair } from '@bb/common/utils/phone.util';
 import { detectPasswordAlgo } from '@bb/common/utils/password-algo.util';
 import type { LegacyClient } from './legacy-db';
 import { normalizeBankCode } from './bank-code';
 import { bool, nonEmpty, toDate } from './util';
 import { decideIdentityMatch, type IdentityKeys } from './identity-rules';
+import { planAdopt } from './adopt-rules';
 
 interface Deps {
   prisma: PrismaClient;
@@ -49,6 +50,12 @@ const EXISTING_SELECT = {
   phone: true,
   googleSub: true,
   appleSub: true,
+  fullName: true,
+  avatarUrl: true,
+  bio: true,
+  isActive: true,
+  isEmailVerified: true,
+  isPhoneVerified: true,
 } as const;
 
 const NO_PHONE = { phone: null, phoneCode: null, isPhoneVerified: false };
@@ -112,7 +119,7 @@ export function makeEnsureMember(deps: Deps) {
     let email = rawEmail ? rawEmail.toLowerCase() : null;
     if (email && /@brainboost\.id$/i.test(email)) email = null; // generated → phone identity
     const rawPhone = nonEmpty(r.phone);
-    const pair = rawPhone ? normalizePhonePair(rawPhone, '+62') : null;
+    const pair = rawPhone ? normalizeLegacyPhonePair(rawPhone) : null;
     const phone = pair && pair.phone.length >= 6 ? pair.phone : null;
     const googleSub = nonEmpty(r.google_id);
     const appleSub = nonEmpty(r.sign_in_with_apple_id);
@@ -172,9 +179,14 @@ export function makeEnsureMember(deps: Deps) {
       // SAME instant as legacySyncedAt so the members syncer's touch-gate
       // (updatedAt > legacySyncedAt) doesn't misread the fresh row as app-touched.
       const now = new Date();
-      const adoptData: any = { legacyId: legacyMemberId, ...profile, legacySyncedAt: now, updatedAt: now };
-      // fill bank only when the placeholder has none — never clobber an app-set account
-      if (bank && existing.bankAccountNumber === null) Object.assign(adoptData, bank);
+      // Never downgrade the placeholder's app state (audit 07 #9): fill-if-null profile /
+      // identity, activation only raised, and keep an existing bank / affiliate code.
+      const adoptData: any = {
+        legacyId: legacyMemberId,
+        ...planAdopt(existing as any, { ...profile, bank }),
+        legacySyncedAt: now,
+        updatedAt: now,
+      };
       try {
         await prisma.member.update({ where: { id: existing.id }, data: adoptData });
       } catch (err: any) {
@@ -198,17 +210,19 @@ export function makeEnsureMember(deps: Deps) {
           return undefined;
         }
         for (const t of targets) {
+          // drop the field from THIS write (leave whatever the placeholder already had);
+          // never null it, and never lower a verification flag the placeholder owned.
           if (t === 'email') {
-            adoptData.email = null;
-            adoptData.isEmailVerified = false;
+            delete adoptData.email;
+            adoptData.isEmailVerified = (existing as any).isEmailVerified;
           } else if (t === 'phone') {
-            adoptData.phone = null;
-            adoptData.phoneCode = null;
-            adoptData.isPhoneVerified = false;
+            delete adoptData.phone;
+            delete adoptData.phoneCode;
+            adoptData.isPhoneVerified = (existing as any).isPhoneVerified;
           } else if (t === 'googleSub' || t === 'google_sub') {
-            adoptData.googleSub = null;
+            delete adoptData.googleSub;
           } else if (t === 'appleSub' || t === 'apple_sub') {
-            adoptData.appleSub = null;
+            delete adoptData.appleSub;
           }
         }
         try {

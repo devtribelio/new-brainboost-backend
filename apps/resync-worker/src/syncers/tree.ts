@@ -22,6 +22,7 @@ import { emptyStats, type RunCtx, type Stats, type Syncer, type SyncerCtx } from
 import { errCode, nonEmpty, runConcurrent, sinceBound, toDate, WatermarkTracker } from '../util';
 import { decideAffiliatorWrite, isLegacyAffiliatorActive, prefersAffiliatorRow } from './affiliator-rules';
 import { syncLegacyAffiliateCode } from '../affiliate-code-sync';
+import { AFFILIATE_BASED_SOURCE, mayOverwriteAffiliateBased } from './affiliate-mode-rules';
 import {
   CYCLE_CHECK_LEVELS,
   INVITER_SOURCE,
@@ -157,12 +158,19 @@ export async function syncInvitersScoped(
     const subjectIds = subjects
       .map((r: any) => ctx.memberByLegacy.get(Number(r.member_id)))
       .filter((id): id is string => id !== undefined);
-    const current = new Map<string, { inviterId: string | null; inviterSource: string | null }>();
+    const current = new Map<
+      string,
+      { inviterId: string | null; inviterSource: string | null; affiliateBasedSource: string | null }
+    >();
     for (const m of await ctx.prisma.member.findMany({
       where: { id: { in: subjectIds } },
-      select: { id: true, inviterId: true, inviterSource: true },
+      select: { id: true, inviterId: true, inviterSource: true, affiliateBasedSource: true },
     })) {
-      current.set(m.id, { inviterId: m.inviterId, inviterSource: m.inviterSource });
+      current.set(m.id, {
+        inviterId: m.inviterId,
+        inviterSource: m.inviterSource,
+        affiliateBasedSource: m.affiliateBasedSource,
+      });
     }
 
     await runConcurrent(subjects, resyncConfig.writeConcurrency, async (r: any) => {
@@ -217,9 +225,22 @@ export async function syncInvitersScoped(
           return;
         }
       }
-      const base = { affiliateBased: nonEmpty(r.affiliate_based) ?? 'PERFORMANCE' };
+      const legacyBased = nonEmpty(r.affiliate_based);
       try {
-        await ctx.prisma.member.update({ where: { id: subjectId }, data: base });
+        // never revert a mode the member chose in the app: only a NULL/LEGACY-sourced field
+        // is the tree's to write (audit 08 F8). An empty legacy value leaves it as is.
+        if (legacyBased && mayOverwriteAffiliateBased(cur.affiliateBasedSource)) {
+          await ctx.prisma.member.updateMany({
+            where: {
+              id: subjectId,
+              OR: [
+                { affiliateBasedSource: null },
+                { affiliateBasedSource: AFFILIATE_BASED_SOURCE.LEGACY },
+              ],
+            },
+            data: { affiliateBased: legacyBased, affiliateBasedSource: AFFILIATE_BASED_SOURCE.LEGACY },
+          });
+        }
         // never replaces a code already on the member — a differing one becomes an alias
         const action = await syncLegacyAffiliateCode(ctx.prisma, subjectId, nonEmpty(r.affiliator_code));
         if (action === 'collision') {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   decideIdentityMatch,
+  shouldResetBorrowedWinnerKyc,
   type ExistingMember,
   type IdentityDecision,
   type IdentityKeys,
@@ -58,5 +59,25 @@ describe('decideIdentityMatch', () => {
 
   it.each(cases)('%s', (_name, legacyKeys, existing, expected) => {
     expect(decideIdentityMatch(LEGACY_ID, legacyKeys, existing)).toBe(expected);
+  });
+});
+
+describe('shouldResetBorrowedWinnerKyc', () => {
+  it('resets when the loser had KYC, the winner had none, and the winner source is LEGACY', () => {
+    expect(shouldResetBorrowedWinnerKyc({ loserRows: 1, winnerRows: 0, winnerSource: 'LEGACY' })).toBe(true);
+  });
+
+  it('does not reset when the winner has its own legacy KYC', () => {
+    expect(shouldResetBorrowedWinnerKyc({ loserRows: 1, winnerRows: 1, winnerSource: 'LEGACY' })).toBe(false);
+  });
+
+  it('does not reset when the loser had no KYC', () => {
+    expect(shouldResetBorrowedWinnerKyc({ loserRows: 0, winnerRows: 0, winnerSource: 'LEGACY' })).toBe(false);
+  });
+
+  it('never touches app-owned KYC', () => {
+    expect(shouldResetBorrowedWinnerKyc({ loserRows: 1, winnerRows: 0, winnerSource: 'SUMSUB' })).toBe(false);
+    expect(shouldResetBorrowedWinnerKyc({ loserRows: 1, winnerRows: 0, winnerSource: 'MANUAL' })).toBe(false);
+    expect(shouldResetBorrowedWinnerKyc({ loserRows: 1, winnerRows: 0, winnerSource: null })).toBe(false);
   });
 });

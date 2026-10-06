@@ -16,6 +16,7 @@ import { makeEnsureMember } from './ensure-member';
 import { backfillNewMembers } from './backfill-new-members';
 import { recountCounters } from './recount';
 import { emptyStats, type RunCtx, type Stats, type SyncerCtx } from './types';
+import { flattenRedirects } from './util';
 
 const LOCK_ROW = '__lock__';
 
@@ -67,10 +68,13 @@ async function heartbeatLock(prisma: PrismaClient, ownedAt: Date): Promise<Date 
 }
 
 async function buildCtx(prisma: PrismaClient, legacy: any, dryRun: boolean): Promise<RunCtx> {
-  const redirect = new Map<number, number>();
+  const rawRedirect = new Map<number, number>();
   for (const r of await prisma.memberRedirect.findMany({ select: { loserLegacyId: true, winnerLegacyId: true } })) {
-    redirect.set(r.loserLegacyId, r.winnerLegacyId);
+    rawRedirect.set(r.loserLegacyId, r.winnerLegacyId);
   }
+  // Flatten A→B→C so a loser that was itself redirected resolves to the terminal winner,
+  // not to an intermediate loser that has no member row.
+  const redirect = flattenRedirects(rawRedirect);
   const memberByLegacy = new Map<number, string>();
   for (const m of await prisma.member.findMany({ where: { legacyId: { not: null } }, select: { id: true, legacyId: true } })) {
     if (m.legacyId !== null) memberByLegacy.set(m.legacyId, m.id);
@@ -113,6 +117,30 @@ export async function runResync(opts: RunOpts): Promise<Record<string, Stats>> {
       log('another resync run holds the lock — skipping this tick');
       return results;
     }
+
+    // Serialize run-lock heartbeats: the periodic timer and each syncer's checkpoint share
+    // this, so two refreshes can't race on the same stamp (the loser would read a stale
+    // lastRunAt and falsely report the lock lost). Returns false once we no longer own it.
+    let heartbeatInFlight: Promise<boolean> | null = null;
+    const heartbeat = (): Promise<boolean> => {
+      if (!acquired) return Promise.resolve(false);
+      if (!heartbeatInFlight) {
+        const stamp = acquired;
+        heartbeatInFlight = heartbeatLock(prisma, stamp)
+          .then((next) => {
+            if (next) acquired = next;
+            return next !== null;
+          })
+          .finally(() => {
+            heartbeatInFlight = null;
+          });
+      }
+      return heartbeatInFlight;
+    };
+    // Refresh well inside the TTL: a syncer that runs longer than lockTtlSec (the first
+    // members/posts pass can) must not be taken over mid-write because its only checkpoint
+    // is at the end.
+    const heartbeatMs = Math.max(30_000, Math.floor((resyncConfig.lockTtlSec * 1000) / 3));
     const legacy = await connectResilientLegacy(
       { dateStrings: false },
       resyncConfig.legacyReconnectRetries,
@@ -163,12 +191,10 @@ export async function runResync(opts: RunOpts): Promise<Record<string, Stats>> {
             }
             // refresh the run-lock first: a long run must not be taken over mid-syncer, and
             // a lost lock means another process owns sync_state now → stop, don't write
-            const stamp: Date | null = acquired ? await heartbeatLock(prisma, acquired) : null;
-            if (!stamp) {
+            if (!(await heartbeat())) {
               acquired = null; // not ours anymore; don't release someone else's lock
               throw new Error('run-lock lost (TTL takeover by another process)');
             }
-            acquired = stamp;
             await prisma.syncState.upsert({
               where: { syncer: name },
               create: { syncer: name, watermark },
@@ -178,6 +204,17 @@ export async function runResync(opts: RunOpts): Promise<Record<string, Stats>> {
         };
 
         const started = Date.now();
+        // A syncer's only checkpoint is at its end, so keep the lock warm on a timer for
+        // as long as it runs. On a lost lock we can only log — the running syncer stops at
+        // its next checkpoint — but the periodic refresh makes a takeover far less likely.
+        const hbTimer = opts.dryRun
+          ? null
+          : setInterval(() => {
+              void heartbeat().then((owned) => {
+                if (!owned) log(`WARN: run-lock lost during ${name} — takeover may have happened`);
+              });
+            }, heartbeatMs);
+        hbTimer?.unref();
         try {
           const stats = await syncer.run(syncerCtx);
           results[name] = stats;
@@ -196,18 +233,15 @@ export async function runResync(opts: RunOpts): Promise<Record<string, Stats>> {
           results[name] = { ...emptyStats(), errors: 1 };
           log(`ERROR ${name}: ${err?.message ?? err} — continuing with next syncer`);
           console.error(err);
+        } finally {
+          if (hbTimer) clearInterval(hbTimer);
         }
 
-        // keep the run-lock alive across long syncers; a lost lock means another process
-        // holds it now → stop writing immediately.
-        if (!opts.dryRun) {
-          const stamp: Date | null = acquired ? await heartbeatLock(prisma, acquired) : null;
-          if (!stamp) {
-            log('ERROR: run-lock lost (TTL takeover by another process) — aborting remaining syncers');
-            acquired = null; // not ours anymore; don't release someone else's lock
-            break;
-          }
-          acquired = stamp;
+        // confirm ownership between syncers; a lost lock means another process holds it now
+        if (!opts.dryRun && !(await heartbeat())) {
+          log('ERROR: run-lock lost (TTL takeover by another process) — aborting remaining syncers');
+          acquired = null; // not ours anymore; don't release someone else's lock
+          break;
         }
       }
       const em = (ctx.ensureMember as any).stats?.();

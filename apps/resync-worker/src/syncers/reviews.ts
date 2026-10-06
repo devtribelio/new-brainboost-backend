@@ -2,9 +2,13 @@
 /**
  * Reviews syncer — incremental port of migrate-reviews.ts.
  *
- * SOURCE legacy product_review (status=1) for migrated products.
+ * SOURCE legacy product_review (status=1, productable_type='TBModel_Course') for migrated
+ *        products. The type filter matters: a Bundle/Digital/Book review can share a numeric
+ *        productable_id with a migrated Product.legacyId.
  * KEY    no legacyId on Review → upsert on @@unique(productId, memberId).
  * RATING 0 → clamped to 1; outside 1..5 skipped (legacy parity).
+ * GAP    Review carries no legacy/app-edit marker, so a re-scan overwrites stars/comment an
+ *        app user edited. Needs a provenance column before it can be fixed.
  * See docs/legacy-resync-plan.md §6.
  */
 import type { RowDataPacket } from 'mysql2/promise';
@@ -32,7 +36,7 @@ export const reviewsSyncer: Syncer = {
       `SELECT product_review_id, productable_id, member_id, rating, note, created,
               COALESCE(\`updated\`, \`created\`) AS wm
          FROM product_review
-        WHERE status = 1 AND productable_id IN (?)
+        WHERE status = 1 AND productable_type = 'TBModel_Course' AND productable_id IN (?)
           AND COALESCE(\`updated\`, \`created\`) > ?
         ORDER BY COALESCE(\`updated\`, \`created\`) ASC, product_review_id ASC`,
       [productLegacyIds, since],

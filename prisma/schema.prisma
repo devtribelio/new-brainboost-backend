@@ -41,6 +41,10 @@ model Member {
   // "LEGACY_CONNECT" | "APP" (new-app register/connect). NULL = pre-existing/unknown.
   // The tree resync may only overwrite NULL / LEGACY_PARENT — never APP or LEGACY_CONNECT.
   inviterSource        String?   @map("inviter_source")
+  // Who set affiliateBased: "LEGACY" (migration / tree resync) | "APP" (member switched
+  // mode in the app). NULL = unknown. The tree resync may only overwrite NULL / LEGACY, so a
+  // mode the member chose in the app is never reverted by a legacy member_network touch.
+  affiliateBasedSource String?   @map("affiliate_based_source")
   utmSource            String?   @map("utm_source")
   utmContent           String?   @map("utm_content")
   scheduledDeletionAt  DateTime? @map("scheduled_deletion_at")

@@ -39,17 +39,18 @@ import { createInterface } from 'node:readline/promises';
 import { randomUUID } from 'node:crypto';
 import { PrismaClient } from '@prisma/client';
 import type { RowDataPacket } from 'mysql2/promise';
-import { normalizePhonePair } from '@bb/common/utils/phone.util';
+import { normalizeLegacyPhonePair } from '@bb/common/utils/phone.util';
 import { detectPasswordAlgo } from '@bb/common/utils/password-algo.util';
 import { connectLegacyDb } from './legacy-db';
 import { acquireLock, releaseLock } from './core';
 import { applyKycDecisions } from './syncers/kyc';
 import { recountCounters } from './recount';
 import { emptyStats, type RunCtx } from './types';
-import { bool, nonEmpty, toDate } from './util';
+import { bool, flattenRedirects, nonEmpty, toDate } from './util';
 import { resyncConfig } from './config';
 import { INVITER_SOURCE } from './syncers/inviter-rules';
 import { PAYMENT_TABLE_BY_MODEL } from './syncers/commission-rules';
+import { shouldResetBorrowedWinnerKyc } from './identity-rules';
 
 /** Downlines whose inviter points at the winner (or nowhere) AND is tree-owned. */
 function treeOwnedDownlineOf(winnerMemberId: string) {
@@ -113,7 +114,7 @@ function toIdentity(r: any): LegacyIdentity {
   let email = nonEmpty(r.email) ? String(r.email).trim().toLowerCase() : null;
   if (email && /@brainboost\.id$/i.test(email)) email = null; // generated → phone is identity
   const rawPhone = nonEmpty(r.phone);
-  const pair = rawPhone ? normalizePhonePair(rawPhone, '+62') : null;
+  const pair = rawPhone ? normalizeLegacyPhonePair(rawPhone) : null;
   const phone = pair && pair.phone.length >= 6 ? pair.phone : null;
   const legacyPassword = nonEmpty(r.password);
   return {
@@ -707,10 +708,11 @@ async function executeSplit(prisma: PrismaClient, legacy: any, plan: Plan): Prom
   // 5. re-evaluate KYC for BOTH members from their own legacy rows. Runs outside the
   //    transaction: applyKycDecisions is guarded (kycSource NONE/LEGACY) and idempotent,
   //    and it needs the post-split redirect/member maps.
-  const redirect = new Map<number, number>();
+  const rawRedirect = new Map<number, number>();
   for (const r of await prisma.memberRedirect.findMany({ select: { loserLegacyId: true, winnerLegacyId: true } })) {
-    redirect.set(r.loserLegacyId, r.winnerLegacyId);
+    rawRedirect.set(r.loserLegacyId, r.winnerLegacyId);
   }
+  const redirect = flattenRedirects(rawRedirect);
   const memberByLegacy = new Map<number, string>();
   for (const m of await prisma.member.findMany({ where: { legacyId: { not: null } }, select: { id: true, legacyId: true } })) {
     if (m.legacyId !== null) memberByLegacy.set(m.legacyId, m.id);
@@ -729,6 +731,29 @@ async function executeSplit(prisma: PrismaClient, legacy: any, plan: Plan): Prom
   const kycStats = emptyStats();
   await applyKycDecisions(ctx, [plan.loser, plan.winner], kycStats);
   log(`kyc re-evaluated: upserted=${kycStats.upserted} skipped=${kycStats.skipped}`);
+
+  // 5b. If the winner's KYC came from the loser (the winner has no own legacy KYC), handing the
+  //     loser its own member is not enough: the winner still shows the borrowed APPROVED status
+  //     (+ payout bank). Reset it to NONE so a split pair that are different people doesn't keep
+  //     the other person's KYC (audit 08 F12). App-owned KYC is never touched.
+  if (shouldResetBorrowedWinnerKyc(plan.kyc)) {
+    const clearBank = plan.kyc.winnerCurrent === 'APPROVED';
+    await prisma.member.update({
+      where: { id: plan.winnerMemberId },
+      data: {
+        kycStatus: 'NONE',
+        kycSource: 'NONE',
+        kycIdNumber: null,
+        kycReviewedAt: null,
+        kycRejectedReason: null,
+        ...(clearBank ? { bankCode: null, bankAccountNumber: null, bankAccountName: null } : {}),
+      },
+    });
+    log(
+      `WARN winner ${plan.winnerMemberId} KYC reset to NONE — its legacy KYC belonged to loser ${plan.loser}` +
+        (clearBank ? ' (bank account cleared)' : ''),
+    );
+  }
 
   // 6. post/comment/like counters are denormalised → recompute
   await recountCounters(prisma, log);

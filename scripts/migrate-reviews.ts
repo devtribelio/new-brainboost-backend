@@ -66,6 +66,7 @@ async function main() {
       `SELECT product_review_id, productable_id, member_id, rating, note, created, updated
          FROM product_review
         WHERE status = 1
+          AND productable_type = 'TBModel_Course'
           AND product_review_id > ?
           AND productable_id IN (?)
         ORDER BY product_review_id ASC

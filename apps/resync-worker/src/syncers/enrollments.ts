@@ -18,6 +18,7 @@ import { errCode, nonEmpty, runConcurrent, sinceBound, toDate, WatermarkTracker 
 import {
   decideEnrollmentWrite,
   LEGACY_CANCEL_REASON,
+  LEGACY_PAYMENT_REVOKED_REASON,
   mayCancelRemoved,
   type ExistingEnrollment,
 } from './enrollment-rules';
@@ -67,12 +68,16 @@ export const enrollmentsSyncer: Syncer = {
       `SELECT e.course_enrollment_id, e.member_id, e.course_id, e.created, e.expired_date,
               e.certificate_code, e.certificate_created, e.progress, e.status,
               COALESCE(e.\`updated\`, e.\`created\`) AS wm,
+              COALESCE(cp.\`updated\`, cp.\`created\`) AS course_pay_wm,
+              COALESCE(bp.\`updated\`, bp.\`created\`) AS bundle_pay_wm,
               cp.payment_status AS course_ps, bp.payment_status AS bundle_ps
          FROM ${ENROLLMENT_FROM}
         WHERE e.course_id IN (?) AND e.member_id IS NOT NULL
-          AND COALESCE(e.\`updated\`, e.\`created\`) > ?
+          AND ( COALESCE(e.\`updated\`, e.\`created\`) > ?
+                OR COALESCE(cp.\`updated\`, cp.\`created\`) > ?
+                OR COALESCE(bp.\`updated\`, bp.\`created\`) > ? )
         ORDER BY COALESCE(e.\`updated\`, e.\`created\`) ASC, e.course_enrollment_id ASC`,
-      [scopeCourseIds, since],
+      [scopeCourseIds, since, since, since],
     );
     stats.scanned = (rows as any[]).length;
     if (!stats.scanned) return stats;
@@ -103,6 +108,10 @@ export const enrollmentsSyncer: Syncer = {
     const wm = new WatermarkTracker();
     await runConcurrent(rows as any[], resyncConfig.writeConcurrency, async (r: any) => {
       wm.seen(toDate(r.wm));
+      // A refund/failed payment bumps only the payment's `updated` — track it so the checkpoint
+      // advances (and the row is not re-scanned every tick).
+      wm.seen(toDate(r.course_pay_wm));
+      wm.seen(toDate(r.bundle_pay_wm));
       const legacyId = Number(r.course_enrollment_id);
 
       // Legacy removal. `course_enrollment` has NO `deleted` column, so the Cresenity
@@ -116,7 +125,9 @@ export const enrollmentsSyncer: Syncer = {
       // regardless of what the payment row says now.
       if (Number(r.status) === 0) {
         try {
-          await cancelRemoved(ctx, stats, byPair, r, legacyId, courseByLegacy, losersByWinner);
+          await cancelEnrollment(
+            ctx, stats, byPair, r, legacyId, courseByLegacy, losersByWinner, LEGACY_CANCEL_REASON,
+          );
         } catch (err) {
           stats.errors += 1;
           wm.failed(toDate(r.wm));
@@ -128,7 +139,19 @@ export const enrollmentsSyncer: Syncer = {
       const paid = r.course_ps === 'SUCCESS' || r.bundle_ps === 'SUCCESS';
       const access = paid || (r.course_ps == null && r.bundle_ps == null);
       if (!access) {
-        stats.skipped += 1;
+        // Still active in legacy (status=1) but its payment is no longer SUCCESS (refund /
+        // failed). Legacy bumps only `course_payment.updated` on that change, so the row
+        // surfaces here thanks to the payment watermark above — and access now fails. Revoke
+        // the entitlement, with the same guards as a removal (audit 07 #11).
+        try {
+          await cancelEnrollment(
+            ctx, stats, byPair, r, legacyId, courseByLegacy, losersByWinner, LEGACY_PAYMENT_REVOKED_REASON,
+          );
+        } catch (err) {
+          stats.errors += 1;
+          wm.failed(toDate(r.wm));
+          ctx.log(`ERROR revoke course_enrollment_id=${legacyId}: ${errCode(err)}`);
+        }
         return;
       }
       const memberId = await ctx.ensureMember(Number(r.member_id));
@@ -241,13 +264,16 @@ function sameMemberLegacyIds(
 }
 
 /**
- * Mirror a legacy removal as a cancel — never a row delete, so `progress` and the
- * purchase trail survive exactly as they do for a refund.
+ * Mirror a lost entitlement as a cancel — never a row delete, so `progress` and the purchase
+ * trail survive exactly as they do for a refund. Shared by two sources:
+ *   - legacy removal (`status = 0`) → cancelationReason `legacy_removed`
+ *   - payment no longer SUCCESS (refund/failed) → `legacy_payment_revoked`
+ * Both are ours to lift if legacy re-grants access.
  *
- * Uses `resolveMember`, not `ensureMember`: a removal is not a reason to materialise
+ * Uses `resolveMember`, not `ensureMember`: a lost entitlement is not a reason to materialise
  * a member who has no row here yet. Nothing to cancel, nothing to create.
  */
-async function cancelRemoved(
+async function cancelEnrollment(
   ctx: SyncerCtx,
   stats: Stats,
   byPair: Map<string, ExistingEnrollment>,
@@ -255,6 +281,7 @@ async function cancelRemoved(
   legacyId: number,
   courseByLegacy: Map<number, CourseRef>,
   losersByWinner: Map<number, number[]>,
+  reason: string,
 ): Promise<void> {
   const memberId = ctx.resolveMember(Number(r.member_id));
   const course = courseByLegacy.get(Number(r.course_id));
@@ -304,12 +331,12 @@ async function cancelRemoved(
   // re-stamping `canceled_at`, and a concurrent re-point of this pair is never undone.
   const res = await ctx.prisma.courseEnrollment.updateMany({
     where: { id: existing!.id, legacyId, isCanceled: false },
-    data: { isCanceled: true, cancelationReason: LEGACY_CANCEL_REASON, canceledAt: new Date() },
+    data: { isCanceled: true, cancelationReason: reason, canceledAt: new Date() },
   });
   if (res.count > 0) {
     const current = byPair.get(pairKey);
     if (current?.legacyId === legacyId) {
-      byPair.set(pairKey, { ...current, isCanceled: true, cancelationReason: LEGACY_CANCEL_REASON });
+      byPair.set(pairKey, { ...current, isCanceled: true, cancelationReason: reason });
     }
     stats.voided = (stats.voided ?? 0) + 1;
   } else stats.skipped += 1;

@@ -3,6 +3,7 @@ import {
   decideEnrollmentWrite,
   mayCancelRemoved,
   LEGACY_CANCEL_REASON,
+  LEGACY_PAYMENT_REVOKED_REASON,
   type ExistingEnrollment,
 } from '../src/syncers/enrollment-rules';
 
@@ -27,6 +28,11 @@ describe('decideEnrollmentWrite', () => {
     [
       'same legacyId reactivated after legacy_removed → uncancel',
       row({ isCanceled: true, cancelationReason: LEGACY_CANCEL_REASON }),
+      'uncancel',
+    ],
+    [
+      'same legacyId re-granted after a payment revoke → uncancel',
+      row({ isCanceled: true, cancelationReason: LEGACY_PAYMENT_REVOKED_REASON }),
       'uncancel',
     ],
     [

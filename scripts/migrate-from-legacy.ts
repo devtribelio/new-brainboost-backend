@@ -13,7 +13,7 @@ import 'dotenv/config';
 import { randomUUID } from 'node:crypto';
 import type { Connection, RowDataPacket } from 'mysql2/promise';
 import { PrismaClient } from '@prisma/client';
-import { normalizePhonePair } from '@bb/common/utils/phone.util';
+import { normalizeLegacyPhonePair } from '@bb/common/utils/phone.util';
 import { detectPasswordAlgo } from '@bb/common/utils/password-algo.util';
 import { connectLegacyDb } from './legacy-db';
 
@@ -310,7 +310,7 @@ async function migrateMembers(legacy: Connection) {
       // #7/#8, docs/register-verification-flow.md). Legacy kept E.164-ish
       // strings ('+628…'/'628…'/'08…'); too short after canonicalizing = junk.
       const rawPhone = nonEmpty(r.phone);
-      const pair = rawPhone ? normalizePhonePair(rawPhone, '+62') : null;
+      const pair = rawPhone ? normalizeLegacyPhonePair(rawPhone) : null;
       const canonicalPhone = pair && pair.phone.length >= 6 ? pair.phone : null;
 
       if (!email && !canonicalPhone) {

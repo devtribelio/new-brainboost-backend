@@ -14,10 +14,9 @@
 import type { RowDataPacket } from 'mysql2/promise';
 import { resyncConfig } from '../config';
 import { emptyStats, type RunCtx, type Stats, type Syncer, type SyncerCtx } from '../types';
-import { buyerLegacyIdSql, planCommissionUpdate } from './commission-rules';
+import { buyerLegacyIdSql, planCommissionUpdate, resolveAffiliateBased } from './commission-rules';
 import { errCode, runConcurrent, sinceBound, toDate, WatermarkTracker } from '../util';
 
-const BASED = new Set(['PERFORMANCE', 'GROWTH', 'INACTIVE']);
 const PAGE = 5000;
 
 function intOf(v: any): number {
@@ -72,7 +71,9 @@ export async function applyCommissionRow(ctx: RunCtx, r: any, maps: CommissionMa
     return true;
   }
   const programId = maps.programByNapa.get(Number(r.network_account_product_affiliator_id)) ?? null;
-  const based = BASED.has(String(r.affiliate_based)) ? String(r.affiliate_based) : 'PERFORMANCE';
+  const level = intOf(r.level) || 1;
+  // NULL affiliate_based on a level≥2 row is GROWTH (PERFORMANCE pays L1 only) — audit 08 F5.
+  const based = resolveAffiliateBased(r.affiliate_based, level);
   const status = Number(r.is_expired) === 1 ? 'VOIDED' : 'MIGRATED';
   // buyer = payment row's member (see ./commission-rules.ts), NOT member_downline_id.
   // A BB-course buyer is in scope by definition (same rule as the recipient above).
@@ -87,7 +88,7 @@ export async function applyCommissionRow(ctx: RunCtx, r: any, maps: CommissionMa
     productId,
     paymentId: null,
     paymentLegacyId: r.payment_id != null ? Number(r.payment_id) : null,
-    level: intOf(r.level) || 1,
+    level,
     affiliateBased: based,
     productPrice: intOf(r.product_price),
     voucherAmount: 0,

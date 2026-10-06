@@ -6,6 +6,20 @@
 /** Stamped on rows cancelled because legacy removed them, so support can tell them apart from a refund. */
 export const LEGACY_CANCEL_REASON = 'legacy_removed';
 
+/**
+ * Stamped on rows revoked because the payment that granted them is no longer SUCCESS
+ * (refund / failed settlement) — distinct from an admin removal so support can tell them apart.
+ */
+export const LEGACY_PAYMENT_REVOKED_REASON = 'legacy_payment_revoked';
+
+/** Cancels the legacy resync itself wrote — both are safe to lift when legacy re-grants access. */
+export const LEGACY_CANCEL_REASONS: ReadonlySet<string> = new Set([
+  LEGACY_CANCEL_REASON,
+  LEGACY_PAYMENT_REVOKED_REASON,
+]);
+
+const isLegacyCancel = (reason: string | null): boolean => reason !== null && LEGACY_CANCEL_REASONS.has(reason);
+
 /** The Postgres enrollment currently holding a (member, course) pair. */
 export interface ExistingEnrollment {
   id: string;
@@ -43,14 +57,14 @@ export function decideEnrollmentWrite(
 ): EnrollmentWrite {
   if (!existing) return 'create';
   if (existing.legacyId === legacyId) {
-    return existing.isCanceled && existing.cancelationReason === LEGACY_CANCEL_REASON ? 'uncancel' : 'refresh';
+    return existing.isCanceled && isLegacyCancel(existing.cancelationReason) ? 'uncancel' : 'refresh';
   }
   if (existing.legacyId === null) return 'skip';
   const expired = existing.expiredDate !== null && existing.expiredDate.getTime() < now.getTime();
   const paidOverTrial = existing.expiredDate !== null && incomingExpiredDate === null;
-  // A refund cancel (reason other than legacy_removed) is lifted only by a real re-purchase,
-  // never by a free / admin-granted legacy row.
-  const deadByLegacy = existing.isCanceled && (existing.cancelationReason === LEGACY_CANCEL_REASON || incomingPaid);
+  // A refund cancel (reason other than our own legacy cancels) is lifted only by a real
+  // re-purchase, never by a free / admin-granted legacy row.
+  const deadByLegacy = existing.isCanceled && (isLegacyCancel(existing.cancelationReason) || incomingPaid);
   return deadByLegacy || (!existing.isCanceled && (expired || paidOverTrial)) ? 'repoint' : 'skip';
 }
 

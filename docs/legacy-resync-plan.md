@@ -80,8 +80,10 @@ All 7 syncers implemented and validated end-to-end:
   post/comment counters), so the column self-heals after any out-of-app write — the
   auto-join above, a manual SQL backfill, or the one-shot migrate script.
 - **Lock heartbeat (implemented):** the run refreshes the `__lock__` stamp after each
-  syncer, so a run longer than the TTL (4-5h first run vs 2h default) can't be taken over
-  mid-write; a lost heartbeat aborts the remaining syncers instead of double-writing.
+  syncer **and on a timer while a syncer runs** (`lockTtlSec/3`, min 30s — a syncer's only
+  checkpoint is at its end, and the first members/posts pass can exceed the TTL), so a run
+  longer than the TTL (4-5h first run vs 2h default) can't be taken over mid-write; a lost
+  heartbeat aborts the remaining syncers instead of double-writing.
 - **members raw UPDATE tz fix (implemented):** `updated_at`/`legacy_synced_at` are now an
   app-side `Date` param (was server `now()`): the columns are tz-less `timestamp` filled
   with app-clock UTC by Prisma everywhere else — a non-UTC server TimeZone or app↔DB
@@ -361,6 +363,11 @@ new-system state.
   with a new-app placeholder (`legacyId=null`) → **adopt** it (stamp `legacyId` + profile);
   no collision → fresh create. The in-run `redirect`/`memberByLegacy` maps are mutated so
   later syncers resolve the new id; counts logged as `created/redirected/adopted`.
+- **Redirect resolution is transitive (2026-10-06).** `member_redirect` is normally one hop,
+  but a manual seed or a split/merge can leave A→B→C; `flattenRedirects` (`util.ts`, applied in
+  `core.ts`, `fix-dates.ts`, `identity.ts`, `code-aliases.ts`) collapses every chain to its
+  terminal winner (and folds a cycle onto one node) so a loser never resolves to an
+  intermediate loser that has no member row.
 
 ### 6.1 `passwordAlgo` is derived from the hash, never assumed
 
@@ -510,8 +517,12 @@ excluded outright so a social-only account can never acquire an algo that authen
   added (audit P2 "pra_member.ref_id tidak di-sync" closed as not needed).
 
 ### reviews — incremental
-- `product_review` `WHERE COALESCE(updated,created) > :watermark`, key `legacyId`, upsert.
-  Needs product + member to exist (skip otherwise).
+- `product_review` `WHERE status=1 AND productable_type='TBModel_Course' AND
+  COALESCE(updated,created) > :watermark`, upsert on `@@unique(productId, memberId)`. The type
+  filter is required: a Bundle/Digital/Book review can share a numeric `productable_id` with a
+  migrated `Product.legacyId`. Needs product + member to exist (skip otherwise).
+- **Gap:** `Review` has no legacyId/app-edit marker, so a re-scan overwrites `stars`/`comment`
+  an app user edited — needs a provenance column before it can be guarded.
 
 ### posts + comments + replies + likes — incremental
 - Reuse `migrate-network-posts` upsert-by-`legacyId` logic (already upserts).
@@ -587,4 +598,37 @@ preserve post→comment→reply→like ordering.
    to brainboost because creation only fires when a brainboost-scoped row references the
    member. Wiring + no-regression validated on bb_trial (dry-run errors=0); a full create
    test needs a genuinely-new legacy member or a delete-and-recreate on a throwaway DB.
-```
+
+---
+
+## 10. Batch audit fixes 07/08 (2026-10-06, P1/P2)
+
+Implemented together with the P0 PRD; each has unit tests under `apps/resync-worker/tests/`.
+
+- **`affiliateBased` provenance (`member.affiliate_based_source`).** The tree pass used to write
+  `affiliateBased` unconditionally, reverting a PERFORMANCE/GROWTH switch the member made in the
+  app (`AffiliatorService.setMode`, which now stamps source `APP`). Migration
+  `20261008120000_member_affiliate_based_source` backfills legacy rows `LEGACY` / app rows `APP`;
+  the tree writes only over NULL/`LEGACY` (`affiliate-mode-rules.ts`).
+- **Adopt fill-if-null (`adopt-rules.ts`).** `ensureMember`'s adopt path no longer overwrites an
+  app placeholder's profile/verification/activation: identity + profile fill only when empty,
+  `isActive`/verified only ever raised, bank only when absent; a P2002 conflict drops that field
+  from the write instead of nulling it.
+- **Commission mode + update refresh (`commissions.ts`).** A NULL legacy `affiliate_based` at
+  level ≥2 resolves to GROWTH (PERFORMANCE pays L1 only); the update branch now also refreshes
+  `recipientId`/`level`/`affiliateBased`, so a forced re-scan or a redirect/split heals old rows
+  (migrated rows have `paymentId = null`, so the unique key cannot collide).
+- **Split hands borrowed KYC back (`identity.ts`).** After `resync:identity split`, a winner whose
+  KYC came from the loser (no own legacy KYC, source `LEGACY`) is reset to `NONE` and its
+  KYC-sourced bank cleared — a pair that are different people no longer keeps the other's KYC.
+- **Enrollment revoked when the payment is no longer SUCCESS (`enrollments.ts`).** The scan now
+  also rides `course_payment.updated` / `product_bundle_payment.updated` (legacy bumps only the
+  payment on a refund/failed settlement). An active enrollment whose entitlement is gone is
+  cancelled with reason `legacy_payment_revoked` (safely lifted again if legacy re-grants).
+  Repair existing rows with a forced `pnpm resync enrollments --since=1970-01-01T00:00:00Z`.
+- **Foreign phone preserved on legacy import (`normalizeLegacyPhonePair`).** Legacy numbers already
+  in E.164 (`+27…`, `+852…`) were re-prefixed with `+62`, producing an undeliverable OTP target.
+  The legacy importers (`ensureMember`, `identity split`, `migrate-members`, `migrate-from-legacy`)
+  now split on the number's own dial code. **Existing 1 428 corrupted rows need a one-off repair**
+  (audit `02-member-identity/telepon-luar-negeri-salah-normalisasi.csv`); the `+27 8xx` ones are
+  flagged "mungkin nomor Indonesia" — decide by hand, do not guess.
