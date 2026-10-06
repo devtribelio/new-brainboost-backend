@@ -23,7 +23,7 @@ import {
 } from './enrollment-rules';
 
 /** In-scope legacy course ids: brainboost-owned, or sold as brainboost on the payment. */
-const BB_COURSE_IDS_SQL = `SELECT course_id FROM course WHERE client = 'brainboost'
+export const BB_COURSE_IDS_SQL = `SELECT course_id FROM course WHERE client = 'brainboost'
   UNION
   SELECT course_id FROM course_payment
    WHERE client_product = 'brainboost' AND payment_status = 'SUCCESS' AND course_id IS NOT NULL`;

@@ -7,7 +7,9 @@ import type { Syncer } from '../types';
 import { membersSyncer } from './members';
 import { enrollmentsSyncer } from './enrollments';
 import { kycSyncer } from './kyc';
+import { programsSyncer } from './programs';
 import { treeSyncer } from './tree';
+import { connectSyncer } from './connect';
 import { commissionsSyncer } from './commissions';
 import { reviewsSyncer } from './reviews';
 import { postsSyncer } from './posts';
@@ -17,7 +19,9 @@ const ordered: Syncer[] = [
   membersSyncer,
   enrollmentsSyncer,
   kycSyncer,
+  programsSyncer, // before tree: tree only syncs joins of programs linked to a product
   treeSyncer,
+  connectSyncer, // after tree: overrides LEGACY_PARENT with the legacy connect (P0-1 option C)
   commissionsSyncer,
   reviewsSyncer,
   postsSyncer,
