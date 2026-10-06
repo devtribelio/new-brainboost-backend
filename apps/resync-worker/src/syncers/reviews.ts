@@ -10,7 +10,7 @@
 import type { RowDataPacket } from 'mysql2/promise';
 import { resyncConfig } from '../config';
 import { emptyStats, type Stats, type Syncer, type SyncerCtx } from '../types';
-import { maxWatermark, nonEmpty, runConcurrent, sinceBound, toDate } from '../util';
+import { errCode, nonEmpty, runConcurrent, sinceBound, toDate, WatermarkTracker } from '../util';
 
 export const reviewsSyncer: Syncer = {
   name: 'reviews',
@@ -40,13 +40,13 @@ export const reviewsSyncer: Syncer = {
     stats.scanned = (rows as any[]).length;
     if (!stats.scanned) return stats;
 
-    let watermark = ctx.since;
+    const wm = new WatermarkTracker();
     // upsert key is (product, member) and legacy can hold several rows per pair — rows are
     // ordered wm ASC, so sequentially the newest won. Keep that deterministically under
     // concurrency: dedupe to the last (newest) row per pair BEFORE writing in parallel.
     const byPair = new Map<string, any>();
     for (const r of rows as any[]) {
-      watermark = maxWatermark(watermark, toDate(r.wm));
+      wm.seen(toDate(r.wm));
       byPair.set(`${r.productable_id}|${ctx.redirect.get(Number(r.member_id)) ?? Number(r.member_id)}`, r);
     }
     stats.skipped += (rows as any[]).length - byPair.size; // superseded in-batch duplicates
@@ -76,12 +76,14 @@ export const reviewsSyncer: Syncer = {
           update: { stars, comment },
         });
         stats.upserted += 1;
-      } catch {
+      } catch (err) {
         stats.errors += 1;
+        wm.failed(toDate(r.wm));
+        ctx.log(`ERROR write product_review_id=${r.product_review_id}: ${errCode(err)}`);
       }
     });
 
-    if (watermark && !ctx.dryRun) await ctx.checkpoint(watermark);
+    await ctx.checkpoint(wm.result(ctx.runStart));
     return stats;
   },
 };

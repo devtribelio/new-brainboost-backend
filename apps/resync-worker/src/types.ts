@@ -44,8 +44,13 @@ export interface RunCtx {
 export interface SyncerCtx extends RunCtx {
   /** stored watermark (max COALESCE(updated,created) seen) or null on first run. */
   since: string | null;
-  /** persist the watermark mid-run so an ECONNRESET resumes instead of restarting. */
-  checkpoint(watermark: string): Promise<void>;
+  /** legacy clock captured before this syncer's first query — the checkpoint ceiling. */
+  runStart: Date;
+  /**
+   * Persist the watermark (from WatermarkTracker.result). null = nothing scanned → no-op.
+   * Also a no-op in dry runs, and never moves forward across an unscanned `--since` gap.
+   */
+  checkpoint(watermark: string | null): Promise<void>;
 }
 
 export interface Syncer {

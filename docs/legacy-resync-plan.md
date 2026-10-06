@@ -202,6 +202,21 @@ in the batch. To avoid skipping rows that share the boundary second, the next qu
 `>= :watermark` combined with a processed-PK guard, or `> :watermark` with a 1-second
 overlap re-scan (cheap, upsert is idempotent so re-processing a few boundary rows is safe).
 
+**Checkpoint rule (2026-10-06, `WatermarkTracker` in `apps/resync-worker/src/util.ts`):**
+`checkpoint = min(maxSeen, runStart, earliestFailed − 1s)`, and **no checkpoint at all when
+nothing was scanned**. `runStart` = legacy clock (`legacyNow()`: `UTC_TIMESTAMP()` rendered in
+`LEGACY_DB_TIMEZONE`, so it decodes like an `updated` value) read before the syncer's first
+query — a row changed in an already-scanned chunk / sub-query / table during a long run is
+re-scanned next tick instead of skipped. A row whose WRITE threw holds the checkpoint below
+it (logged `ERROR write <pk>=<id>: <code>`, code only — no row data); intentional skips
+(out of scope, guard-blocked, known P2002 collisions) still advance. Consequence: a row that
+fails on every run pins its syncer — each tick re-scans from that row onward (idempotent,
+but slower) and logs the same `ERROR write` line; fix the cause, or move the watermark past
+it by hand (`UPDATE sync_state SET watermark = … WHERE syncer = …`). A `--since` newer than
+the stored watermark never moves it forward (the gap below `--since` was not scanned), so it
+cannot be used to skip ahead. `checkpoint()` also refreshes the run-lock heartbeat and stops
+the syncer if the lock was taken over.
+
 ---
 
 ## 4. New schema (additive — hand-written SQL + `prisma migrate deploy`)

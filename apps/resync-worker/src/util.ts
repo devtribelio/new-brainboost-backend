@@ -18,13 +18,48 @@ export function bool(v: any): boolean {
   return v === 1 || v === true || v === '1';
 }
 
-/** ISO string of the larger of two date-ish values (for advancing a watermark). */
-export function maxWatermark(prev: string | null, ...dates: (Date | null)[]): string | null {
-  let best = prev ? new Date(prev).getTime() : Number.NEGATIVE_INFINITY;
-  for (const d of dates) {
-    if (d && d.getTime() > best) best = d.getTime();
+/**
+ * Folds a syncer's scanned rows into the watermark it may checkpoint:
+ *
+ *   checkpoint = min(maxSeen, runStart, earliestFailed − 1s)   — or null if nothing scanned
+ *
+ * - `seen(wm)` for every row that settled (written OR intentionally skipped — holding on a
+ *   permanently unresolvable row would stall the syncer forever).
+ * - `failed(wm)` for a row whose WRITE threw: the next run must re-scan it, so the
+ *   checkpoint stays strictly below it (scans use `> since`).
+ * - `runStart` = legacy clock captured before the syncer's first query: a row updated in an
+ *   already-scanned chunk during a long run is re-scanned next tick instead of skipped.
+ * - nothing scanned → null: never checkpoint (a forced `--since` must not write itself back).
+ */
+export class WatermarkTracker {
+  private maxSeen: number | null = null;
+  private minFailed: number | null = null;
+
+  seen(wm: Date | null): void {
+    if (!wm) return;
+    const t = wm.getTime();
+    if (this.maxSeen === null || t > this.maxSeen) this.maxSeen = t;
   }
-  return Number.isFinite(best) ? new Date(best).toISOString() : prev;
+
+  failed(wm: Date | null): void {
+    if (!wm) return;
+    this.seen(wm);
+    const t = wm.getTime();
+    if (this.minFailed === null || t < this.minFailed) this.minFailed = t;
+  }
+
+  result(runStart: Date): string | null {
+    if (this.maxSeen === null) return null;
+    let cp = Math.min(this.maxSeen, runStart.getTime());
+    if (this.minFailed !== null) cp = Math.min(cp, this.minFailed - 1000);
+    return new Date(cp).toISOString();
+  }
+}
+
+/** Loggable tag for a row-write error — the code only: Prisma messages can echo row data (PII). */
+export function errCode(err: unknown): string {
+  const e = err as { code?: string; name?: string } | null;
+  return e?.code ?? e?.name ?? 'unknown';
 }
 
 /**

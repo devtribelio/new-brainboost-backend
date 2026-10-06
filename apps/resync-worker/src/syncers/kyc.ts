@@ -5,13 +5,16 @@
  * SOURCE  legacy `member_data_kyc` (real KYC table; member.last_kyc_status is stale).
  * CHANGE  any row with COALESCE(updated,created) > watermark re-evaluates that member.
  * AUTH    latest APPROVED/REJECTED row across the dedup cluster wins (MAX id).
- * GUARD   only writes members whose kycSource is still NONE/LEGACY — never clobbers a
- *         MANUAL/SUMSUB decision, never downgrades an EXPIRED (re-KYC in progress).
+ * GUARD   only writes members whose kycSource is still NONE/LEGACY and whose kycStatus is
+ *         not EXPIRED — never clobbers a MANUAL/DIDIT decision, and never re-approves a
+ *         member DisbursementService.resetKyc revoked (it keeps kycSource=LEGACY).
+ *         Soft-deleted member_data_kyc rows (status = 0) are ignored.
  * See docs/legacy-resync-plan.md §6.
  */
 import type { RowDataPacket } from 'mysql2/promise';
 import { emptyStats, type RunCtx, type Stats, type Syncer, type SyncerCtx } from '../types';
-import { maxWatermark, nonEmpty, sinceBound, toDate } from '../util';
+import { normalizeBankCode } from '../bank-code';
+import { nonEmpty, sinceBound, toDate, WatermarkTracker } from '../util';
 
 interface KycTarget {
   id: number; // member_data_kyc_id (latest in cluster)
@@ -70,7 +73,7 @@ export async function applyKycDecisions(ctx: RunCtx, memberLegacyIds: number[], 
               k.bank_type, k.bank_name, k.bank_number
          FROM member_data_kyc k
          JOIN (SELECT member_id, MAX(member_data_kyc_id) mx FROM member_data_kyc
-                WHERE kyc_status IN ('APPROVED','REJECTED') AND member_id IN (?)
+                WHERE kyc_status IN ('APPROVED','REJECTED') AND COALESCE(status, 1) <> 0 AND member_id IN (?)
                 GROUP BY member_id) t
            ON t.member_id = k.member_id AND t.mx = k.member_data_kyc_id`,
       [chunk],
@@ -90,7 +93,7 @@ export async function applyKycDecisions(ctx: RunCtx, memberLegacyIds: number[], 
         nik: nonEmpty(r.nik),
         reason: status === 'REJECTED' ? nonEmpty(r.reason) : null,
         reviewedAt: toDate(r.actionat) ?? toDate(r.updated) ?? toDate(r.created),
-        bankCode: bankOk ? nonEmpty(r.bank_type) : null,
+        bankCode: bankOk ? normalizeBankCode(r.bank_type) : null,
         bankAccountNumber: bankOk ? nonEmpty(r.bank_number) : null,
         bankAccountName: bankOk ? nonEmpty(r.bank_name) : null,
       };
@@ -113,7 +116,11 @@ export async function applyKycDecisions(ctx: RunCtx, memberLegacyIds: number[], 
     const res = await Promise.all(
       batch.map((t) =>
         ctx.prisma.member.updateMany({
-          where: { id: ctx.memberByLegacy.get(t.winnerLegacy)!, kycSource: { in: ['NONE', 'LEGACY'] } },
+          where: {
+            id: ctx.memberByLegacy.get(t.winnerLegacy)!,
+            kycSource: { in: ['NONE', 'LEGACY'] },
+            kycStatus: { not: 'EXPIRED' }, // re-KYC pending — a legacy touch must not reopen payouts
+          },
           data: {
             kycStatus: t.status,
             kycSource: 'LEGACY',
@@ -167,17 +174,18 @@ export const kycSyncer: Syncer = {
     stats.scanned = (changed as any[]).length;
     if (!stats.scanned) return stats;
 
-    let watermark = ctx.since;
+    const wm = new WatermarkTracker();
     const changedMembers: number[] = [];
     for (const r of changed as any[]) {
       changedMembers.push(Number(r.member_id));
-      watermark = maxWatermark(watermark, toDate(r.wm));
+      wm.seen(toDate(r.wm));
     }
 
-    // 2-4) cluster-widen, pick authoritative row, apply guarded
+    // 2-4) cluster-widen, pick authoritative row, apply guarded. A failed write throws out
+    // of the syncer → no checkpoint, the whole window is re-scanned next run.
     await applyKycDecisions(ctx, changedMembers, stats);
 
-    if (watermark && !ctx.dryRun) await ctx.checkpoint(watermark);
+    await ctx.checkpoint(wm.result(ctx.runStart));
     return stats;
   },
 };

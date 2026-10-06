@@ -14,7 +14,7 @@
 import type { RowDataPacket } from 'mysql2/promise';
 import { resyncConfig } from '../config';
 import { emptyStats, type Stats, type Syncer, type SyncerCtx } from '../types';
-import { maxWatermark, nonEmpty, runConcurrent, sinceBound, toDate } from '../util';
+import { errCode, nonEmpty, runConcurrent, sinceBound, toDate, WatermarkTracker } from '../util';
 import {
   decideEnrollmentWrite,
   LEGACY_CANCEL_REASON,
@@ -100,9 +100,9 @@ export const enrollmentsSyncer: Syncer = {
 
     const now = new Date();
     const losersByWinner = invertRedirect(ctx.redirect);
-    let watermark = ctx.since;
+    const wm = new WatermarkTracker();
     await runConcurrent(rows as any[], resyncConfig.writeConcurrency, async (r: any) => {
-      watermark = maxWatermark(watermark, toDate(r.wm));
+      wm.seen(toDate(r.wm));
       const legacyId = Number(r.course_enrollment_id);
 
       // Legacy removal. `course_enrollment` has NO `deleted` column, so the Cresenity
@@ -117,8 +117,10 @@ export const enrollmentsSyncer: Syncer = {
       if (Number(r.status) === 0) {
         try {
           await cancelRemoved(ctx, stats, byPair, r, legacyId, courseByLegacy, losersByWinner);
-        } catch {
+        } catch (err) {
           stats.errors += 1;
+          wm.failed(toDate(r.wm));
+          ctx.log(`ERROR cancel course_enrollment_id=${legacyId}: ${errCode(err)}`);
         }
         return;
       }
@@ -206,12 +208,17 @@ export const enrollmentsSyncer: Syncer = {
         }
         stats.upserted += 1;
       } catch (err: any) {
-        if (err?.code === 'P2002') stats.skipped += 1;
-        else stats.errors += 1;
+        if (err?.code === 'P2002') {
+          stats.skipped += 1;
+        } else {
+          stats.errors += 1;
+          wm.failed(toDate(r.wm));
+          ctx.log(`ERROR write course_enrollment_id=${legacyId}: ${errCode(err)}`);
+        }
       }
     });
 
-    if (watermark && !ctx.dryRun) await ctx.checkpoint(watermark);
+    await ctx.checkpoint(wm.result(ctx.runStart));
     return stats;
   },
 };

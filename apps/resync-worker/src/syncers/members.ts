@@ -33,7 +33,7 @@ import type { RowDataPacket } from 'mysql2/promise';
 import { resyncConfig } from '../config';
 import { planMemberSync, type MemberSyncCurrent } from './member-rules';
 import { emptyStats, type Stats, type Syncer, type SyncerCtx } from '../types';
-import { bool, maxWatermark, nonEmpty, runConcurrent, sinceBound, toDate } from '../util';
+import { bool, errCode, nonEmpty, runConcurrent, sinceBound, toDate, WatermarkTracker } from '../util';
 
 const CHUNK = 5000; // legacy member_id IN (...) batch
 
@@ -52,7 +52,7 @@ export const membersSyncer: Syncer = {
 
     // only the already-migrated members (winner legacyIds) are subjects
     const legacyIds = [...ctx.memberByLegacy.keys()];
-    let watermark = ctx.since;
+    const wm = new WatermarkTracker();
 
     for (let i = 0; i < legacyIds.length; i += CHUNK) {
       const idChunk = legacyIds.slice(i, i + CHUNK);
@@ -78,7 +78,7 @@ export const membersSyncer: Syncer = {
       // one member_id per row (PK IN) → rows are write-independent → safe to parallelise
       await runConcurrent(rows as any[], resyncConfig.writeConcurrency, async (r) => {
         stats.scanned += 1;
-        watermark = maxWatermark(watermark, toDate(r.wm));
+        wm.seen(toDate(r.wm));
         const id = ctx.memberByLegacy.get(Number(r.member_id))!; // guaranteed: member_id ∈ our set
         const cur = current.get(id);
         if (!cur) {
@@ -124,15 +124,17 @@ export const membersSyncer: Syncer = {
             ...params,
           );
           stats.upserted += 1;
-        } catch {
+        } catch (err) {
           stats.errors += 1;
+          wm.failed(toDate(r.wm));
+          ctx.log(`ERROR write member_id=${r.member_id}: ${errCode(err)}`);
         }
       });
     }
 
     // checkpoint once after all chunks — interruption re-runs the (bounded) syncer idempotently
     // rather than risk skipping an unprocessed chunk whose rows predate a per-chunk watermark.
-    if (watermark && !ctx.dryRun) await ctx.checkpoint(watermark);
+    await ctx.checkpoint(wm.result(ctx.runStart));
     return stats;
   },
 };

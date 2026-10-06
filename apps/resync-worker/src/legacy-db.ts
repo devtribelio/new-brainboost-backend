@@ -20,6 +20,11 @@ function reqEnv(name: string): string {
   return v;
 }
 
+/** The wall-clock zone legacy DATETIMEs are written in (mysql2 decodes with it). */
+function legacyTimezone(): string {
+  return process.env.LEGACY_DB_TIMEZONE ?? '+07:00';
+}
+
 /** Open a connection to the legacy MariaDB using .env credentials. */
 export function connectLegacyDb(extra?: ConnectionOptions): Promise<Connection> {
   return mysql.createConnection({
@@ -30,7 +35,7 @@ export function connectLegacyDb(extra?: ConnectionOptions): Promise<Connection> 
     // Legacy DATETIMEs are stored as Asia/Jakarta / Bangkok wall-clock (WIB, UTC+7).
     // Without this, mysql2 reads them as if UTC → every timestamp lands 7h in the
     // future. Telling mysql2 the source tz makes it convert to the correct UTC Date.
-    timezone: process.env.LEGACY_DB_TIMEZONE ?? '+07:00',
+    timezone: legacyTimezone(),
     ...extra,
   });
 }
@@ -115,4 +120,24 @@ export async function connectResilientLegacy(
       }
     },
   };
+}
+
+/**
+ * The legacy clock NOW, in the same frame as the `updated` columns. Built from
+ * UTC_TIMESTAMP() converted to the legacy wall-clock zone rather than NOW(): mysql2's
+ * `timezone` only drives client-side decoding, it does NOT set the session time_zone, so
+ * NOW() would be the server's zone (UTC on RDS) and decode 7h early. Rendering the instant
+ * in the legacy zone means mysql2 decodes it exactly like an `updated` value.
+ */
+export async function legacyNow(client: LegacyClient): Promise<Date> {
+  const tz = legacyTimezone();
+  const expr = /^[+-]\d{2}:\d{2}$/.test(tz)
+    ? `CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}')`
+    : tz === 'Z'
+      ? 'UTC_TIMESTAMP()'
+      : 'NOW()'; // non-offset zone ('local'): best effort
+  const [rows] = await client.query<RowDataPacket[]>(`SELECT ${expr} AS now`);
+  const now = (rows as RowDataPacket[])[0]?.now;
+  if (!(now instanceof Date) || Number.isNaN(now.getTime())) throw new Error(`legacy clock unreadable: ${String(now)}`);
+  return now;
 }

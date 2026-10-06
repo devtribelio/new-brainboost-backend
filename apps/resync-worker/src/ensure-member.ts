@@ -21,6 +21,7 @@ import type { PrismaClient } from '@prisma/client';
 import { normalizePhonePair } from '@bb/common/utils/phone.util';
 import { detectPasswordAlgo } from '@bb/common/utils/password-algo.util';
 import type { LegacyClient } from './legacy-db';
+import { normalizeBankCode } from './bank-code';
 import { bool, nonEmpty, toDate } from './util';
 
 interface Deps {
@@ -111,7 +112,7 @@ export function makeEnsureMember(deps: Deps) {
     // kyc syncer). Only offered when legacy actually has a number — never nulls anything.
     const bank = nonEmpty(r.bank_account_number)
       ? {
-          bankCode: nonEmpty(r.bank_account_bank),
+          bankCode: normalizeBankCode(r.bank_account_bank),
           bankAccountNumber: nonEmpty(r.bank_account_number),
           bankAccountName: nonEmpty(r.bank_account_name),
         }

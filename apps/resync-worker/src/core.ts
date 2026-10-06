@@ -9,7 +9,7 @@
  */
 import os from 'node:os';
 import { PrismaClient } from '@prisma/client';
-import { connectResilientLegacy } from './legacy-db';
+import { connectResilientLegacy, legacyNow } from './legacy-db';
 import { resyncConfig } from './config';
 import { registry, SYNCER_ORDER } from './syncers';
 import { makeEnsureMember } from './ensure-member';
@@ -132,14 +132,43 @@ export async function runResync(opts: RunOpts): Promise<Record<string, Stats>> {
           continue;
         }
         const state = await prisma.syncState.findUnique({ where: { syncer: name } });
-        const since = opts.since !== undefined ? opts.since : (state?.watermark ?? null);
+        const stored = state?.watermark ?? null;
+        const since = opts.since !== undefined ? opts.since : stored;
+        // a --since NEWER than the stored watermark leaves (stored, since] unscanned: this run
+        // may move the watermark back (a held failure) but never forward across that gap
+        const gapFloor =
+          opts.since && stored && new Date(opts.since) > new Date(stored) ? new Date(stored) : null;
+        // a --since OLDER than the stored watermark is a repair pass over rows already behind it:
+        // a failure there must not rewind the stored watermark (the next tick would re-scan from
+        // that point) — it is logged, and the operator re-runs the repair
+        const repairFloor =
+          opts.since && stored && new Date(opts.since) < new Date(stored) ? new Date(stored) : null;
+        const syncerLog = (m: string) => console.log(`[${ts()}] [resync:${name}] ${m}`);
 
         const syncerCtx: SyncerCtx = {
           ...ctx,
-          log: (m: string) => console.log(`[${ts()}] [resync:${name}] ${m}`),
+          log: syncerLog,
           since,
-          async checkpoint(watermark: string) {
-            if (opts.dryRun) return;
+          // captured BEFORE the syncer's first data query — the checkpoint ceiling
+          runStart: await legacyNow(legacy),
+          async checkpoint(watermark: string | null) {
+            if (opts.dryRun || !watermark) return;
+            if (gapFloor && new Date(watermark) > gapFloor) {
+              syncerLog(`--since is past the stored watermark ${stored} — not advancing it to ${watermark}`);
+              return;
+            }
+            if (repairFloor && new Date(watermark) < repairFloor) {
+              syncerLog(`repair pass held below the stored watermark ${stored} — keeping it, not rewinding to ${watermark}`);
+              return;
+            }
+            // refresh the run-lock first: a long run must not be taken over mid-syncer, and
+            // a lost lock means another process owns sync_state now → stop, don't write
+            const stamp: Date | null = acquired ? await heartbeatLock(prisma, acquired) : null;
+            if (!stamp) {
+              acquired = null; // not ours anymore; don't release someone else's lock
+              throw new Error('run-lock lost (TTL takeover by another process)');
+            }
+            acquired = stamp;
             await prisma.syncState.upsert({
               where: { syncer: name },
               create: { syncer: name, watermark },
@@ -172,7 +201,7 @@ export async function runResync(opts: RunOpts): Promise<Record<string, Stats>> {
         // keep the run-lock alive across long syncers; a lost lock means another process
         // holds it now → stop writing immediately.
         if (!opts.dryRun) {
-          const stamp = await heartbeatLock(prisma, acquired);
+          const stamp: Date | null = acquired ? await heartbeatLock(prisma, acquired) : null;
           if (!stamp) {
             log('ERROR: run-lock lost (TTL takeover by another process) — aborting remaining syncers');
             acquired = null; // not ours anymore; don't release someone else's lock
