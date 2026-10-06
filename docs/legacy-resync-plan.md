@@ -293,26 +293,33 @@ new-system state.
 ### members — **new-wins-on-touch**
 - Only touch rows with `legacyId != null`. Rows with `legacyId = null` (registered in the
   new app) are **never** touched.
-- Add `legacySyncedAt`. On each run, for a candidate member:
-  - if `member.updatedAt <= legacySyncedAt` (no app-side write since last sync) →
-    **overwrite** the legacy-owned fields, then set `legacySyncedAt` = the same write
-    timestamp (raw upsert sets `updated_at = now()` and `legacy_synced_at = now()` in one
-    statement so they stay equal → next run sees "untouched" unless the app writes).
-  - if `member.updatedAt > legacySyncedAt` (user changed something in the new app) →
-    **skip** the legacy-owned fields (new wins). Still allowed: `isActive=false` from
-    `is_deleted=1` (deactivation always propagates).
-  - first ever sync (`legacySyncedAt IS NULL`) → treat as legacy-owned (overwrite).
-- **Legacy-owned fields** (subject to overwrite when untouched): `fullName`, `avatarUrl`,
-  `bio`, `gender`, `birthdate`, `isActive` (from `is_active && !is_deleted`),
+- **Per-field gate on app-edit markers (2026-10-06, replaces the `updatedAt > legacySyncedAt`
+  touch-gate).** `updatedAt` is Prisma `@updatedAt` — every write bumps it (push counters,
+  `lastActiveAt`, `lastTopicDigestAt`, the resync's own tree/kyc writes) — so 64,360/64,366
+  migrated members read as touched and legacy password/profile/reactivation stopped flowing
+  (1,004 members locked out of a legacy-reset password). Now `members.profile_updated_at` /
+  `password_updated_at` are set ONLY by member-initiated app edits (profile update;
+  change-password, forgot-password reset, claim), and `planMemberSync`
+  (`apps/resync-worker/src/syncers/member-rules.ts`) decides per field:
+  - profile (`fullName`/`avatarUrl`/`bio`) → overwritten while `profile_updated_at IS NULL`;
+  - password → overwritten while `password_updated_at IS NULL` (NULL legacy password never
+    clobbers). The lazy md5→bcrypt rehash on login does NOT set the marker (same password);
+  - `isActive` → follows legacy both ways, except no reactivation over an app
+    `scheduledDeletionAt`.
+  `legacySyncedAt` is still stamped (provenance only). Migration
+  `20261006120000_member_app_edit_markers` backfills the markers only for app-active
+  (`last_active_at` not null) legacy members (password: only bcrypt rows) — a member who
+  never opened the app follows legacy.
+- **Legacy-owned fields**: `fullName`, `avatarUrl`,
+  `bio`, `isActive` (from `is_active && !is_deleted`),
   `passwordHash`/`passwordAlgo` (see below).
 - **Never legacy-owned** (app or other syncers own these):
   `email`/`phone`/`*Verified` (identity — touching unique cols on a live account is risky;
   leave to a deliberate later pass), all `kyc*`, all `bank*`, `affiliateCode`/`code`,
   `inviterId`/`affiliateBased` (owned by the **tree** syncer).
 - **Password (2026-08-21):** legacy still accepts registrations + resets during cutover, so
-  `member.password` rides the same touch-gate — a new-app change-password or the lazy
-  md5→bcrypt rehash on login bumps `updatedAt`, marking the row touched, after which legacy
-  never overwrites it again. A NULL/empty legacy password is a no-op (`COALESCE`), never a
+  `member.password` is propagated until `password_updated_at` is set by an app password
+  write (see the per-field gate above). A NULL/empty legacy password is a no-op (`COALESCE`), never a
   clobber of a real hash with the social sentinel. **`passwordAlgo` is DERIVED from the hash
   shape** (`detectPasswordAlgo`, `@bb/common/utils/password-algo.util`), never assumed — see
   §6.1.
@@ -397,6 +404,27 @@ excluded outright so a social-only account can never acquire an algo that authen
   pnpm resync enrollments --dry-run --since=1970-01-01T00:00:00Z   # count first
   pnpm resync enrollments --since=1970-01-01T00:00:00Z
   ```
+- **Re-enrolment, cancel guard, reactivation, scope (fixed 2026-10-05).** Legacy writes a
+  NEW `course_enrollment` row (new legacyId) when a member re-enrols — typically buying
+  after the free trial expired. The pair here was still held by the old legacyId, so the
+  new row was skipped and the later removal of the old row cancelled a paying buyer
+  (measured: 53 paid enrollments / 8 members cancelled 2026-09-29). Rules now in
+  `apps/resync-worker/src/syncers/enrollment-rules.ts` (table-driven spec in
+  `apps/resync-worker/tests/`):
+  - **Re-point:** an active incoming row whose pair is held by a *different* legacyId that
+    is cancelled or past `expired_date` takes over that PG row (`legacyId` = new,
+    un-cancelled, `expiredDate` = new row's, `progress` = max). A live row or a new-system
+    row (`legacyId = null` — app purchase, employee grant) is still skipped.
+  - **Cancel guard:** a `status = 0` row cancels only if it holds the pair AND legacy has no
+    other active (status 1 + access) row for that course on any redirect-linked legacy
+    member id AND the member has no `PAID` `commerce_transactions` order for the course's
+    product.
+  - **Reactivation:** same legacyId back to `status = 1` lifts a `legacy_removed` cancel
+    (never a refund cancel).
+  - **Scope:** `course.client = 'brainboost'` OR a SUCCESS `course_payment` with
+    `client_product = 'brainboost'` (course 6659 has `client` NULL). In-scope courses with
+    no PG `Course` row are logged each run (`in-scope legacy courses with no PG course`).
+  - Heal = the same full pass as below (dry-run first).
 - **`is_canceled` is deliberately NOT mapped.** The legacy column exists but is never
   written: 0 rows carry `is_canceled = 1`. `status` is the real cancel marker.
 - `expired_date` is copied as-is and now *means something* on this side: access gates
@@ -425,8 +453,21 @@ excluded outright so a social-only account can never acquire an algo that authen
   [memberId, programId]`). Re-point through `member_redirect`.
 - `member_product_affiliator.deleted / exit_date / exit_state` rides the `updated`
   watermark → deactivate the join row in the same pass.
-- Only set `inviterId` if currently null OR the member is still legacy-owned (untouched),
-  to avoid fighting any new-app referral.
+- **Inviter ownership = `members.inviter_source`** (migration `20261006130000_member_inviter_source`,
+  2026-10-06): `LEGACY_PARENT` (tree resync) | `LEGACY_CONNECT` (reserved for the
+  `member_network_connect` sync, PRD P0-1) | `APP` (register / pre-reg carry-over / social /
+  `affiliateConnect`) | NULL (no inviter / unknown). The tree pass writes `inviterId` only over
+  NULL or `LEGACY_PARENT` (atomic `updateMany` gate), stamps `LEGACY_PARENT`, and **never writes
+  NULL over a non-null inviter** — a legacy row with no parent leaves the value alone. Before this
+  the pass overwrote app-set inviters unconditionally, including to NULL (audit 07 #5).
+- **Self / cycle guard** (`inviter-rules.ts`, PRD P0-4): a parent that is a dedup-loser alias of
+  the subject resolves to the subject itself (legacy 424829 → itself, real upline 57). The pass
+  climbs past such aliases (≤ 5 hops) to the first ancestor that is someone else; still self →
+  clear a stored self-inviter + `WARN inviter self`. A candidate whose own 4-level `inviter_id`
+  chain reaches the subject is rejected (`WARN inviter cycle … left as is`) — an already stored
+  mutual pair (641626 ↔ 641123) is therefore NOT auto-repaired; decide by hand.
+- `scripts/backfill-affiliate-tree.ts` is disabled (exits 1): it wrote NULL inviters and read the
+  stale redirect JSON. Use `pnpm resync tree`.
 
 ### reviews — incremental
 - `product_review` `WHERE COALESCE(updated,created) > :watermark`, key `legacyId`, upsert.

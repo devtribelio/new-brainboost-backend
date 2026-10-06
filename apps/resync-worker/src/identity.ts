@@ -48,6 +48,17 @@ import { recountCounters } from './recount';
 import { emptyStats, type RunCtx } from './types';
 import { bool, nonEmpty, toDate } from './util';
 import { resyncConfig } from './config';
+import { INVITER_SOURCE } from './syncers/inviter-rules';
+
+/** Downlines whose inviter points at the winner (or nowhere) AND is tree-owned. */
+function treeOwnedDownlineOf(winnerMemberId: string) {
+  return {
+    AND: [
+      { OR: [{ inviterId: winnerMemberId }, { inviterId: null }] },
+      { OR: [{ inviterSource: null }, { inviterSource: INVITER_SOURCE.LEGACY_PARENT }] },
+    ],
+  };
+}
 
 type IdentityField = 'email' | 'phone' | 'googleSub' | 'appleSub';
 const IDENTITY_FIELDS: IdentityField[] = ['email', 'phone', 'googleSub', 'appleSub'];
@@ -358,12 +369,10 @@ async function buildPlan(
       const childLegacy = children.map((r) => Number(r.member_id));
       // `inviterId: null` counts too — the tree syncer used to wipe the chain when the
       // inviter wasn't materialised yet, so a downline of the loser may currently point
-      // at nobody rather than at the winner. Legacy is authoritative for the tree.
+      // at nobody rather than at the winner. Legacy is authoritative for the tree, except
+      // over an inviter it doesn't own (inviter_source APP / LEGACY_CONNECT).
       for (const m of await prisma.member.findMany({
-        where: {
-          legacyId: { in: childLegacy },
-          OR: [{ inviterId: winnerMemberId }, { inviterId: null }],
-        },
+        where: { legacyId: { in: childLegacy }, ...treeOwnedDownlineOf(winnerMemberId) },
         select: { id: true },
       })) {
         move.downlineMemberIds.push(m.id);
@@ -618,6 +627,7 @@ async function executeSplit(prisma: PrismaClient, legacy: any, plan: Plan): Prom
         affiliateCode: plan.tree.affiliateCode,
         affiliateBased: plan.tree.affiliateBased,
         inviterId: plan.tree.inviterMemberId,
+        inviterSource: plan.tree.inviterMemberId ? INVITER_SOURCE.LEGACY_PARENT : null,
         createdAt: L.createdAt,
         legacySyncedAt: now,
         updatedAt: now,
@@ -673,8 +683,8 @@ async function executeSplit(prisma: PrismaClient, legacy: any, plan: Plan): Prom
     }
     for (const ids of chunk(mv.downlineMemberIds)) {
       await tx.member.updateMany({
-        where: { id: { in: ids }, OR: [{ inviterId: plan.winnerMemberId }, { inviterId: null }] },
-        data: { inviterId: created.id },
+        where: { id: { in: ids }, ...treeOwnedDownlineOf(plan.winnerMemberId) },
+        data: { inviterId: created.id, inviterSource: INVITER_SOURCE.LEGACY_PARENT },
       });
     }
     return created.id;

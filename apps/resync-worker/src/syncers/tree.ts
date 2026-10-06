@@ -8,13 +8,26 @@
  * B) program memberships: legacy member_product_affiliator → MemberAffiliator (key legacyId,
  *    unique (memberId, programId)); deleted/exit rides the `updated` watermark → isActive=false.
  *
- * Tree is legacy-authoritative for migrated members (the new app doesn't edit referral
- * structure), so no new-wins gate here. See docs/legacy-resync-plan.md §6.
+ * Inviter writes are gated by members.inviter_source (see ./inviter-rules.ts): the tree
+ * only overwrites an inviter it owns (NULL / LEGACY_PARENT) — the new app writes
+ * inviterId too (register, affiliate connect → 'APP') and that wins. A parent that
+ * resolves to the subject itself (dedup alias) is climbed past; a candidate that would
+ * close a cycle is rejected. See docs/legacy-resync-plan.md §6.
  */
 import type { RowDataPacket } from 'mysql2/promise';
 import { resyncConfig } from '../config';
 import { emptyStats, type RunCtx, type Stats, type Syncer, type SyncerCtx } from '../types';
 import { bool, maxWatermark, nonEmpty, runConcurrent, sinceBound, toDate } from '../util';
+import {
+  CYCLE_CHECK_LEVELS,
+  INVITER_SOURCE,
+  MAX_CLIMB_HOPS,
+  chainHitsSubject,
+  mayOverwriteInviter,
+  pickInviter,
+  planInviterWrite,
+  type InviterPick,
+} from './inviter-rules';
 
 const PAGE = 5000;
 
@@ -33,19 +46,72 @@ function dedupeByKey<T>(rows: T[], keyOf: (r: T) => string | number, stats: Stat
   return out;
 }
 
-/** legacy member_network.member_network_id (node) -> member_id, for the given nodes. */
-async function resolveNodes(ctx: RunCtx, nodeIds: number[]): Promise<Map<number, number>> {
-  const map = new Map<number, number>();
+interface LegacyNode {
+  memberId: number | null;
+  parentId: number | null;
+}
+
+/** legacy member_network.member_network_id (node) -> { member_id, parent_id }, for the given nodes. */
+async function fetchNodes(ctx: RunCtx, nodeIds: number[]): Promise<Map<number, LegacyNode>> {
+  const map = new Map<number, LegacyNode>();
   for (let i = 0; i < nodeIds.length; i += 5000) {
     const chunk = nodeIds.slice(i, i + 5000);
     if (!chunk.length) continue;
     const [rows] = await ctx.legacy.query<RowDataPacket[]>(
-      'SELECT member_network_id, member_id FROM member_network WHERE member_network_id IN (?)',
+      'SELECT member_network_id, member_id, parent_id FROM member_network WHERE member_network_id IN (?)',
       [chunk],
     );
-    for (const r of rows as any[]) if (r.member_id != null) map.set(Number(r.member_network_id), Number(r.member_id));
+    for (const r of rows as any[]) {
+      map.set(Number(r.member_network_id), {
+        memberId: r.member_id != null ? Number(r.member_id) : null,
+        parentId: r.parent_id != null ? Number(r.parent_id) : null,
+      });
+    }
   }
   return map;
+}
+
+/**
+ * Resolve the subject's legacy parent node to an inviter. When the node's member resolves
+ * to the subject itself (a dedup loser of the same person, or another node of the
+ * subject), climb to that node's parent, up to MAX_CLIMB_HOPS. `legacyChain` = legacy
+ * member ids visited, for the log line.
+ */
+async function resolveInviter(
+  ctx: RunCtx,
+  subjectId: string,
+  parentNodeId: number,
+  nodes: Map<number, LegacyNode>,
+): Promise<{ pick: InviterPick; legacyChain: Array<number | null> }> {
+  const ancestors: Array<string | undefined> = [];
+  const legacyChain: Array<number | null> = [];
+  let nodeId: number | null = parentNodeId;
+  for (let hop = 0; hop <= MAX_CLIMB_HOPS && nodeId != null; hop += 1) {
+    // direct parents are prefetched per chunk; climbed nodes are rare → fetched one by one
+    const node: LegacyNode | undefined = nodes.get(nodeId) ?? (await fetchNodes(ctx, [nodeId])).get(nodeId);
+    legacyChain.push(node?.memberId ?? null);
+    const memberId = node?.memberId != null ? ctx.resolveMember(node.memberId) : undefined;
+    ancestors.push(memberId);
+    if (memberId !== subjectId) break;
+    nodeId = node?.parentId ?? null;
+  }
+  return { pick: pickInviter(subjectId, ancestors), legacyChain };
+}
+
+/** True when `candidateId`'s PG inviter chain reaches `subjectId` within CYCLE_CHECK_LEVELS. */
+async function wouldCloseCycle(ctx: RunCtx, subjectId: string, candidateId: string): Promise<boolean> {
+  const rows = await ctx.prisma.$queryRaw<Array<{ inviterId: string | null }>>`
+    WITH RECURSIVE up AS (
+      SELECT inviter_id, 1 AS lvl FROM members WHERE id = ${candidateId}::uuid
+      UNION ALL
+      SELECT m.inviter_id, up.lvl + 1 FROM members m JOIN up ON m.id = up.inviter_id
+       WHERE up.lvl < ${CYCLE_CHECK_LEVELS}
+    )
+    SELECT inviter_id::text AS "inviterId" FROM up ORDER BY lvl`;
+  return chainHitsSubject(
+    subjectId,
+    rows.map((r) => r.inviterId),
+  );
 }
 
 /**
@@ -73,7 +139,7 @@ export async function syncInvitersScoped(
     if ((rows as any[]).length === 0) continue;
 
     const parentIds = [...new Set((rows as any[]).map((r) => (r.parent_id != null ? Number(r.parent_id) : 0)).filter(Boolean))];
-    const nodeToMember = await resolveNodes(ctx, parentIds);
+    const nodes = await fetchNodes(ctx, parentIds);
 
     stats.scanned += (rows as any[]).length;
     for (const r of rows as any[]) watermark = maxWatermark(watermark, toDate(r.wm));
@@ -81,9 +147,21 @@ export async function syncInvitersScoped(
     // member would be last-write-wins by chance; keep only the newest row per member
     const subjects = dedupeByKey(rows as any[], (r: any) => Number(r.member_id), stats);
 
+    const subjectIds = subjects
+      .map((r: any) => ctx.memberByLegacy.get(Number(r.member_id)))
+      .filter((id): id is string => id !== undefined);
+    const current = new Map<string, { inviterId: string | null; inviterSource: string | null }>();
+    for (const m of await ctx.prisma.member.findMany({
+      where: { id: { in: subjectIds } },
+      select: { id: true, inviterId: true, inviterSource: true },
+    })) {
+      current.set(m.id, { inviterId: m.inviterId, inviterSource: m.inviterSource });
+    }
+
     await runConcurrent(subjects, resyncConfig.writeConcurrency, async (r: any) => {
       const subjectId = ctx.memberByLegacy.get(Number(r.member_id)); // migrated only (no create)
-      if (!subjectId) {
+      const cur = subjectId ? current.get(subjectId) : undefined;
+      if (!subjectId || !cur) {
         stats.skipped += 1;
         return;
       }
@@ -92,23 +170,45 @@ export async function syncInvitersScoped(
       // function runs BEFORE syncAffiliatorsScoped (the step that can materialise a
       // member), so an inviter first created later in the same run would wipe every
       // downline's chain — which is exactly how ~4k inviter links were lost on the
-      // 2026-07-09 run. Only a legacy row that genuinely has NO parent clears it.
-      let inviterId: string | undefined;
-      let unresolvedParent = false;
-      if (r.parent_id != null) {
-        const invMember = nodeToMember.get(Number(r.parent_id));
-        inviterId = invMember != null ? ctx.resolveMember(invMember) : undefined;
-        unresolvedParent = inviterId === undefined;
+      // 2026-07-09 run. A legacy row with NO parent leaves it alone too (never NULL over
+      // a non-null inviter); the only NULL ever written clears a self-inviter.
+      let pick: InviterPick | null = null;
+      let legacyChain: Array<number | null> = [];
+      if (r.parent_id != null && mayOverwriteInviter(cur.inviterSource)) {
+        ({ pick, legacyChain } = await resolveInviter(ctx, subjectId, Number(r.parent_id), nodes));
+      }
+      if (pick?.status === 'unresolved') stats.skipped += 1;
+      const createsCycle = pick?.status === 'ok' ? await wouldCloseCycle(ctx, subjectId, pick.inviterId) : false;
+      const plan = planInviterWrite({ subjectId, current: cur, pick, createsCycle });
+      if (plan.reason) {
+        const action = !plan.patch ? 'left as is' : plan.patch.inviterId ? `set ${plan.patch.inviterId}` : 'cleared self-inviter';
+        ctx.log(
+          `${plan.reason === 'climbed' ? 'INFO' : 'WARN'} inviter ${plan.reason}: legacy member=${r.member_id} ` +
+            `parent_node=${r.parent_id} legacy_chain=[${legacyChain.join(',')}] → ${action}`,
+        );
       }
       if (ctx.dryRun) {
         stats.upserted += 1;
         return;
       }
-      const base = {
-        ...(unresolvedParent ? {} : { inviterId: inviterId ?? null }),
-        affiliateBased: nonEmpty(r.affiliate_based) ?? 'PERFORMANCE',
-      };
-      if (unresolvedParent) stats.skipped += 1;
+      if (plan.patch) {
+        try {
+          // atomic ownership gate: an inviter the app set after the read above wins, and a
+          // clear only ever clears the self value it was decided on
+          await ctx.prisma.member.updateMany({
+            where: {
+              id: subjectId,
+              OR: [{ inviterSource: null }, { inviterSource: INVITER_SOURCE.LEGACY_PARENT }],
+              ...(plan.patch.inviterId === null ? { inviterId: subjectId } : {}),
+            },
+            data: plan.patch,
+          });
+        } catch {
+          stats.errors += 1;
+          return;
+        }
+      }
+      const base = { affiliateBased: nonEmpty(r.affiliate_based) ?? 'PERFORMANCE' };
       const code = nonEmpty(r.affiliator_code);
       try {
         await ctx.prisma.member.update({

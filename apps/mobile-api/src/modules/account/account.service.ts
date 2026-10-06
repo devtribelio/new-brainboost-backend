@@ -59,7 +59,7 @@ export class AccountService {
 
     await prisma.member.update({
       where: { id: memberId },
-      data: { inviterId: inviter.id },
+      data: { inviterId: inviter.id, inviterSource: 'APP' },
     });
 
     return {
@@ -195,7 +195,7 @@ export class AccountService {
     const passwordHash = await bcrypt.hash(dto.newPassword, 10);
     const updated = await prisma.member.update({
       where: { id: memberId },
-      data: { passwordHash, passwordAlgo: 'bcrypt' },
+      data: { passwordHash, passwordAlgo: 'bcrypt', passwordUpdatedAt: new Date() },
       select: {
         id: true,
         legacyId: true,
@@ -331,6 +331,7 @@ export class AccountService {
       const md5 = createHash('md5').update(plaintext).digest('hex');
       if (md5 !== member.passwordHash) return false;
       const newHash = await bcrypt.hash(plaintext, 10);
+      // Not passwordUpdatedAt: same password, so a later legacy reset must still flow.
       await prisma.member.update({
         where: { id: member.id },
         data: { passwordHash: newHash, passwordAlgo: 'bcrypt' },

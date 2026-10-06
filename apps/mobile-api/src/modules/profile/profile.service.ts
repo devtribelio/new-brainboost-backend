@@ -114,6 +114,10 @@ export class ProfileService {
         bio: dto.bio,
         avatarUrl: dto.avatarUrl,
         coverUrl: dto.coverUrl,
+        // Member edited a resync-owned field → the legacy resync stops writing the profile.
+        ...(dto.fullName !== undefined || dto.bio !== undefined || dto.avatarUrl !== undefined
+          ? { profileUpdatedAt: new Date() }
+          : {}),
       },
     });
   }

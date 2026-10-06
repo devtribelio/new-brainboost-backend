@@ -285,6 +285,7 @@ export class AuthService {
       gender: dto.gender,
       birthdate: dto.birthdate ? new Date(dto.birthdate) : null,
       inviterId,
+      inviterSource: inviterId ? 'APP' : undefined,
       utmSource: dto.utmSource,
       utmContent: dto.utmContent,
       isActive: false,
@@ -525,7 +526,8 @@ export class AuthService {
 
     if (computed !== null) {
       if (computed.toLowerCase() !== member.passwordHash.toLowerCase()) return false;
-      // Lazy rehash to bcrypt — transparent upgrade on first successful login.
+      // Lazy rehash to bcrypt — transparent upgrade on first successful login. Deliberately
+      // NOT passwordUpdatedAt: same password, so a later legacy reset must still flow.
       const newHash = await bcrypt.hash(plaintext, 10);
       await prisma.member.update({
         where: { id: member.id },
@@ -780,6 +782,7 @@ export class AuthService {
           fullName: name,
           isEmailVerified: true,
           inviterId,
+          inviterSource: inviterId ? 'APP' : undefined,
         },
         usernameSeed: `${provider}${sub}`,
       });
@@ -1040,7 +1043,7 @@ export class AuthService {
     const passwordHash = await bcrypt.hash(dto.newPassword, 10);
     await prisma.member.update({
       where: { id: member.id },
-      data: { passwordHash, passwordAlgo: 'bcrypt' },
+      data: { passwordHash, passwordAlgo: 'bcrypt', passwordUpdatedAt: new Date() },
     });
     await prisma.refreshToken.updateMany({
       where: { memberId: member.id, revokedAt: null },
@@ -1117,7 +1120,7 @@ export class AuthService {
     const passwordHash = await bcrypt.hash(dto.newPassword, 10);
     await prisma.member.update({
       where: { id: member.id },
-      data: { passwordHash, passwordAlgo: 'bcrypt', isEmailVerified: true },
+      data: { passwordHash, passwordAlgo: 'bcrypt', passwordUpdatedAt: new Date(), isEmailVerified: true },
     });
     await prisma.refreshToken.updateMany({
       where: { memberId: member.id, revokedAt: null },
@@ -1196,6 +1199,7 @@ export class AuthService {
           // Prisma skips the column, so an inviter already on the placeholder
           // survives. Mirrors the email register path.
           inviterId,
+          inviterSource: inviterId ? 'APP' : undefined,
         },
         select: { id: true, legacyId: true, phone: true, phoneCode: true },
       });
@@ -1214,6 +1218,7 @@ export class AuthService {
             code: memberCode,
             affiliateCode: memberCode,
             inviterId,
+            inviterSource: inviterId ? 'APP' : undefined,
             isActive: false,
             isEmailVerified: false,
             isPhoneVerified: false,

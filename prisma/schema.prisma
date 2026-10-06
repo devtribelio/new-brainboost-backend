@@ -37,6 +37,10 @@ model Member {
   affiliateCode        String?   @unique @map("affiliate_code")
   affiliateBased       String    @default("PERFORMANCE") @map("affiliate_based") // "PERFORMANCE" | "GROWTH" | "INACTIVE"
   inviterId            String?   @map("inviter_id") @db.Uuid
+  // Who set inviterId: "LEGACY_PARENT" (tree resync, member_network.parent_id) |
+  // "LEGACY_CONNECT" | "APP" (new-app register/connect). NULL = pre-existing/unknown.
+  // The tree resync may only overwrite NULL / LEGACY_PARENT — never APP or LEGACY_CONNECT.
+  inviterSource        String?   @map("inviter_source")
   utmSource            String?   @map("utm_source")
   utmContent           String?   @map("utm_content")
   scheduledDeletionAt  DateTime? @map("scheduled_deletion_at")
@@ -92,11 +96,13 @@ model Member {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  // Legacy resync (new-wins-on-touch): the timestamp the resync last wrote this row.
-  // If updatedAt > legacySyncedAt, the app touched the row since → legacy-owned fields
-  // are NOT overwritten. null = never resynced (treat as legacy-owned). See
-  // docs/legacy-resync-plan.md §6.
+  // Legacy resync: the timestamp the resync last wrote this row (provenance only — the
+  // gate reads the two markers below, never updatedAt). See docs/legacy-resync-plan.md §6.
   legacySyncedAt DateTime? @map("legacy_synced_at")
+  // Set ONLY by member-initiated app edits (profile update / password change, reset,
+  // claim). Non-null = the app owns that field group; the legacy resync stops writing it.
+  profileUpdatedAt  DateTime? @map("profile_updated_at")
+  passwordUpdatedAt DateTime? @map("password_updated_at")
 
   profile                MemberProfile?
   devices                Device[]
