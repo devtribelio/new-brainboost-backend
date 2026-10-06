@@ -661,3 +661,32 @@ Implemented together with the P0 PRD; each has unit tests under `apps/resync-wor
   on a dry run) and is called ONLY for "needs attention" reasons — unresolved parent/member,
   guard-blocked, not-mapped course — never for the bulk out-of-scope traffic. A skipped row still
   advances the watermark, so this table is the only trace it leaves.
+
+### TODO (not implemented): delta commission repair (PRD §8)
+
+`pnpm repair:commission` only selects orders that have **no** commission row at all
+(`NOT EXISTS` in `scanTargets`), then re-runs the engine. Two audit groups are already past
+that filter because they DO have rows: the **7 misrouted** orders (paid to the parent instead
+of the connect affiliator, ≈Rp 250 rb) and the **65 chain-cut** orders (L1 paid, upper levels
+missing, ≈Rp 1,61 jt). The 248 "LOST" orders need no delta — once P0-1 gives them an
+`inviter_id` they are picked up by the existing path.
+
+Planned: a `--delta` mode that selects orders with `EXISTS`, recomputes the chain/rates with
+the same helpers (`walkInviterChain` / `getPerformanceTier` / `computeAmount`), and reconciles
+per `(recipientId, level)` — INSERT when the level is missing, UPDATE the existing row when it
+is underpaid (the engine cannot: its `create` hits the `uniq_payment_recipient_level` unique and
+the P2002 is swallowed), never claw back an overpayment (§1.2 — report only), `--backdate` for
+the PENDING→BALANCE hold window. Must run **after** P0-1 + P0-4 are deployed and the tree has
+been rescanned, or the delta is computed from the old (wrong) seed.
+
+Open decisions before coding:
+1. delta marker — `channel='adjustment'` (overloads `channel`, which means payment channel today,
+   and there is a `[status, channel]` index used for finance reporting) **or** a dedicated column
+   + migration?
+2. an underpaid row already `BALANCE`/withdrawn — auto-update (double-pay risk) **or** insert the
+   missing levels only and flag the row for manual review?
+3. keep web/Xendit only (`provider IS NULL`), or also ingested orders (RevenueCat/Scalev/Lynk.id)
+   that are gated by `affiliate_attribution_claims`?
+
+Proposed default (pending confirmation): `channel='adjustment'`; insert-only plus auto-update for
+`PENDING` rows; web/Xendit only.
