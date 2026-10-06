@@ -1,6 +1,7 @@
 import bcrypt from 'bcryptjs';
 import { createHash } from 'node:crypto';
 import { prisma } from '@bb/db';
+import { resolveAffiliateCode } from '@bb/domain/affiliate/resolve-affiliate-code';
 import { badRequest, unauthorized, notFound, ERROR_CODES } from '@bb/common/exceptions';
 import { otpService } from '@bb/common/services/otp.service';
 import { isReusableUnverifiedMember } from '@bb/common/utils/member-state.util';
@@ -28,18 +29,18 @@ export class AccountService {
 
     const me = await prisma.member.findUnique({
       where: { id: memberId },
-      select: { id: true, affiliateCode: true, inviterId: true },
+      select: { id: true, inviterId: true },
     });
     if (!me) throw notFound(ERROR_CODES.MEMBER_NOT_FOUND);
 
-    if (me.affiliateCode && me.affiliateCode === affiliatorCode) {
-      throw badRequest(ERROR_CODES.AFFILIATE_SELF_CONNECT);
-    }
-
-    const inviter = await prisma.member.findUnique({
-      where: { affiliateCode: affiliatorCode },
-      select: { id: true, affiliateCode: true, legacyId: true },
+    // Self-check on the RESOLVED owner, not the string: an alias code (a merged
+    // legacy account's code) belongs to the same member as their own code.
+    const inviter = await resolveAffiliateCode(affiliatorCode, {
+      id: true,
+      affiliateCode: true,
+      legacyId: true,
     });
+    if (inviter?.id === me.id) throw badRequest(ERROR_CODES.AFFILIATE_SELF_CONNECT);
     if (!inviter) throw notFound(ERROR_CODES.AFFILIATOR_CODE_NOT_FOUND, { affiliatorCode });
 
     // Already connected — return existing without overwriting
@@ -101,9 +102,7 @@ export class AccountService {
 
     let affiliateMemberId: string | undefined;
     if (dto.affiliateCode) {
-      const inviter = await prisma.member.findUnique({
-        where: { affiliateCode: dto.affiliateCode },
-      });
+      const inviter = await resolveAffiliateCode(dto.affiliateCode, { id: true });
       if (inviter) affiliateMemberId = inviter.id;
     }
 

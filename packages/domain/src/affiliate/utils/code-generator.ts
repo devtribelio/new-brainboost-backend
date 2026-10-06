@@ -1,6 +1,7 @@
 import { customAlphabet } from 'nanoid';
 import { prisma } from '@bb/db';
 import { AFFILIATE_CODE_LENGTH, PROGRAM_CODE_LENGTH, CODE_ALPHABET } from '../constants';
+import { isAffiliateCodeFree } from '../resolve-affiliate-code';
 
 const generateAffiliateCodeRaw = customAlphabet(CODE_ALPHABET, AFFILIATE_CODE_LENGTH);
 const generateProgramCodeRaw = customAlphabet(CODE_ALPHABET, PROGRAM_CODE_LENGTH);
@@ -13,6 +14,8 @@ const MAX_RETRIES = 5;
 export async function assignMemberAffiliateCode(memberId: string): Promise<string> {
   for (let i = 0; i < MAX_RETRIES; i++) {
     const code = generateAffiliateCodeRaw();
+    // members.affiliate_code is guarded by its unique index; an alias code is not.
+    if (!(await isAffiliateCodeFree(code))) continue;
     try {
       await prisma.member.update({ where: { id: memberId }, data: { affiliateCode: code } });
       return code;

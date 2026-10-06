@@ -3,8 +3,12 @@
  * Members syncer — incremental, NEW-WINS-ON-TOUCH (docs/legacy-resync-plan.md §6).
  *
  * Only migrated winners (Member.legacyId set) are touched. Identity (email/phone/verified),
- * kyc*, bank*, affiliate* are NOT owned here — only profile fields + deactivation + password:
- *   fullName, avatarUrl, bio, isActive(=is_active && !is_deleted), passwordHash/passwordAlgo.
+ * kyc*, bank*, affiliateBased are NOT owned here — only profile fields + deactivation +
+ * password + affiliate code:
+ *   fullName, avatarUrl, bio, isActive(=is_active && !is_deleted), passwordHash/passwordAlgo,
+ *   affiliateCode (set only when the member has none; a differing legacy code becomes an
+ *   alias — see affiliate-code-sync.ts; the tree syncer shares it but watches
+ *   member_network.updated, not member.updated).
  *
  * Password: legacy still accepts registrations + resets during cutover, so the hash is
  * propagated. The algo is DERIVED from the hash shape (detectPasswordAlgo), never assumed:
@@ -32,6 +36,7 @@
 import type { RowDataPacket } from 'mysql2/promise';
 import { resyncConfig } from '../config';
 import { planMemberSync, type MemberSyncCurrent } from './member-rules';
+import { syncLegacyAffiliateCode } from '../affiliate-code-sync';
 import { emptyStats, type Stats, type Syncer, type SyncerCtx } from '../types';
 import { bool, errCode, nonEmpty, runConcurrent, sinceBound, toDate, WatermarkTracker } from '../util';
 
@@ -58,7 +63,7 @@ export const membersSyncer: Syncer = {
       const idChunk = legacyIds.slice(i, i + CHUNK);
       const [rows] = await ctx.legacy.query<RowDataPacket[]>(
         `SELECT member_id, name, first_name, last_name, image_url, biography,
-                password, is_active, is_deleted, COALESCE(\`updated\`, \`created\`) AS wm
+                password, is_active, is_deleted, affiliator_code, COALESCE(\`updated\`, \`created\`) AS wm
            FROM member
           WHERE member_id IN (?) AND COALESCE(\`updated\`, \`created\`) > ?`,
         [idChunk, since],
@@ -67,10 +72,16 @@ export const membersSyncer: Syncer = {
 
       // current Postgres state for the per-field gate
       const ids = (rows as any[]).map((r) => ctx.memberByLegacy.get(Number(r.member_id))!);
-      const current = new Map<string, MemberSyncCurrent>();
+      const current = new Map<string, MemberSyncCurrent & { affiliateCode: string | null }>();
       for (const m of await ctx.prisma.member.findMany({
         where: { id: { in: ids } },
-        select: { id: true, profileUpdatedAt: true, passwordUpdatedAt: true, scheduledDeletionAt: true },
+        select: {
+          id: true,
+          profileUpdatedAt: true,
+          passwordUpdatedAt: true,
+          scheduledDeletionAt: true,
+          affiliateCode: true,
+        },
       })) {
         current.set(m.id, m);
       }
@@ -128,6 +139,20 @@ export const membersSyncer: Syncer = {
           stats.errors += 1;
           wm.failed(toDate(r.wm));
           ctx.log(`ERROR write member_id=${r.member_id}: ${errCode(err)}`);
+          return;
+        }
+
+        // separate write: a code problem must not fail the profile sync. Never replaces a code
+        // already on the member — a differing legacy code becomes an alias (affiliate-code-sync).
+        try {
+          const action = await syncLegacyAffiliateCode(ctx.prisma, id, nonEmpty(r.affiliator_code));
+          if (action === 'collision') {
+            ctx.log(`WARN affiliateCode collision: legacy member=${r.member_id} → code left as is`);
+          }
+        } catch (err: any) {
+          stats.errors += 1;
+          wm.failed(toDate(r.wm));
+          ctx.log(`ERROR write affiliateCode member_id=${r.member_id}: ${errCode(err)}`);
         }
       });
     }

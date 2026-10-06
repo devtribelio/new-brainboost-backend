@@ -40,6 +40,7 @@ import type { RequestVerificationEmailDto } from './dto/request-verification-ema
 import type { ValidateOtpEmailDto } from './dto/validate-otp-email.dto';
 import { logger } from '@bb/common/config/logger';
 import { VisitService } from '@bb/domain/affiliate/visit.service';
+import { resolveAffiliateCode } from '@bb/domain/affiliate/resolve-affiliate-code';
 import { memberProvisioningService } from '@bb/domain/member/provisioning.service';
 
 interface TokenBundle {
@@ -408,10 +409,7 @@ export class AuthService {
   }> {
     if (!affiliateCode) return {};
 
-    const inviter = await prisma.member.findUnique({
-      where: { affiliateCode: affiliateCode.slice(0, 8) },
-      select: { id: true },
-    });
+    const inviter = await resolveAffiliateCode(affiliateCode.slice(0, 8), { id: true });
 
     let inviterNetworkId: string | undefined;
     const networkLegacyPart = affiliateCode.slice(8);
@@ -762,10 +760,7 @@ export class AuthService {
     // is ignored (never aborts signup). Network suffix is not applied here.
     let inviterId: string | undefined;
     if (opts.affiliateCode) {
-      const inviter = await prisma.member.findUnique({
-        where: { affiliateCode: opts.affiliateCode.slice(0, 8) },
-        select: { id: true },
-      });
+      const inviter = await resolveAffiliateCode(opts.affiliateCode.slice(0, 8), { id: true });
       if (inviter) inviterId = inviter.id;
     }
 

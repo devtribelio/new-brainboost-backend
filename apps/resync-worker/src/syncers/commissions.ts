@@ -7,11 +7,14 @@
  *        → VOIDED (excluded from lifetime). Both ride the `updated` watermark.
  * GUARD  upsert keyed legacyId — new Xendit commissions have legacyId=null, so this never
  *        touches PENDING/BALANCE/VOIDED rows owned by the new flow.
+ * BUYER  from the payment row (payment_model → table.member_id), not member_downline_id —
+ *        see ./commission-rules.ts. The update branch refreshes buyer + product.
  * See docs/legacy-resync-plan.md §6.
  */
 import type { RowDataPacket } from 'mysql2/promise';
 import { resyncConfig } from '../config';
 import { emptyStats, type RunCtx, type Stats, type Syncer, type SyncerCtx } from '../types';
+import { buyerLegacyIdSql, planCommissionUpdate } from './commission-rules';
 import { errCode, runConcurrent, sinceBound, toDate, WatermarkTracker } from '../util';
 
 const BASED = new Set(['PERFORMANCE', 'GROWTH', 'INACTIVE']);
@@ -71,10 +74,15 @@ export async function applyCommissionRow(ctx: RunCtx, r: any, maps: CommissionMa
   const programId = maps.programByNapa.get(Number(r.network_account_product_affiliator_id)) ?? null;
   const based = BASED.has(String(r.affiliate_based)) ? String(r.affiliate_based) : 'PERFORMANCE';
   const status = Number(r.is_expired) === 1 ? 'VOIDED' : 'MIGRATED';
+  // buyer = payment row's member (see ./commission-rules.ts), NOT member_downline_id.
+  // A BB-course buyer is in scope by definition (same rule as the recipient above).
+  const buyerLegacyId = r.buyer_member_id != null ? Number(r.buyer_member_id) : null;
+  const buyerMemberId =
+    (productId !== null ? await ctx.ensureMember(buyerLegacyId) : ctx.resolveMember(buyerLegacyId)) ?? null;
 
   const fields = {
     recipientId,
-    buyerMemberId: ctx.resolveMember(Number(r.member_downline_id)) ?? null,
+    buyerMemberId,
     programId,
     productId,
     paymentId: null,
@@ -92,8 +100,9 @@ export async function applyCommissionRow(ctx: RunCtx, r: any, maps: CommissionMa
     await ctx.prisma.affiliateCommission.upsert({
       where: { legacyId: Number(r.affiliator_commision_id) },
       create: { legacyId: Number(r.affiliator_commision_id), ...fields },
-      // only the legacy-owned fields; never demote a non-legacy row (no collision anyway)
-      update: { status: fields.status, amount: fields.amount, commissionRate: fields.commissionRate },
+      // only the legacy-owned fields (+ buyer/product so a forced re-scan heals old rows);
+      // never demote a non-legacy row (no collision anyway)
+      update: planCommissionUpdate(fields),
     });
     stats.upserted += 1;
     if (status === 'VOIDED') stats.voided = (stats.voided ?? 0) + 1;
@@ -112,7 +121,7 @@ export async function applyCommissionRow(ctx: RunCtx, r: any, maps: CommissionMa
 export const COMMISSION_COLS = `affiliator_commision_id, member_recipient_id, member_downline_id, level,
                 payment_id, product_model, product_id, network_account_product_affiliator_id,
                 product_price, commision_amount, price_recipient, affiliate_based,
-                is_expired, created, COALESCE(\`updated\`, \`created\`) AS wm`;
+                is_expired, created, ${buyerLegacyIdSql()}, COALESCE(\`updated\`, \`created\`) AS wm`;
 
 export const commissionsSyncer: Syncer = {
   name: 'commissions',

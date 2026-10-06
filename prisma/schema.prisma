@@ -124,6 +124,7 @@ model Member {
   commercePayments       CommercePayment[]
   notificationMutes      NotificationMute[]
   kycEvents              KycEvent[]
+  affiliateCodeAliases   MemberAffiliateCodeAlias[]
   eventTicketsBought     EventTicket[]           @relation("EventTicketBuyer")
   eventTicketsClaimed    EventTicket[]           @relation("EventTicketAttendee")
 
@@ -1618,6 +1619,23 @@ model SyncState {
 // Durable dedup map (loser legacy member id -> winner legacy member id). Replaces
 // the gitignored scripts/member-redirect.json so resync re-points dangling legacy
 // member refs consistently across runs. Append-only.
+/// Extra affiliate code that resolves to a member: a legacy dedup loser's
+/// `member.affiliator_code`, re-pointed at the winner the loser was merged into, so
+/// links shared under the loser's code keep attributing. Read ONLY through
+/// `resolveAffiliateCode` (members.affiliate_code first, then this table). A code here
+/// must never equal any `members.affiliate_code` — the allocators check both. Deleted
+/// when the merge is split (`resync:identity split`): the code goes back to its own member.
+model MemberAffiliateCodeAlias {
+  code      String   @id
+  memberId  String   @map("member_id") @db.Uuid
+  member    Member   @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  source    String // LEGACY_DEDUP = loser code from member_redirect
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([memberId])
+  @@map("member_affiliate_code_aliases")
+}
+
 model MemberRedirect {
   loserLegacyId  Int      @id @map("loser_legacy_id")
   winnerLegacyId Int      @map("winner_legacy_id")

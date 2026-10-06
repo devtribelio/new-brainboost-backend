@@ -21,6 +21,7 @@ import { resyncConfig } from '../config';
 import { emptyStats, type RunCtx, type Stats, type Syncer, type SyncerCtx } from '../types';
 import { errCode, nonEmpty, runConcurrent, sinceBound, toDate, WatermarkTracker } from '../util';
 import { decideAffiliatorWrite, isLegacyAffiliatorActive, prefersAffiliatorRow } from './affiliator-rules';
+import { syncLegacyAffiliateCode } from '../affiliate-code-sync';
 import {
   CYCLE_CHECK_LEVELS,
   INVITER_SOURCE,
@@ -217,29 +218,18 @@ export async function syncInvitersScoped(
         }
       }
       const base = { affiliateBased: nonEmpty(r.affiliate_based) ?? 'PERFORMANCE' };
-      const code = nonEmpty(r.affiliator_code);
       try {
-        await ctx.prisma.member.update({
-          where: { id: subjectId },
-          data: code ? { ...base, affiliateCode: code } : base,
-        });
-        stats.upserted += 1;
-      } catch (err: any) {
-        if (err?.code === 'P2002' && code) {
-          // affiliateCode collision — keep tree fields, drop the code
-          try {
-            await ctx.prisma.member.update({ where: { id: subjectId }, data: base });
-            stats.upserted += 1;
-          } catch (err2) {
-            stats.errors += 1;
-            wm.failed(toDate(r.wm));
-            ctx.log(`ERROR write tree member_network_id=${r.member_network_id}: ${errCode(err2)}`);
-          }
-        } else {
-          stats.errors += 1;
-          wm.failed(toDate(r.wm));
-          ctx.log(`ERROR write tree member_network_id=${r.member_network_id}: ${errCode(err)}`);
+        await ctx.prisma.member.update({ where: { id: subjectId }, data: base });
+        // never replaces a code already on the member — a differing one becomes an alias
+        const action = await syncLegacyAffiliateCode(ctx.prisma, subjectId, nonEmpty(r.affiliator_code));
+        if (action === 'collision') {
+          ctx.log(`WARN affiliateCode collision: legacy member=${r.member_id} → code left as is`);
         }
+        stats.upserted += 1;
+      } catch (err) {
+        stats.errors += 1;
+        wm.failed(toDate(r.wm));
+        ctx.log(`ERROR write tree member_network_id=${r.member_network_id}: ${errCode(err)}`);
       }
     });
   }

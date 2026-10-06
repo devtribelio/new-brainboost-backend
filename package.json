@@ -21,6 +21,7 @@
     "resync": "tsx --conditions=development apps/resync-worker/src/run.ts",
     "resync:worker": "tsx --conditions=development apps/resync-worker/src/worker.ts",
     "resync:seed-redirect": "tsx --conditions=development apps/resync-worker/src/seed-redirect.ts",
+    "resync:code-aliases": "tsx --conditions=development apps/resync-worker/src/code-aliases-cli.ts",
     "resync:unlock": "tsx --conditions=development apps/resync-worker/src/unlock.ts",
     "resync:identity": "tsx --conditions=development apps/resync-worker/src/identity.ts",
     "resync:recount": "tsx --conditions=development apps/resync-worker/src/recount.ts",

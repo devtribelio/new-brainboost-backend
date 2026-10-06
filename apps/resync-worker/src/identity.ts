@@ -49,6 +49,7 @@ import { emptyStats, type RunCtx } from './types';
 import { bool, nonEmpty, toDate } from './util';
 import { resyncConfig } from './config';
 import { INVITER_SOURCE } from './syncers/inviter-rules';
+import { PAYMENT_TABLE_BY_MODEL } from './syncers/commission-rules';
 
 /** Downlines whose inviter points at the winner (or nowhere) AND is tree-owned. */
 function treeOwnedDownlineOf(winnerMemberId: string) {
@@ -300,12 +301,18 @@ async function buildPlan(
       move.commissionLegacyIds.push(Number(r.id));
       move.commissionTotal += Number(r.amt ?? 0);
     }
-    // commissions where the loser was the recorded downline
-    for (const r of await q(
-      legacy,
-      `SELECT affiliator_commision_id id FROM affiliator_commision WHERE member_downline_id = ?`,
-      [loser],
-    )) {
+    // commissions where the loser was the BUYER — the payment row's member, never
+    // member_downline_id (that is the recipient's tree node; see commission-rules.ts)
+    const buyerSql = Object.entries(PAYMENT_TABLE_BY_MODEL)
+      .map(
+        ([model, table]) =>
+          `SELECT ac.affiliator_commision_id id FROM affiliator_commision ac
+             JOIN ${table} p ON p.${table}_id = ac.payment_id
+            WHERE ac.payment_model = '${model}' AND p.member_id = ?`,
+      )
+      .join(' UNION ALL ');
+    const buyerArgs = Object.keys(PAYMENT_TABLE_BY_MODEL).map(() => loser);
+    for (const r of await q(legacy, buyerSql, buyerArgs)) {
       move.buyerCommissionLegacyIds.push(Number(r.id));
     }
     // enrollments
@@ -599,6 +606,11 @@ async function executeSplit(prisma: PrismaClient, legacy: any, plan: Plan): Prom
         if (f === 'email') clear.isEmailVerified = false;
       }
       await tx.member.update({ where: { id: plan.winnerMemberId }, data: clear });
+    }
+
+    // the loser's code was aliased to the winner while merged — it goes back to its own member
+    if (plan.tree.affiliateCode) {
+      await tx.memberAffiliateCodeAlias.deleteMany({ where: { code: plan.tree.affiliateCode } });
     }
 
     // 2. create the loser as its own member

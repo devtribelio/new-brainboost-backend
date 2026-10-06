@@ -42,6 +42,23 @@ async function buildMap(model: { findMany: (a: any) => Promise<any[]> }): Promis
   return new Map(rows.map((r) => [r.legacyId as number, r.id as string]));
 }
 
+/**
+ * UPDATE branch: everything except the moderation state. isDeleted / publishStatus are set
+ * on create only — the app's delete / REJECTED (post moderation) must survive a legacy bump
+ * of the row. A legacy-side delete falls out of the status filter instead (known gap, §3).
+ */
+export function postUpdate<T extends { isDeleted: boolean; publishStatus: string }>(
+  fields: T,
+): Omit<T, 'isDeleted' | 'publishStatus'> {
+  const { isDeleted: _d, publishStatus: _p, ...rest } = fields;
+  return rest;
+}
+
+export function commentUpdate<T extends { isDeleted: boolean }>(fields: T): Omit<T, 'isDeleted'> {
+  const { isDeleted: _d, ...rest } = fields;
+  return rest;
+}
+
 export const postsSyncer: Syncer = {
   name: 'posts',
   async run(ctx: SyncerCtx): Promise<Stats> {
@@ -128,7 +145,7 @@ export const postsSyncer: Syncer = {
         await ctx.prisma.post.upsert({
           where: { legacyId: Number(r.post_id) },
           create: { legacyId: Number(r.post_id), ...fields },
-          update: fields,
+          update: postUpdate(fields),
         });
         stats.upserted += 1;
       } catch (err) {
@@ -172,7 +189,7 @@ export const postsSyncer: Syncer = {
         await ctx.prisma.comment.upsert({
           where: { legacyId: Number(r.comment_id) },
           create: { legacyId: Number(r.comment_id), ...fields },
-          update: fields,
+          update: commentUpdate(fields),
         });
         stats.upserted += 1;
       } catch (err) {

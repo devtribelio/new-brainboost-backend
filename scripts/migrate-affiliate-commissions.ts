@@ -74,7 +74,7 @@ async function main() {
 
   // brainboost course product: legacyId(course_id) -> Product.id (for productId link)
   const products = await prisma.product.findMany({
-    where: { type: 'course', legacyId: { not: null } },
+    where: { type: { in: ['course', 'mini_course'] }, legacyId: { not: null } },
     select: { id: true, legacyId: true },
   });
   const productByCourse = new Map<number, string>();

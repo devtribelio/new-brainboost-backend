@@ -484,6 +484,31 @@ excluded outright so a social-only account can never acquire an algo that authen
 - `scripts/backfill-affiliate-tree.ts` is disabled (exits 1): it wrote NULL inviters and read the
   stale redirect JSON. Use `pnpm resync tree`.
 
+### programs — incremental (PRD P1 #11)
+- `network_account_product_affiliator` (`productable LIKE '%Course%'`, in-scope BB courses) →
+  `AffiliateProgram` keyed `legacyId`, same shape as `migrate-from-legacy.ts::migrateAffiliatePrograms`
+  + `backfill-affiliate-program-product.ts` (`PROG-<id>`, napa name, product via
+  `Course.legacyCourseId`, `isActive=true`). Creates missing programs and links an unlinked one;
+  never re-activates/renames/re-points a linked program. No product → logged, never created.
+- Runs **before tree** (tree only syncs joins of linked programs). Joins of a newly linked
+  program predate the tree watermark → after a run that logs `program(s) newly linked`, force
+  `pnpm resync tree --since=1970-01-01T00:00:00Z` once (dry-run first).
+
+### connect — incremental (PRD P0-1, option C decided 2026-10-06)
+- `member_network_connect` → `inviter_id` with source `LEGACY_CONNECT` (`syncers/connect.ts`,
+  rules in `connect-rules.ts`; `CONNECT_VARIANT = 'C'`), runs after `treeSyncer`. Option C:
+  a member whose connect differs from its legacy parent AND has downlines keeps the parent
+  (WARN `downlines`, review list) so L2–L4 of its downlines match legacy; never flipped back
+  once applied. Tree never overwrites `LEGACY_CONNECT`; connect never overwrites `APP`.
+- Removal (status=0) reverts a `LEGACY_CONNECT` inviter to the resolved legacy parent
+  (`LEGACY_PARENT`); no usable parent → cleared only if it still equals the removed connect.
+
+### pra-members — NOT synced (decided 2026-10-06)
+- Legacy `pra_member` is dead: `MemberPraRegister` is `@deprecated 2.5`, the table holds
+  1 267 rows and the newest was created 2020-06-19. A carry-over window of any sane length
+  (30 days) would never match a row, so no syncer and no `PraMember.legacy_id` column were
+  added (audit P2 "pra_member.ref_id tidak di-sync" closed as not needed).
+
 ### reviews — incremental
 - `product_review` `WHERE COALESCE(updated,created) > :watermark`, key `legacyId`, upsert.
   Needs product + member to exist (skip otherwise).
@@ -518,7 +543,9 @@ excluded outright so a social-only account can never acquire an algo that authen
 ```
 members → enrollments
         → kyc
+        → programs (affiliate programs of new BB courses)
         → tree (inviter + member-affiliators)
+        → connect (P0-1 option C; after tree)
         → commissions   (needs recipient member + program)
         → reviews       (needs member)
         → posts→comments→replies→likes   (needs member; posts before comments before likes)
