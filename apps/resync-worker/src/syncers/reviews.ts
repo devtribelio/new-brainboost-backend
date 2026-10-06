@@ -14,7 +14,7 @@
 import type { RowDataPacket } from 'mysql2/promise';
 import { resyncConfig } from '../config';
 import { emptyStats, type Stats, type Syncer, type SyncerCtx } from '../types';
-import { errCode, nonEmpty, runConcurrent, sinceBound, toDate, WatermarkTracker } from '../util';
+import { errCode, markReason, markSkip, nonEmpty, runConcurrent, sinceBound, toDate, WatermarkTracker } from '../util';
 
 export const reviewsSyncer: Syncer = {
   name: 'reviews',
@@ -53,19 +53,20 @@ export const reviewsSyncer: Syncer = {
       wm.seen(toDate(r.wm));
       byPair.set(`${r.productable_id}|${ctx.redirect.get(Number(r.member_id)) ?? Number(r.member_id)}`, r);
     }
-    stats.skipped += (rows as any[]).length - byPair.size; // superseded in-batch duplicates
+    markReason(stats, 'superseded_row', null, (rows as any[]).length - byPair.size); // in-batch duplicates
 
     await runConcurrent([...byPair.values()], resyncConfig.writeConcurrency, async (r: any) => {
       const productId = productByLegacy.get(Number(r.productable_id));
       const memberId = await ctx.ensureMember(Number(r.member_id));
       if (!productId || !memberId) {
-        stats.skipped += 1;
+        markSkip(stats, 'product_or_member_missing', r.product_review_id);
+        void ctx.recordIssue('product_or_member_missing', r.product_review_id, `productable_id=${r.productable_id}`);
         return;
       }
       let stars = Number(r.rating);
       if (stars === 0) stars = 1;
       if (stars < 1 || stars > 5) {
-        stats.skipped += 1;
+        markSkip(stats, 'rating_out_of_range', r.product_review_id);
         return;
       }
       if (ctx.dryRun) {

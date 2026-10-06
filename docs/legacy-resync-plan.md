@@ -632,3 +632,32 @@ Implemented together with the P0 PRD; each has unit tests under `apps/resync-wor
   now split on the number's own dial code. **Existing 1 428 corrupted rows need a one-off repair**
   (audit `02-member-identity/telepon-luar-negeri-salah-normalisasi.csv`); the `+27 8xx` ones are
   flagged "mungkin nomor Indonesia" — decide by hand, do not guess.
+
+---
+
+## 11. Inviter correction + skip observability (2026-10-06)
+
+- **Inviter correction tool (`pnpm repair:inviter`).** One-off, whitelisted repair of the
+  redirect-collapse rows (`apps/resync-worker/src/repair-inviter.ts`, rules in
+  `inviter-correction-rules.ts`): 424829 → 57, 409824 → NULL, 641123 → NULL (half of the mutual
+  cycle 641626 ↔ 641123 — the tree guard refuses cycles, so it can never fix it), 390754 → 57
+  (`--allowAppOwned` override — its inviter was set by the app to the "Juna (DEV)" test account).
+  Dry-run by default (`--apply` to write); each row prints its legacy `member_network` parent
+  chain, the current/proposed inviter, and runs the same 4-level cycle check; the write is gated
+  on the values it read (optimistic `updateMany`, no-op if the row moved). After `--apply`, run a
+  forced tree rescan so the corrected uplines propagate:
+  `pnpm resync tree --dry-run --since=1970-01-01T00:00:00Z` then without `--dry-run`.
+- **Skip observability (`stats.skipReasons` / `skipSamples`).** `Stats` gains a reason breakdown
+  so the single `skipped` bucket (audit 07 #13: "mixes out-of-scope with data likely lost") is no
+  longer opaque. `markSkip(stats, reason, pk?, count?)` counts a dropped row; `markReason(...)`
+  counts a partial skip WITHOUT incrementing `skipped` — used where a row is still written
+  (e.g. the tree upserts `affiliateBased`/code but cannot resolve the inviter parent, which the
+  audit flagged as counted *both* skipped and upserted). Up to 5 example PKs are kept per reason,
+  and `core.ts` logs `skip[reason=count …]` on the per-syncer line. Wired across members, tree,
+  connect, enrollments, commissions, kyc, programs, reviews, posts and the new-member backfill.
+- **`sync_issue` table + `ctx.recordIssue`.** Migration `20261008130000_sync_issue` adds the
+  reconciliation list keyed `(syncer, legacy_pk, reason)` with `occurrences`/`first_seen_at`/
+  `last_seen_at`/`resolved_at`. `ctx.recordIssue(reason, pk, detail)` upserts (never throws, no-op
+  on a dry run) and is called ONLY for "needs attention" reasons — unresolved parent/member,
+  guard-blocked, not-mapped course — never for the bulk out-of-scope traffic. A skipped row still
+  advances the watermark, so this table is the only trace it leaves.

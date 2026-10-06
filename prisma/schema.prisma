@@ -1620,6 +1620,26 @@ model SyncState {
   @@map("sync_state")
 }
 
+/// Reconciliation list: a legacy row the resync could not process (unresolved parent/member,
+/// guard-blocked, missing master data). Only "needs attention" reasons are recorded —
+/// out-of-scope skips are normal traffic and are counted in sync_state.lastStats.skipReasons.
+/// A SKIPPED row still advances the watermark (by design), so without this table it is gone.
+model SyncIssue {
+  id          String    @id @default(uuid(7)) @db.Uuid
+  syncer      String // syncer name
+  legacyPk    String    @map("legacy_pk") // legacy PK, stringified (course_enrollment_id, member_id, …)
+  reason      String // e.g. unresolved_parent, recipient_unresolved, course_not_mapped
+  detail      String?
+  occurrences Int       @default(1)
+  firstSeenAt DateTime  @default(now()) @map("first_seen_at")
+  lastSeenAt  DateTime  @updatedAt @map("last_seen_at")
+  resolvedAt  DateTime? @map("resolved_at")
+
+  @@unique([syncer, legacyPk, reason])
+  @@index([syncer, reason])
+  @@map("sync_issue")
+}
+
 // Durable dedup map (loser legacy member id -> winner legacy member id). Replaces
 // the gitignored scripts/member-redirect.json so resync re-points dangling legacy
 // member refs consistently across runs. Append-only.

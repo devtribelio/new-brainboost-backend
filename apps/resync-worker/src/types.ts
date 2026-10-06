@@ -11,6 +11,10 @@ export interface Stats {
   skipped: number; // out of scope / unresolved / guard-blocked
   voided?: number; // commissions/affiliators deactivated
   errors: number; // per-row failures (run continues)
+  /** Why rows were skipped (reason → count). Persisted in sync_state.lastStats. */
+  skipReasons?: Record<string, number>;
+  /** Up to a handful of example legacy PKs per reason, so a skip is actionable. */
+  skipSamples?: Record<string, Array<number | string>>;
 }
 
 export function emptyStats(): Stats {
@@ -38,6 +42,12 @@ export interface RunCtx {
   batchSize: number;
   dryRun: boolean;
   log: (msg: string) => void;
+  /**
+   * Persist a row that could not be processed (table `sync_issue`). Optional here because
+   * hand-built contexts (identity.ts, one-off scripts) don't provide it; SyncerCtx makes it
+   * required. Call it as `void ctx.recordIssue?.(...)` from helpers typed RunCtx.
+   */
+  recordIssue?(reason: string, legacyPk: number | string | null, detail?: string): Promise<void>;
 }
 
 /** Context for a single syncer: shared ctx + its watermark + checkpoint hook. */
@@ -51,6 +61,14 @@ export interface SyncerCtx extends RunCtx {
    * Also a no-op in dry runs, and never moves forward across an unscanned `--since` gap.
    */
   checkpoint(watermark: string | null): Promise<void>;
+  /**
+   * Persist a row that could not be processed so it can be reconciled later (table
+   * `sync_issue`, keyed `(syncer, legacyPk, reason)`, counts occurrences). Call this ONLY for
+   * "needs attention" reasons — a row dropped for being out of scope is normal traffic and
+   * would flood the table. No-op in dry runs; never throws (issue logging must not fail a
+   * syncer).
+   */
+  recordIssue(reason: string, legacyPk: number | string | null, detail?: string): Promise<void>;
 }
 
 export interface Syncer {

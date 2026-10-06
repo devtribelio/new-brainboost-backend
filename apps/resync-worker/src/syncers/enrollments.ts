@@ -14,7 +14,7 @@
 import type { RowDataPacket } from 'mysql2/promise';
 import { resyncConfig } from '../config';
 import { emptyStats, type Stats, type Syncer, type SyncerCtx } from '../types';
-import { errCode, nonEmpty, runConcurrent, sinceBound, toDate, WatermarkTracker } from '../util';
+import { errCode, markReason, markSkip, nonEmpty, runConcurrent, sinceBound, toDate, WatermarkTracker } from '../util';
 import {
   decideEnrollmentWrite,
   LEGACY_CANCEL_REASON,
@@ -156,8 +156,13 @@ export const enrollmentsSyncer: Syncer = {
       }
       const memberId = await ctx.ensureMember(Number(r.member_id));
       const courseId = courseByLegacy.get(Number(r.course_id))?.id;
-      if (!memberId || !courseId) {
-        stats.skipped += 1;
+      if (!courseId) {
+        markSkip(stats, 'course_not_mapped', r.course_id);
+        void ctx.recordIssue('course_not_mapped', r.course_enrollment_id, `course_id=${r.course_id}`);
+        return;
+      }
+      if (!memberId) {
+        markSkip(stats, 'member_unresolved', r.member_id);
         return;
       }
       const pairKey = `${memberId}|${courseId}`;
@@ -170,7 +175,7 @@ export const enrollmentsSyncer: Syncer = {
       if (action === 'skip') {
         // Pair held by a new-system row (app purchase / employee grant) or by a live
         // legacy row — not ours to fight over.
-        stats.skipped += 1;
+        markSkip(stats, 'pair_held', legacyId);
         return;
       }
       if (ctx.dryRun) {
@@ -232,7 +237,7 @@ export const enrollmentsSyncer: Syncer = {
         stats.upserted += 1;
       } catch (err: any) {
         if (err?.code === 'P2002') {
-          stats.skipped += 1;
+          markSkip(stats, 'unique_clash', legacyId);
         } else {
           stats.errors += 1;
           wm.failed(toDate(r.wm));
@@ -286,7 +291,7 @@ async function cancelEnrollment(
   const memberId = ctx.resolveMember(Number(r.member_id));
   const course = courseByLegacy.get(Number(r.course_id));
   if (!memberId || !course) {
-    stats.skipped += 1;
+    markSkip(stats, 'revoke_member_or_course_missing', r.course_enrollment_id);
     return;
   }
   const pairKey = `${memberId}|${course.id}`;
@@ -295,7 +300,7 @@ async function cancelEnrollment(
   // purchase, an employee grant) is not ours to revoke. Cheap check first.
   const existing = byPair.get(pairKey);
   if (!mayCancelRemoved({ existing, legacyId, otherActiveLegacyRows: 0, hasPaidOrder: false })) {
-    stats.skipped += 1;
+    markReason(stats, 'revoke_pair_not_ours', legacyId);
     return;
   }
 
@@ -320,7 +325,7 @@ async function cancelEnrollment(
       hasPaidOrder: paid !== null,
     })
   ) {
-    stats.skipped += 1;
+    markReason(stats, 'revoke_still_entitled', legacyId);
     return;
   }
   if (ctx.dryRun) {
@@ -339,5 +344,5 @@ async function cancelEnrollment(
       byPair.set(pairKey, { ...current, isCanceled: true, cancelationReason: reason });
     }
     stats.voided = (stats.voided ?? 0) + 1;
-  } else stats.skipped += 1;
+  } else markReason(stats, 'revoke_raced_or_done', legacyId);
 }

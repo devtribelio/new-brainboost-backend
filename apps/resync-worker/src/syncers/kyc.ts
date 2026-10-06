@@ -14,7 +14,7 @@
 import type { RowDataPacket } from 'mysql2/promise';
 import { emptyStats, type RunCtx, type Stats, type Syncer, type SyncerCtx } from '../types';
 import { normalizeBankCode } from '../bank-code';
-import { nonEmpty, sinceBound, toDate, WatermarkTracker } from '../util';
+import { markReason, markSkip, nonEmpty, sinceBound, toDate, WatermarkTracker } from '../util';
 
 interface KycTarget {
   id: number; // member_data_kyc_id (latest in cluster)
@@ -81,7 +81,7 @@ export async function applyKycDecisions(ctx: RunCtx, memberLegacyIds: number[], 
     for (const r of rows as any[]) {
       const winnerLegacy = ctx.redirect.get(Number(r.member_id)) ?? Number(r.member_id);
       if (!ctx.memberByLegacy.has(winnerLegacy)) {
-        stats.skipped += 1;
+        markSkip(stats, 'member_not_migrated', r.member_id);
         continue;
       }
       const status = String(r.kyc_status) as 'APPROVED' | 'REJECTED';
@@ -133,7 +133,7 @@ export async function applyKycDecisions(ctx: RunCtx, memberLegacyIds: number[], 
     );
     for (const r of res) {
       if (r.count > 0) stats.upserted += r.count;
-      else stats.skipped += 1; // guard-blocked (MANUAL/SUMSUB/EXPIRED)
+      else markReason(stats, 'kyc_guard_blocked'); // guard-blocked (MANUAL/SUMSUB/EXPIRED)
     }
     // payout account from the APPROVED submission — fill-if-NULL only (never overwrite an
     // app-set account → also never trips the BANK_CHANGE re-KYC semantics). Independent of

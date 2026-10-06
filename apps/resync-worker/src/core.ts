@@ -16,7 +16,7 @@ import { makeEnsureMember } from './ensure-member';
 import { backfillNewMembers } from './backfill-new-members';
 import { recountCounters } from './recount';
 import { emptyStats, type RunCtx, type Stats, type SyncerCtx } from './types';
-import { flattenRedirects } from './util';
+import { errCode, flattenRedirects, skipReasonsSummary } from './util';
 
 const LOCK_ROW = '__lock__';
 
@@ -201,6 +201,20 @@ export async function runResync(opts: RunOpts): Promise<Record<string, Stats>> {
               update: { watermark },
             });
           },
+          async recordIssue(reason: string, legacyPk: number | string | null, detail?: string) {
+            if (opts.dryRun) return;
+            const pk = legacyPk === null || legacyPk === undefined ? '' : String(legacyPk);
+            try {
+              await prisma.syncIssue.upsert({
+                where: { syncer_legacyPk_reason: { syncer: name, legacyPk: pk, reason } },
+                create: { syncer: name, legacyPk: pk, reason, detail: detail ?? null },
+                update: { detail: detail ?? null, occurrences: { increment: 1 }, lastSeenAt: new Date() },
+              });
+            } catch (err) {
+              // issue logging must never fail a syncer
+              syncerLog(`WARN recordIssue ${reason} pk=${pk}: ${errCode(err)}`);
+            }
+          },
         };
 
         const started = Date.now();
@@ -227,7 +241,8 @@ export async function runResync(opts: RunOpts): Promise<Record<string, Stats>> {
           }
           log(
             `${name}: scanned=${stats.scanned} upserted=${stats.upserted} skipped=${stats.skipped}` +
-              `${stats.voided ? ` voided=${stats.voided}` : ''} errors=${stats.errors} (${Date.now() - started}ms)`,
+              `${stats.voided ? ` voided=${stats.voided}` : ''} errors=${stats.errors}` +
+              `${skipReasonsSummary(stats)} (${Date.now() - started}ms)`,
           );
         } catch (err: any) {
           results[name] = { ...emptyStats(), errors: 1 };

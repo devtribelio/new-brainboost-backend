@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /** Small shared row-coercion helpers (mirror the migrate:* scripts). */
 import { resyncConfig } from './config';
+import type { Stats } from './types';
 
 export function nonEmpty(v: any): string | null {
   if (v === null || v === undefined) return null;
@@ -99,6 +100,45 @@ export class WatermarkTracker {
 export function errCode(err: unknown): string {
   const e = err as { code?: string; name?: string } | null;
   return e?.code ?? e?.name ?? 'unknown';
+}
+
+const SKIP_SAMPLE_MAX = 5;
+
+/**
+ * Count a row that was SKIPPED (dropped) under a reason, and keep a few example legacy PKs.
+ * `skipped` is the single bucket the audit called out as mixing "out of scope" with "data
+ * likely lost"; `skipReasons` separates them so an operator can tell which skips matter.
+ */
+export function markSkip(stats: Stats, reason: string, legacyPk?: number | string | null, count = 1): void {
+  if (count <= 0) return;
+  stats.skipped += count;
+  markReason(stats, reason, legacyPk, count);
+}
+
+/**
+ * Count a reason WITHOUT incrementing `skipped` — for a row that was still written but had
+ * part of its work skipped (e.g. the tree wrote affiliateBased but could not resolve the
+ * inviter parent). Avoids the audit's "counted as skipped AND upserted" double count.
+ */
+export function markReason(stats: Stats, reason: string, legacyPk?: number | string | null, count = 1): void {
+  if (count <= 0) return;
+  const reasons = (stats.skipReasons ??= {});
+  reasons[reason] = (reasons[reason] ?? 0) + count;
+  if (legacyPk === undefined || legacyPk === null) return;
+  const samples = (stats.skipSamples ??= {});
+  const list = (samples[reason] ??= []);
+  if (list.length < SKIP_SAMPLE_MAX) list.push(legacyPk);
+}
+
+/** One-line summary of `skipReasons` for the per-syncer log (empty string when none). */
+export function skipReasonsSummary(stats: Stats): string {
+  const entries = Object.entries(stats.skipReasons ?? {});
+  if (entries.length === 0) return '';
+  const body = entries
+    .sort((a, b) => b[1] - a[1])
+    .map(([reason, count]) => `${reason}=${count}`)
+    .join(' ');
+  return ` skip[${body}]`;
 }
 
 /**

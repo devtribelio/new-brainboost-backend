@@ -19,7 +19,7 @@
 import type { RowDataPacket } from 'mysql2/promise';
 import { resyncConfig } from '../config';
 import { emptyStats, type RunCtx, type Stats, type Syncer, type SyncerCtx } from '../types';
-import { errCode, nonEmpty, runConcurrent, sinceBound, toDate, WatermarkTracker } from '../util';
+import { errCode, markReason, markSkip, nonEmpty, runConcurrent, sinceBound, toDate, WatermarkTracker } from '../util';
 import { decideAffiliatorWrite, isLegacyAffiliatorActive, prefersAffiliatorRow } from './affiliator-rules';
 import { syncLegacyAffiliateCode } from '../affiliate-code-sync';
 import { AFFILIATE_BASED_SOURCE, mayOverwriteAffiliateBased } from './affiliate-mode-rules';
@@ -49,7 +49,8 @@ function dedupeByKey<T>(rows: T[], keyOf: (r: T) => string | number, stats: Stat
     }
   }
   const out = [...best.values()];
-  stats.skipped += rows.length - out.length; // in-batch duplicates superseded by a newer row
+  // in-batch duplicates superseded by a newer row — normal, not a drop
+  markReason(stats, 'superseded_row', null, rows.length - out.length);
   return out;
 }
 
@@ -177,7 +178,7 @@ export async function syncInvitersScoped(
       const subjectId = ctx.memberByLegacy.get(Number(r.member_id)); // migrated only (no create)
       const cur = subjectId ? current.get(subjectId) : undefined;
       if (!subjectId || !cur) {
-        stats.skipped += 1;
+        markSkip(stats, 'subject_not_migrated', r.member_id);
         return;
       }
       // legacy parent present but not resolvable to a Member yet? LEAVE the current
@@ -192,10 +193,19 @@ export async function syncInvitersScoped(
       if (r.parent_id != null && mayOverwriteInviter(cur.inviterSource)) {
         ({ pick, legacyChain } = await resolveInviter(ctx, subjectId, Number(r.parent_id), nodes));
       }
-      if (pick?.status === 'unresolved') stats.skipped += 1;
+      if (pick?.status === 'unresolved') {
+        // the row is still upserted (affiliateBased/code), so do NOT count it as skipped —
+        // that double count is exactly what the audit flagged. Record it for reconciliation.
+        markReason(stats, 'inviter_unresolved_parent', r.member_id);
+        void ctx.recordIssue?.('inviter_unresolved_parent', r.member_id, `parent_node=${r.parent_id}`);
+      }
       const createsCycle = pick?.status === 'ok' ? await wouldCloseCycle(ctx, subjectId, pick.inviterId) : false;
       const plan = planInviterWrite({ subjectId, current: cur, pick, createsCycle });
       if (plan.reason) {
+        if (plan.reason === 'cycle' || plan.reason === 'self') {
+          markReason(stats, `inviter_${plan.reason}`, r.member_id);
+          void ctx.recordIssue?.(`inviter_${plan.reason}`, r.member_id, `parent_node=${r.parent_id}`);
+        }
         const action = !plan.patch ? 'left as is' : plan.patch.inviterId ? `set ${plan.patch.inviterId}` : 'cleared self-inviter';
         ctx.log(
           `${plan.reason === 'climbed' ? 'INFO' : 'WARN'} inviter ${plan.reason}: legacy member=${r.member_id} ` +
@@ -330,13 +340,14 @@ export async function syncAffiliatorsScoped(
       stats.scanned += 1;
       wm.seen(toDate(r.wm));
       if (!applied.has(Number(r.mpa_id))) {
-        stats.skipped += 1; // superseded by another legacy row for the same pair
+        markReason(stats, 'superseded_row', r.mpa_id); // superseded by another legacy row for the pair
         return;
       }
       const programId = programByNapa.get(Number(r.napa_id));
       const memberId = await ctx.ensureMember(Number(r.member_id));
       if (!programId || !memberId) {
-        stats.skipped += 1;
+        markSkip(stats, 'affiliator_program_missing', r.mpa_id);
+        void ctx.recordIssue?.('affiliator_program_missing', r.mpa_id, `napa_id=${r.napa_id}`);
         return;
       }
       const isActive = isLegacyAffiliatorActive(legacyState(r));
@@ -356,7 +367,7 @@ export async function syncAffiliatorsScoped(
       if (write !== 'skip') byPair.set(pairKey, { id: existing?.id ?? 'new', legacyId, isActive });
       try {
         if (write === 'skip') {
-          stats.skipped += 1;
+          markReason(stats, 'affiliator_write_skip', legacyId);
         } else if (existing) {
           // refresh: this row IS the pair's join; repoint: a re-join wrote a newer legacy row
           const data = write === 'repoint' ? { legacyId, ...fields } : fields;
@@ -368,7 +379,7 @@ export async function syncAffiliatorsScoped(
         }
       } catch (err: any) {
         if (err?.code === 'P2002' && write !== 'repoint') {
-          stats.skipped += 1;
+          markSkip(stats, 'unique_clash', legacyId);
         } else {
           // a re-point colliding on legacyId is a lost re-join, not a duplicate — retry it
           stats.errors += 1;

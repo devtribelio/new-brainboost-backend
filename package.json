@@ -29,6 +29,7 @@
     "resync:fix-dates": "tsx --conditions=development apps/resync-worker/src/fix-dates.ts",
     "resync:fix-password-algo": "tsx --conditions=development apps/resync-worker/src/fix-password-algo.ts",
     "repair:commission": "tsx --conditions=development scripts/repair-commission.ts",
+    "repair:inviter": "tsx --conditions=development apps/resync-worker/src/repair-inviter.ts",
     "build:packages": "pnpm -r --filter \"./packages/*\" build",
     "build": "pnpm -r build",
     "typecheck": "tsc -b",

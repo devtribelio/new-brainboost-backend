@@ -38,7 +38,7 @@ import { resyncConfig } from '../config';
 import { planMemberSync, type MemberSyncCurrent } from './member-rules';
 import { syncLegacyAffiliateCode } from '../affiliate-code-sync';
 import { emptyStats, type Stats, type Syncer, type SyncerCtx } from '../types';
-import { bool, errCode, nonEmpty, runConcurrent, sinceBound, toDate, WatermarkTracker } from '../util';
+import { bool, errCode, markSkip, nonEmpty, runConcurrent, sinceBound, toDate, WatermarkTracker } from '../util';
 
 const CHUNK = 5000; // legacy member_id IN (...) batch
 
@@ -93,7 +93,7 @@ export const membersSyncer: Syncer = {
         const id = ctx.memberByLegacy.get(Number(r.member_id))!; // guaranteed: member_id ∈ our set
         const cur = current.get(id);
         if (!cur) {
-          stats.skipped += 1; // row vanished since buildCtx
+          markSkip(stats, 'member_vanished', r.member_id); // row vanished since buildCtx
           return;
         }
         const plan = planMemberSync(cur, {

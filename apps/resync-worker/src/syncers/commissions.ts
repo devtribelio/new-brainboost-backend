@@ -15,7 +15,7 @@ import type { RowDataPacket } from 'mysql2/promise';
 import { resyncConfig } from '../config';
 import { emptyStats, type RunCtx, type Stats, type Syncer, type SyncerCtx } from '../types';
 import { buyerLegacyIdSql, planCommissionUpdate, resolveAffiliateBased } from './commission-rules';
-import { errCode, runConcurrent, sinceBound, toDate, WatermarkTracker } from '../util';
+import { errCode, markSkip, runConcurrent, sinceBound, toDate, WatermarkTracker } from '../util';
 
 const PAGE = 5000;
 
@@ -62,7 +62,8 @@ export async function applyCommissionRow(ctx: RunCtx, r: any, maps: CommissionMa
       ? await ctx.ensureMember(Number(r.member_recipient_id))
       : ctx.resolveMember(Number(r.member_recipient_id));
   if (!recipientId) {
-    stats.skipped += 1;
+    markSkip(stats, 'recipient_unresolved', r.member_recipient_id);
+    void ctx.recordIssue?.('recipient_unresolved', r.member_recipient_id, `commission_id=${r.affiliator_commision_id}, product_id=${r.product_id}`);
     return true;
   }
   if (ctx.dryRun) {
@@ -109,7 +110,7 @@ export async function applyCommissionRow(ctx: RunCtx, r: any, maps: CommissionMa
     if (status === 'VOIDED') stats.voided = (stats.voided ?? 0) + 1;
   } catch (err: any) {
     if (err?.code === 'P2002') {
-      stats.skipped += 1; // uniq(payment,recipient,level) clash
+      markSkip(stats, 'unique_clash', r.affiliator_commision_id); // uniq(payment,recipient,level) clash
     } else {
       stats.errors += 1;
       ctx.log(`ERROR write affiliator_commision_id=${r.affiliator_commision_id}: ${errCode(err)}`);

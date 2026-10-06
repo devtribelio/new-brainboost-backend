@@ -23,7 +23,7 @@
 import type { RowDataPacket } from 'mysql2/promise';
 import { resyncConfig } from '../config';
 import { emptyStats, type RunCtx, type Stats, type Syncer, type SyncerCtx } from '../types';
-import { errCode, runConcurrent, sinceBound, toDate, WatermarkTracker } from '../util';
+import { errCode, markReason, markSkip, runConcurrent, sinceBound, toDate, WatermarkTracker } from '../util';
 import { decideConnectWrite, type ConnectVariant } from './connect-rules';
 import { CYCLE_CHECK_LEVELS, INVITER_SOURCE, MAX_CLIMB_HOPS, chainHitsSubject, pickInviter } from './inviter-rules';
 
@@ -163,7 +163,8 @@ export const connectSyncer: Syncer = {
     stats.scanned = (rows as any[]).length;
     for (const r of rows as any[]) wm.seen(toDate(r.wm));
     const bySubject = pickRowPerSubject(ctx, rows as any[]);
-    stats.skipped += stats.scanned - bySubject.size; // not migrated, or superseded alias row
+    // not migrated (connect never creates a member), or an alias row superseded by the subject's own
+    markReason(stats, 'connect_not_migrated_or_superseded', null, stats.scanned - bySubject.size);
 
     const subjectIds = [...bySubject.keys()];
     const current = new Map<string, { inviterId: string | null; inviterSource: string | null }>();
@@ -197,7 +198,7 @@ export const connectSyncer: Syncer = {
     await runConcurrent([...bySubject], resyncConfig.writeConcurrency, async ([subjectId, r]) => {
       const cur = current.get(subjectId);
       if (!cur) {
-        stats.skipped += 1;
+        markSkip(stats, 'subject_not_migrated', r.member_id);
         return;
       }
       try {
@@ -234,7 +235,10 @@ export const connectSyncer: Syncer = {
           );
         }
         if (!plan.patch) {
-          stats.skipped += 1;
+          markReason(stats, plan.reason ? `connect_${plan.reason}` : 'connect_no_write', r.member_id);
+          if (plan.reason === 'unresolved' || plan.reason === 'cycle') {
+            void ctx.recordIssue(`connect_${plan.reason}`, r.member_id, `affiliator=${r.affiliator_member_id}`);
+          }
           return;
         }
         if (ctx.dryRun) {

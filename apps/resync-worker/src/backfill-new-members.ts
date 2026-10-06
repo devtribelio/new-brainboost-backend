@@ -27,7 +27,7 @@ import { syncInvitersScoped, syncAffiliatorsScoped } from './syncers/tree';
 import { applyCommissionRow, buildCommissionMaps, COMMISSION_COLS } from './syncers/commissions';
 import { joinCommunityNetworks } from './network-join';
 import { emptyStats, type RunCtx, type Stats } from './types';
-import { runConcurrent, toDate } from './util';
+import { markReason, markSkip, runConcurrent, toDate } from './util';
 
 const EPOCH = new Date(0);
 const IN_CHUNK = 1000;
@@ -93,13 +93,13 @@ async function backfillLikes(ctx: RunCtx, newIds: number[], stats: Stats): Promi
       stats.scanned += 1;
       const memberId = ctx.resolveMember(Number(r.member_id));
       if (!memberId) {
-        stats.skipped += 1;
+        markSkip(stats, 'like_member_unresolved', r.member_id);
         continue;
       }
       const isComment = r.comment_id != null && Number(r.comment_id) !== 0;
       const targetId = isComment ? commentMap.get(Number(r.comment_id)) : postMap.get(Number(r.post_id));
       if (!targetId) {
-        stats.skipped += 1; // like on a non-BB (or hard-deleted) post/comment
+        markReason(stats, 'like_target_out_of_scope'); // like on a non-BB (or hard-deleted) post/comment
         continue;
       }
       const row = { memberId, createdAt: toDate(r.created) ?? new Date() };

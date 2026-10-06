@@ -14,7 +14,7 @@
 import type { RowDataPacket } from 'mysql2/promise';
 import { resyncConfig } from '../config';
 import { emptyStats, type Stats, type Syncer, type SyncerCtx } from '../types';
-import { bool, errCode, nonEmpty, runConcurrent, sinceBound, toDate, WatermarkTracker } from '../util';
+import { bool, errCode, markReason, markSkip, nonEmpty, runConcurrent, sinceBound, toDate, WatermarkTracker } from '../util';
 
 const NETWORK_LEGACY_IDS = [23410, 25136]; // BB-TIMELINE, BB-EDUCATION
 const IN_CHUNK = 1000;
@@ -116,7 +116,7 @@ export const postsSyncer: Syncer = {
       const authorId = await ctx.ensureMember(Number(r.member_id));
       const networkId = networkMap.get(Number(r.network_id));
       if (!authorId || !networkId) {
-        stats.skipped += 1;
+        markSkip(stats, 'author_or_network_missing', r.post_id);
         return;
       }
       if (ctx.dryRun) {
@@ -170,7 +170,7 @@ export const postsSyncer: Syncer = {
       const isReply = r.reply_id && Number(r.reply_id) !== 0;
       const parentId = isReply ? commentMap.get(Number(r.reply_id)) ?? null : null;
       if (!postId || !authorId || (isReply && !parentId)) {
-        stats.skipped += 1;
+        markSkip(stats, 'post_or_author_missing', r.comment_id);
         return;
       }
       if (ctx.dryRun) {

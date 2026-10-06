@@ -23,7 +23,7 @@
  */
 import type { RowDataPacket } from 'mysql2/promise';
 import { emptyStats, type Stats, type Syncer, type SyncerCtx } from '../types';
-import { errCode, nonEmpty, sinceBound, toDate, WatermarkTracker } from '../util';
+import { errCode, markReason, markSkip, nonEmpty, sinceBound, toDate, WatermarkTracker } from '../util';
 import { BB_COURSE_IDS_SQL } from './enrollments';
 
 export const programsSyncer: Syncer = {
@@ -74,8 +74,14 @@ export const programsSyncer: Syncer = {
       const productId = productByCourse.get(Number(r.course_id));
       const prev = existing.get(legacyId);
       if (Number(r.status) !== 1 || r.deleted != null || !productId || prev?.productId) {
-        if (!productId) noProduct.add(Number(r.course_id));
-        stats.skipped += 1;
+        if (!productId) {
+          noProduct.add(Number(r.course_id));
+          markSkip(stats, 'program_course_not_mapped', r.napa_id);
+        } else if (prev?.productId) {
+          markReason(stats, 'program_already_linked', r.napa_id);
+        } else {
+          markReason(stats, 'program_inactive_or_deleted', r.napa_id);
+        }
         continue;
       }
       if (ctx.dryRun) {
@@ -103,7 +109,8 @@ export const programsSyncer: Syncer = {
         if (err?.code === 'P2002') {
           // e.g. code PROG-<id> already held by a program without this legacyId: retrying every
           // run can't fix it — settle the row and leave it for a human
-          stats.skipped += 1;
+          markSkip(stats, 'unique_clash', legacyId);
+          void ctx.recordIssue('program_unique_clash', legacyId, 'PROG-<id> code or name collision');
           ctx.log(`WARN program napa=${legacyId} collides on a unique field — left for review`);
         } else {
           stats.errors += 1;
