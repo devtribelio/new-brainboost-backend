@@ -23,7 +23,7 @@
 import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';
 import { connectLegacyDb } from './legacy-db';
-import { toDate } from './util';
+import { flattenRedirects, toDate } from './util';
 
 const prisma = new PrismaClient({ log: ['warn', 'error'] });
 const CHUNK = 5000;
@@ -94,10 +94,11 @@ async function fixReviews(legacy: any): Promise<void> {
   for (const m of await prisma.member.findMany({ where: { legacyId: { not: null } }, select: { id: true, legacyId: true } })) {
     if (m.legacyId !== null) memberByLegacy.set(m.legacyId, m.id);
   }
-  const redirect = new Map<number, number>();
+  const rawRedirect = new Map<number, number>();
   for (const r of await prisma.memberRedirect.findMany({ select: { loserLegacyId: true, winnerLegacyId: true } })) {
-    redirect.set(r.loserLegacyId, r.winnerLegacyId);
+    rawRedirect.set(r.loserLegacyId, r.winnerLegacyId);
   }
+  const redirect = flattenRedirects(rawRedirect);
   const resolveMember = (id: number) => memberByLegacy.get(redirect.get(id) ?? id);
 
   const productLegacyIds = [...productByLegacy.keys()];
@@ -137,10 +138,11 @@ async function fixLikes(legacy: any): Promise<void> {
   for (const m of await prisma.member.findMany({ where: { legacyId: { not: null } }, select: { id: true, legacyId: true } })) {
     if (m.legacyId !== null) memberByLegacy.set(m.legacyId, m.id);
   }
-  const redirect = new Map<number, number>();
+  const rawRedirect = new Map<number, number>();
   for (const r of await prisma.memberRedirect.findMany({ select: { loserLegacyId: true, winnerLegacyId: true } })) {
-    redirect.set(r.loserLegacyId, r.winnerLegacyId);
+    rawRedirect.set(r.loserLegacyId, r.winnerLegacyId);
   }
+  const redirect = flattenRedirects(rawRedirect);
   const resolveMember = (id: number) => memberByLegacy.get(redirect.get(id) ?? id);
 
   const targets: Array<{

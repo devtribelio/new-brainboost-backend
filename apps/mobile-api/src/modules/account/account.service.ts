@@ -1,6 +1,7 @@
 import bcrypt from 'bcryptjs';
 import { createHash } from 'node:crypto';
 import { prisma } from '@bb/db';
+import { resolveAffiliateCode } from '@bb/domain/affiliate/resolve-affiliate-code';
 import { badRequest, unauthorized, notFound, ERROR_CODES } from '@bb/common/exceptions';
 import { otpService } from '@bb/common/services/otp.service';
 import { isReusableUnverifiedMember } from '@bb/common/utils/member-state.util';
@@ -28,18 +29,18 @@ export class AccountService {
 
     const me = await prisma.member.findUnique({
       where: { id: memberId },
-      select: { id: true, affiliateCode: true, inviterId: true },
+      select: { id: true, inviterId: true },
     });
     if (!me) throw notFound(ERROR_CODES.MEMBER_NOT_FOUND);
 
-    if (me.affiliateCode && me.affiliateCode === affiliatorCode) {
-      throw badRequest(ERROR_CODES.AFFILIATE_SELF_CONNECT);
-    }
-
-    const inviter = await prisma.member.findUnique({
-      where: { affiliateCode: affiliatorCode },
-      select: { id: true, affiliateCode: true, legacyId: true },
+    // Self-check on the RESOLVED owner, not the string: an alias code (a merged
+    // legacy account's code) belongs to the same member as their own code.
+    const inviter = await resolveAffiliateCode(affiliatorCode, {
+      id: true,
+      affiliateCode: true,
+      legacyId: true,
     });
+    if (inviter?.id === me.id) throw badRequest(ERROR_CODES.AFFILIATE_SELF_CONNECT);
     if (!inviter) throw notFound(ERROR_CODES.AFFILIATOR_CODE_NOT_FOUND, { affiliatorCode });
 
     // Already connected — return existing without overwriting
@@ -59,7 +60,7 @@ export class AccountService {
 
     await prisma.member.update({
       where: { id: memberId },
-      data: { inviterId: inviter.id },
+      data: { inviterId: inviter.id, inviterSource: 'APP' },
     });
 
     return {
@@ -101,9 +102,7 @@ export class AccountService {
 
     let affiliateMemberId: string | undefined;
     if (dto.affiliateCode) {
-      const inviter = await prisma.member.findUnique({
-        where: { affiliateCode: dto.affiliateCode },
-      });
+      const inviter = await resolveAffiliateCode(dto.affiliateCode, { id: true });
       if (inviter) affiliateMemberId = inviter.id;
     }
 
@@ -195,7 +194,7 @@ export class AccountService {
     const passwordHash = await bcrypt.hash(dto.newPassword, 10);
     const updated = await prisma.member.update({
       where: { id: memberId },
-      data: { passwordHash, passwordAlgo: 'bcrypt' },
+      data: { passwordHash, passwordAlgo: 'bcrypt', passwordUpdatedAt: new Date() },
       select: {
         id: true,
         legacyId: true,
@@ -331,6 +330,7 @@ export class AccountService {
       const md5 = createHash('md5').update(plaintext).digest('hex');
       if (md5 !== member.passwordHash) return false;
       const newHash = await bcrypt.hash(plaintext, 10);
+      // Not passwordUpdatedAt: same password, so a later legacy reset must still flow.
       await prisma.member.update({
         where: { id: member.id },
         data: { passwordHash: newHash, passwordAlgo: 'bcrypt' },

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Member, Prisma } from '@prisma/client';
 import { prisma } from '@bb/db';
+import { isAffiliateCodeFree } from '../affiliate/resolve-affiliate-code';
 
 /**
  * Shared "create a brand-new Member" primitives, extracted so the social-login
@@ -55,11 +56,12 @@ export class MemberProvisioningService {
   async generateUniqueMemberCode(): Promise<string> {
     for (let attempt = 0; attempt < 5; attempt++) {
       const code = randomUUID().replace(/-/g, '').slice(0, 8).toUpperCase();
+      // The code doubles as affiliateCode, so it must also miss every alias code.
       const exists = await prisma.member.findFirst({
         where: { OR: [{ code }, { affiliateCode: code }] },
         select: { id: true },
       });
-      if (!exists) return code;
+      if (!exists && (await isAffiliateCodeFree(code))) return code;
     }
     throw new Error('Unable to generate unique member code after 5 attempts');
   }

@@ -1,6 +1,7 @@
 import { prisma } from '@bb/db';
 import { settingsService, SETTING_KEYS } from '@bb/common/services/settings.service';
 import { AFFILIATE_COOKIE_DAYS_DEFAULT } from './constants';
+import { resolveAffiliateCode } from './resolve-affiliate-code';
 
 /**
  * Resolves the per-purchase commission "override" affiliator (last-touch), shared by web
@@ -23,13 +24,12 @@ export class AttributionService {
     buyerMemberId: string,
     explicitCode?: string | null,
     productId?: string | null,
+    /** Resolve as of this moment: later clicks are ignored and the window counts back from it. */
+    asOf: Date = new Date(),
   ): Promise<string | null> {
     if (explicitCode) {
       const code = explicitCode.slice(0, 8); // first 8 chars = member code (rest = network suffix)
-      const m = await prisma.member.findUnique({
-        where: { affiliateCode: code },
-        select: { id: true },
-      });
+      const m = await resolveAffiliateCode(code, { id: true });
       if (m && m.id !== buyerMemberId) return m.id;
     }
 
@@ -37,15 +37,23 @@ export class AttributionService {
       SETTING_KEYS.affiliateCookieDays,
       AFFILIATE_COOKIE_DAYS_DEFAULT,
     );
-    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+    const since = new Date(asOf.getTime() - days * 24 * 60 * 60 * 1000);
 
+    // Own-code clicks are excluded IN the query, not after it: picking the latest
+    // click and then rejecting it as self stopped the search, so an affiliator's
+    // earlier click inside the window was never seen (BB-20261004-0088).
     const pickVisit = async (where: Record<string, unknown>): Promise<string | null> => {
       const visit = await prisma.affiliateVisit.findFirst({
-        where: { memberId: buyerMemberId, createdAt: { gte: since }, ...where },
+        where: {
+          memberId: buyerMemberId,
+          affiliatorMemberId: { not: buyerMemberId },
+          createdAt: { gte: since, lte: asOf },
+          ...where,
+        },
         orderBy: { createdAt: 'desc' },
         select: { affiliatorMemberId: true },
       });
-      return visit && visit.affiliatorMemberId !== buyerMemberId ? visit.affiliatorMemberId : null;
+      return visit?.affiliatorMemberId ?? null;
     };
 
     if (productId !== undefined && productId !== null) {

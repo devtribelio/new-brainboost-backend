@@ -58,6 +58,30 @@ const SETTINGS: Array<{ key: string; value: string; description: string }> = [
       "Max iOS app version (INCLUSIVE) that still sees banners on GET /api/data/banner, e.g. '3.3.0' = shown on 3.3.0 and below, hidden on 3.3.1+. Empty = gate off. Separate from Android because App Store review and Play rollout never land together.",
   },
   {
+    key: 'promo.minVersionAndroid',
+    value: '',
+    description:
+      "Min Android app version (INCLUSIVE) that sees promos on GET /api/member/promo/public, e.g. '3.3.2' = hidden on 3.3.1 and below. Empty = no lower bound. Mobile only: a request without ?platform= (web shop) is never gated. Once min or max is set, an Android request with no/unparseable ?version= gets an empty list.",
+  },
+  {
+    key: 'promo.maxVersionAndroid',
+    value: '',
+    description:
+      'Max Android app version (INCLUSIVE) that sees promos on GET /api/member/promo/public. Empty = no upper bound. Mobile only, same rules as promo.minVersionAndroid.',
+  },
+  {
+    key: 'promo.minVersionIos',
+    value: '',
+    description:
+      'Min iOS app version (INCLUSIVE) that sees promos on GET /api/member/promo/public. Empty = no lower bound. Mobile only, same rules as promo.minVersionAndroid. Separate from Android because App Store review and Play rollout never land together.',
+  },
+  {
+    key: 'promo.maxVersionIos',
+    value: '',
+    description:
+      'Max iOS app version (INCLUSIVE) that sees promos on GET /api/member/promo/public. Empty = no upper bound. Mobile only, same rules as promo.minVersionAndroid.',
+  },
+  {
     key: 'disbursement.autoEnabled',
     value: 'false',
     description:
@@ -206,7 +230,7 @@ const SETTINGS: Array<{ key: string; value: string; description: string }> = [
   {
     key: 'firstPurchaseVoucher.type',
     value: '',
-    description: "PERCENT | AMOUNT. Kosong = program dianggap belum dikonfigurasi.",
+    description: 'PERCENT | AMOUNT. Kosong = program dianggap belum dikonfigurasi.',
   },
   {
     key: 'firstPurchaseVoucher.value',
@@ -270,7 +294,8 @@ const SETTINGS: Array<{ key: string; value: string; description: string }> = [
   {
     key: 'wa.cekat.baseUrl',
     value: 'https://api.cekat.ai',
-    description: 'Origin API Cekat. Auth-nya API key statis di header `api_key`, bukan OAuth seperti Qontak.',
+    description:
+      'Origin API Cekat. Auth-nya API key statis di header `api_key`, bukan OAuth seperti Qontak.',
   },
   {
     key: 'wa.cekat.wabaId',
@@ -288,13 +313,13 @@ const SETTINGS: Array<{ key: string; value: string; description: string }> = [
     key: 'wa.cekat.template.otp',
     value: '2548823212252868',
     description:
-      "wa_template_id template `template_otp2` di Cekat (APPROVED, AUTHENTICATION, bahasa id) di WABA 1878086816553498. BELUM PERNAH DIUJI lewat adaptor: template AUTHENTICATION Meta berbentuk lain — body_placeholder kosong walau body memuat {{1}}, dan tombolnya bertipe otp/copy_code, bukan URL. Uji lewat halaman Provider WhatsApp sebelum Cekat dijadikan provider aktif.",
+      'wa_template_id template `template_otp2` di Cekat (APPROVED, AUTHENTICATION, bahasa id) di WABA 1878086816553498. BELUM PERNAH DIUJI lewat adaptor: template AUTHENTICATION Meta berbentuk lain — body_placeholder kosong walau body memuat {{1}}, dan tombolnya bertipe otp/copy_code, bukan URL. Uji lewat halaman Provider WhatsApp sebelum Cekat dijadikan provider aktif.',
   },
   {
     key: 'wa.cekat.template.firstPurchaseVoucher',
     value: '1483010856991046',
     description:
-      "wa_template_id template `first_time_buyer` di Cekat (APPROVED, kategori MARKETING, bahasa id, 4 variabel). Angka — bentuknya berbeda dengan UUID milik Qontak; tiap provider punya namespace sendiri, jadi id ini TIDAK bisa dipakai di baris wa.qontak.*. Jangan tertukar dengan waba_id (1368529094981820), yang menunjuk akun WhatsApp Business, bukan template.",
+      'wa_template_id template `first_time_buyer` di Cekat (APPROVED, kategori MARKETING, bahasa id, 4 variabel). Angka — bentuknya berbeda dengan UUID milik Qontak; tiap provider punya namespace sendiri, jadi id ini TIDAK bisa dipakai di baris wa.qontak.*. Jangan tertukar dengan waba_id (1368529094981820), yang menunjuk akun WhatsApp Business, bukan template.',
   },
   {
     key: 'wa.qontak.template.firstPurchaseVoucher',

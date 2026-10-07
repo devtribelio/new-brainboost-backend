@@ -555,9 +555,10 @@ export class KycTokenDto {
 /** `POST /affiliate/visits` & `POST /affiliate/attribution` — visit log outcome. */
 export class VisitLogResultDto {
   @ApiProperty({
-    enum: ['logged', 'duplicate', 'invalid', 'error'],
+    enum: ['logged', 'duplicate', 'invalid', 'skipped', 'error'],
     example: 'logged',
-    description: 'Outcome. Always HTTP 200 — never breaks marketing ad links.',
+    description:
+      'Outcome. Always HTTP 200 — never breaks marketing ad links. `skipped` (reason `self`) = a logged-in member clicked their own code; nothing is stored and no cookie is set.',
   })
   status!: string;
 
@@ -567,6 +568,6 @@ export class VisitLogResultDto {
   })
   visitId?: string;
 
-  @ApiPropertyOptional({ description: 'Set when status is `invalid` or `error`.' })
+  @ApiPropertyOptional({ description: 'Set when status is `invalid`, `skipped` or `error`.' })
   reason?: string;
 }
