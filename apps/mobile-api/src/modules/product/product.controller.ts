@@ -21,6 +21,7 @@ import {
   OWNERSHIP_VALUES,
   PRODUCT_TYPE_VALUES,
   SORT_VALUES,
+  INCLUDE_VALUES,
 } from './dto/list-query.dto';
 
 @ApiTags('Product')
@@ -64,6 +65,14 @@ export class ProductController {
     enum: OWNERSHIP_VALUES as unknown as string[],
     example: 'purchased',
   })
+  @ApiQuery({
+    name: 'include',
+    type: 'string',
+    required: false,
+    enum: INCLUDE_VALUES as unknown as string[],
+    example: 'audios',
+    description: 'Opt-in: `audios` adds each course\'s addable audio slides. Signed-in list only.',
+  })
   @ApiResponse({
     status: 200,
     type: () => ProductDto,
@@ -88,12 +97,18 @@ export class ProductController {
     const commissionRate = memberId
       ? await this.affiliatorService.getPerformanceRate(memberId)
       : undefined;
+    // Opt-in and signed-in only: the public list has no playlist to add to.
+    const audiosByProduct =
+      memberId && q.include === 'audios'
+        ? await this.productService.batchAudios(rows.map((r) => r.id))
+        : undefined;
     const items = rows.map((r) =>
       serializeProduct(r, {
         ratingAvg: ratingAvgByProduct.get(r.id) ?? 0,
         isPurchased: purchasedProductIds.has(r.id),
         viaSubscription: viaSubscriptionIds.has(r.id),
         commissionRate,
+        audios: audiosByProduct ? (audiosByProduct.get(r.id) ?? []) : undefined,
       }),
     );
     return okPaginated(res, items, { page: p.page, perPage: p.perPage, total });

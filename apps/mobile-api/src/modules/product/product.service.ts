@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import type { Product } from '@prisma/client';
 import { prisma } from '@bb/db';
+import { listAddableAudios } from '@/modules/media/media-asset.util';
 import { notFound, ERROR_CODES } from '@bb/common/exceptions';
 import { activeEnrollment } from '@bb/domain/commerce/enrollment';
 import type { PaginationParams } from '@bb/common/utils/pagination.util';
@@ -36,6 +37,12 @@ function distributionFromGroupBy(
     if (key in out) out[key] = r._count.stars;
   }
   return out;
+}
+
+export interface ProductAudio {
+  id: string;
+  title: string;
+  durationSec: number;
 }
 
 export class ProductService {
@@ -374,6 +381,36 @@ export class ProductService {
       if (e.viaSubscriptionId !== null) viaSubscriptionIds.add(e.course.productId);
     }
     return result;
+  }
+
+  /**
+   * Addable audio per product, for `include=audios`. One lesson query for the
+   * whole page, filtered in memory with the same slide rules the course page
+   * applies — not a per-product loop, and not part of `list()`, so the three
+   * list paths (plain / purchased / raw) stay untouched and the catalog never
+   * pays for it. Order = section.order, lesson.order, slide order.
+   */
+  async batchAudios(productIds: string[]): Promise<Map<string, ProductAudio[]>> {
+    const map = new Map<string, ProductAudio[]>();
+    if (productIds.length === 0) return map;
+    const lessons = await prisma.lesson.findMany({
+      where: { lessonStatus: 'ACTIVE', section: { course: { productId: { in: productIds } } } },
+      orderBy: [{ section: { order: 'asc' } }, { order: 'asc' }],
+      select: {
+        name: true,
+        slidesData: true,
+        section: { select: { course: { select: { productId: true } } } },
+      },
+    });
+    for (const l of lessons) {
+      const productId = l.section.course.productId;
+      const list = map.get(productId) ?? [];
+      for (const a of listAddableAudios(l.slidesData)) {
+        list.push({ id: a.audioId, title: a.title ?? l.name, durationSec: a.durationSec });
+      }
+      map.set(productId, list);
+    }
+    return map;
   }
 
   async batchRatingAvg(productIds: string[]): Promise<Map<string, number>> {

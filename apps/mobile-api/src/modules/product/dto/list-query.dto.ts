@@ -23,6 +23,9 @@ export const SORT_VALUES = ['price_asc', 'price_desc', 'newest', 'top_rated'] as
 export type ProductSort = (typeof SORT_VALUES)[number];
 
 export const MEDIA_VALUES = ['audio', 'video'] as const;
+
+export const INCLUDE_VALUES = ['audios'] as const;
+export type ProductInclude = (typeof INCLUDE_VALUES)[number];
 export type ProductMedia = (typeof MEDIA_VALUES)[number];
 
 // Normalise a query param that may arrive as a single string, a CSV string
@@ -100,4 +103,14 @@ export class ListProductsQueryDto {
   @IsOptional()
   @IsIn(OWNERSHIP_VALUES as unknown as string[])
   ownership?: Ownership;
+
+  @ApiPropertyOptional({
+    example: 'audios',
+    enum: INCLUDE_VALUES as unknown as string[],
+    description:
+      'Opt-in extra data per item. `audios` adds `audios[]` — the course\'s addable audio slides (id/title/durationSec) for the playlist "Tambah audio" sheet. Costs one extra lesson query; leave it off for catalog/home/explore. Signed-in list only.',
+  })
+  @IsOptional()
+  @IsIn(INCLUDE_VALUES as unknown as string[])
+  include?: ProductInclude;
 }

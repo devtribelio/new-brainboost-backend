@@ -137,3 +137,33 @@ export function listPlayableSlides(slidesData: unknown): PlayableSlide[] {
 export function findPlayableAudio(slidesData: unknown, audioId: string): PlayableSlide | null {
   return listPlayableSlides(slidesData).find((s) => s.audioId === audioId) ?? null;
 }
+
+export interface AddableAudio {
+  /** Slide id — the `audioId` every playlist endpoint takes and returns. */
+  audioId: string;
+  /** `data.title`, or null when the slide has none (caller falls back to the lesson name). */
+  title: string | null;
+  durationSec: number;
+}
+
+/**
+ * The audio a member can add to a playlist from a course, in authoring order:
+ * `AudioTemplate` only (what the course page's "Tambah ke playlist" offers —
+ * `VideoTemplate` stays addable by id, just not listed here), with a guid (no
+ * guid = nothing to play), and not a bonus slide (routed to the course's Bonus
+ * section in the app, not offered as playlist material).
+ */
+export function listAddableAudios(slidesData: unknown): AddableAudio[] {
+  if (!Array.isArray(slidesData)) return [];
+  const out: AddableAudio[] = [];
+  for (const raw of slidesData as Array<MediaSlide & { id?: unknown; bonus?: unknown; data?: MediaSlideData & { title?: unknown } }>) {
+    if (raw?.type !== 'AudioTemplate' || raw.bonus === true) continue;
+    const audioId = typeof raw.id === 'string' && raw.id ? raw.id : null;
+    if (!audioId) continue;
+    const d = raw.data ?? {};
+    if (!resolveGuid(d)) continue;
+    const title = typeof d.title === 'string' && d.title.trim() ? d.title.trim() : null;
+    out.push({ audioId, title, durationSec: resolveDurationSec(raw, d) });
+  }
+  return out;
+}

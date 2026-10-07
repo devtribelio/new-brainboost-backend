@@ -130,6 +130,27 @@ export class ProductDto {
 
   @ApiProperty({ type: 'number', example: 4.8 })
   productRatingAvg!: number;
+
+  @ApiPropertyOptional({
+    type: () => [ProductAudioDto],
+    description:
+      'Only with `include=audios` on the signed-in list. The course\'s addable audio slides in lesson order — `AudioTemplate`, playable, not bonus. Empty array when it has none. Listed for every returned course, locked ones included: access is still `isPurchased` / `viaSubscription`, and the playlist add endpoint does not gate on course access.',
+  })
+  audios?: ProductAudioDto[];
+}
+
+export class ProductAudioDto {
+  @ApiProperty({
+    example: 'M2WYRVCUV6JB5',
+    description: 'Slide id — exactly `slidesData[].id` on course detail, and the `audioId` the playlist endpoints take and return. Opaque: legacy 13-char ids and UUIDs both occur.',
+  })
+  id!: string;
+
+  @ApiProperty({ example: 'BrainBoost Action Booster', description: '`slidesData[].data.title`, or the lesson name when the slide has none.' })
+  title!: string;
+
+  @ApiProperty({ type: 'integer', example: 1800, description: 'Seconds; 0 when unknown.' })
+  durationSec!: number;
 }
 
 export class CourseLessonItemDto {

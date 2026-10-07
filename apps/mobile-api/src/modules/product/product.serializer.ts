@@ -8,6 +8,7 @@ import {
 } from '@/modules/media/media-asset.util';
 import { logger } from '@bb/common/config/logger';
 import { serializeBonusItem } from '@/modules/bonus/bonus.dto';
+import type { ProductAudio } from './product.service';
 import { env } from '@bb/common/config/env';
 
 /**
@@ -43,6 +44,8 @@ export function serializeProduct(
     /** Owned ONLY through an active subscription (valid retail enrollment wins → false). */
     viaSubscription?: boolean;
     commissionRate?: number;
+    /** `include=audios` only — absent means the key is not emitted at all. */
+    audios?: ProductAudio[];
   } = {},
 ): Record<string, unknown> {
   const productId = p.legacyId ?? p.id;
@@ -106,6 +109,7 @@ export function serializeProduct(
     isPurchased: opts.isPurchased ?? false,
     viaSubscription: opts.viaSubscription ?? false,
     productRatingAvg: opts.ratingAvg ?? 0,
+    ...(opts.audios ? { audios: opts.audios } : {}),
   };
 }
 
