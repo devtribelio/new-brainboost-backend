@@ -8,6 +8,7 @@
  *
  *   - their legacy KYC decision            (member_data_kyc rows are old)
  *   - inviter chain + program memberships  (member_network / member_product_affiliator)
+ *   - their legacy downline's inviter       (children synced before this upline existed)
  *   - old commissions they received        (affiliator_commision, incl. non-BB rows that
  *                                           count toward lifetime tier)
  *   - old post/comment likes they gave     (like rows are old)
@@ -26,7 +27,7 @@ import { syncInvitersScoped, syncAffiliatorsScoped } from './syncers/tree';
 import { applyCommissionRow, buildCommissionMaps, COMMISSION_COLS } from './syncers/commissions';
 import { joinCommunityNetworks } from './network-join';
 import { emptyStats, type RunCtx, type Stats } from './types';
-import { runConcurrent, toDate } from './util';
+import { markReason, markSkip, runConcurrent, toDate } from './util';
 
 const EPOCH = new Date(0);
 const IN_CHUNK = 1000;
@@ -49,6 +50,24 @@ async function backfillCommissions(ctx: RunCtx, newIds: number[], stats: Stats):
       await applyCommissionRow(ctx, r, maps, stats);
     });
   }
+}
+
+/** Migrated winners whose legacy parent node belongs to one of `legacyIds`. */
+async function legacyChildren(ctx: RunCtx, legacyIds: number[]): Promise<number[]> {
+  const out = new Set<number>();
+  for (const ids of chunk(legacyIds, IN_CHUNK)) {
+    const [rows] = await ctx.legacy.query<RowDataPacket[]>(
+      `SELECT DISTINCT c.member_id
+         FROM member_network c JOIN member_network p ON c.parent_id = p.member_network_id
+        WHERE p.member_id IN (?)`,
+      [ids],
+    );
+    for (const r of rows as any[]) {
+      const id = Number(r.member_id);
+      if (ctx.memberByLegacy.has(id)) out.add(id); // subjects are migrated winners only
+    }
+  }
+  return [...out];
 }
 
 async function backfillLikes(ctx: RunCtx, newIds: number[], stats: Stats): Promise<void> {
@@ -74,13 +93,13 @@ async function backfillLikes(ctx: RunCtx, newIds: number[], stats: Stats): Promi
       stats.scanned += 1;
       const memberId = ctx.resolveMember(Number(r.member_id));
       if (!memberId) {
-        stats.skipped += 1;
+        markSkip(stats, 'like_member_unresolved', r.member_id);
         continue;
       }
       const isComment = r.comment_id != null && Number(r.comment_id) !== 0;
       const targetId = isComment ? commentMap.get(Number(r.comment_id)) : postMap.get(Number(r.post_id));
       if (!targetId) {
-        stats.skipped += 1; // like on a non-BB (or hard-deleted) post/comment
+        markReason(stats, 'like_target_out_of_scope'); // like on a non-BB (or hard-deleted) post/comment
         continue;
       }
       const row = { memberId, createdAt: toDate(r.created) ?? new Date() };
@@ -115,6 +134,11 @@ export async function backfillNewMembers(ctx: RunCtx, newIds: number[]): Promise
   // inviter chain stays winner-scoped: a loser's member_network row must never set a
   // winner's inviter (same rule as the tree syncer)
   await syncInvitersScoped(scoped, newIds, EPOCH, stats);
+  // ...and their legacy downline: a child synced before its upline existed kept its old
+  // inviter (an unresolvable parent is left alone), and its member_network row is behind
+  // the tree watermark. The inviter_source gate keeps app-set inviters untouched.
+  const children = await legacyChildren(ctx, wide);
+  if (children.length) await syncInvitersScoped(scoped, children, EPOCH, stats);
   await syncAffiliatorsScoped(scoped, EPOCH, stats, wide);
   await backfillCommissions(ctx, wide, stats);
   await backfillLikes(ctx, wide, stats);

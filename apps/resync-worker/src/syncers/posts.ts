@@ -2,8 +2,9 @@
 /**
  * Posts syncer — incremental port of migrate-network-posts.ts (the 2 BrainBoost networks).
  * Covers posts → comments → replies → post-likes → comment-likes in one pass, sharing a
- * single combined watermark (each sub-query fetches everything with updated>since, so one
- * max watermark is safe).
+ * single combined watermark (each sub-query fetches everything with updated>since; the
+ * checkpoint is capped at the run start, so a row changed in an already-run sub-query
+ * during the pass is re-scanned next run).
  *
  * KEYS  post/comment upsert by legacyId; likes have no legacyId → createMany + skipDuplicates
  *       on their composite uniques.
@@ -13,7 +14,7 @@
 import type { RowDataPacket } from 'mysql2/promise';
 import { resyncConfig } from '../config';
 import { emptyStats, type Stats, type Syncer, type SyncerCtx } from '../types';
-import { bool, maxWatermark, nonEmpty, runConcurrent, sinceBound, toDate } from '../util';
+import { bool, errCode, markReason, markSkip, nonEmpty, runConcurrent, sinceBound, toDate, WatermarkTracker } from '../util';
 
 const NETWORK_LEGACY_IDS = [23410, 25136]; // BB-TIMELINE, BB-EDUCATION
 const IN_CHUNK = 1000;
@@ -41,12 +42,29 @@ async function buildMap(model: { findMany: (a: any) => Promise<any[]> }): Promis
   return new Map(rows.map((r) => [r.legacyId as number, r.id as string]));
 }
 
+/**
+ * UPDATE branch: everything except the moderation state. isDeleted / publishStatus are set
+ * on create only — the app's delete / REJECTED (post moderation) must survive a legacy bump
+ * of the row. A legacy-side delete falls out of the status filter instead (known gap, §3).
+ */
+export function postUpdate<T extends { isDeleted: boolean; publishStatus: string }>(
+  fields: T,
+): Omit<T, 'isDeleted' | 'publishStatus'> {
+  const { isDeleted: _d, publishStatus: _p, ...rest } = fields;
+  return rest;
+}
+
+export function commentUpdate<T extends { isDeleted: boolean }>(fields: T): Omit<T, 'isDeleted'> {
+  const { isDeleted: _d, ...rest } = fields;
+  return rest;
+}
+
 export const postsSyncer: Syncer = {
   name: 'posts',
   async run(ctx: SyncerCtx): Promise<Stats> {
     const stats = emptyStats();
     const since = sinceBound(ctx.since);
-    let watermark = ctx.since;
+    const wm = new WatermarkTracker();
 
     const nets = await ctx.prisma.network.findMany({
       where: { legacyId: { in: NETWORK_LEGACY_IDS } },
@@ -94,11 +112,11 @@ export const postsSyncer: Syncer = {
     // one row per post_id (upsert key) → write-independent → parallel
     await runConcurrent(postRows as any[], resyncConfig.writeConcurrency, async (r: any) => {
       stats.scanned += 1;
-      watermark = maxWatermark(watermark, toDate(r.wm));
+      wm.seen(toDate(r.wm));
       const authorId = await ctx.ensureMember(Number(r.member_id));
       const networkId = networkMap.get(Number(r.network_id));
       if (!authorId || !networkId) {
-        stats.skipped += 1;
+        markSkip(stats, 'author_or_network_missing', r.post_id);
         return;
       }
       if (ctx.dryRun) {
@@ -127,11 +145,13 @@ export const postsSyncer: Syncer = {
         await ctx.prisma.post.upsert({
           where: { legacyId: Number(r.post_id) },
           create: { legacyId: Number(r.post_id), ...fields },
-          update: fields,
+          update: postUpdate(fields),
         });
         stats.upserted += 1;
-      } catch {
+      } catch (err) {
         stats.errors += 1;
+        wm.failed(toDate(r.wm));
+        ctx.log(`ERROR write post_id=${r.post_id}: ${errCode(err)}`);
       }
     });
 
@@ -144,13 +164,13 @@ export const postsSyncer: Syncer = {
 
     const upsertComment = async (r: any, postMap: Map<number, string>, commentMap: Map<number, string>) => {
       stats.scanned += 1;
-      watermark = maxWatermark(watermark, toDate(r.wm));
+      wm.seen(toDate(r.wm));
       const postId = postMap.get(Number(r.post_id));
       const authorId = await ctx.ensureMember(Number(r.member_id));
       const isReply = r.reply_id && Number(r.reply_id) !== 0;
       const parentId = isReply ? commentMap.get(Number(r.reply_id)) ?? null : null;
       if (!postId || !authorId || (isReply && !parentId)) {
-        stats.skipped += 1;
+        markSkip(stats, 'post_or_author_missing', r.comment_id);
         return;
       }
       if (ctx.dryRun) {
@@ -169,11 +189,13 @@ export const postsSyncer: Syncer = {
         await ctx.prisma.comment.upsert({
           where: { legacyId: Number(r.comment_id) },
           create: { legacyId: Number(r.comment_id), ...fields },
-          update: fields,
+          update: commentUpdate(fields),
         });
         stats.upserted += 1;
-      } catch {
+      } catch (err) {
         stats.errors += 1;
+        wm.failed(toDate(r.wm));
+        ctx.log(`ERROR write comment_id=${r.comment_id}: ${errCode(err)}`);
       }
     };
 
@@ -215,7 +237,7 @@ export const postsSyncer: Syncer = {
         );
         const data: any[] = [];
         for (const r of rows as any[]) {
-          watermark = maxWatermark(watermark, toDate(r.wm));
+          wm.seen(toDate(r.wm));
           const postId = postMap.get(Number(r.post_id));
           const memberId = ctx.resolveMember(Number(r.member_id));
           if (postId && memberId) data.push({ postId, memberId, createdAt: toDate(r.created) ?? new Date() });
@@ -234,7 +256,7 @@ export const postsSyncer: Syncer = {
         );
         const data: any[] = [];
         for (const r of rows as any[]) {
-          watermark = maxWatermark(watermark, toDate(r.wm));
+          wm.seen(toDate(r.wm));
           const commentId = commentMap.get(Number(r.comment_id));
           const memberId = ctx.resolveMember(Number(r.member_id));
           if (commentId && memberId) data.push({ commentId, memberId, createdAt: toDate(r.created) ?? new Date() });
@@ -243,7 +265,7 @@ export const postsSyncer: Syncer = {
       }
     }
 
-    if (watermark && !ctx.dryRun) await ctx.checkpoint(watermark);
+    await ctx.checkpoint(wm.result(ctx.runStart));
     return stats;
   },
 };

@@ -1,6 +1,7 @@
 import { prisma } from '@bb/db';
 import { settingsService, SETTING_KEYS } from '@bb/common/services/settings.service';
 import { AFFILIATE_COOKIE_DAYS_DEFAULT } from './constants';
+import { resolveAffiliateCode } from './resolve-affiliate-code';
 
 /**
  * Resolves the per-purchase commission "override" affiliator (last-touch), shared by web
@@ -28,10 +29,7 @@ export class AttributionService {
   ): Promise<string | null> {
     if (explicitCode) {
       const code = explicitCode.slice(0, 8); // first 8 chars = member code (rest = network suffix)
-      const m = await prisma.member.findUnique({
-        where: { affiliateCode: code },
-        select: { id: true },
-      });
+      const m = await resolveAffiliateCode(code, { id: true });
       if (m && m.id !== buyerMemberId) return m.id;
     }
 

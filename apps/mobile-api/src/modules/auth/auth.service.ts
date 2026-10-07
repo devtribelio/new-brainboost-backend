@@ -40,6 +40,7 @@ import type { RequestVerificationEmailDto } from './dto/request-verification-ema
 import type { ValidateOtpEmailDto } from './dto/validate-otp-email.dto';
 import { logger } from '@bb/common/config/logger';
 import { VisitService } from '@bb/domain/affiliate/visit.service';
+import { resolveAffiliateCode } from '@bb/domain/affiliate/resolve-affiliate-code';
 import { memberProvisioningService } from '@bb/domain/member/provisioning.service';
 
 interface TokenBundle {
@@ -285,6 +286,7 @@ export class AuthService {
       gender: dto.gender,
       birthdate: dto.birthdate ? new Date(dto.birthdate) : null,
       inviterId,
+      inviterSource: inviterId ? 'APP' : undefined,
       utmSource: dto.utmSource,
       utmContent: dto.utmContent,
       isActive: false,
@@ -407,10 +409,7 @@ export class AuthService {
   }> {
     if (!affiliateCode) return {};
 
-    const inviter = await prisma.member.findUnique({
-      where: { affiliateCode: affiliateCode.slice(0, 8) },
-      select: { id: true },
-    });
+    const inviter = await resolveAffiliateCode(affiliateCode.slice(0, 8), { id: true });
 
     let inviterNetworkId: string | undefined;
     const networkLegacyPart = affiliateCode.slice(8);
@@ -525,7 +524,8 @@ export class AuthService {
 
     if (computed !== null) {
       if (computed.toLowerCase() !== member.passwordHash.toLowerCase()) return false;
-      // Lazy rehash to bcrypt — transparent upgrade on first successful login.
+      // Lazy rehash to bcrypt — transparent upgrade on first successful login. Deliberately
+      // NOT passwordUpdatedAt: same password, so a later legacy reset must still flow.
       const newHash = await bcrypt.hash(plaintext, 10);
       await prisma.member.update({
         where: { id: member.id },
@@ -760,10 +760,7 @@ export class AuthService {
     // is ignored (never aborts signup). Network suffix is not applied here.
     let inviterId: string | undefined;
     if (opts.affiliateCode) {
-      const inviter = await prisma.member.findUnique({
-        where: { affiliateCode: opts.affiliateCode.slice(0, 8) },
-        select: { id: true },
-      });
+      const inviter = await resolveAffiliateCode(opts.affiliateCode.slice(0, 8), { id: true });
       if (inviter) inviterId = inviter.id;
     }
 
@@ -780,6 +777,7 @@ export class AuthService {
           fullName: name,
           isEmailVerified: true,
           inviterId,
+          inviterSource: inviterId ? 'APP' : undefined,
         },
         usernameSeed: `${provider}${sub}`,
       });
@@ -1040,7 +1038,7 @@ export class AuthService {
     const passwordHash = await bcrypt.hash(dto.newPassword, 10);
     await prisma.member.update({
       where: { id: member.id },
-      data: { passwordHash, passwordAlgo: 'bcrypt' },
+      data: { passwordHash, passwordAlgo: 'bcrypt', passwordUpdatedAt: new Date() },
     });
     await prisma.refreshToken.updateMany({
       where: { memberId: member.id, revokedAt: null },
@@ -1117,7 +1115,7 @@ export class AuthService {
     const passwordHash = await bcrypt.hash(dto.newPassword, 10);
     await prisma.member.update({
       where: { id: member.id },
-      data: { passwordHash, passwordAlgo: 'bcrypt', isEmailVerified: true },
+      data: { passwordHash, passwordAlgo: 'bcrypt', passwordUpdatedAt: new Date(), isEmailVerified: true },
     });
     await prisma.refreshToken.updateMany({
       where: { memberId: member.id, revokedAt: null },
@@ -1196,6 +1194,7 @@ export class AuthService {
           // Prisma skips the column, so an inviter already on the placeholder
           // survives. Mirrors the email register path.
           inviterId,
+          inviterSource: inviterId ? 'APP' : undefined,
         },
         select: { id: true, legacyId: true, phone: true, phoneCode: true },
       });
@@ -1214,6 +1213,7 @@ export class AuthService {
             code: memberCode,
             affiliateCode: memberCode,
             inviterId,
+            inviterSource: inviterId ? 'APP' : undefined,
             isActive: false,
             isEmailVerified: false,
             isPhoneVerified: false,

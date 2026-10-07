@@ -57,7 +57,8 @@ export class AffiliatorService {
     }
     return prisma.member.update({
       where: { id: memberId },
-      data: { affiliateBased: mode },
+      // Mark APP so the legacy tree resync never reverts a mode the member chose here.
+      data: { affiliateBased: mode, affiliateBasedSource: 'APP' },
       select: { id: true, affiliateBased: true },
     });
   }

@@ -11,7 +11,10 @@
       "brace-expansion@<2.0.0": "^1.1.21",
       "brace-expansion@>=2.0.0 <5.0.12": "^5.0.12",
       "js-yaml@<4.3.0": "^4.3.0",
-      "postcss@<8.5.18": "^8.5.18"
+      "postcss@<8.5.18": "^8.5.18",
+      "proxy-addr@<2.0.8": "^2.0.8",
+      "source-map-js@<1.2.2": "^1.2.2",
+      "fast-copy@<3.1.0": "^3.1.0"
     }
   },
   "scripts": {
@@ -21,6 +24,7 @@
     "resync": "tsx --conditions=development apps/resync-worker/src/run.ts",
     "resync:worker": "tsx --conditions=development apps/resync-worker/src/worker.ts",
     "resync:seed-redirect": "tsx --conditions=development apps/resync-worker/src/seed-redirect.ts",
+    "resync:code-aliases": "tsx --conditions=development apps/resync-worker/src/code-aliases-cli.ts",
     "resync:unlock": "tsx --conditions=development apps/resync-worker/src/unlock.ts",
     "resync:identity": "tsx --conditions=development apps/resync-worker/src/identity.ts",
     "resync:recount": "tsx --conditions=development apps/resync-worker/src/recount.ts",
@@ -28,6 +32,8 @@
     "resync:fix-dates": "tsx --conditions=development apps/resync-worker/src/fix-dates.ts",
     "resync:fix-password-algo": "tsx --conditions=development apps/resync-worker/src/fix-password-algo.ts",
     "repair:commission": "tsx --conditions=development scripts/repair-commission.ts",
+    "repair:inviter": "tsx --conditions=development apps/resync-worker/src/repair-inviter.ts",
+    "export:enrollment-cancels": "tsx --conditions=development apps/resync-worker/src/export-enrollment-cancels.ts",
     "build:packages": "pnpm -r --filter \"./packages/*\" build",
     "build": "pnpm -r build",
     "typecheck": "tsc -b",
@@ -79,7 +85,7 @@
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.1",
     "class-validator-jsonschema": "^5.1.0",
-    "compression": "^1.7.5",
+    "compression": "^1.8.2",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",

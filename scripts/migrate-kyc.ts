@@ -86,7 +86,8 @@ async function main() {
               k.actionat, k.updated, k.created
          FROM member_data_kyc k
          JOIN (SELECT member_id, MAX(member_data_kyc_id) mx FROM member_data_kyc
-                WHERE kyc_status IN ('APPROVED','REJECTED') GROUP BY member_id) t
+                WHERE kyc_status IN ('APPROVED','REJECTED') AND COALESCE(status, 1) <> 0
+                GROUP BY member_id) t
            ON t.member_id = k.member_id AND t.mx = k.member_data_kyc_id`,
     );
 
