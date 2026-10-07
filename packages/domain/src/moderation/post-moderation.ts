@@ -78,11 +78,9 @@ export function moderationText(post: { title?: string | null; content: string })
   return toPlainText([post.title, post.content].filter(Boolean).join('\n'));
 }
 
-// The first balanced `{…}` in the text, string-aware so a brace inside the
-// model's `reason` does not end the object early.
-function firstJsonObject(text: string): string | null {
-  const start = text.indexOf('{');
-  if (start < 0) return null;
+// The balanced `{…}` that opens at `start`, string-aware so a brace inside the
+// model's `reason` does not end the object early. Null when it never closes.
+function balancedObjectAt(text: string, start: number): string | null {
   let depth = 0;
   let inString = false;
   for (let i = start; i < text.length; i += 1) {
@@ -105,25 +103,35 @@ function firstJsonObject(text: string): string | null {
  * about the verdict: `violation` must be a real boolean. Anything else returns
  * null, which the caller treats as an ERROR — a reply we could not read is
  * never an approval.
+ *
+ * Every `{` is tried, not just the first: a model that thinks out loud
+ * ("the post mentions {promo code}. Answer: {…}") would otherwise hide a
+ * perfectly readable verdict behind its own prose, and an unreadable reply is
+ * an ERROR, which fail-opens the post. The verdict is the first candidate that
+ * both parses AND carries a real boolean `violation`; a decoy object that
+ * merely looks like JSON is skipped rather than ending the search.
  */
 export function parseVerdict(text: unknown): ModerationVerdict | null {
   if (typeof text !== 'string') return null;
-  const raw = firstJsonObject(text);
-  if (!raw) return null;
-  let obj: unknown;
-  try {
-    obj = JSON.parse(raw);
-  } catch {
-    return null;
+  for (let start = text.indexOf('{'); start >= 0; start = text.indexOf('{', start + 1)) {
+    const raw = balancedObjectAt(text, start);
+    if (!raw) continue; // unclosed from here — a later `{` may still open a valid one
+    let obj: unknown;
+    try {
+      obj = JSON.parse(raw);
+    } catch {
+      continue;
+    }
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) continue;
+    const { violation, category, reason } = obj as Record<string, unknown>;
+    if (typeof violation !== 'boolean') continue;
+    return {
+      violation,
+      category: typeof category === 'string' && category.trim() ? category.trim() : null,
+      reason: typeof reason === 'string' ? reason.trim().slice(0, 500) : '',
+    };
   }
-  if (!obj || typeof obj !== 'object') return null;
-  const { violation, category, reason } = obj as Record<string, unknown>;
-  if (typeof violation !== 'boolean') return null;
-  return {
-    violation,
-    category: typeof category === 'string' && category.trim() ? category.trim() : null,
-    reason: typeof reason === 'string' ? reason.trim().slice(0, 500) : '',
-  };
+  return null;
 }
 
 function systemPrompt(categories: ModerationConfig['categories']): string {
@@ -205,6 +213,11 @@ export async function moderatePost(
   // Every write below goes through this guard. It re-reads the row inside the
   // UPDATE itself: an admin decision made in the backoffice while the model was
   // thinking (or another worker finishing first) matches 0 rows and wins.
+  //
+  // LOCK ORDER CONTRACT: this transaction takes `post_moderations` first and
+  // `posts` second. The backoffice takes the SAME two rows in the same order
+  // (lib/moderation-queries.ts `decidePostModeration`) — an admin clicking
+  // "Tolak" at the exact moment a check commits must not deadlock against it.
   const guard = {
     id: row.id,
     status: row.status,
@@ -227,10 +240,17 @@ export async function moderatePost(
     },
   });
   if (!post || post.isDeleted) {
-    // Nothing left to check; park the row so the job stops picking it up.
+    // Nothing left to check. Counted as a failed check like any other error, so
+    // the job parks the row after MODERATION_MAX_ATTEMPTS ticks — jumping
+    // `attempts` straight to the cap here would claim three tries that never
+    // happened. The two extra ticks cost two indexed lookups and no model call.
     await prisma.postModeration.updateMany({
       where: guard,
-      data: { status: 'ERROR', attempts: MODERATION_MAX_ATTEMPTS, lastError: 'post deleted before it was checked' },
+      data: {
+        status: 'ERROR',
+        attempts: { increment: 1 },
+        lastError: 'post deleted before it was checked',
+      },
     });
     return 'skipped';
   }

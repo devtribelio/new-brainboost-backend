@@ -43,6 +43,11 @@ describe('parseVerdict', () => {
     ['json code fence', '```json\n{"violation": true, "category": "Judi", "reason": "slot"}\n```', { violation: true, category: 'Judi', reason: 'slot' }],
     ['prose around the object', 'Here you go: {"violation":false,"category":null,"reason":"ok"} Hope it helps.', clean],
     ['a brace inside the reason', '{"violation":true,"category":"Judi","reason":"text says {win}"}', { violation: true, category: 'Judi', reason: 'text says {win}' }],
+    // The model thinking out loud: a brace in the prose must not hide the verdict
+    // behind it — an unreadable reply is an ERROR, which fail-opens the post.
+    ['a brace in the prose before the object', 'The post mentions {promo code}. Answer: {"violation":true,"category":"Judi","reason":"slot"}', { violation: true, category: 'Judi', reason: 'slot' }],
+    ['an unclosed brace in the prose before the object', 'Post says "use {code" ... {"violation":false,"category":null,"reason":"ok"}', clean],
+    ['a decoy object before the verdict', '{"note":"not a verdict"} {"violation":true,"category":"Judi","reason":"slot"}', { violation: true, category: 'Judi', reason: 'slot' }],
     ['missing reason and category', '{"violation":false}', { violation: false, category: null, reason: '' }],
     ['blank category', '{"violation":true,"category":"  ","reason":"x"}', { violation: true, category: null, reason: 'x' }],
   ])('reads %s', (_name, text, expected) => {
@@ -416,6 +421,30 @@ describe('tribe post moderation', () => {
       expect(await moderatePosts(new Date(), { postIds: [postId] })).toEqual({ approved: 0, rejected: 0, error: 0, skipped: 0 });
       expect(requests).toHaveLength(0);
       expect(await status(postId)).toBe('PUBLISHED');
+    });
+
+    it('counts a check on a deleted post as one failed attempt, not three', async () => {
+      const p = await prisma.post.create({
+        data: { authorId, topicId, content: `hapus ${uid()}`, imageUrls: [IMAGE], publishStatus: 'IN_REVIEW' },
+      });
+      await prisma.postModeration.create({ data: { postId: p.id, status: 'PENDING' } });
+      await prisma.post.update({ where: { id: p.id }, data: { isDeleted: true } });
+
+      expect(await moderatePost(p.id)).toBe('skipped');
+      expect(await row(p.id)).toMatchObject({
+        status: 'ERROR',
+        attempts: 1,
+        lastError: 'post deleted before it was checked',
+      });
+      expect(requests).toHaveLength(0);
+
+      // The job keeps ticking it (no model call, the post is gone) and parks it
+      // at the cap like any other repeated error.
+      await moderatePosts(new Date(), { postIds: [p.id] });
+      await moderatePosts(new Date(), { postIds: [p.id] });
+      expect(await row(p.id)).toMatchObject({ status: 'ERROR', attempts: 3 });
+      expect(await moderatePosts(new Date(), { postIds: [p.id] })).toEqual({ approved: 0, rejected: 0, error: 0, skipped: 0 });
+      expect(requests).toHaveLength(0);
     });
 
     it('picks up a PENDING post the inline check never reached, and tells followers', async () => {
