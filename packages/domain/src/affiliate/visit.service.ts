@@ -1,4 +1,5 @@
 import { prisma } from '@bb/db';
+import { resolveAffiliateCode } from './resolve-affiliate-code';
 import { logger } from '@bb/common/config/logger';
 
 export interface VisitInput {
@@ -72,7 +73,7 @@ export class VisitService {
         input.programCode
           ? prisma.affiliateProgram.findUnique({ where: { code: input.programCode } })
           : Promise.resolve(null),
-        prisma.member.findUnique({ where: { affiliateCode: input.affiliatorCode } }),
+        resolveAffiliateCode(input.affiliatorCode, { id: true }),
       ]);
 
       if (input.programCode && !program) {

@@ -1,5 +1,10 @@
 /* eslint-disable no-console, @typescript-eslint/no-explicit-any */
 /**
+ * DEPRECATED — refuses to run (see the guard below). It writes `inviterId` with no
+ * ownership gate (overwrites inviters the new app set, inviter_source='APP') and writes
+ * NULL over existing inviters. Use the tree resync instead:
+ *   pnpm resync tree [--dry-run] [--since=1970-01-01T00:00:00Z]
+ *
  * Backfill the affiliate upline tree onto migrated members.
  *
  *   pnpm tsx scripts/backfill-affiliate-tree.ts
@@ -20,6 +25,13 @@ import { existsSync, readFileSync } from 'node:fs';
 import type { RowDataPacket } from 'mysql2/promise';
 import { PrismaClient } from '@prisma/client';
 import { connectLegacyDb } from './legacy-db';
+
+console.error(
+  'backfill-affiliate-tree is DEPRECATED and disabled: it overwrites app-set inviters ' +
+    "(members.inviter_source='APP') and writes NULL over existing inviter links. " +
+    'Use `pnpm resync tree [--dry-run] [--since=1970-01-01T00:00:00Z]` instead.',
+);
+process.exit(1);
 
 const REDIRECT_PATH = 'scripts/member-redirect.json';
 

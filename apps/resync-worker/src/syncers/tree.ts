@@ -6,17 +6,37 @@
  *    Member.inviterId; plus affiliateBased + affiliateCode. Subject must be a migrated
  *    winner (we never overwrite a winner's inviter from a redirected loser's row).
  * B) program memberships: legacy member_product_affiliator → MemberAffiliator (key legacyId,
- *    unique (memberId, programId)); deleted/exit rides the `updated` watermark → isActive=false.
+ *    unique (memberId, programId)); a kick (status=0 + exit/delete stamps) rides the `updated`
+ *    watermark → isActive=false, and a re-join's NEW legacy row re-points the pair
+ *    (see ./affiliator-rules.ts).
  *
- * Tree is legacy-authoritative for migrated members (the new app doesn't edit referral
- * structure), so no new-wins gate here. See docs/legacy-resync-plan.md §6.
+ * Inviter writes are gated by members.inviter_source (see ./inviter-rules.ts): the tree
+ * only overwrites an inviter it owns (NULL / LEGACY_PARENT) — the new app writes
+ * inviterId too (register, affiliate connect → 'APP') and that wins. A parent that
+ * resolves to the subject itself (dedup alias) is climbed past; a candidate that would
+ * close a cycle is rejected. See docs/legacy-resync-plan.md §6.
  */
 import type { RowDataPacket } from 'mysql2/promise';
 import { resyncConfig } from '../config';
 import { emptyStats, type RunCtx, type Stats, type Syncer, type SyncerCtx } from '../types';
-import { bool, maxWatermark, nonEmpty, runConcurrent, sinceBound, toDate } from '../util';
+import { errCode, markReason, markSkip, nonEmpty, runConcurrent, sinceBound, toDate, WatermarkTracker } from '../util';
+import { decideAffiliatorWrite, isLegacyAffiliatorActive, prefersAffiliatorRow } from './affiliator-rules';
+import { syncLegacyAffiliateCode } from '../affiliate-code-sync';
+import { AFFILIATE_BASED_SOURCE, mayOverwriteAffiliateBased } from './affiliate-mode-rules';
+import {
+  CYCLE_CHECK_LEVELS,
+  INVITER_SOURCE,
+  MAX_CLIMB_HOPS,
+  chainHitsSubject,
+  mayOverwriteInviter,
+  pickInviter,
+  planInviterWrite,
+  type InviterPick,
+} from './inviter-rules';
 
 const PAGE = 5000;
+
+const legacyState = (r: any) => ({ status: r.status, exitState: r.exit_state, deleted: r.deleted, deleteAt: r.delete_at });
 
 /** Keep one row per key — the one with the largest watermark (last write wins, deterministic). */
 function dedupeByKey<T>(rows: T[], keyOf: (r: T) => string | number, stats: Stats): T[] {
@@ -29,37 +49,92 @@ function dedupeByKey<T>(rows: T[], keyOf: (r: T) => string | number, stats: Stat
     }
   }
   const out = [...best.values()];
-  stats.skipped += rows.length - out.length; // in-batch duplicates superseded by a newer row
+  // in-batch duplicates superseded by a newer row — normal, not a drop
+  markReason(stats, 'superseded_row', null, rows.length - out.length);
   return out;
 }
 
-/** legacy member_network.member_network_id (node) -> member_id, for the given nodes. */
-async function resolveNodes(ctx: RunCtx, nodeIds: number[]): Promise<Map<number, number>> {
-  const map = new Map<number, number>();
+interface LegacyNode {
+  memberId: number | null;
+  parentId: number | null;
+}
+
+/** legacy member_network.member_network_id (node) -> { member_id, parent_id }, for the given nodes. */
+async function fetchNodes(ctx: RunCtx, nodeIds: number[]): Promise<Map<number, LegacyNode>> {
+  const map = new Map<number, LegacyNode>();
   for (let i = 0; i < nodeIds.length; i += 5000) {
     const chunk = nodeIds.slice(i, i + 5000);
     if (!chunk.length) continue;
     const [rows] = await ctx.legacy.query<RowDataPacket[]>(
-      'SELECT member_network_id, member_id FROM member_network WHERE member_network_id IN (?)',
+      'SELECT member_network_id, member_id, parent_id FROM member_network WHERE member_network_id IN (?)',
       [chunk],
     );
-    for (const r of rows as any[]) if (r.member_id != null) map.set(Number(r.member_network_id), Number(r.member_id));
+    for (const r of rows as any[]) {
+      map.set(Number(r.member_network_id), {
+        memberId: r.member_id != null ? Number(r.member_id) : null,
+        parentId: r.parent_id != null ? Number(r.parent_id) : null,
+      });
+    }
   }
   return map;
+}
+
+/**
+ * Resolve the subject's legacy parent node to an inviter. When the node's member resolves
+ * to the subject itself (a dedup loser of the same person, or another node of the
+ * subject), climb to that node's parent, up to MAX_CLIMB_HOPS. `legacyChain` = legacy
+ * member ids visited, for the log line.
+ */
+async function resolveInviter(
+  ctx: RunCtx,
+  subjectId: string,
+  parentNodeId: number,
+  nodes: Map<number, LegacyNode>,
+): Promise<{ pick: InviterPick; legacyChain: Array<number | null> }> {
+  const ancestors: Array<string | undefined> = [];
+  const legacyChain: Array<number | null> = [];
+  let nodeId: number | null = parentNodeId;
+  for (let hop = 0; hop <= MAX_CLIMB_HOPS && nodeId != null; hop += 1) {
+    // direct parents are prefetched per chunk; climbed nodes are rare → fetched one by one
+    const node: LegacyNode | undefined = nodes.get(nodeId) ?? (await fetchNodes(ctx, [nodeId])).get(nodeId);
+    legacyChain.push(node?.memberId ?? null);
+    const memberId = node?.memberId != null ? ctx.resolveMember(node.memberId) : undefined;
+    ancestors.push(memberId);
+    if (memberId !== subjectId) break;
+    nodeId = node?.parentId ?? null;
+  }
+  return { pick: pickInviter(subjectId, ancestors), legacyChain };
+}
+
+/** True when `candidateId`'s PG inviter chain reaches `subjectId` within CYCLE_CHECK_LEVELS. */
+async function wouldCloseCycle(ctx: RunCtx, subjectId: string, candidateId: string): Promise<boolean> {
+  const rows = await ctx.prisma.$queryRaw<Array<{ inviterId: string | null }>>`
+    WITH RECURSIVE up AS (
+      SELECT inviter_id, 1 AS lvl FROM members WHERE id = ${candidateId}::uuid
+      UNION ALL
+      SELECT m.inviter_id, up.lvl + 1 FROM members m JOIN up ON m.id = up.inviter_id
+       WHERE up.lvl < ${CYCLE_CHECK_LEVELS}
+    )
+    SELECT inviter_id::text AS "inviterId" FROM up ORDER BY lvl`;
+  return chainHitsSubject(
+    subjectId,
+    rows.map((r) => r.inviterId),
+  );
 }
 
 /**
  * Inviter-chain sync for an explicit set of migrated legacy member ids.
  * Called by the syncer (all migrated ids, watermark-bounded) AND by the backfill pass
  * (just-created members, since=epoch — their member_network rows predate any watermark).
+ * Rows are folded into `wm` (the syncer's checkpoint; backfill passes none).
  */
 export async function syncInvitersScoped(
   ctx: RunCtx & { since: string | null },
   legacyIds: number[],
   since: Date,
   stats: Stats,
-): Promise<string | null> {
-  let watermark = ctx.since;
+  wm = new WatermarkTracker(),
+): Promise<void> {
 
   for (let i = 0; i < legacyIds.length; i += PAGE) {
     const idChunk = legacyIds.slice(i, i + PAGE);
@@ -73,18 +148,37 @@ export async function syncInvitersScoped(
     if ((rows as any[]).length === 0) continue;
 
     const parentIds = [...new Set((rows as any[]).map((r) => (r.parent_id != null ? Number(r.parent_id) : 0)).filter(Boolean))];
-    const nodeToMember = await resolveNodes(ctx, parentIds);
+    const nodes = await fetchNodes(ctx, parentIds);
 
     stats.scanned += (rows as any[]).length;
-    for (const r of rows as any[]) watermark = maxWatermark(watermark, toDate(r.wm));
+    for (const r of rows as any[]) wm.seen(toDate(r.wm));
     // a member can hold several member_network nodes → concurrent updates to the same
     // member would be last-write-wins by chance; keep only the newest row per member
     const subjects = dedupeByKey(rows as any[], (r: any) => Number(r.member_id), stats);
 
+    const subjectIds = subjects
+      .map((r: any) => ctx.memberByLegacy.get(Number(r.member_id)))
+      .filter((id): id is string => id !== undefined);
+    const current = new Map<
+      string,
+      { inviterId: string | null; inviterSource: string | null; affiliateBasedSource: string | null }
+    >();
+    for (const m of await ctx.prisma.member.findMany({
+      where: { id: { in: subjectIds } },
+      select: { id: true, inviterId: true, inviterSource: true, affiliateBasedSource: true },
+    })) {
+      current.set(m.id, {
+        inviterId: m.inviterId,
+        inviterSource: m.inviterSource,
+        affiliateBasedSource: m.affiliateBasedSource,
+      });
+    }
+
     await runConcurrent(subjects, resyncConfig.writeConcurrency, async (r: any) => {
       const subjectId = ctx.memberByLegacy.get(Number(r.member_id)); // migrated only (no create)
-      if (!subjectId) {
-        stats.skipped += 1;
+      const cur = subjectId ? current.get(subjectId) : undefined;
+      if (!subjectId || !cur) {
+        markSkip(stats, 'subject_not_migrated', r.member_id);
         return;
       }
       // legacy parent present but not resolvable to a Member yet? LEAVE the current
@@ -92,69 +186,108 @@ export async function syncInvitersScoped(
       // function runs BEFORE syncAffiliatorsScoped (the step that can materialise a
       // member), so an inviter first created later in the same run would wipe every
       // downline's chain — which is exactly how ~4k inviter links were lost on the
-      // 2026-07-09 run. Only a legacy row that genuinely has NO parent clears it.
-      let inviterId: string | undefined;
-      let unresolvedParent = false;
-      if (r.parent_id != null) {
-        const invMember = nodeToMember.get(Number(r.parent_id));
-        inviterId = invMember != null ? ctx.resolveMember(invMember) : undefined;
-        unresolvedParent = inviterId === undefined;
+      // 2026-07-09 run. A legacy row with NO parent leaves it alone too (never NULL over
+      // a non-null inviter); the only NULL ever written clears a self-inviter.
+      let pick: InviterPick | null = null;
+      let legacyChain: Array<number | null> = [];
+      if (r.parent_id != null && mayOverwriteInviter(cur.inviterSource)) {
+        ({ pick, legacyChain } = await resolveInviter(ctx, subjectId, Number(r.parent_id), nodes));
+      }
+      if (pick?.status === 'unresolved') {
+        // the row is still upserted (affiliateBased/code), so do NOT count it as skipped —
+        // that double count is exactly what the audit flagged. Record it for reconciliation.
+        markReason(stats, 'inviter_unresolved_parent', r.member_id);
+        void ctx.recordIssue?.('inviter_unresolved_parent', r.member_id, `parent_node=${r.parent_id}`);
+      }
+      const createsCycle = pick?.status === 'ok' ? await wouldCloseCycle(ctx, subjectId, pick.inviterId) : false;
+      const plan = planInviterWrite({ subjectId, current: cur, pick, createsCycle });
+      if (plan.reason) {
+        if (plan.reason === 'cycle' || plan.reason === 'self') {
+          markReason(stats, `inviter_${plan.reason}`, r.member_id);
+          void ctx.recordIssue?.(`inviter_${plan.reason}`, r.member_id, `parent_node=${r.parent_id}`);
+        }
+        const action = !plan.patch ? 'left as is' : plan.patch.inviterId ? `set ${plan.patch.inviterId}` : 'cleared self-inviter';
+        ctx.log(
+          `${plan.reason === 'climbed' ? 'INFO' : 'WARN'} inviter ${plan.reason}: legacy member=${r.member_id} ` +
+            `parent_node=${r.parent_id} legacy_chain=[${legacyChain.join(',')}] → ${action}`,
+        );
       }
       if (ctx.dryRun) {
         stats.upserted += 1;
         return;
       }
-      const base = {
-        ...(unresolvedParent ? {} : { inviterId: inviterId ?? null }),
-        affiliateBased: nonEmpty(r.affiliate_based) ?? 'PERFORMANCE',
-      };
-      if (unresolvedParent) stats.skipped += 1;
-      const code = nonEmpty(r.affiliator_code);
-      try {
-        await ctx.prisma.member.update({
-          where: { id: subjectId },
-          data: code ? { ...base, affiliateCode: code } : base,
-        });
-        stats.upserted += 1;
-      } catch (err: any) {
-        if (err?.code === 'P2002' && code) {
-          // affiliateCode collision — keep tree fields, drop the code
-          try {
-            await ctx.prisma.member.update({ where: { id: subjectId }, data: base });
-            stats.upserted += 1;
-          } catch {
-            stats.errors += 1;
-          }
-        } else {
+      if (plan.patch) {
+        try {
+          // atomic ownership gate: an inviter the app set after the read above wins, and a
+          // clear only ever clears the self value it was decided on
+          await ctx.prisma.member.updateMany({
+            where: {
+              id: subjectId,
+              OR: [{ inviterSource: null }, { inviterSource: INVITER_SOURCE.LEGACY_PARENT }],
+              ...(plan.patch.inviterId === null ? { inviterId: subjectId } : {}),
+            },
+            data: plan.patch,
+          });
+        } catch (err) {
           stats.errors += 1;
+          wm.failed(toDate(r.wm));
+          ctx.log(`ERROR write inviter member_network_id=${r.member_network_id}: ${errCode(err)}`);
+          return;
         }
+      }
+      const legacyBased = nonEmpty(r.affiliate_based);
+      try {
+        // never revert a mode the member chose in the app: only a NULL/LEGACY-sourced field
+        // is the tree's to write (audit 08 F8). An empty legacy value leaves it as is.
+        if (legacyBased && mayOverwriteAffiliateBased(cur.affiliateBasedSource)) {
+          await ctx.prisma.member.updateMany({
+            where: {
+              id: subjectId,
+              OR: [
+                { affiliateBasedSource: null },
+                { affiliateBasedSource: AFFILIATE_BASED_SOURCE.LEGACY },
+              ],
+            },
+            data: { affiliateBased: legacyBased, affiliateBasedSource: AFFILIATE_BASED_SOURCE.LEGACY },
+          });
+        }
+        // never replaces a code already on the member — a differing one becomes an alias
+        const action = await syncLegacyAffiliateCode(ctx.prisma, subjectId, nonEmpty(r.affiliator_code));
+        if (action === 'collision') {
+          ctx.log(`WARN affiliateCode collision: legacy member=${r.member_id} → code left as is`);
+        }
+        stats.upserted += 1;
+      } catch (err) {
+        stats.errors += 1;
+        wm.failed(toDate(r.wm));
+        ctx.log(`ERROR write tree member_network_id=${r.member_network_id}: ${errCode(err)}`);
       }
     });
   }
-  // checkpoint once after all chunks (interruption re-runs the bounded syncer idempotently)
-  return watermark;
 }
 
-async function syncInviters(ctx: SyncerCtx, since: Date, stats: Stats): Promise<string | null> {
+async function syncInviters(ctx: SyncerCtx, since: Date, stats: Stats, wm: WatermarkTracker): Promise<void> {
   // Only set inviter on ALREADY-migrated members. `member_network` is the GLOBAL affiliate
   // tree (~700k rows for the whole legacy base), NOT a brainboost-scope signal — so we scope
   // the scan to our migrated member_ids (PK-indexed IN) and NEVER create members here
   // (using ensureMember would materialise the entire legacy base). New brainboost members are
   // created by the scoped syncers (enrollments / tree-affiliators / posts / reviews); members
   // materialised AFTER this syncer ran are covered by the end-of-run backfill pass.
-  return syncInvitersScoped(ctx, [...ctx.memberByLegacy.keys()], since, stats);
+  return syncInvitersScoped(ctx, [...ctx.memberByLegacy.keys()], since, stats, wm);
 }
 
 /**
  * Program-membership sync. `memberLegacyIds` (backfill mode) narrows the scan to those
- * members' rows; undefined = watermark-driven full scan (the syncer).
+ * members' rows; undefined = watermark-driven full scan (the syncer). Rows are folded
+ * into `wm` (the syncer's checkpoint; backfill passes none).
  */
 export async function syncAffiliatorsScoped(
   ctx: RunCtx & { since: string | null },
   since: Date,
   stats: Stats,
   memberLegacyIds?: number[],
-): Promise<string | null> {
+  wm = new WatermarkTracker(),
+): Promise<void> {
   // linked brainboost programs: legacy napa_id -> AffiliateProgram.id
   const programByNapa = new Map<number, string>();
   for (const p of await ctx.prisma.affiliateProgram.findMany({
@@ -164,20 +297,19 @@ export async function syncAffiliatorsScoped(
     if (p.legacyId !== null) programByNapa.set(p.legacyId, p.id);
   }
   const napaIds = [...programByNapa.keys()];
-  if (!napaIds.length) return ctx.since;
-  if (memberLegacyIds && !memberLegacyIds.length) return ctx.since;
+  if (!napaIds.length) return;
+  if (memberLegacyIds && !memberLegacyIds.length) return;
 
   // MemberAffiliator carries both a legacyId unique AND a (memberId,programId) unique —
   // upserting on legacyId can collide on the pair (loser+winner in the same program).
   // Decide update/create/skip in memory so no P2002 is thrown.
-  const byPair = new Map<string, { id: string; legacyId: number | null }>();
+  const byPair = new Map<string, { id: string; legacyId: number | null; isActive: boolean }>();
   for (const a of await ctx.prisma.memberAffiliator.findMany({
-    select: { id: true, memberId: true, programId: true, legacyId: true },
+    select: { id: true, memberId: true, programId: true, legacyId: true, isActive: true },
   })) {
-    byPair.set(`${a.memberId}|${a.programId}`, { id: a.id, legacyId: a.legacyId });
+    byPair.set(`${a.memberId}|${a.programId}`, { id: a.id, legacyId: a.legacyId, isActive: a.isActive });
   }
 
-  let watermark = ctx.since;
   for (let i = 0; i < napaIds.length; i += 500) {
     const chunk = napaIds.slice(i, i + 500);
     const memberFilter = memberLegacyIds ? ' AND naa.member_id IN (?)' : '';
@@ -186,7 +318,7 @@ export async function syncAffiliatorsScoped(
       `SELECT mpa.member_product_affiliator_id AS mpa_id,
               mpa.network_account_product_affiliator_id AS napa_id,
               naa.member_id AS member_id,
-              mpa.exit_state, mpa.exit_date, mpa.deleted,
+              mpa.status, mpa.exit_state, mpa.exit_date, mpa.deleted, mpa.delete_at,
               COALESCE(mpa.\`updated\`, mpa.\`created\`) AS wm
          FROM member_product_affiliator mpa
          JOIN network_account_affiliator naa
@@ -195,16 +327,30 @@ export async function syncAffiliatorsScoped(
           AND COALESCE(mpa.\`updated\`, mpa.\`created\`) > ?${memberFilter}`,
       params,
     );
+    // one row per legacy (winner member, program) pair — see prefersAffiliatorRow
+    const pairWinner = new Map<string, { legacyId: number; isActive: boolean }>();
+    for (const r of rows as any[]) {
+      const key = `${ctx.redirect.get(Number(r.member_id)) ?? Number(r.member_id)}|${r.napa_id}`;
+      const cand = { legacyId: Number(r.mpa_id), isActive: isLegacyAffiliatorActive(legacyState(r)) };
+      const prev = pairWinner.get(key);
+      if (!prev || prefersAffiliatorRow(cand, prev)) pairWinner.set(key, cand);
+    }
+    const applied = new Set([...pairWinner.values()].map((w) => w.legacyId));
     await runConcurrent(rows as any[], resyncConfig.writeConcurrency, async (r: any) => {
       stats.scanned += 1;
-      watermark = maxWatermark(watermark, toDate(r.wm));
+      wm.seen(toDate(r.wm));
+      if (!applied.has(Number(r.mpa_id))) {
+        markReason(stats, 'superseded_row', r.mpa_id); // superseded by another legacy row for the pair
+        return;
+      }
       const programId = programByNapa.get(Number(r.napa_id));
       const memberId = await ctx.ensureMember(Number(r.member_id));
       if (!programId || !memberId) {
-        stats.skipped += 1;
+        markSkip(stats, 'affiliator_program_missing', r.mpa_id);
+        void ctx.recordIssue?.('affiliator_program_missing', r.mpa_id, `napa_id=${r.napa_id}`);
         return;
       }
-      const isActive = !bool(r.deleted);
+      const isActive = isLegacyAffiliatorActive(legacyState(r));
       if (!isActive) stats.voided = (stats.voided ?? 0) + 1;
       if (ctx.dryRun) {
         stats.upserted += 1;
@@ -216,28 +362,33 @@ export async function syncAffiliatorsScoped(
       // read-decide-claim is one synchronous block (no await inside) so a concurrent row
       // for the same pair deterministically sees the claim and skips instead of racing.
       const existing = byPair.get(pairKey);
-      if (!existing) byPair.set(pairKey, { id: 'new', legacyId });
+      // a placeholder = another row's create for this pair is in flight → leave it be
+      const write = existing?.id === 'new' ? 'skip' : decideAffiliatorWrite(existing, { legacyId, isActive });
+      if (write !== 'skip') byPair.set(pairKey, { id: existing?.id ?? 'new', legacyId, isActive });
       try {
-        if (existing) {
-          // pair already joined → update its state only when this row IS that join (same
-          // legacyId); a different legacyId for the same pair is a dup → skip.
-          if (existing.legacyId === legacyId) {
-            await ctx.prisma.memberAffiliator.update({ where: { id: existing.id }, data: fields });
-            stats.upserted += 1;
-          } else {
-            stats.skipped += 1;
-          }
+        if (write === 'skip') {
+          markReason(stats, 'affiliator_write_skip', legacyId);
+        } else if (existing) {
+          // refresh: this row IS the pair's join; repoint: a re-join wrote a newer legacy row
+          const data = write === 'repoint' ? { legacyId, ...fields } : fields;
+          await ctx.prisma.memberAffiliator.update({ where: { id: existing.id }, data });
+          stats.upserted += 1;
         } else {
           await ctx.prisma.memberAffiliator.create({ data: { legacyId, memberId, programId, ...fields } });
           stats.upserted += 1;
         }
       } catch (err: any) {
-        if (err?.code === 'P2002') stats.skipped += 1;
-        else stats.errors += 1;
+        if (err?.code === 'P2002' && write !== 'repoint') {
+          markSkip(stats, 'unique_clash', legacyId);
+        } else {
+          // a re-point colliding on legacyId is a lost re-join, not a duplicate — retry it
+          stats.errors += 1;
+          wm.failed(toDate(r.wm));
+          ctx.log(`ERROR write member_product_affiliator_id=${legacyId} (${write}): ${errCode(err)}`);
+        }
       }
     });
   }
-  return watermark;
 }
 
 export const treeSyncer: Syncer = {
@@ -245,10 +396,12 @@ export const treeSyncer: Syncer = {
   async run(ctx: SyncerCtx): Promise<Stats> {
     const stats = emptyStats();
     const since = sinceBound(ctx.since);
-    const wmA = await syncInviters(ctx, since, stats);
-    const wmB = await syncAffiliatorsScoped(ctx, since, stats);
-    const watermark = maxWatermark(wmA, wmB ? new Date(wmB) : null);
-    if (watermark && !ctx.dryRun) await ctx.checkpoint(watermark);
+    // one tracker over both tables; the runStart cap keeps the merge safe (a row changed in
+    // the first table while the second was scanning is re-scanned next run)
+    const wm = new WatermarkTracker();
+    await syncInviters(ctx, since, stats, wm);
+    await syncAffiliatorsScoped(ctx, since, stats, undefined, wm);
+    await ctx.checkpoint(wm.result(ctx.runStart));
     return stats;
   },
 };

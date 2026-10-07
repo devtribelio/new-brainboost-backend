@@ -49,3 +49,11 @@ reason = "js-yaml — pulled only by eslint/@eslint/eslintrc (dev), not in the p
 # pnpm.overrides (`brace-expansion@<2.0.0` -> ^1.1.18, `>=2.0.0 <5.0.9` -> ^5.0.9),
 # so the advisory no longer matches anything and osv-scanner reported the entry as
 # an unused ignore. Fixed, not silenced — keep it that way.
+
+# --- tinypool (vitest worker pool; fix needs vitest 3+/4 — re-triage with the vitest bump) ---
+[[IgnoredVulns]]
+id = "GHSA-5gmw-xhrv-c9v3"
+reason = "tinypool — vitest test tooling only (devDependency), not in the production tree"
+[[IgnoredVulns]]
+id = "GHSA-85c8-ppgw-ccpr"
+reason = "tinypool — vitest test tooling only (devDependency), not in the production tree"

@@ -30,9 +30,6 @@ const dryRun = process.argv.includes('--dry-run');
 function log(msg: string) {
   console.log(`[${new Date().toISOString().slice(11, 19)}] [migrate-member-affiliators] ${msg}`);
 }
-function bool(v: any): boolean {
-  return v === 1 || v === true || v === '1';
-}
 function toDate(v: any): Date | null {
   if (!v) return null;
   const d = v instanceof Date ? v : new Date(v);
@@ -90,7 +87,7 @@ async function main() {
         `SELECT mpa.member_product_affiliator_id AS mpa_id,
                 mpa.network_account_product_affiliator_id AS napa_id,
                 naa.member_id AS member_id,
-                mpa.exit_state, mpa.exit_date, mpa.deleted, mpa.created
+                mpa.status, mpa.exit_state, mpa.exit_date, mpa.deleted, mpa.delete_at, mpa.created
            FROM member_product_affiliator mpa
            JOIN network_account_affiliator naa
              ON naa.network_account_affiliator_id = mpa.network_account_affiliator_id
@@ -117,7 +114,9 @@ async function main() {
           legacyId: Number(r.mpa_id),
           memberId,
           programId,
-          isActive: !bool(r.deleted),
+          // live = status > 0 and no exit/delete stamp (a kick sets status=0 + KICK + delete_at;
+          // `deleted` is a DATETIME, not a flag) — same rule as resync-worker affiliator-rules.ts
+          isActive: Number(r.status) > 0 && !r.exit_state && !toDate(r.deleted) && !toDate(r.delete_at),
           exitState: r.exit_state ? String(r.exit_state) : null,
           exitAt: toDate(r.exit_date),
         });

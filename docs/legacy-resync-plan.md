@@ -80,8 +80,10 @@ All 7 syncers implemented and validated end-to-end:
   post/comment counters), so the column self-heals after any out-of-app write — the
   auto-join above, a manual SQL backfill, or the one-shot migrate script.
 - **Lock heartbeat (implemented):** the run refreshes the `__lock__` stamp after each
-  syncer, so a run longer than the TTL (4-5h first run vs 2h default) can't be taken over
-  mid-write; a lost heartbeat aborts the remaining syncers instead of double-writing.
+  syncer **and on a timer while a syncer runs** (`lockTtlSec/3`, min 30s — a syncer's only
+  checkpoint is at its end, and the first members/posts pass can exceed the TTL), so a run
+  longer than the TTL (4-5h first run vs 2h default) can't be taken over mid-write; a lost
+  heartbeat aborts the remaining syncers instead of double-writing.
 - **members raw UPDATE tz fix (implemented):** `updated_at`/`legacy_synced_at` are now an
   app-side `Date` param (was server `now()`): the columns are tz-less `timestamp` filled
   with app-clock UTC by Prisma everywhere else — a non-UTC server TimeZone or app↔DB
@@ -202,6 +204,21 @@ in the batch. To avoid skipping rows that share the boundary second, the next qu
 `>= :watermark` combined with a processed-PK guard, or `> :watermark` with a 1-second
 overlap re-scan (cheap, upsert is idempotent so re-processing a few boundary rows is safe).
 
+**Checkpoint rule (2026-10-06, `WatermarkTracker` in `apps/resync-worker/src/util.ts`):**
+`checkpoint = min(maxSeen, runStart, earliestFailed − 1s)`, and **no checkpoint at all when
+nothing was scanned**. `runStart` = legacy clock (`legacyNow()`: `UTC_TIMESTAMP()` rendered in
+`LEGACY_DB_TIMEZONE`, so it decodes like an `updated` value) read before the syncer's first
+query — a row changed in an already-scanned chunk / sub-query / table during a long run is
+re-scanned next tick instead of skipped. A row whose WRITE threw holds the checkpoint below
+it (logged `ERROR write <pk>=<id>: <code>`, code only — no row data); intentional skips
+(out of scope, guard-blocked, known P2002 collisions) still advance. Consequence: a row that
+fails on every run pins its syncer — each tick re-scans from that row onward (idempotent,
+but slower) and logs the same `ERROR write` line; fix the cause, or move the watermark past
+it by hand (`UPDATE sync_state SET watermark = … WHERE syncer = …`). A `--since` newer than
+the stored watermark never moves it forward (the gap below `--since` was not scanned), so it
+cannot be used to skip ahead. `checkpoint()` also refreshes the run-lock heartbeat and stops
+the syncer if the lock was taken over.
+
 ---
 
 ## 4. New schema (additive — hand-written SQL + `prisma migrate deploy`)
@@ -293,26 +310,33 @@ new-system state.
 ### members — **new-wins-on-touch**
 - Only touch rows with `legacyId != null`. Rows with `legacyId = null` (registered in the
   new app) are **never** touched.
-- Add `legacySyncedAt`. On each run, for a candidate member:
-  - if `member.updatedAt <= legacySyncedAt` (no app-side write since last sync) →
-    **overwrite** the legacy-owned fields, then set `legacySyncedAt` = the same write
-    timestamp (raw upsert sets `updated_at = now()` and `legacy_synced_at = now()` in one
-    statement so they stay equal → next run sees "untouched" unless the app writes).
-  - if `member.updatedAt > legacySyncedAt` (user changed something in the new app) →
-    **skip** the legacy-owned fields (new wins). Still allowed: `isActive=false` from
-    `is_deleted=1` (deactivation always propagates).
-  - first ever sync (`legacySyncedAt IS NULL`) → treat as legacy-owned (overwrite).
-- **Legacy-owned fields** (subject to overwrite when untouched): `fullName`, `avatarUrl`,
-  `bio`, `gender`, `birthdate`, `isActive` (from `is_active && !is_deleted`),
+- **Per-field gate on app-edit markers (2026-10-06, replaces the `updatedAt > legacySyncedAt`
+  touch-gate).** `updatedAt` is Prisma `@updatedAt` — every write bumps it (push counters,
+  `lastActiveAt`, `lastTopicDigestAt`, the resync's own tree/kyc writes) — so 64,360/64,366
+  migrated members read as touched and legacy password/profile/reactivation stopped flowing
+  (1,004 members locked out of a legacy-reset password). Now `members.profile_updated_at` /
+  `password_updated_at` are set ONLY by member-initiated app edits (profile update;
+  change-password, forgot-password reset, claim), and `planMemberSync`
+  (`apps/resync-worker/src/syncers/member-rules.ts`) decides per field:
+  - profile (`fullName`/`avatarUrl`/`bio`) → overwritten while `profile_updated_at IS NULL`;
+  - password → overwritten while `password_updated_at IS NULL` (NULL legacy password never
+    clobbers). The lazy md5→bcrypt rehash on login does NOT set the marker (same password);
+  - `isActive` → follows legacy both ways, except no reactivation over an app
+    `scheduledDeletionAt`.
+  `legacySyncedAt` is still stamped (provenance only). Migration
+  `20261006120000_member_app_edit_markers` backfills the markers only for app-active
+  (`last_active_at` not null) legacy members (password: only bcrypt rows) — a member who
+  never opened the app follows legacy.
+- **Legacy-owned fields**: `fullName`, `avatarUrl`,
+  `bio`, `isActive` (from `is_active && !is_deleted`),
   `passwordHash`/`passwordAlgo` (see below).
 - **Never legacy-owned** (app or other syncers own these):
   `email`/`phone`/`*Verified` (identity — touching unique cols on a live account is risky;
   leave to a deliberate later pass), all `kyc*`, all `bank*`, `affiliateCode`/`code`,
   `inviterId`/`affiliateBased` (owned by the **tree** syncer).
 - **Password (2026-08-21):** legacy still accepts registrations + resets during cutover, so
-  `member.password` rides the same touch-gate — a new-app change-password or the lazy
-  md5→bcrypt rehash on login bumps `updatedAt`, marking the row touched, after which legacy
-  never overwrites it again. A NULL/empty legacy password is a no-op (`COALESCE`), never a
+  `member.password` is propagated until `password_updated_at` is set by an app password
+  write (see the per-field gate above). A NULL/empty legacy password is a no-op (`COALESCE`), never a
   clobber of a real hash with the social sentinel. **`passwordAlgo` is DERIVED from the hash
   shape** (`detectPasswordAlgo`, `@bb/common/utils/password-algo.util`), never assumed — see
   §6.1.
@@ -339,6 +363,11 @@ new-system state.
   with a new-app placeholder (`legacyId=null`) → **adopt** it (stamp `legacyId` + profile);
   no collision → fresh create. The in-run `redirect`/`memberByLegacy` maps are mutated so
   later syncers resolve the new id; counts logged as `created/redirected/adopted`.
+- **Redirect resolution is transitive (2026-10-06).** `member_redirect` is normally one hop,
+  but a manual seed or a split/merge can leave A→B→C; `flattenRedirects` (`util.ts`, applied in
+  `core.ts`, `fix-dates.ts`, `identity.ts`, `code-aliases.ts`) collapses every chain to its
+  terminal winner (and folds a cycle onto one node) so a loser never resolves to an
+  intermediate loser that has no member row.
 
 ### 6.1 `passwordAlgo` is derived from the hash, never assumed
 
@@ -397,6 +426,27 @@ excluded outright so a social-only account can never acquire an algo that authen
   pnpm resync enrollments --dry-run --since=1970-01-01T00:00:00Z   # count first
   pnpm resync enrollments --since=1970-01-01T00:00:00Z
   ```
+- **Re-enrolment, cancel guard, reactivation, scope (fixed 2026-10-05).** Legacy writes a
+  NEW `course_enrollment` row (new legacyId) when a member re-enrols — typically buying
+  after the free trial expired. The pair here was still held by the old legacyId, so the
+  new row was skipped and the later removal of the old row cancelled a paying buyer
+  (measured: 53 paid enrollments / 8 members cancelled 2026-09-29). Rules now in
+  `apps/resync-worker/src/syncers/enrollment-rules.ts` (table-driven spec in
+  `apps/resync-worker/tests/`):
+  - **Re-point:** an active incoming row whose pair is held by a *different* legacyId that
+    is cancelled or past `expired_date` takes over that PG row (`legacyId` = new,
+    un-cancelled, `expiredDate` = new row's, `progress` = max). A live row or a new-system
+    row (`legacyId = null` — app purchase, employee grant) is still skipped.
+  - **Cancel guard:** a `status = 0` row cancels only if it holds the pair AND legacy has no
+    other active (status 1 + access) row for that course on any redirect-linked legacy
+    member id AND the member has no `PAID` `commerce_transactions` order for the course's
+    product.
+  - **Reactivation:** same legacyId back to `status = 1` lifts a `legacy_removed` cancel
+    (never a refund cancel).
+  - **Scope:** `course.client = 'brainboost'` OR a SUCCESS `course_payment` with
+    `client_product = 'brainboost'` (course 6659 has `client` NULL). In-scope courses with
+    no PG `Course` row are logged each run (`in-scope legacy courses with no PG course`).
+  - Heal = the same full pass as below (dry-run first).
 - **`is_canceled` is deliberately NOT mapped.** The legacy column exists but is never
   written: 0 rows carry `is_canceled = 1`. `status` is the real cancel marker.
 - `expired_date` is copied as-is and now *means something* on this side: access gates
@@ -425,12 +475,54 @@ excluded outright so a social-only account can never acquire an algo that authen
   [memberId, programId]`). Re-point through `member_redirect`.
 - `member_product_affiliator.deleted / exit_date / exit_state` rides the `updated`
   watermark → deactivate the join row in the same pass.
-- Only set `inviterId` if currently null OR the member is still legacy-owned (untouched),
-  to avoid fighting any new-app referral.
+- **Inviter ownership = `members.inviter_source`** (migration `20261006130000_member_inviter_source`,
+  2026-10-06): `LEGACY_PARENT` (tree resync) | `LEGACY_CONNECT` (reserved for the
+  `member_network_connect` sync, PRD P0-1) | `APP` (register / pre-reg carry-over / social /
+  `affiliateConnect`) | NULL (no inviter / unknown). The tree pass writes `inviterId` only over
+  NULL or `LEGACY_PARENT` (atomic `updateMany` gate), stamps `LEGACY_PARENT`, and **never writes
+  NULL over a non-null inviter** — a legacy row with no parent leaves the value alone. Before this
+  the pass overwrote app-set inviters unconditionally, including to NULL (audit 07 #5).
+- **Self / cycle guard** (`inviter-rules.ts`, PRD P0-4): a parent that is a dedup-loser alias of
+  the subject resolves to the subject itself (legacy 424829 → itself, real upline 57). The pass
+  climbs past such aliases (≤ 5 hops) to the first ancestor that is someone else; still self →
+  clear a stored self-inviter + `WARN inviter self`. A candidate whose own 4-level `inviter_id`
+  chain reaches the subject is rejected (`WARN inviter cycle … left as is`) — an already stored
+  mutual pair (641626 ↔ 641123) is therefore NOT auto-repaired; decide by hand.
+- `scripts/backfill-affiliate-tree.ts` is disabled (exits 1): it wrote NULL inviters and read the
+  stale redirect JSON. Use `pnpm resync tree`.
+
+### programs — incremental (PRD P1 #11)
+- `network_account_product_affiliator` (`productable LIKE '%Course%'`, in-scope BB courses) →
+  `AffiliateProgram` keyed `legacyId`, same shape as `migrate-from-legacy.ts::migrateAffiliatePrograms`
+  + `backfill-affiliate-program-product.ts` (`PROG-<id>`, napa name, product via
+  `Course.legacyCourseId`, `isActive=true`). Creates missing programs and links an unlinked one;
+  never re-activates/renames/re-points a linked program. No product → logged, never created.
+- Runs **before tree** (tree only syncs joins of linked programs). Joins of a newly linked
+  program predate the tree watermark → after a run that logs `program(s) newly linked`, force
+  `pnpm resync tree --since=1970-01-01T00:00:00Z` once (dry-run first).
+
+### connect — incremental (PRD P0-1, option C decided 2026-10-06)
+- `member_network_connect` → `inviter_id` with source `LEGACY_CONNECT` (`syncers/connect.ts`,
+  rules in `connect-rules.ts`; `CONNECT_VARIANT = 'C'`), runs after `treeSyncer`. Option C:
+  a member whose connect differs from its legacy parent AND has downlines keeps the parent
+  (WARN `downlines`, review list) so L2–L4 of its downlines match legacy; never flipped back
+  once applied. Tree never overwrites `LEGACY_CONNECT`; connect never overwrites `APP`.
+- Removal (status=0) reverts a `LEGACY_CONNECT` inviter to the resolved legacy parent
+  (`LEGACY_PARENT`); no usable parent → cleared only if it still equals the removed connect.
+
+### pra-members — NOT synced (decided 2026-10-06)
+- Legacy `pra_member` is dead: `MemberPraRegister` is `@deprecated 2.5`, the table holds
+  1 267 rows and the newest was created 2020-06-19. A carry-over window of any sane length
+  (30 days) would never match a row, so no syncer and no `PraMember.legacy_id` column were
+  added (audit P2 "pra_member.ref_id tidak di-sync" closed as not needed).
 
 ### reviews — incremental
-- `product_review` `WHERE COALESCE(updated,created) > :watermark`, key `legacyId`, upsert.
-  Needs product + member to exist (skip otherwise).
+- `product_review` `WHERE status=1 AND productable_type='TBModel_Course' AND
+  COALESCE(updated,created) > :watermark`, upsert on `@@unique(productId, memberId)`. The type
+  filter is required: a Bundle/Digital/Book review can share a numeric `productable_id` with a
+  migrated `Product.legacyId`. Needs product + member to exist (skip otherwise).
+- **Gap:** `Review` has no legacyId/app-edit marker, so a re-scan overwrites `stars`/`comment`
+  an app user edited — needs a provenance column before it can be guarded.
 
 ### posts + comments + replies + likes — incremental
 - Reuse `migrate-network-posts` upsert-by-`legacyId` logic (already upserts).
@@ -462,7 +554,9 @@ excluded outright so a social-only account can never acquire an algo that authen
 ```
 members → enrollments
         → kyc
+        → programs (affiliate programs of new BB courses)
         → tree (inviter + member-affiliators)
+        → connect (P0-1 option C; after tree)
         → commissions   (needs recipient member + program)
         → reviews       (needs member)
         → posts→comments→replies→likes   (needs member; posts before comments before likes)
@@ -504,4 +598,121 @@ preserve post→comment→reply→like ordering.
    to brainboost because creation only fires when a brainboost-scoped row references the
    member. Wiring + no-regression validated on bb_trial (dry-run errors=0); a full create
    test needs a genuinely-new legacy member or a delete-and-recreate on a throwaway DB.
-```
+
+---
+
+## 10. Batch audit fixes 07/08 (2026-10-06, P1/P2)
+
+Implemented together with the P0 PRD; each has unit tests under `apps/resync-worker/tests/`.
+
+- **`affiliateBased` provenance (`member.affiliate_based_source`).** The tree pass used to write
+  `affiliateBased` unconditionally, reverting a PERFORMANCE/GROWTH switch the member made in the
+  app (`AffiliatorService.setMode`, which now stamps source `APP`). Migration
+  `20261008120000_member_affiliate_based_source` backfills legacy rows `LEGACY` / app rows `APP`;
+  the tree writes only over NULL/`LEGACY` (`affiliate-mode-rules.ts`).
+- **Adopt fill-if-null (`adopt-rules.ts`).** `ensureMember`'s adopt path no longer overwrites an
+  app placeholder's profile/verification/activation: identity + profile fill only when empty,
+  `isActive`/verified only ever raised, bank only when absent; a P2002 conflict drops that field
+  from the write instead of nulling it.
+- **Commission mode + update refresh (`commissions.ts`).** A NULL legacy `affiliate_based` at
+  level ≥2 resolves to GROWTH (PERFORMANCE pays L1 only); the update branch now also refreshes
+  `recipientId`/`level`/`affiliateBased`, so a forced re-scan or a redirect/split heals old rows
+  (migrated rows have `paymentId = null`, so the unique key cannot collide).
+- **Split hands borrowed KYC back (`identity.ts`).** After `resync:identity split`, a winner whose
+  KYC came from the loser (no own legacy KYC, source `LEGACY`) is reset to `NONE` and its
+  KYC-sourced bank cleared — a pair that are different people no longer keeps the other's KYC.
+- **Enrollment revoked when the payment is no longer SUCCESS (`enrollments.ts`).** The scan now
+  also rides `course_payment.updated` / `product_bundle_payment.updated` (legacy bumps only the
+  payment on a refund/failed settlement). An active enrollment whose entitlement is gone is
+  cancelled with reason `legacy_payment_revoked` (safely lifted again if legacy re-grants).
+  Repair existing rows with a forced `pnpm resync enrollments --since=1970-01-01T00:00:00Z`.
+- **Foreign phone preserved on legacy import (`normalizeLegacyPhonePair`).** Legacy numbers already
+  in E.164 (`+27…`, `+852…`) were re-prefixed with `+62`, producing an undeliverable OTP target.
+  The legacy importers (`ensureMember`, `identity split`, `migrate-members`, `migrate-from-legacy`)
+  now split on the number's own dial code. **Existing 1 428 corrupted rows need a one-off repair**
+  (audit `02-member-identity/telepon-luar-negeri-salah-normalisasi.csv`); the `+27 8xx` ones are
+  flagged "mungkin nomor Indonesia" — decide by hand, do not guess.
+
+---
+
+## 11. Inviter correction + skip observability (2026-10-06)
+
+- **Inviter correction tool (`pnpm repair:inviter`).** One-off, whitelisted repair of the
+  redirect-collapse rows (`apps/resync-worker/src/repair-inviter.ts`, rules in
+  `inviter-correction-rules.ts`): 424829 → 57, 409824 → NULL, 641123 → NULL (half of the mutual
+  cycle 641626 ↔ 641123 — the tree guard refuses cycles, so it can never fix it), 390754 → 57
+  (`--allowAppOwned` override — its inviter was set by the app to the "Juna (DEV)" test account).
+  Dry-run by default (`--apply` to write); each row prints its legacy `member_network` parent
+  chain, the current/proposed inviter, and runs the same 4-level cycle check; the write is gated
+  on the values it read (optimistic `updateMany`, no-op if the row moved). After `--apply`, run a
+  forced tree rescan so the corrected uplines propagate:
+  `pnpm resync tree --dry-run --since=1970-01-01T00:00:00Z` then without `--dry-run`.
+- **Skip observability (`stats.skipReasons` / `skipSamples`).** `Stats` gains a reason breakdown
+  so the single `skipped` bucket (audit 07 #13: "mixes out-of-scope with data likely lost") is no
+  longer opaque. `markSkip(stats, reason, pk?, count?)` counts a dropped row; `markReason(...)`
+  counts a partial skip WITHOUT incrementing `skipped` — used where a row is still written
+  (e.g. the tree upserts `affiliateBased`/code but cannot resolve the inviter parent, which the
+  audit flagged as counted *both* skipped and upserted). Up to 5 example PKs are kept per reason,
+  and `core.ts` logs `skip[reason=count …]` on the per-syncer line. Wired across members, tree,
+  connect, enrollments, commissions, kyc, programs, reviews, posts and the new-member backfill.
+- **`sync_issue` table + `ctx.recordIssue`.** Migration `20261008130000_sync_issue` adds the
+  reconciliation list keyed `(syncer, legacy_pk, reason)` with `occurrences`/`first_seen_at`/
+  `last_seen_at`/`resolved_at`. `ctx.recordIssue(reason, pk, detail)` upserts (never throws, no-op
+  on a dry run) and is called ONLY for "needs attention" reasons — unresolved parent/member,
+  guard-blocked, not-mapped course — never for the bulk out-of-scope traffic. A skipped row still
+  advances the watermark, so this table is the only trace it leaves.
+
+### TODO (not implemented): delta commission repair (PRD §8)
+
+`pnpm repair:commission` only selects orders that have **no** commission row at all
+(`NOT EXISTS` in `scanTargets`), then re-runs the engine. Two audit groups are already past
+that filter because they DO have rows: the **7 misrouted** orders (paid to the parent instead
+of the connect affiliator, ≈Rp 250 rb) and the **65 chain-cut** orders (L1 paid, upper levels
+missing, ≈Rp 1,61 jt). The 248 "LOST" orders need no delta — once P0-1 gives them an
+`inviter_id` they are picked up by the existing path.
+
+Planned: a `--delta` mode that selects orders with `EXISTS`, recomputes the chain/rates with
+the same helpers (`walkInviterChain` / `getPerformanceTier` / `computeAmount`), and reconciles
+per `(recipientId, level)` — INSERT when the level is missing, UPDATE the existing row when it
+is underpaid (the engine cannot: its `create` hits the `uniq_payment_recipient_level` unique and
+the P2002 is swallowed), never claw back an overpayment (§1.2 — report only), `--backdate` for
+the PENDING→BALANCE hold window. Must run **after** P0-1 + P0-4 are deployed and the tree has
+been rescanned, or the delta is computed from the old (wrong) seed.
+
+Open decisions before coding:
+1. delta marker — `channel='adjustment'` (overloads `channel`, which means payment channel today,
+   and there is a `[status, channel]` index used for finance reporting) **or** a dedicated column
+   + migration?
+2. an underpaid row already `BALANCE`/withdrawn — auto-update (double-pay risk) **or** insert the
+   missing levels only and flag the row for manual review?
+3. keep web/Xendit only (`provider IS NULL`), or also ingested orders (RevenueCat/Scalev/Lynk.id)
+   that are gated by `affiliate_attribution_claims`?
+
+Proposed default (pending confirmation): `channel='adjustment'`; insert-only plus auto-update for
+`PENDING` rows; web/Xendit only.
+
+## Audit journal (`--audit-csv`) and the enrollment cancel export
+
+Repair runs are reviewed before they write and traced back after, so both are supported:
+
+- **`pnpm resync <syncer> --dry-run --audit-csv=<path>`** (or bare `--audit-csv` for a
+  timestamped default name) writes a CSV journal from the syncer itself — one row per decision
+  (`cancel` / `create` / `refresh` / `uncancel` / `repoint` / `skip` / `error`) with `run_id`,
+  `mode` (dry-run vs apply), `reason`, ids, PII (`member_email`, `member_phone`) and
+  `before`/`after` JSON, so a wrong cancel/grant can be reversed by hand
+  (`update course_enrollment set is_canceled=false, cancelation_reason=null where legacy_id in (…)`).
+  **Opt-in and one-shot only** — the periodic worker never sets `auditCsv`, so production ticks
+  write nothing. Implementation: `src/change-log.ts`, wired in `core.ts`/`run.ts`, instrumented in
+  `syncers/enrollments.ts`. A journal file is appended to (header written once), so use a fresh
+  path per run or the default timestamped name.
+- **`pnpm export:enrollment-cancels --out=<path>`** — standalone read-only export of every legacy
+  `course_enrollment` with `status = 0` in brainboost scope, with `tanggal` / `status` /
+  `tanggal_dicabut` / `alasan_dicabut` (+ payment, sibling-active and paid-order columns) and an
+  `aksi` column (`would_cancel` vs `skip` + `blocked_reason`) mirroring the syncer's guards.
+- Both files contain **PII** (email/phone) — never commit them.
+
+Measured on prod (7 Okt 2026, `--since=1970`): the full 9-syncer dry run takes **~2 minutes**
+(388k rows scanned), enrollments alone ~85 s. Running it twice gave identical per-syncer
+counters (only one scan count moved +2 from live legacy growth), so the numbers are safe to
+plan an apply from.
+

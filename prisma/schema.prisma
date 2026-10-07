@@ -37,6 +37,14 @@ model Member {
   affiliateCode        String?   @unique @map("affiliate_code")
   affiliateBased       String    @default("PERFORMANCE") @map("affiliate_based") // "PERFORMANCE" | "GROWTH" | "INACTIVE"
   inviterId            String?   @map("inviter_id") @db.Uuid
+  // Who set inviterId: "LEGACY_PARENT" (tree resync, member_network.parent_id) |
+  // "LEGACY_CONNECT" | "APP" (new-app register/connect). NULL = pre-existing/unknown.
+  // The tree resync may only overwrite NULL / LEGACY_PARENT — never APP or LEGACY_CONNECT.
+  inviterSource        String?   @map("inviter_source")
+  // Who set affiliateBased: "LEGACY" (migration / tree resync) | "APP" (member switched
+  // mode in the app). NULL = unknown. The tree resync may only overwrite NULL / LEGACY, so a
+  // mode the member chose in the app is never reverted by a legacy member_network touch.
+  affiliateBasedSource String?   @map("affiliate_based_source")
   utmSource            String?   @map("utm_source")
   utmContent           String?   @map("utm_content")
   scheduledDeletionAt  DateTime? @map("scheduled_deletion_at")
@@ -92,11 +100,13 @@ model Member {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  // Legacy resync (new-wins-on-touch): the timestamp the resync last wrote this row.
-  // If updatedAt > legacySyncedAt, the app touched the row since → legacy-owned fields
-  // are NOT overwritten. null = never resynced (treat as legacy-owned). See
-  // docs/legacy-resync-plan.md §6.
+  // Legacy resync: the timestamp the resync last wrote this row (provenance only — the
+  // gate reads the two markers below, never updatedAt). See docs/legacy-resync-plan.md §6.
   legacySyncedAt DateTime? @map("legacy_synced_at")
+  // Set ONLY by member-initiated app edits (profile update / password change, reset,
+  // claim). Non-null = the app owns that field group; the legacy resync stops writing it.
+  profileUpdatedAt  DateTime? @map("profile_updated_at")
+  passwordUpdatedAt DateTime? @map("password_updated_at")
 
   profile                MemberProfile?
   devices                Device[]
@@ -118,6 +128,7 @@ model Member {
   commercePayments       CommercePayment[]
   notificationMutes      NotificationMute[]
   kycEvents              KycEvent[]
+  affiliateCodeAliases   MemberAffiliateCodeAlias[]
   eventTicketsBought     EventTicket[]           @relation("EventTicketBuyer")
   eventTicketsClaimed    EventTicket[]           @relation("EventTicketAttendee")
 
@@ -1609,9 +1620,46 @@ model SyncState {
   @@map("sync_state")
 }
 
+/// Reconciliation list: a legacy row the resync could not process (unresolved parent/member,
+/// guard-blocked, missing master data). Only "needs attention" reasons are recorded —
+/// out-of-scope skips are normal traffic and are counted in sync_state.lastStats.skipReasons.
+/// A SKIPPED row still advances the watermark (by design), so without this table it is gone.
+model SyncIssue {
+  id          String    @id @default(uuid(7)) @db.Uuid
+  syncer      String // syncer name
+  legacyPk    String    @map("legacy_pk") // legacy PK, stringified (course_enrollment_id, member_id, …)
+  reason      String // e.g. unresolved_parent, recipient_unresolved, course_not_mapped
+  detail      String?
+  occurrences Int       @default(1)
+  firstSeenAt DateTime  @default(now()) @map("first_seen_at")
+  lastSeenAt  DateTime  @updatedAt @map("last_seen_at")
+  resolvedAt  DateTime? @map("resolved_at")
+
+  @@unique([syncer, legacyPk, reason])
+  @@index([syncer, reason])
+  @@map("sync_issue")
+}
+
 // Durable dedup map (loser legacy member id -> winner legacy member id). Replaces
 // the gitignored scripts/member-redirect.json so resync re-points dangling legacy
 // member refs consistently across runs. Append-only.
+/// Extra affiliate code that resolves to a member: a legacy dedup loser's
+/// `member.affiliator_code`, re-pointed at the winner the loser was merged into, so
+/// links shared under the loser's code keep attributing. Read ONLY through
+/// `resolveAffiliateCode` (members.affiliate_code first, then this table). A code here
+/// must never equal any `members.affiliate_code` — the allocators check both. Deleted
+/// when the merge is split (`resync:identity split`): the code goes back to its own member.
+model MemberAffiliateCodeAlias {
+  code      String   @id
+  memberId  String   @map("member_id") @db.Uuid
+  member    Member   @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  source    String // LEGACY_DEDUP = loser code from member_redirect
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([memberId])
+  @@map("member_affiliate_code_aliases")
+}
+
 model MemberRedirect {
   loserLegacyId  Int      @id @map("loser_legacy_id")
   winnerLegacyId Int      @map("winner_legacy_id")

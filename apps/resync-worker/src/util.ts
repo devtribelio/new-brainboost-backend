@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /** Small shared row-coercion helpers (mirror the migrate:* scripts). */
 import { resyncConfig } from './config';
+import type { Stats } from './types';
 
 export function nonEmpty(v: any): string | null {
   if (v === null || v === undefined) return null;
@@ -18,13 +19,126 @@ export function bool(v: any): boolean {
   return v === 1 || v === true || v === '1';
 }
 
-/** ISO string of the larger of two date-ish values (for advancing a watermark). */
-export function maxWatermark(prev: string | null, ...dates: (Date | null)[]): string | null {
-  let best = prev ? new Date(prev).getTime() : Number.NEGATIVE_INFINITY;
-  for (const d of dates) {
-    if (d && d.getTime() > best) best = d.getTime();
+/**
+ * Flatten a loser→winner redirect map so every entry points at the CHAIN TERMINAL.
+ *
+ * Redirects are normally one hop, but a manual seed or a split/merge sequence can leave
+ * A→B→C; resolving a single hop would map the loser A to B, which is itself a loser with
+ * no member row (so the reference would silently resolve to nobody). Walk the chain to
+ * its end. A cycle (A→B→A) has no terminal, so every node on it is folded onto the
+ * smallest id in the cycle — deterministic and terminating. Self-pointing entries are
+ * dropped (a winner is not a loser).
+ */
+export function flattenRedirects(raw: ReadonlyMap<number, number>): Map<number, number> {
+  const flat = new Map<number, number>();
+  for (const start of raw.keys()) {
+    if (flat.has(start)) continue;
+    const path: number[] = [];
+    const at = new Map<number, number>(); // node → index in `path`
+    let current = start;
+    let terminal: number;
+    for (;;) {
+      const seenAt = at.get(current);
+      if (seenAt !== undefined) {
+        terminal = Math.min(...path.slice(seenAt)); // cycle → smallest node on it
+        break;
+      }
+      at.set(current, path.length);
+      path.push(current);
+      const next = raw.get(current);
+      if (next === undefined) {
+        terminal = current; // reached a real winner (no outgoing edge)
+        break;
+      }
+      current = next;
+    }
+    for (const node of path) flat.set(node, terminal);
   }
-  return Number.isFinite(best) ? new Date(best).toISOString() : prev;
+  for (const [loser, winner] of [...flat]) if (loser === winner) flat.delete(loser);
+  return flat;
+}
+
+/**
+ * Folds a syncer's scanned rows into the watermark it may checkpoint:
+ *
+ *   checkpoint = min(maxSeen, runStart, earliestFailed − 1s)   — or null if nothing scanned
+ *
+ * - `seen(wm)` for every row that settled (written OR intentionally skipped — holding on a
+ *   permanently unresolvable row would stall the syncer forever).
+ * - `failed(wm)` for a row whose WRITE threw: the next run must re-scan it, so the
+ *   checkpoint stays strictly below it (scans use `> since`).
+ * - `runStart` = legacy clock captured before the syncer's first query: a row updated in an
+ *   already-scanned chunk during a long run is re-scanned next tick instead of skipped.
+ * - nothing scanned → null: never checkpoint (a forced `--since` must not write itself back).
+ */
+export class WatermarkTracker {
+  private maxSeen: number | null = null;
+  private minFailed: number | null = null;
+
+  seen(wm: Date | null): void {
+    if (!wm) return;
+    const t = wm.getTime();
+    if (this.maxSeen === null || t > this.maxSeen) this.maxSeen = t;
+  }
+
+  failed(wm: Date | null): void {
+    if (!wm) return;
+    this.seen(wm);
+    const t = wm.getTime();
+    if (this.minFailed === null || t < this.minFailed) this.minFailed = t;
+  }
+
+  result(runStart: Date): string | null {
+    if (this.maxSeen === null) return null;
+    let cp = Math.min(this.maxSeen, runStart.getTime());
+    if (this.minFailed !== null) cp = Math.min(cp, this.minFailed - 1000);
+    return new Date(cp).toISOString();
+  }
+}
+
+/** Loggable tag for a row-write error — the code only: Prisma messages can echo row data (PII). */
+export function errCode(err: unknown): string {
+  const e = err as { code?: string; name?: string } | null;
+  return e?.code ?? e?.name ?? 'unknown';
+}
+
+const SKIP_SAMPLE_MAX = 5;
+
+/**
+ * Count a row that was SKIPPED (dropped) under a reason, and keep a few example legacy PKs.
+ * `skipped` is the single bucket the audit called out as mixing "out of scope" with "data
+ * likely lost"; `skipReasons` separates them so an operator can tell which skips matter.
+ */
+export function markSkip(stats: Stats, reason: string, legacyPk?: number | string | null, count = 1): void {
+  if (count <= 0) return;
+  stats.skipped += count;
+  markReason(stats, reason, legacyPk, count);
+}
+
+/**
+ * Count a reason WITHOUT incrementing `skipped` — for a row that was still written but had
+ * part of its work skipped (e.g. the tree wrote affiliateBased but could not resolve the
+ * inviter parent). Avoids the audit's "counted as skipped AND upserted" double count.
+ */
+export function markReason(stats: Stats, reason: string, legacyPk?: number | string | null, count = 1): void {
+  if (count <= 0) return;
+  const reasons = (stats.skipReasons ??= {});
+  reasons[reason] = (reasons[reason] ?? 0) + count;
+  if (legacyPk === undefined || legacyPk === null) return;
+  const samples = (stats.skipSamples ??= {});
+  const list = (samples[reason] ??= []);
+  if (list.length < SKIP_SAMPLE_MAX) list.push(legacyPk);
+}
+
+/** One-line summary of `skipReasons` for the per-syncer log (empty string when none). */
+export function skipReasonsSummary(stats: Stats): string {
+  const entries = Object.entries(stats.skipReasons ?? {});
+  if (entries.length === 0) return '';
+  const body = entries
+    .sort((a, b) => b[1] - a[1])
+    .map(([reason, count]) => `${reason}=${count}`)
+    .join(' ');
+  return ` skip[${body}]`;
 }
 
 /**

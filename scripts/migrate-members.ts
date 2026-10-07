@@ -9,7 +9,8 @@
  *            ∪ valid-downlines-of-in-scope (Tier 2). ≈ 57.6k of 701k.
  *   FILTER = drop junk (@example.com, lxbfYeaa bot) + no-identity. `@brainboost.id`
  *            generated emails → email=null (phone is identity).
- *   DEDUP  = union-find over (email ∨ phone); one winner per cluster (§5 ranking);
+ *   DEDUP  = union-find over email (NOT phone — PRD P0-5: a phone-only collision is kept
+ *            as two members, the phone going to the better-ranked one); one winner per cluster (§5 ranking);
  *            losers drop, their enrollments merge to the winner. A redirect map
  *            (loser legacyId -> winner legacyId) is written to scripts/member-redirect.json
  *            so backfill-affiliate-tree can re-point dangling inviter links.
@@ -26,7 +27,7 @@ import { randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import type { Connection, RowDataPacket } from 'mysql2/promise';
 import { PrismaClient } from '@prisma/client';
-import { normalizePhonePair } from '@bb/common/utils/phone.util';
+import { normalizeLegacyPhonePair } from '@bb/common/utils/phone.util';
 import { detectPasswordAlgo } from '@bb/common/utils/password-algo.util';
 import { connectLegacyDb } from './legacy-db';
 
@@ -175,7 +176,7 @@ async function fetchMembers(legacy: Connection, scope: Scope): Promise<LegacyMem
       if (email && /@brainboost\.id$/i.test(email)) email = null; // generated → phone identity
 
       const rawPhone = nonEmpty(r.phone);
-      const pair = rawPhone ? normalizePhonePair(rawPhone, '+62') : null;
+      const pair = rawPhone ? normalizeLegacyPhonePair(rawPhone) : null;
       const phone = pair && pair.phone.length >= 6 ? pair.phone : null;
 
       const googleSub = nonEmpty(r.google_id);
@@ -267,17 +268,14 @@ interface DedupResult {
 function dedup(members: LegacyMember[]): DedupResult {
   const dsu = new DSU(members.length);
   const byEmail = new Map<string, number>();
-  const byPhone = new Map<string, number>();
+  // Clusters form on EMAIL only. A shared phone alone is no proof of one person (PRD
+  // P0-5 — 342/373 resync redirects were phone-only, ~87 pairs different people), so
+  // it never merges; the phone goes to one winner and is stripped from the others below.
   members.forEach((m, i) => {
     if (m.email) {
       const e = byEmail.get(m.email);
       if (e !== undefined) dsu.union(i, e);
       else byEmail.set(m.email, i);
-    }
-    if (m.phone) {
-      const p = byPhone.get(m.phone);
-      if (p !== undefined) dsu.union(i, p);
-      else byPhone.set(m.phone, i);
     }
   });
 
@@ -298,14 +296,35 @@ function dedup(members: LegacyMember[]): DedupResult {
     }
   }
   log(`dedup: clusters=${clusters.size} winners=${winners.length} losers=${redirect.size}`);
-  return { winners, redirect };
+  return { winners: assignPhones(winners), redirect };
+}
+
+/**
+ * `members.phone` is unique: when winners share a phone, the best-ranked keeps it and
+ * the rest are inserted without it (phone, phoneCode, isPhoneVerified cleared).
+ */
+function assignPhones(winners: LegacyMember[]): LegacyMember[] {
+  const holder = new Map<string, LegacyMember>();
+  for (const w of winners) {
+    if (!w.phone) continue;
+    const cur = holder.get(w.phone);
+    if (!cur || better(w, cur)) holder.set(w.phone, w);
+  }
+  let stripped = 0;
+  const out = winners.map((w) => {
+    if (!w.phone || holder.get(w.phone) === w) return w;
+    stripped += 1;
+    return { ...w, phone: null, phoneCode: null, isPhoneVerified: false };
+  });
+  log(`dedup: phone-only collisions kept separate, phone stripped from ${stripped} winner(s)`);
+  return out;
 }
 
 // ---------------------------------------------------------------------------
 // 4. Insert members
 // ---------------------------------------------------------------------------
 async function insertMembers(winners: LegacyMember[]): Promise<void> {
-  // dedup unique sub fields across winners (email/phone already unique by cluster)
+  // dedup unique sub fields across winners (email unique by cluster, phone by assignPhones)
   const seenGoogle = new Set<string>();
   const seenApple = new Set<string>();
   const data = winners.map((w) => {
