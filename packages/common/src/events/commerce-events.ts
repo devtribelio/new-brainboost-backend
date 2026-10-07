@@ -34,6 +34,13 @@ export interface CommercePaymentSuccessEvent {
    * provider reports whatever it charged and does the proration itself.
    */
   prorationCredit?: number;
+  /**
+   * PPN included in `amount` (0 when the order predates tax or the rate was 0).
+   * Carried so the affiliate listener CAN take commission on the pre-tax base;
+   * whether it does is a pending business decision (docs/checkout-tax.md §6.1).
+   * Optional: ingest channels never bill tax and leave it out.
+   */
+  taxAmount?: number;
   voucherId?: string | null;
   affiliatorId?: string | null;
   programId?: string | null;

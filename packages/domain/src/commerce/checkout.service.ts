@@ -14,6 +14,7 @@ import { attributionService } from '@bb/domain/affiliate/attribution.service';
 import { OWNED_FOR_PURCHASE } from './enrollment';
 import { isUpgrade } from '../subscription/tier';
 import { computeProration } from '../subscription/proration';
+import { resolveTaxRate } from './tax';
 
 export interface StartCheckoutInput {
   memberId: string;
@@ -72,116 +73,61 @@ export interface TrackingSource {
   utmTerm?: string;
 }
 
-export interface StartCheckoutResult {
-  transactionId: string;
-  transactionCode: string;
+/** What a checkout costs. Same numbers whether it was quoted or submitted. */
+export interface CheckoutQuoteResult {
   itemTotal: number;
   voucherAmount: number;
   /** Unused term credited back on an upgrade; 0 on every other order. */
   prorationCredit: number;
+  /** Percent (11 = 11%). Frozen on the order at submit. */
+  taxRate: number;
+  taxAmount: number;
+  /** Tax-inclusive. */
   amount: number;
+}
+
+export interface StartCheckoutResult extends CheckoutQuoteResult {
+  transactionId: string;
+  transactionCode: string;
   expiredAt: Date;
 }
+
+/** `memberId` absent = a guest quote: the member-scoped guards cannot run and are skipped. */
+type PriceInput = Pick<StartCheckoutInput, 'productId' | 'voucherCode' | 'qty' | 'itemTotal'> & {
+  memberId?: string;
+};
 
 export class CheckoutService {
   constructor(private readonly voucherService: VoucherService = new VoucherService()) {}
 
+  /**
+   * Price a course checkout without writing anything: no order, no order number,
+   * no voucher slot. Runs the exact guards and arithmetic `start()` runs, so the
+   * summary card shows the numbers submit will charge — the alternative, a
+   * client-side estimate with a tax estimate on top, is where one-rupiah drifts
+   * come from. Same errors as submit, on purpose: a quote for a purchase submit
+   * would refuse is not a price.
+   */
+  async quote(input: PriceInput & { memberId: string }): Promise<CheckoutQuoteResult> {
+    const { totals } = await this.price(input);
+    return totals;
+  }
+
+  /**
+   * `quote()` for a visitor who has not logged in yet. Same product guards, same
+   * arithmetic, same tax; what it cannot know is who is asking, so the
+   * already-owned guard is skipped and the voucher goes through
+   * `validatePublic()`. The price is therefore what a NEW buyer pays — the authed
+   * quote after login is still the one that decides.
+   */
+  async quotePublic(input: Pick<PriceInput, 'productId' | 'voucherCode'>): Promise<CheckoutQuoteResult> {
+    const { totals } = await this.price(input);
+    return totals;
+  }
+
   async start(input: StartCheckoutInput): Promise<StartCheckoutResult> {
-    const product = await prisma.product.findUnique({
-      where: { id: input.productId },
-      select: { id: true, price: true, isActive: true, status: true },
-    });
-    if (!product) throw notFound(ERROR_CODES.PRODUCT_NOT_FOUND);
-    if (!product.isActive || product.status !== 'active') {
-      throw badRequest(ERROR_CODES.PRODUCT_NOT_AVAILABLE);
-    }
-
-    // Block paying twice for a course the member still holds — the grant is
-    // keyed on (memberId, courseId), so a second purchase would take the money
-    // and change nothing. `OWNED_FOR_PURCHASE` scopes the block to RETAIL
-    // ownership, which is what keeps it from locking out three cases: a refunded
-    // member (their row is cancelled), a member on a free trial (a trial row must
-    // not block the purchase it exists to sell), and a member holding the course
-    // through a subscription (that purchase is the documented upgrade-to-lifetime
-    // path — the payment-success listener clears the marker).
-    // Checkout only — the ingest path (IAP/Scalev) cannot refuse a purchase the
-    // store has already charged for.
-    const owned = await prisma.courseEnrollment.findFirst({
-      where: { memberId: input.memberId, ...OWNED_FOR_PURCHASE, course: { productId: product.id } },
-      select: { id: true },
-    });
-    if (owned) throw badRequest(ERROR_CODES.PRODUCT_ALREADY_PURCHASED);
-
-    let prorationCredit = 0;
-    // Subscription checkout guard (PRD BE-14). Same plan passes on purpose —
-    // that's web renewal-by-repurchase (the reminder emails point here); the
-    // activation listener extends the sub on payment success.
-    const plan = await prisma.subscriptionPlan.findUnique({
-      where: { productId: product.id },
-      select: { id: true, seatCount: true },
-    });
-    if (plan) {
-      const activeSub = await prisma.memberSubscription.findFirst({
-        where: { ownerId: input.memberId, status: 'ACTIVE' },
-        include: { plan: { include: { product: { select: { price: true } } } } },
-      });
-      if (activeSub && activeSub.planId !== plan.id) {
-        prorationCredit = assertTierSwitchAllowed(activeSub, plan, product.price);
-      }
-      if (!activeSub) {
-        // Seated on someone ELSE's ACTIVE sub → resolve that BEFORE paying, not
-        // after (the seat-1-left-empty fallback is for the unblockable IAP path).
-        // Seats on dead subs (zombies) don't block — consistent with the
-        // release-on-demand in claimSeat/createInitial.
-        const seatElsewhere = await prisma.subscriptionSeat.findFirst({
-          where: {
-            memberId: input.memberId,
-            subscription: { status: 'ACTIVE', ownerId: { not: input.memberId } },
-          },
-          select: { id: true },
-        });
-        if (seatElsewhere) {
-          throw new BadRequestException(
-            'Kamu masih tergabung di subscription lain — keluar dulu sebelum membeli paket sendiri',
-          );
-        }
-      }
-    }
-
-    let voucherId: string | undefined;
-    let voucherMeta: {
-      type: 'PERCENT' | 'AMOUNT' | 'TRIAL';
-      value: number;
-      maxAmount?: number | null;
-    } | null = null;
-    if (input.voucherCode) {
-      const check = await this.voucherService.validate(
-        input.voucherCode,
-        input.productId,
-        input.memberId,
-      );
-      // `reason` is member-facing Indonesian copy, not a log string. The displayed
-      // message still comes from `errorCode` where validate() set one; `reason` rides
-      // along in `details` so the cases that have no code of their own (expired,
-      // inactive, wrong product, quota) are not lost behind the generic
-      // VOUCHER_INVALID text.
-      if (!check.valid) {
-        throw badRequest(check.errorCode ?? ERROR_CODES.VOUCHER_INVALID, { reason: check.reason });
-      }
-      voucherId = check.voucherId;
-      // maxAmount MUST be threaded through — omitting it silently bypasses the
-      // PERCENT cap in computeTotals (over-discount / revenue loss).
-      voucherMeta = { type: check.type!, value: check.voucherAmount!, maxAmount: check.maxAmount };
-    }
-
+    const { product, voucherId, totals } = await this.price(input);
     const qty = Math.max(1, Math.floor(input.qty ?? 1));
-    const totals = computeTotals({
-      unitPrice: product.price,
-      qty,
-      itemTotal: input.itemTotal,
-      voucher: voucherMeta,
-      prorationCredit,
-    });
 
     const attribution = await this.resolveAttribution(input.memberId, input.productId);
     const attributedAffiliatorMemberId = await attributionService.resolveOverrideAffiliatorMemberId(
@@ -205,13 +151,16 @@ export class CheckoutService {
     const tx = await this.createTransactionWithRetry((code) => ({
         code,
         memberId: input.memberId,
-        productId: input.productId,
+        productId: product.id,
         qty,
         itemTotal: totals.itemTotal,
         voucherAmount: totals.voucherAmount,
         voucherCode: input.voucherCode,
         voucherId,
         prorationCredit: totals.prorationCredit,
+        // Frozen with the order: a later rate change must not move this row.
+        taxRate: totals.taxRate,
+        taxAmount: totals.taxAmount,
         amount: totals.amount,
         affiliatorId: attribution.affiliatorId,
         programId: attribution.programId,
@@ -234,12 +183,124 @@ export class CheckoutService {
     return {
       transactionId: tx.id,
       transactionCode: tx.code,
-      itemTotal: totals.itemTotal,
-      voucherAmount: totals.voucherAmount,
-      prorationCredit: totals.prorationCredit,
-      amount: totals.amount,
+      ...totals,
       expiredAt,
     };
+  }
+
+  /**
+   * Guards + arithmetic shared by `quote()` and `start()`. Anything that decides
+   * the price or refuses the sale lives here, so the two can never disagree.
+   */
+  private async price(input: PriceInput) {
+    const product = await prisma.product.findUnique({
+      where: { id: input.productId },
+      select: { id: true, price: true, isActive: true, status: true },
+    });
+    if (!product) throw notFound(ERROR_CODES.PRODUCT_NOT_FOUND);
+    if (!product.isActive || product.status !== 'active') {
+      throw badRequest(ERROR_CODES.PRODUCT_NOT_AVAILABLE);
+    }
+
+    // Block paying twice for a course the member still holds — the grant is
+    // keyed on (memberId, courseId), so a second purchase would take the money
+    // and change nothing. `OWNED_FOR_PURCHASE` scopes the block to RETAIL
+    // ownership, which is what keeps it from locking out three cases: a refunded
+    // member (their row is cancelled), a member on a free trial (a trial row must
+    // not block the purchase it exists to sell), and a member holding the course
+    // through a subscription (that purchase is the documented upgrade-to-lifetime
+    // path — the payment-success listener clears the marker).
+    // Checkout only — the ingest path (IAP/Scalev) cannot refuse a purchase the
+    // store has already charged for. A guest quote has nobody to check.
+    let prorationCredit = 0;
+    if (input.memberId) {
+      const owned = await prisma.courseEnrollment.findFirst({
+        where: { memberId: input.memberId, ...OWNED_FOR_PURCHASE, course: { productId: product.id } },
+        select: { id: true },
+      });
+      if (owned) throw badRequest(ERROR_CODES.PRODUCT_ALREADY_PURCHASED);
+
+      prorationCredit = await this.assertSubscriptionCheckout(input.memberId, product);
+    }
+
+    let voucherId: string | undefined;
+    let voucherMeta: {
+      type: 'PERCENT' | 'AMOUNT' | 'TRIAL';
+      value: number;
+      maxAmount?: number | null;
+    } | null = null;
+    if (input.voucherCode) {
+      const check = input.memberId
+        ? await this.voucherService.validate(input.voucherCode, input.productId, input.memberId)
+        : await this.voucherService.validatePublic(input.voucherCode, input.productId);
+      // `reason` is member-facing Indonesian copy, not a log string. The displayed
+      // message still comes from `errorCode` where validate() set one; `reason` rides
+      // along in `details` so the cases that have no code of their own (expired,
+      // inactive, wrong product, quota) are not lost behind the generic
+      // VOUCHER_INVALID text.
+      if (!check.valid) {
+        throw badRequest(check.errorCode ?? ERROR_CODES.VOUCHER_INVALID, { reason: check.reason });
+      }
+      voucherId = check.voucherId;
+      // maxAmount MUST be threaded through — omitting it silently bypasses the
+      // PERCENT cap in computeTotals (over-discount / revenue loss).
+      voucherMeta = { type: check.type!, value: check.voucherAmount!, maxAmount: check.maxAmount };
+    }
+
+    const totals = computeTotals({
+      unitPrice: product.price,
+      qty: Math.max(1, Math.floor(input.qty ?? 1)),
+      itemTotal: input.itemTotal,
+      voucher: voucherMeta,
+      prorationCredit,
+      taxRate: await resolveTaxRate(product.id),
+    });
+
+    return { product, voucherId, totals };
+  }
+
+  /**
+   * Subscription checkout guard (PRD BE-14). Same plan passes on purpose —
+   * that's web renewal-by-repurchase (the reminder emails point here); the
+   * activation listener extends the sub on payment success. Returns the
+   * proration credit for a tier upgrade, 0 otherwise. Member-scoped, so a
+   * guest quote never reaches it.
+   */
+  private async assertSubscriptionCheckout(
+    memberId: string,
+    product: { id: string; price: number },
+  ): Promise<number> {
+    const plan = await prisma.subscriptionPlan.findUnique({
+      where: { productId: product.id },
+      select: { id: true, seatCount: true },
+    });
+    if (!plan) return 0;
+
+    const activeSub = await prisma.memberSubscription.findFirst({
+      where: { ownerId: memberId, status: 'ACTIVE' },
+      include: { plan: { include: { product: { select: { price: true } } } } },
+    });
+    if (activeSub) {
+      return activeSub.planId !== plan.id ? assertTierSwitchAllowed(activeSub, plan, product.price) : 0;
+    }
+
+    // Seated on someone ELSE's ACTIVE sub → resolve that BEFORE paying, not
+    // after (the seat-1-left-empty fallback is for the unblockable IAP path).
+    // Seats on dead subs (zombies) don't block — consistent with the
+    // release-on-demand in claimSeat/createInitial.
+    const seatElsewhere = await prisma.subscriptionSeat.findFirst({
+      where: {
+        memberId,
+        subscription: { status: 'ACTIVE', ownerId: { not: memberId } },
+      },
+      select: { id: true },
+    });
+    if (seatElsewhere) {
+      throw new BadRequestException(
+        'Kamu masih tergabung di subscription lain — keluar dulu sebelum membeli paket sendiri',
+      );
+    }
+    return 0;
   }
 
   /**
@@ -285,6 +346,7 @@ export class CheckoutService {
     const visit = await prisma.affiliateVisit.findFirst({
       where: {
         memberId,
+        affiliatorMemberId: { not: memberId }, // an own-code click attributes nothing
         createdAt: { gte: since },
         program: { productId },
       },

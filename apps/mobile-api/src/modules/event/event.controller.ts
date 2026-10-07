@@ -41,10 +41,7 @@ export class EventController {
   @ApiResponse({ status: 200, type: () => EventQuoteResultDto })
   quote = async (req: Request, res: Response) => {
     const q = req.query as unknown as { ticketTypeId: string; qty: number };
-    const quoted = await this.eventService.quote(q.ticketTypeId, Number(q.qty));
-    // `voucherAmount` / `amount` are echoed so the shape matches checkout, where a
-    // voucher can actually apply. Here they can only be the item total.
-    return ok(res, { ...quoted, voucherAmount: 0, amount: quoted.itemTotal });
+    return ok(res, await this.eventService.quote(q.ticketTypeId, Number(q.qty)));
   };
 
   @ApiOperation({

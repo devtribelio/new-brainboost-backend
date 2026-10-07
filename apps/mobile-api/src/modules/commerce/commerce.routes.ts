@@ -8,7 +8,7 @@ import { CommerceController } from './commerce.controller';
 import { CheckoutService } from '@bb/domain/commerce/checkout.service';
 import { PaymentService } from '@bb/domain/commerce/payment.service';
 import { VoucherService } from '@bb/domain/commerce/voucher.service';
-import { StartCheckoutDto } from './dto/start-checkout.dto';
+import { CheckoutQuoteDto, StartCheckoutDto } from './dto/start-checkout.dto';
 import { PayDto, CancelTransactionDto, ValidateVoucherDto } from './dto/pay.dto';
 import { ListTransactionsQueryDto } from './dto/list-transactions.dto';
 
@@ -17,6 +17,27 @@ export function commerceRoutes(): Router {
   const voucher = traceService(new VoucherService());
   const ctrl = new CommerceController(traceService(new CheckoutService(voucher)), traceService(new PaymentService()), voucher);
 
+  // Same limiter as /payment/voucher/validate: this endpoint also answers a
+  // distinct error per voucher failure mode, i.e. a code-validity oracle.
+  bindRoute({
+    router,
+    controller: ctrl,
+    method: 'post',
+    path: '/product/checkout/quote',
+    handlerKey: 'quoteCheckout',
+    middlewares: [authGuard, voucherValidateRateLimiter, validateDto(CheckoutQuoteDto)],
+  });
+  // Guest quote for the web shop. No authGuard on purpose — not even the optional
+  // one: a visitor's stale bearer must not turn a price lookup into a 401. With no
+  // `req.user` the limiter keys on the client IP.
+  bindRoute({
+    router,
+    controller: ctrl,
+    method: 'post',
+    path: '/product/checkout/quote/public',
+    handlerKey: 'quoteCheckoutPublic',
+    middlewares: [voucherValidateRateLimiter, validateDto(CheckoutQuoteDto)],
+  });
   bindRoute({
     router,
     controller: ctrl,

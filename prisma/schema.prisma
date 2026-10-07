@@ -417,6 +417,15 @@ model Banner {
   position  Int       @default(0)
   isActive  Boolean   @default(true) @map("is_active")
   isPopup   Boolean   @default(false) @map("is_popup")
+  // "external" (system browser, the behaviour before this column) | "webview" (in-app
+  // browser). Free text: the app treats any value it does not know as "external".
+  openMode  String    @default("external") @map("open_mode")
+  // App version window per platform, both INCLUSIVE, null = unbounded. Any bound set =
+  // shown only to a client sending ?platform=&version= inside it (fails closed otherwise).
+  minVersionAndroid String? @map("min_version_android")
+  maxVersionAndroid String? @map("max_version_android")
+  minVersionIos     String? @map("min_version_ios")
+  maxVersionIos     String? @map("max_version_ios")
   startedAt DateTime? @map("started_at") // window open; null = no lower bound
   endedAt   DateTime? @map("ended_at") // window close; null = no upper bound
   createdAt DateTime  @default(now()) @map("created_at")
@@ -453,6 +462,7 @@ model Product {
   commerceTransactions CommerceTransaction[]
   subscriptionPlan     SubscriptionPlan?
   voucherProducts      VoucherProduct[]
+  promoProducts        PromoProduct[]
   eventTicketType      EventTicketType?
 
   @@map("products")
@@ -1386,7 +1396,16 @@ model CommerceTransaction {
   // `amount` exactly like a voucher does, so the affiliate base (which is
   // derived from what was actually paid) follows without extra plumbing.
   prorationCredit              Int                       @default(0) @map("proration_credit")
-  amount                       Int                       @default(0) // grand total
+  /// PPN frozen on the order at creation, in percent (11 = 11%). A later rate
+  /// change must not move an existing order's history row or receipt — same
+  /// reason the UTM snapshot below is never updated. `Float`, not `Decimal`:
+  /// the list endpoint returns the raw row and a Prisma Decimal serialises as
+  /// a JSON string, which would break "every amount is a number". 0 = no tax
+  /// (every order before the change, and every order while the rate is unset).
+  taxRate                      Float                     @default(0) @map("tax_rate")
+  /// Rupiah of tax on `itemTotal − voucherAmount − prorationCredit`, half-up. Included in `amount`.
+  taxAmount                    Int                       @default(0) @map("tax_amount")
+  amount                       Int                       @default(0) // grand total, tax-inclusive
   voucherCode                  String?                   @map("voucher_code")
   voucherId                    String?                   @map("voucher_id") @db.Uuid
   affiliatorId                 String?                   @map("affiliator_id") @db.Uuid
@@ -1602,6 +1621,7 @@ model Voucher {
   // column (migration 20260719120000_voucher_multi_product).
   products     VoucherProduct[]
   transactions CommerceTransaction[]
+  promos       Promo[]
 
   // One automated voucher per member per program, for life. A PLAIN unique, not the
   // partial `WHERE owner_member_id IS NOT NULL` the spec first asked for: Postgres
@@ -1622,6 +1642,41 @@ model VoucherProduct {
 
   @@id([voucherId, productId])
   @@map("voucher_products")
+}
+
+/// A promo landing page (`/promo/{slug}` on the marketplace): a title, ONE public
+/// voucher, and the products to show under it. It holds no price of its own — the
+/// promo price is the voucher applied to `products.price`, so the card and the
+/// checkout quote cannot drift. Authored by the backoffice over plain SQL, which
+/// must supply `id` and `updated_at` itself (both defaults are Prisma-Client-side).
+model Promo {
+  id        String    @id @default(uuid(7)) @db.Uuid
+  slug      String    @unique
+  title     String
+  subtitle  String?
+  voucherId String    @map("voucher_id") @db.Uuid
+  position  Int       @default(0)
+  isActive  Boolean   @default(true) @map("is_active")
+  startsAt  DateTime? @map("starts_at")
+  endsAt    DateTime? @map("ends_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+
+  voucher  Voucher        @relation(fields: [voucherId], references: [id])
+  products PromoProduct[]
+
+  @@map("promos")
+}
+
+model PromoProduct {
+  promoId   String  @map("promo_id") @db.Uuid
+  productId String  @map("product_id") @db.Uuid
+  position  Int     @default(0)
+  promo     Promo   @relation(fields: [promoId], references: [id], onDelete: Cascade)
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@id([promoId, productId])
+  @@map("promo_products")
 }
 
 /// Idempotency guard for voucher redemption. One row per order (CommerceTransaction)

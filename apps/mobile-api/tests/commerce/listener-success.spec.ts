@@ -201,6 +201,61 @@ describe('commerce.payment.success listener', () => {
     expect(commission?.amount).toBe(Math.floor(1_499_000 * 0.2)); // voucher stays deducted
   });
 
+  it('commissions the pre-tax base — PPN in `amount` never reaches the affiliator', async () => {
+    // Same course as the first case (500k, 50k voucher) billed at 11% PPN:
+    // amount = 450_000 + 49_500. Commission must still be 20% × 450_000.
+    const paymentId = randomUUID();
+    const transactionId = randomUUID();
+    commerceEvents.emit('commerce.payment.success', {
+      paymentId,
+      transactionId,
+      memberId,
+      productId,
+      amount: 499_500,
+      voucherAmount: 50_000,
+      taxAmount: 49_500,
+      voucherId: null,
+      affiliatorId: null,
+      programId,
+    });
+    await wait(150);
+
+    const commission = await prisma.affiliateCommission.findFirst({
+      where: { buyerMemberId: memberId, paymentId },
+    });
+    expect(commission).not.toBeNull();
+    expect(commission?.amount).toBe(Math.floor(450_000 * 0.2));
+    expect(commission?.amount).not.toBe(Math.floor(499_500 * 0.2));
+  });
+
+  it('IAP: commissions Apple proceeds minus the PPN owed on them', async () => {
+    // Real prod shape: App Store price 399_000, Apple net 0.7 → 279_300; the
+    // kernel books tax = 11% × 279_300 = 30_723. Base = 279_300 − 30_723 = 248_577.
+    const paymentId = randomUUID();
+    const transactionId = randomUUID();
+    commerceEvents.emit('commerce.payment.success', {
+      paymentId,
+      transactionId,
+      memberId,
+      productId,
+      amount: 399_000,
+      acceptedAmount: 279_300,
+      taxAmount: 30_723,
+      voucherAmount: 0,
+      voucherId: null,
+      affiliatorId: null,
+      programId,
+    });
+    await wait(150);
+
+    const commission = await prisma.affiliateCommission.findFirst({
+      where: { buyerMemberId: memberId, paymentId },
+    });
+    expect(commission).not.toBeNull();
+    expect(commission?.amount).toBe(Math.floor(248_577 * 0.2));
+    expect(commission?.amount).not.toBe(Math.floor(279_300 * 0.2)); // the pre-tax behaviour
+  });
+
   it('idempotent: re-emit same paymentId does not duplicate side effects', async () => {
     const paymentId = randomUUID();
     const transactionId = randomUUID();

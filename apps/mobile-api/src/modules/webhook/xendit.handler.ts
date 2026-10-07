@@ -2,6 +2,7 @@ import { prisma } from '@bb/db';
 import { logger } from '@bb/common/config/logger';
 import { commerceEvents } from '@bb/common/events/commerce-events';
 import { mapInvoiceStatus } from '@bb/domain/commerce/payment.service';
+import { attributionService } from '@bb/domain/affiliate/attribution.service';
 import type { CommercePaymentStatus } from '@prisma/client';
 
 type RawPayload = Record<string, unknown>;
@@ -147,6 +148,7 @@ export class XenditWebhookHandler {
           amount: true,
           voucherAmount: true,
           prorationCredit: true,
+          taxAmount: true,
           voucherId: true,
           affiliatorId: true,
           programId: true,
@@ -154,6 +156,8 @@ export class XenditWebhookHandler {
         },
       });
       if (tx) {
+        const attributedAffiliatorMemberId =
+          tx.attributedAffiliatorMemberId ?? (await this.attributeAtSettle(tx, now));
         commerceEvents.emit('commerce.payment.success', {
           paymentId: payment.id,
           transactionId: tx.id,
@@ -162,10 +166,11 @@ export class XenditWebhookHandler {
           amount: tx.amount,
           voucherAmount: tx.voucherAmount,
           prorationCredit: tx.prorationCredit,
+          taxAmount: tx.taxAmount,
           voucherId: tx.voucherId,
           affiliatorId: tx.affiliatorId,
           programId: tx.programId,
-          attributedAffiliatorMemberId: tx.attributedAffiliatorMemberId,
+          attributedAffiliatorMemberId,
           channel: 'xendit',
         });
       }
@@ -183,6 +188,41 @@ export class XenditWebhookHandler {
     }
 
     return { noop: false };
+  }
+
+  /**
+   * Checkout froze no affiliator, but the buyer may have come back through an
+   * affiliator link before paying (PRD D1). Resolve again as of the payment and
+   * record it on the order — never over an attribution checkout already made.
+   * Best-effort: a redelivered webhook stops at the terminal guard and never gets
+   * here again, so a failure must not block the success event; it logs and settles
+   * as unattributed (inviter fallback), exactly as before this existed.
+   */
+  private async attributeAtSettle(
+    tx: { id: string; memberId: string; productId: string },
+    paidAt: Date,
+  ): Promise<string | null> {
+    try {
+      const affiliatorMemberId = await attributionService.resolveOverrideAffiliatorMemberId(
+        tx.memberId,
+        null,
+        tx.productId,
+        paidAt,
+      );
+      if (!affiliatorMemberId) return null;
+      await prisma.commerceTransaction.updateMany({
+        where: { id: tx.id, attributedAffiliatorMemberId: null },
+        data: { attributedAffiliatorMemberId: affiliatorMemberId },
+      });
+      logger.info(
+        { transactionId: tx.id, affiliatorMemberId },
+        '[webhook] attributed at settle (no affiliator at checkout)',
+      );
+      return affiliatorMemberId;
+    } catch (err) {
+      logger.error({ err, transactionId: tx.id }, '[webhook] attribution at settle failed');
+      return null;
+    }
   }
 }
 

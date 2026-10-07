@@ -1,6 +1,18 @@
 import { IsOptional, IsString, IsUUID } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@bb/common/openapi/decorators';
 
+/** Body of `POST /product/checkout/quote` — the price of a checkout, nothing written. */
+export class CheckoutQuoteDto {
+  @ApiProperty({ format: 'uuid', example: '0190-...-uuid' })
+  @IsUUID()
+  productId!: string;
+
+  @ApiPropertyOptional({ example: 'EARLYBIRD' })
+  @IsOptional()
+  @IsString()
+  voucherCode?: string;
+}
+
 export class StartCheckoutDto {
   @ApiProperty({ format: 'uuid', example: '0190-...-uuid' })
   @IsUUID()

@@ -24,6 +24,13 @@ export interface ComputeTotalsInput {
    * than compete, and neither can push the order below zero.
    */
   prorationCredit?: number;
+  /**
+   * PPN in percent (11 = 11%). Omitted or 0 = no tax, and the result is then
+   * byte-identical to the pre-tax function. Applied to
+   * `itemTotal − voucherAmount − prorationCredit` — the bill the buyer actually
+   * faces — never to the catalog price.
+   */
+  taxRate?: number;
 }
 
 export interface ComputeTotalsResult {
@@ -31,6 +38,11 @@ export interface ComputeTotalsResult {
   voucherAmount: number;
   /** Credit actually applied — never more than what is left after the voucher. */
   prorationCredit: number;
+  /** Percent, echoed so the client can label the line ("PPN 11%"). */
+  taxRate: number;
+  /** Whole rupiah, half-up. 0 whenever `taxRate` is 0 or nothing is left to tax. */
+  taxAmount: number;
+  /** Tax-inclusive: what goes on the invoice. */
   amount: number;
 }
 
@@ -47,6 +59,12 @@ export interface ComputeTotalsResult {
  *
  * A PERCENT voucher therefore discounts the BUNDLED total when one is supplied —
  * the bill the buyer actually faces, not a notional `unitPrice × qty`.
+ *
+ * Tax comes LAST, on `itemTotal − voucherAmount − prorationCredit`: a 100% voucher
+ * or a TRIAL leaves nothing to tax, so those orders still settle at 0 through the
+ * voucher-bypass path, and a tier upgrade is taxed on what the member actually
+ * pays (the credited term was taxed when it was sold). Rounding is half-up (`Math.round` on a non-negative number); the product
+ * is taken before the single division so an exact .5 stays exact.
  *
  * Legacy parity: `priceRecipient` uses floor((max(productPrice - voucherAmount, 0)) * rate / 100)
  * — voucher is subtracted from itemTotal before fee in this function.
@@ -72,6 +90,9 @@ export function computeTotals(input: ComputeTotalsInput): ComputeTotalsResult {
   const afterVoucher = Math.max(0, itemTotal - voucherAmount);
   const prorationCredit = Math.min(Math.max(input.prorationCredit ?? 0, 0), afterVoucher);
 
-  const amount = afterVoucher - prorationCredit;
-  return { itemTotal, voucherAmount, prorationCredit, amount };
+  const taxBase = afterVoucher - prorationCredit;
+  const taxRate = input.taxRate != null && input.taxRate > 0 ? input.taxRate : 0;
+  const taxAmount = Math.round((taxBase * taxRate) / 100);
+  const amount = taxBase + taxAmount;
+  return { itemTotal, voucherAmount, prorationCredit, taxRate, taxAmount, amount };
 }

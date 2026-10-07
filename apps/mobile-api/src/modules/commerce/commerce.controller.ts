@@ -12,11 +12,12 @@ import {
 import type { CheckoutService } from '@bb/domain/commerce/checkout.service';
 import type { PaymentService } from '@bb/domain/commerce/payment.service';
 import type { VoucherService } from '@bb/domain/commerce/voucher.service';
-import { StartCheckoutDto } from './dto/start-checkout.dto';
+import { CheckoutQuoteDto, StartCheckoutDto } from './dto/start-checkout.dto';
 import { AFFILIATE_COOKIE_NAME } from '@bb/domain/affiliate/constants';
 import { PayDto, CancelTransactionDto, ValidateVoucherDto } from './dto/pay.dto';
 import { ListTransactionsQueryDto } from './dto/list-transactions.dto';
 import {
+  CheckoutQuoteResultDto,
   CommerceTransactionListItemDto,
   CreatePaymentResultDto,
   StartCheckoutResultDto,
@@ -35,6 +36,40 @@ export class CommerceController {
     private readonly payment: PaymentService,
     private readonly voucher: VoucherService,
   ) {}
+
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Quote a checkout — price, discount, tax, total; writes nothing',
+    description:
+      'Same guards and arithmetic as submit, without creating an order or touching the voucher quota. An invalid voucher or an already-owned product fails exactly as submit would (same 400 codes), so the card never shows a price submit will refuse.',
+  })
+  @ApiBody({ type: () => CheckoutQuoteDto })
+  @ApiResponse({ status: 200, type: () => CheckoutQuoteResultDto })
+  quoteCheckout = async (req: ReqWithUser, res: Response) => {
+    const dto = req.body as CheckoutQuoteDto;
+    const result = await this.checkout.quote({
+      memberId: req.user!.id,
+      productId: dto.productId,
+      voucherCode: dto.voucherCode,
+    });
+    return ok(res, result);
+  };
+
+  @ApiOperation({
+    summary: 'Quote a checkout as a guest — same numbers as the authed quote, no login',
+    description:
+      'Public. Prices a product for a visitor who has not logged in: same product guards, arithmetic and tax as the authed quote, writes nothing. The already-owned check is skipped (nobody to check). A voucher that belongs to a member or a campaign answers exactly like an unknown code; a free-trial voucher is refused with a reason asking the visitor to log in. Unusable voucher → 400 VOUCHER_INVALID with `details.reason`. Rate limited per IP.',
+  })
+  @ApiBody({ type: () => CheckoutQuoteDto })
+  @ApiResponse({ status: 200, type: () => CheckoutQuoteResultDto })
+  quoteCheckoutPublic = async (req: Request, res: Response) => {
+    const dto = req.body as CheckoutQuoteDto;
+    const result = await this.checkout.quotePublic({
+      productId: dto.productId,
+      voucherCode: dto.voucherCode,
+    });
+    return ok(res, result);
+  };
 
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Start checkout — create PENDING transaction' })

@@ -45,6 +45,7 @@ type TransactionRow = {
   amount: number;
   voucherAmount: number;
   prorationCredit: number;
+  taxAmount: number;
   voucherId: string | null;
   affiliatorId: string | null;
   programId: string | null;
@@ -266,6 +267,7 @@ export class PaymentService {
       amount: tx.amount,
       voucherAmount: tx.voucherAmount,
       prorationCredit: tx.prorationCredit,
+      taxAmount: tx.taxAmount,
       voucherId: tx.voucherId,
       affiliatorId: tx.affiliatorId,
       programId: tx.programId,
@@ -325,6 +327,11 @@ export class PaymentService {
       transactionId: tx.id,
       transactionCode: tx.code,
       status: tx.status,
+      // The same summary card checkout showed: pre-tax price, discount, tax, total.
+      itemTotal: tx.itemTotal,
+      voucherAmount: tx.voucherAmount,
+      taxRate: tx.taxRate,
+      taxAmount: tx.taxAmount,
       amount: tx.amount,
       expiredAt: tx.expiredAt,
       paidAt: tx.paidAt,

@@ -28,6 +28,17 @@ const NOT_FOUND: VoucherCheckResult = Object.freeze({
 // change the answer for every later request in the process — a cross-request bug with
 // no stack trace. Freezing turns that into an immediate throw.
 
+/**
+ * What a guest gets for a TRIAL code. A trial is once per member, so there is no
+ * honest price to show somebody we cannot identify — the code is real and usable,
+ * just not before they log in.
+ */
+export const VOUCHER_TRIAL_LOGIN_REQUIRED = 'Masuk dulu untuk memakai voucher uji coba ini';
+
+type VoucherWithProducts = Prisma.VoucherGetPayload<{
+  include: { products: { select: { productId: true } } };
+}>;
+
 export interface VoucherCheckResult {
   valid: boolean;
   voucherId?: string;
@@ -98,21 +109,8 @@ export class VoucherService {
       };
     }
 
-    if (!voucher.isActive) return { valid: false, reason: 'Voucher tidak aktif' };
-    // Product whitelist: 0 rows = global; >=1 rows = only the listed products.
-    if (voucher.products.length > 0 && !voucher.products.some((p) => p.productId === productId)) {
-      return { valid: false, reason: 'Voucher tidak berlaku untuk produk ini' };
-    }
-    const now = new Date();
-    if (voucher.startsAt && voucher.startsAt > now) {
-      return { valid: false, reason: 'Voucher belum berlaku' };
-    }
-    if (voucher.endsAt && voucher.endsAt <= now) {
-      return { valid: false, reason: 'Voucher sudah kedaluwarsa' };
-    }
-    if (voucher.quota != null && voucher.used >= voucher.quota) {
-      return { valid: false, reason: ERROR_MESSAGES.VOUCHER_EXHAUSTED };
-    }
+    const refused = this.checkRedeemable(voucher, productId);
+    if (refused) return refused;
     if (voucher.type === 'TRIAL') {
       // Defence in depth against a bad row: the DB CHECK already rejects
       // trial_days <= 0, but a NULL here would silently grant a 0-day trial.
@@ -135,6 +133,52 @@ export class VoucherService {
         };
       }
     }
+    return this.accepted(voucher);
+  }
+
+  /**
+   * `validate()` for a caller with no member: the web shop quoting a price before
+   * login. Same active / product / window / quota checks; the two member-scoped
+   * rules cannot be evaluated, so each resolves to a refusal rather than a guess.
+   *
+   * Any code tied to a member or a campaign answers `NOT_FOUND` — the same object
+   * an unknown code gets — because this endpoint is public and would otherwise
+   * confirm that a private code exists to anyone who types it.
+   */
+  async validatePublic(code: string, productId: string): Promise<VoucherCheckResult> {
+    const voucher = await prisma.voucher.findUnique({
+      where: { code },
+      include: { products: { select: { productId: true } } },
+    });
+    if (!voucher || voucher.ownerMemberId || voucher.campaign) return NOT_FOUND;
+
+    const refused = this.checkRedeemable(voucher, productId);
+    if (refused) return refused;
+    if (voucher.type === 'TRIAL') return { valid: false, reason: VOUCHER_TRIAL_LOGIN_REQUIRED };
+    return this.accepted(voucher);
+  }
+
+  /** Checks that depend on the voucher and the product alone — never on who asks. */
+  private checkRedeemable(voucher: VoucherWithProducts, productId: string): VoucherCheckResult | null {
+    if (!voucher.isActive) return { valid: false, reason: 'Voucher tidak aktif' };
+    // Product whitelist: 0 rows = global; >=1 rows = only the listed products.
+    if (voucher.products.length > 0 && !voucher.products.some((p) => p.productId === productId)) {
+      return { valid: false, reason: 'Voucher tidak berlaku untuk produk ini' };
+    }
+    const now = new Date();
+    if (voucher.startsAt && voucher.startsAt > now) {
+      return { valid: false, reason: 'Voucher belum berlaku' };
+    }
+    if (voucher.endsAt && voucher.endsAt <= now) {
+      return { valid: false, reason: 'Voucher sudah kedaluwarsa' };
+    }
+    if (voucher.quota != null && voucher.used >= voucher.quota) {
+      return { valid: false, reason: ERROR_MESSAGES.VOUCHER_EXHAUSTED };
+    }
+    return null;
+  }
+
+  private accepted(voucher: VoucherWithProducts): VoucherCheckResult {
     return {
       valid: true,
       voucherId: voucher.id,

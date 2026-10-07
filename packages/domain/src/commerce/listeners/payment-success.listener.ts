@@ -55,6 +55,14 @@ export function registerCommerceListeners(): void {
       // shape). When acceptedAmount is absent, falls back to gross (web /
       // voucher bypass behavior unchanged).
       //
+      // PPN is stripped first — tax is money forwarded to the state, not
+      // revenue, so an affiliator must earn the same on a course whether the
+      // rate is 0 or 11. `taxAmount` is always expressed on the same figure
+      // the base comes from: on the web path it is the tax added on top of
+      // `amount`; on IAP the ingest kernel books it as rate × `acceptedAmount`
+      // (Apple's payout). So one flat subtraction is right for both. 0 (or
+      // absent) on every channel that books no tax.
+      //
       // A tier-upgrade proration credit is added back too, and unlike the
       // voucher it is NOT subtracted again — commission is a percentage of the
       // PLAN price, not of the reduced charge. The credit refunds the member for
@@ -62,7 +70,7 @@ export function registerCommerceListeners(): void {
       // was settled when it was sold; letting it shrink the base would claw back
       // commission already earned. A voucher is the opposite case (revenue that
       // never existed), which is why the two are treated differently.
-      const commissionBase = e.acceptedAmount ?? e.amount;
+      const commissionBase = (e.acceptedAmount ?? e.amount) - (e.taxAmount ?? 0);
       await affiliatorService
         .commitCommissionsForPayment({
           paymentId: e.paymentId,

@@ -15,8 +15,12 @@ import {
 export function ApiProperty(options: PropertyOptions = {}): PropertyDecorator {
   return (target: object, propertyKey: string | symbol) => {
     const ctor = (target as { constructor: object }).constructor;
-    const map: Record<string, PropertyOptions> =
-      Reflect.getMetadata(OPENAPI_KEYS.PROPERTIES, ctor) ?? {};
+    // Copied, never mutated in place: `getMetadata` walks the prototype chain, so on a
+    // subclass it returns the PARENT's map and a write would leak the child's property
+    // into the parent's schema.
+    const map: Record<string, PropertyOptions> = {
+      ...(Reflect.getMetadata(OPENAPI_KEYS.PROPERTIES, ctor) ?? {}),
+    };
     map[propertyKey as string] = { required: true, ...options };
     Reflect.defineMetadata(OPENAPI_KEYS.PROPERTIES, map, ctor);
   };
