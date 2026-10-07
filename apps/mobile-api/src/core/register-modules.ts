@@ -30,6 +30,7 @@ import { TrackingModule } from '@/modules/tracker/tracking.module';
 import { StatsModule } from '@/modules/tracker/stats.module';
 import { ShopModule } from '@/modules/shop/shop.module';
 import { EventModule } from '@/modules/event/event.module';
+import { PromoModule } from '@/modules/promo/promo.module';
 import { B2bAppModule } from '@/modules/b2b-app/b2b-app.module';
 
 const modules: AppModule[] = [
@@ -60,6 +61,7 @@ const modules: AppModule[] = [
   StatsModule,
   ShopModule,
   EventModule,
+  PromoModule,
   B2bAppModule,
 ];
 

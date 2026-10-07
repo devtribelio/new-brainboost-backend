@@ -243,7 +243,9 @@ export class ProductService {
     return { rows, total, ratingAvgByProduct, purchasedProductIds };
   }
 
-  private async batchPurchased(
+  // Public: the promo landing reuses both batch helpers so its product cards
+  // answer `isPurchased` / rating exactly as the catalog does.
+  async batchPurchased(
     memberId: string | undefined,
     rows: { id: string; type: string }[],
   ): Promise<Set<string>> {
@@ -264,7 +266,7 @@ export class ProductService {
     return set;
   }
 
-  private async batchRatingAvg(productIds: string[]): Promise<Map<string, number>> {
+  async batchRatingAvg(productIds: string[]): Promise<Map<string, number>> {
     const map = new Map<string, number>();
     if (productIds.length === 0) return map;
     const grouped = await prisma.review.groupBy({

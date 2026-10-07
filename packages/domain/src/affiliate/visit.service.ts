@@ -33,7 +33,7 @@ export interface VisitInput {
 }
 
 export interface VisitLogResult {
-  status: 'logged' | 'duplicate' | 'invalid' | 'error';
+  status: 'logged' | 'duplicate' | 'invalid' | 'skipped' | 'error';
   visitId?: string;
   reason?: string;
 }
@@ -82,6 +82,12 @@ export class VisitService {
       if (!affiliator) {
         logger.warn({ code: input.affiliatorCode }, 'affiliate.visit.unknown_affiliator');
         return { status: 'invalid', reason: 'unknown affiliator' };
+      }
+      // A logged-in member clicking their own code (±60% of member-bound clicks):
+      // nobody may earn on their own purchase, so the row could only ever mask a
+      // real affiliator's click. Still 200 — the app's visit queue drops on any 200.
+      if (input.memberId && input.memberId === affiliator.id) {
+        return { status: 'skipped', reason: 'self' };
       }
 
       // Per-product context (B-5). Best-effort: an unknown productCode degrades to a

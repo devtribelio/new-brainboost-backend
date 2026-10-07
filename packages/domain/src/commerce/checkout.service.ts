@@ -83,7 +83,10 @@ export interface StartCheckoutResult extends CheckoutQuoteResult {
   expiredAt: Date;
 }
 
-type PriceInput = Pick<StartCheckoutInput, 'memberId' | 'productId' | 'voucherCode' | 'qty' | 'itemTotal'>;
+/** `memberId` absent = a guest quote: the member-scoped guards cannot run and are skipped. */
+type PriceInput = Pick<StartCheckoutInput, 'productId' | 'voucherCode' | 'qty' | 'itemTotal'> & {
+  memberId?: string;
+};
 
 export class CheckoutService {
   constructor(private readonly voucherService: VoucherService = new VoucherService()) {}
@@ -96,7 +99,19 @@ export class CheckoutService {
    * come from. Same errors as submit, on purpose: a quote for a purchase submit
    * would refuse is not a price.
    */
-  async quote(input: PriceInput): Promise<CheckoutQuoteResult> {
+  async quote(input: PriceInput & { memberId: string }): Promise<CheckoutQuoteResult> {
+    const { totals } = await this.price(input);
+    return totals;
+  }
+
+  /**
+   * `quote()` for a visitor who has not logged in yet. Same product guards, same
+   * arithmetic, same tax; what it cannot know is who is asking, so the
+   * already-owned guard is skipped and the voucher goes through
+   * `validatePublic()`. The price is therefore what a NEW buyer pays — the authed
+   * quote after login is still the one that decides.
+   */
+  async quotePublic(input: Pick<PriceInput, 'productId' | 'voucherCode'>): Promise<CheckoutQuoteResult> {
     const { totals } = await this.price(input);
     return totals;
   }
@@ -184,11 +199,13 @@ export class CheckoutService {
     // trial: a trial row must not block the purchase it exists to sell, so the
     // filter ignores trial-granted rows. Checkout only — the ingest path
     // (IAP/Scalev) cannot refuse a purchase the store has already charged for.
-    const owned = await prisma.courseEnrollment.findFirst({
-      where: { memberId: input.memberId, ...OWNED_FOR_PURCHASE, course: { productId: product.id } },
-      select: { id: true },
-    });
-    if (owned) throw badRequest(ERROR_CODES.PRODUCT_ALREADY_PURCHASED);
+    if (input.memberId) {
+      const owned = await prisma.courseEnrollment.findFirst({
+        where: { memberId: input.memberId, ...OWNED_FOR_PURCHASE, course: { productId: product.id } },
+        select: { id: true },
+      });
+      if (owned) throw badRequest(ERROR_CODES.PRODUCT_ALREADY_PURCHASED);
+    }
 
     let voucherId: string | undefined;
     let voucherMeta: {
@@ -197,11 +214,9 @@ export class CheckoutService {
       maxAmount?: number | null;
     } | null = null;
     if (input.voucherCode) {
-      const check = await this.voucherService.validate(
-        input.voucherCode,
-        input.productId,
-        input.memberId,
-      );
+      const check = input.memberId
+        ? await this.voucherService.validate(input.voucherCode, input.productId, input.memberId)
+        : await this.voucherService.validatePublic(input.voucherCode, input.productId);
       // `reason` is member-facing Indonesian copy, not a log string. The displayed
       // message still comes from `errorCode` where validate() set one; `reason` rides
       // along in `details` so the cases that have no code of their own (expired,
@@ -270,6 +285,7 @@ export class CheckoutService {
     const visit = await prisma.affiliateVisit.findFirst({
       where: {
         memberId,
+        affiliatorMemberId: { not: memberId }, // an own-code click attributes nothing
         createdAt: { gte: since },
         program: { productId },
       },

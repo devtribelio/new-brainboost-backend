@@ -2,7 +2,8 @@ import { isB2bManagedMember } from '@bb/domain/b2b/managed-member';
 import { prisma } from '@bb/db';
 import type { PaginationParams } from '@bb/common/utils/pagination.util';
 import { settingsService, SETTING_KEYS } from '@bb/common/services/settings.service';
-import { compareSemver } from '../app-version/version.util';
+import type { Banner } from '@prisma/client';
+import { compareSemver, isWithinVersionWindow } from '../app-version/version.util';
 
 /** What the client tells us about itself on `GET /data/banner`. Both optional. */
 export interface BannerClientInfo {
@@ -34,16 +35,15 @@ export class BannerService {
       ],
       ...(filter?.isPopup !== undefined ? { isPopup: filter.isPopup } : {}),
     };
-    const [rows, total] = await Promise.all([
-      prisma.banner.findMany({
-        where,
-        orderBy: [{ position: 'asc' }, { createdAt: 'desc' }],
-        skip: p.skip,
-        take: p.take,
-      }),
-      prisma.banner.count({ where }),
-    ]);
-    return { rows, total };
+    // Paged in memory: the per-banner version window is semver, which SQL cannot compare,
+    // so it has to be applied before skip/take for `total` to stay right. Active banners
+    // number in the single digits.
+    const all = await prisma.banner.findMany({
+      where,
+      orderBy: [{ position: 'asc' }, { createdAt: 'desc' }],
+    });
+    const visible = all.filter((b) => isVisibleForClient(b, client));
+    return { rows: visible.slice(p.skip, p.skip + p.take), total: visible.length };
   }
 
   /**
@@ -65,4 +65,30 @@ export class BannerService {
     // null (unparseable either side) is not 1 -> shown.
     return compareSemver(client.version, maxVersion) === 1;
   }
+}
+
+type BannerVersionWindow = Pick<
+  Banner,
+  'minVersionAndroid' | 'maxVersionAndroid' | 'minVersionIos' | 'maxVersionIos'
+>;
+
+/**
+ * Per-banner version window, on top of the global gate above. A banner with no bound is
+ * shown as before. A banner with ANY bound is shown only to a client that sends
+ * `platform=android|ios` and a version inside that platform's window (an empty pair for
+ * the client's platform = unbounded). It fails CLOSED — no platform means web or an app
+ * build older than the banner gate, which BE cannot tell apart, and either way must not
+ * see a banner scoped to an internal build.
+ */
+function isVisibleForClient(b: BannerVersionWindow, client?: BannerClientInfo): boolean {
+  const hasWindow = [b.minVersionAndroid, b.maxVersionAndroid, b.minVersionIos, b.maxVersionIos]
+    .some((v) => v?.trim());
+  if (!hasWindow) return true;
+  if (client?.platform === 'android') {
+    return isWithinVersionWindow(client.version, b.minVersionAndroid, b.maxVersionAndroid);
+  }
+  if (client?.platform === 'ios') {
+    return isWithinVersionWindow(client.version, b.minVersionIos, b.maxVersionIos);
+  }
+  return false;
 }

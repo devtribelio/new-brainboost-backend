@@ -38,7 +38,7 @@ export class BannerController {
     required: false,
     example: 'android',
     description:
-      "Client platform (`android` | `ios`). Selects which `banner.maxVersion*` setting gates the response. Omit and no gate applies.",
+      "Client platform (`android` | `ios`). Selects which `banner.maxVersion*` setting gates the response, and which per-banner version window applies. Omit and the global gate does not apply, but banners that carry a version window are left out.",
   })
   @ApiQuery({
     name: 'version',
@@ -46,7 +46,7 @@ export class BannerController {
     required: false,
     example: '3.3.0',
     description:
-      'Installed app version (semver). Banners are returned up to and INCLUDING the configured max version; a strictly newer build gets an empty list. Omitted/unparseable = shown.',
+      'Installed app version (semver). Banners are returned up to and INCLUDING the configured max version; a strictly newer build gets an empty list. Omitted/unparseable = shown, except banners with their own version window (min/max per platform, inclusive), which are shown only when the version is inside it.',
   })
   @ApiResponse({
     status: 200,
