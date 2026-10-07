@@ -4,6 +4,12 @@
  */
 import type { PrismaClient } from '@prisma/client';
 import type { LegacyClient } from './legacy-db';
+import type { ChangeEntry } from './change-log';
+
+/** Narrow view of change-log.ts (fs-backed) so this module stays dependency-free. */
+export interface ChangeLogSink {
+  record(entry: ChangeEntry): void;
+}
 
 export interface Stats {
   scanned: number; // legacy rows examined
@@ -69,6 +75,12 @@ export interface SyncerCtx extends RunCtx {
    * syncer).
    */
   recordIssue(reason: string, legacyPk: number | string | null, detail?: string): Promise<void>;
+  /**
+   * Opt-in CSV journal of row-level decisions (see change-log.ts), present only on a one-shot
+   * run started with `--audit-csv`. The periodic worker never sets it. `record` is synchronous,
+   * so it is safe to call from a `runConcurrent` callback.
+   */
+  changeLog?: ChangeLogSink;
 }
 
 export interface Syncer {

@@ -17,6 +17,7 @@ import { backfillNewMembers } from './backfill-new-members';
 import { recountCounters } from './recount';
 import { emptyStats, type RunCtx, type Stats, type SyncerCtx } from './types';
 import { errCode, flattenRedirects, skipReasonsSummary } from './util';
+import { auditPathFor, ChangeLog } from './change-log';
 
 const LOCK_ROW = '__lock__';
 
@@ -31,6 +32,12 @@ export interface RunOpts {
   syncers: string[]; // resolved syncer names to run (ordered by caller)
   dryRun: boolean;
   since?: string | null; // manual watermark override (applies to all selected syncers)
+  /**
+   * One-shot only (`pnpm resync <syncer> --audit-csv=…`): write a CSV journal of the row-level
+   * decisions (cancel/create/repoint/…) so the run can be reviewed and traced back. Empty string
+   * → a default per-syncer file name. The periodic worker never passes it.
+   */
+  auditCsv?: string | null;
 }
 
 /** Acquire the DB run-lock. Returns the owned acquiredAt, or null if held elsewhere. */
@@ -110,6 +117,8 @@ export async function runResync(opts: RunOpts): Promise<Record<string, Stats>> {
   const prisma = new PrismaClient({ log: ['warn', 'error'] });
   const results: Record<string, Stats> = {};
   const runStarted = Date.now();
+  const startedAt = new Date();
+  const runId = startedAt.toISOString();
   let acquired: Date | null = null;
   try {
     acquired = await acquireLock(prisma);
@@ -173,8 +182,15 @@ export async function runResync(opts: RunOpts): Promise<Record<string, Stats>> {
           opts.since && stored && new Date(opts.since) < new Date(stored) ? new Date(stored) : null;
         const syncerLog = (m: string) => console.log(`[${ts()}] [resync:${name}] ${m}`);
 
+        // opt-in row-level journal (one-shot runs only) — see change-log.ts
+        const changeLog = opts.auditCsv
+          ? new ChangeLog(auditPathFor(opts.auditCsv, name, startedAt), name, runId, opts.dryRun)
+          : undefined;
+        if (changeLog) syncerLog(`change-log → ${changeLog.path}`);
+
         const syncerCtx: SyncerCtx = {
           ...ctx,
+          changeLog,
           log: syncerLog,
           since,
           // captured BEFORE the syncer's first data query — the checkpoint ceiling
@@ -250,6 +266,10 @@ export async function runResync(opts: RunOpts): Promise<Record<string, Stats>> {
           console.error(err);
         } finally {
           if (hbTimer) clearInterval(hbTimer);
+          if (changeLog) {
+            changeLog.close();
+            syncerLog(`change-log: ${changeLog.count} row(s) → ${changeLog.path}`);
+          }
         }
 
         // confirm ownership between syncers; a lost lock means another process holds it now

@@ -690,3 +690,29 @@ Open decisions before coding:
 
 Proposed default (pending confirmation): `channel='adjustment'`; insert-only plus auto-update for
 `PENDING` rows; web/Xendit only.
+
+## Audit journal (`--audit-csv`) and the enrollment cancel export
+
+Repair runs are reviewed before they write and traced back after, so both are supported:
+
+- **`pnpm resync <syncer> --dry-run --audit-csv=<path>`** (or bare `--audit-csv` for a
+  timestamped default name) writes a CSV journal from the syncer itself — one row per decision
+  (`cancel` / `create` / `refresh` / `uncancel` / `repoint` / `skip` / `error`) with `run_id`,
+  `mode` (dry-run vs apply), `reason`, ids, PII (`member_email`, `member_phone`) and
+  `before`/`after` JSON, so a wrong cancel/grant can be reversed by hand
+  (`update course_enrollment set is_canceled=false, cancelation_reason=null where legacy_id in (…)`).
+  **Opt-in and one-shot only** — the periodic worker never sets `auditCsv`, so production ticks
+  write nothing. Implementation: `src/change-log.ts`, wired in `core.ts`/`run.ts`, instrumented in
+  `syncers/enrollments.ts`. A journal file is appended to (header written once), so use a fresh
+  path per run or the default timestamped name.
+- **`pnpm export:enrollment-cancels --out=<path>`** — standalone read-only export of every legacy
+  `course_enrollment` with `status = 0` in brainboost scope, with `tanggal` / `status` /
+  `tanggal_dicabut` / `alasan_dicabut` (+ payment, sibling-active and paid-order columns) and an
+  `aksi` column (`would_cancel` vs `skip` + `blocked_reason`) mirroring the syncer's guards.
+- Both files contain **PII** (email/phone) — never commit them.
+
+Measured on prod (7 Okt 2026, `--since=1970`): the full 9-syncer dry run takes **~2 minutes**
+(388k rows scanned), enrollments alone ~85 s. Running it twice gave identical per-syncer
+counters (only one scan count moved +2 from live legacy growth), so the numbers are safe to
+plan an apply from.
+

@@ -22,6 +22,27 @@ import {
   mayCancelRemoved,
   type ExistingEnrollment,
 } from './enrollment-rules';
+import type { ChangeEntry } from '../change-log';
+
+/**
+ * Journal one enrollment decision (no-op unless the run was started with `--audit-csv`, e.g.
+ * `pnpm resync enrollments --dry-run --audit-csv=out.csv`). In a dry run the entry is the PLAN;
+ * with `--apply` it is what was written — so a wrong cancel/grant can be traced back.
+ */
+function journal(ctx: SyncerCtx, e: ChangeEntry): void {
+  ctx.changeLog?.record(e);
+}
+
+/** Compact snapshot of a PG enrollment for the audit journal's `before`/`after` columns. */
+function snapshot(e: ExistingEnrollment | undefined): Record<string, unknown> | null {
+  if (!e) return null;
+  return {
+    legacyId: e.legacyId,
+    isCanceled: e.isCanceled,
+    reason: e.cancelationReason,
+    expiredDate: e.expiredDate ? e.expiredDate.toISOString() : null,
+  };
+}
 
 /** In-scope legacy course ids: brainboost-owned, or sold as brainboost on the payment. */
 export const BB_COURSE_IDS_SQL = `SELECT course_id FROM course WHERE client = 'brainboost'
@@ -67,11 +88,13 @@ export const enrollmentsSyncer: Syncer = {
     const [rows] = await ctx.legacy.query<RowDataPacket[]>(
       `SELECT e.course_enrollment_id, e.member_id, e.course_id, e.created, e.expired_date,
               e.certificate_code, e.certificate_created, e.progress, e.status,
+              m.email AS member_email, m.phone AS member_phone,
               COALESCE(e.\`updated\`, e.\`created\`) AS wm,
               COALESCE(cp.\`updated\`, cp.\`created\`) AS course_pay_wm,
               COALESCE(bp.\`updated\`, bp.\`created\`) AS bundle_pay_wm,
               cp.payment_status AS course_ps, bp.payment_status AS bundle_ps
          FROM ${ENROLLMENT_FROM}
+         LEFT JOIN member m ON m.member_id = e.member_id
         WHERE e.course_id IN (?) AND e.member_id IS NOT NULL
           AND ( COALESCE(e.\`updated\`, e.\`created\`) > ?
                 OR COALESCE(cp.\`updated\`, cp.\`created\`) > ?
@@ -159,10 +182,12 @@ export const enrollmentsSyncer: Syncer = {
       if (!courseId) {
         markSkip(stats, 'course_not_mapped', r.course_id);
         void ctx.recordIssue('course_not_mapped', r.course_enrollment_id, `course_id=${r.course_id}`);
+        journal(ctx, { action: 'skip', reason: 'course_not_mapped', legacyId, memberLegacyId: r.member_id, memberEmail: r.member_email, memberPhone: r.member_phone, courseLegacyId: r.course_id });
         return;
       }
       if (!memberId) {
         markSkip(stats, 'member_unresolved', r.member_id);
+        journal(ctx, { action: 'skip', reason: 'member_unresolved', legacyId, memberLegacyId: r.member_id, memberEmail: r.member_email, memberPhone: r.member_phone, courseLegacyId: r.course_id });
         return;
       }
       const pairKey = `${memberId}|${courseId}`;
@@ -176,10 +201,30 @@ export const enrollmentsSyncer: Syncer = {
         // Pair held by a new-system row (app purchase / employee grant) or by a live
         // legacy row — not ours to fight over.
         markSkip(stats, 'pair_held', legacyId);
+        journal(ctx, {
+          action: 'skip',
+          reason: 'pair_held',
+          legacyId,
+          memberLegacyId: r.member_id, memberEmail: r.member_email, memberPhone: r.member_phone,
+          courseLegacyId: r.course_id,
+          pgEnrollmentId: existing?.id ?? null,
+          before: snapshot(existing),
+        });
         return;
       }
+      const before = snapshot(existing);
       if (ctx.dryRun) {
         stats.upserted += 1;
+        journal(ctx, {
+          action,
+          reason: 'plan (dry-run)',
+          legacyId,
+          memberLegacyId: r.member_id, memberEmail: r.member_email, memberPhone: r.member_phone,
+          courseLegacyId: r.course_id,
+          pgEnrollmentId: existing?.id ?? null,
+          before,
+          after: { legacyId, isCanceled: false, reason: null, expiredDate: toDate(r.expired_date)?.toISOString() ?? null },
+        });
         return;
       }
       const incomingExpired = toDate(r.expired_date);
@@ -235,9 +280,20 @@ export const enrollmentsSyncer: Syncer = {
           });
         }
         stats.upserted += 1;
+        journal(ctx, {
+          action,
+          reason: action === 'uncancel' ? 'legacy_reactivated' : 'legacy_active',
+          legacyId,
+          memberLegacyId: r.member_id, memberEmail: r.member_email, memberPhone: r.member_phone,
+          courseLegacyId: r.course_id,
+          pgEnrollmentId: existing?.id ?? null,
+          before,
+          after: { legacyId, isCanceled: false, reason: null, expiredDate: incomingExpired?.toISOString() ?? null, progress: incomingProgress },
+        });
       } catch (err: any) {
         if (err?.code === 'P2002') {
           markSkip(stats, 'unique_clash', legacyId);
+          journal(ctx, { action: 'error', reason: 'unique_clash', legacyId, memberLegacyId: r.member_id, memberEmail: r.member_email, memberPhone: r.member_phone, courseLegacyId: r.course_id, detail: 'P2002' });
         } else {
           stats.errors += 1;
           wm.failed(toDate(r.wm));
@@ -292,6 +348,7 @@ async function cancelEnrollment(
   const course = courseByLegacy.get(Number(r.course_id));
   if (!memberId || !course) {
     markSkip(stats, 'revoke_member_or_course_missing', r.course_enrollment_id);
+    journal(ctx, { action: 'skip', reason: 'revoke_member_or_course_missing', legacyId, memberLegacyId: r.member_id, memberEmail: r.member_email, memberPhone: r.member_phone, courseLegacyId: r.course_id, detail: `cancel_reason=${reason}` });
     return;
   }
   const pairKey = `${memberId}|${course.id}`;
@@ -301,6 +358,7 @@ async function cancelEnrollment(
   const existing = byPair.get(pairKey);
   if (!mayCancelRemoved({ existing, legacyId, otherActiveLegacyRows: 0, hasPaidOrder: false })) {
     markReason(stats, 'revoke_pair_not_ours', legacyId);
+    journal(ctx, { action: 'skip', reason: 'revoke_pair_not_ours', legacyId, memberLegacyId: r.member_id, memberEmail: r.member_email, memberPhone: r.member_phone, courseLegacyId: r.course_id, pgEnrollmentId: existing?.id ?? null, before: snapshot(existing), detail: `cancel_reason=${reason}` });
     return;
   }
 
@@ -312,6 +370,7 @@ async function cancelEnrollment(
         AND e.status = 1 AND ${HAS_ACCESS_SQL}`,
     [Number(r.course_id), sameMemberLegacyIds(ctx.redirect, losersByWinner, Number(r.member_id)), legacyId],
   );
+  const otherActive = Number((others as any[])[0]?.n ?? 0);
   const paid = await ctx.prisma.commerceTransaction.findFirst({
     // amount > 0: a TRIAL grant or 100%-voucher order settles PAID at zero and is not a purchase
     where: { memberId, productId: course.productId, status: 'PAID', amount: { gt: 0 } },
@@ -321,15 +380,17 @@ async function cancelEnrollment(
     !mayCancelRemoved({
       existing: byPair.get(pairKey),
       legacyId,
-      otherActiveLegacyRows: Number((others as any[])[0]?.n ?? 0),
+      otherActiveLegacyRows: otherActive,
       hasPaidOrder: paid !== null,
     })
   ) {
     markReason(stats, 'revoke_still_entitled', legacyId);
+    journal(ctx, { action: 'skip', reason: 'revoke_still_entitled', legacyId, memberLegacyId: r.member_id, memberEmail: r.member_email, memberPhone: r.member_phone, courseLegacyId: r.course_id, pgEnrollmentId: existing!.id, before: snapshot(existing), detail: `cancel_reason=${reason} otherActiveLegacyRows=${otherActive} hasPaidOrder=${paid !== null}` });
     return;
   }
   if (ctx.dryRun) {
     stats.voided = (stats.voided ?? 0) + 1;
+    journal(ctx, { action: 'cancel', reason, legacyId, memberLegacyId: r.member_id, memberEmail: r.member_email, memberPhone: r.member_phone, courseLegacyId: r.course_id, pgEnrollmentId: existing!.id, before: snapshot(existing), after: { isCanceled: true, reason }, detail: 'plan (dry-run)' });
     return;
   }
   // `legacyId` + `isCanceled: false` in the guard: a re-scan is a no-op instead of
@@ -344,5 +405,9 @@ async function cancelEnrollment(
       byPair.set(pairKey, { ...current, isCanceled: true, cancelationReason: reason });
     }
     stats.voided = (stats.voided ?? 0) + 1;
-  } else markReason(stats, 'revoke_raced_or_done', legacyId);
+    journal(ctx, { action: 'cancel', reason, legacyId, memberLegacyId: r.member_id, memberEmail: r.member_email, memberPhone: r.member_phone, courseLegacyId: r.course_id, pgEnrollmentId: existing!.id, before: snapshot(existing), after: { isCanceled: true, reason } });
+  } else {
+    markReason(stats, 'revoke_raced_or_done', legacyId);
+    journal(ctx, { action: 'skip', reason: 'revoke_raced_or_done', legacyId, memberLegacyId: r.member_id, memberEmail: r.member_email, memberPhone: r.member_phone, courseLegacyId: r.course_id, pgEnrollmentId: existing!.id });
+  }
 }
