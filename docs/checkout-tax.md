@@ -2,7 +2,7 @@
 
 > Hasil review contract FE `checkout-tax-contract.md` (ditulis FE 2026-09-28) terhadap kode `main` per 2026-09-28.
 > Status: **DIBANGUN 2026-09-29/30** di branch `feat/checkout-tax` (rate ship `0`, belum di-merge, migration belum di-apply). Kedua keputusan bisnis sudah masuk: base komisi pre-tax (§6.1) dan **tiket event bebas PPN** (§6.2). Tidak ada keputusan pending di sisi BE.
-> Scope: course checkout, event tickets, riwayat transaksi. Subscription ikut sejak merge `feat/batch-juli-jalur-a` (2026-10-07): `prorationCredit` dipotong SEBELUM pajak — PPN dihitung atas `itemTotal − voucherAmount − prorationCredit`, tagihan yang benar-benar dibayar (masa yang dikreditkan sudah dipajaki saat dijual). Basis komisi tetap `(acceptedAmount ?? amount) − taxAmount + voucherAmount + prorationCredit`.
+> Scope: course checkout, event tickets, riwayat transaksi. Subscription ikut sejak merge `feat/batch-juli-jalur-a` (2026-10-07): `prorationCredit` dipotong SEBELUM pajak — PPN dihitung atas `itemTotal − voucherAmount − prorationCredit`, tagihan yang benar-benar dibayar (masa yang dikreditkan sudah dipajaki saat dijual). Basis komisi tetap `(acceptedAmount ?? amount) − taxAmount + voucherAmount + prorationCredit`. `GET /subscription/quote` (2026-10-08) memakai `computeTotals` + `resolveTaxRate` yang sama, jadi `amount`-nya tax-inclusive dan membawa `taxRate`/`taxAmount` (aditif); `GET /subscription/plans` tetap harga etalase pre-PPN seperti katalog.
 > Dokumen terkait: `docs/commerce-port.md` (checkout + Xendit + voucher bypass), `docs/event-ticketing.md` §17 (price ladder), `docs/event-ticketing-contract.md`, CLAUDE.md §5.
 
 ---

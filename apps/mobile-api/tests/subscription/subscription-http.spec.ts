@@ -12,6 +12,7 @@ import * as bcrypt from 'bcryptjs';
 import { buildApp } from '@/app';
 import { prisma } from '@bb/db';
 import { SubscriptionService } from '@bb/domain/subscription/subscription.service';
+import { SettingsService, settingsService, SETTING_KEYS } from '@bb/common/services/settings.service';
 
 const app = buildApp();
 const subscriptionService = new SubscriptionService();
@@ -324,6 +325,7 @@ describe('/subscription HTTP module (BE-19)', () => {
       payableReason: 'not_scheduled', // must be declared first
     });
     expect(down.body.data.amount).toBe(down.body.data.price);
+    expect(down.body.data).toMatchObject({ taxRate: 0, taxAmount: 0 }); // tax off = pre-tax numbers unchanged
     expect(down.body.data.productId).toBeTruthy(); // ready to hand to checkout
 
     // Same plan = renewal, and paying early is allowed.
@@ -353,6 +355,31 @@ describe('/subscription HTTP module (BE-19)', () => {
     await request(app)
       .delete('/api/subscription/pending')
       .set('authorization', `Bearer ${ownerToken}`);
+  });
+
+  it('GET /quote bills PPN exactly as checkout will once tax is on', async () => {
+    const ownerToken = await login(ownerEmail);
+    try {
+      await settingsService.set(SETTING_KEYS.taxEnabled, 'true');
+      await settingsService.set(SETTING_KEYS.taxRate, '11');
+      SettingsService.clearCache();
+      const r = await request(app)
+        .get(`/api/subscription/quote?planCode=TSTH_DUO_${uniq}`)
+        .set('authorization', `Bearer ${ownerToken}`);
+      expect(r.status).toBe(200);
+      const price = r.body.data.price as number;
+      const taxAmount = Math.round((price * 11) / 100);
+      expect(r.body.data).toMatchObject({
+        action: 'renewal',
+        prorationCredit: 0,
+        taxRate: 11,
+        taxAmount,
+        amount: price + taxAmount,
+      });
+    } finally {
+      await prisma.appSetting.deleteMany({ where: { key: { in: [SETTING_KEYS.taxEnabled, SETTING_KEYS.taxRate] } } });
+      SettingsService.clearCache();
+    }
   });
 
   it('a seat member is not shown the owner’s pending change or seat choices', async () => {

@@ -5,6 +5,8 @@ import { BadRequestException } from '@bb/common/exceptions';
 import { settingsService, SETTING_KEYS } from '@bb/common/services/settings.service';
 import { isDowngrade, isUpgrade } from './tier';
 import { computeProration } from './proration';
+import { computeTotals } from '../commerce/utils/compute-totals';
+import { resolveTaxRate } from '../commerce/tax';
 
 /** Fallback when the app_settings row is missing (seeded as 7). */
 const GRACE_DAYS_DEFAULT = 7;
@@ -63,6 +65,10 @@ export interface PlanQuote {
   action: 'purchase' | 'renewal' | 'upgrade' | 'downgrade';
   price: number;
   prorationCredit: number;
+  /** PPN, same resolver and arithmetic as checkout — the quote must not disagree with the bill. */
+  taxRate: number;
+  taxAmount: number;
+  /** Tax-inclusive: price − prorationCredit + taxAmount. */
   amount: number;
   payableNow: boolean;
   payableReason: 'not_scheduled' | 'term_running' | 'seated_elsewhere' | null;
@@ -477,14 +483,20 @@ export class SubscriptionService {
     });
     if (!target || !target.isActive) throw new BadRequestException('Paket tidak ditemukan');
 
+    // Same `computeTotals` + `resolveTaxRate` checkout runs, so the number on
+    // the confirm screen is the number the invoice carries once tax is on.
+    const taxRate = await resolveTaxRate(target.product.id);
+    const priced = (prorationCredit: number) => {
+      const t = computeTotals({ unitPrice: target.product.price, prorationCredit, taxRate });
+      return { prorationCredit: t.prorationCredit, taxRate: t.taxRate, taxAmount: t.taxAmount, amount: t.amount };
+    };
     const base = {
       planCode: target.code,
       tier: target.tier,
       seatCount: target.seatCount,
       productId: target.product.id,
       price: target.product.price,
-      prorationCredit: 0,
-      amount: target.product.price,
+      ...priced(0),
       remainingDays: null as number | null,
       effectiveAt: null as Date | null,
     };
@@ -533,8 +545,7 @@ export class SubscriptionService {
       return {
         ...base,
         action: 'upgrade',
-        prorationCredit: p.credit,
-        amount: p.charge,
+        ...priced(p.credit),
         remainingDays: p.remainingDays,
         payableNow: true,
         payableReason: null,

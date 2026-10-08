@@ -91,7 +91,13 @@ export class PlanQuoteDto {
   })
   prorationCredit!: number;
 
-  @ApiProperty({ example: 1_273_699, description: 'price − prorationCredit' })
+  @ApiProperty({ example: 11, description: 'PPN rate in percent, 0 while tax is off. Same resolver as checkout.' })
+  taxRate!: number;
+
+  @ApiProperty({ example: 140_107, description: 'round((price − prorationCredit) × taxRate / 100). 0 while tax is off.' })
+  taxAmount!: number;
+
+  @ApiProperty({ example: 1_413_806, description: 'Tax-inclusive: price − prorationCredit + taxAmount. What checkout will charge.' })
   amount!: number;
 
   @ApiProperty({
