@@ -246,6 +246,8 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   // --- playlist ---------------------------------------------------------------
   PLAYLIST_NOT_FOUND: 'Playlist tidak ditemukan',
   PLAYLIST_SUBSCRIPTION_REQUIRED: 'Playlist hanya untuk member berlangganan',
+  SUBSCRIPTION_SEAT_CHANGES_EXHAUSTED:
+    'Batas pergantian anggota untuk periode ini sudah habis — undangan baru bisa dibuat setelah perpanjangan',
   PLAYLIST_QUOTA_EXCEEDED: 'Batas jumlah playlist tercapai',
   PLAYLIST_ITEM_LIMIT_EXCEEDED: 'Batas jumlah audio dalam playlist tercapai',
   PLAYLIST_NAME_REQUIRED: 'Nama playlist wajib diisi',

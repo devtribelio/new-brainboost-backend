@@ -9,6 +9,7 @@ import { randomUUID } from 'node:crypto';
 import { prisma } from '@bb/db';
 import { SubscriptionService } from '@bb/domain/subscription/subscription.service';
 import { SeatService } from '@bb/domain/subscription/seat.service';
+import { ERROR_CODES } from '@bb/common/exceptions';
 
 const subscriptionService = new SubscriptionService();
 const seatService = new SeatService();
@@ -240,6 +241,72 @@ describe('SeatService', () => {
 
     await expect(seatService.leaveSeat(ownerId)).rejects.toThrow('Owner tidak bisa keluar');
     await expect(seatService.leaveSeat(memberA)).rejects.toThrow('tidak menempati seat');
+  });
+
+  describe('seat-change cap (resale deterrent)', () => {
+    it('owner remove AND member leave each count; claims are logged, never counted', async () => {
+      const inv1 = await seatService.generateInvite(ownerId);
+      const seatA = await seatService.claimSeat(memberA, inv1.inviteCode);
+      const afterRemove = await seatService.removeSeat(ownerId, seatA.id);
+      expect(afterRemove.seatChanges).toMatchObject({ used: 1, max: 2, remaining: 1 });
+
+      const inv2 = await seatService.generateInvite(ownerId);
+      await seatService.claimSeat(memberB, inv2.inviteCode);
+      await seatService.leaveSeat(memberB); // "just leave by yourself" must cost the same
+      expect(await seatService.seatChangesOf(subId)).toMatchObject({ used: 2, remaining: 0 });
+
+      const events = await prisma.subscriptionSeatEvent.findMany({
+        where: { subscriptionId: subId },
+        orderBy: { createdAt: 'asc' },
+        select: { kind: true, memberId: true, actorId: true, seatChanges: true },
+      });
+      expect(events).toEqual([
+        { kind: 'claim', memberId: memberA, actorId: memberA, seatChanges: 0 },
+        { kind: 'remove', memberId: memberA, actorId: ownerId, seatChanges: 1 },
+        { kind: 'claim', memberId: memberB, actorId: memberB, seatChanges: 1 },
+        { kind: 'leave', memberId: memberB, actorId: memberB, seatChanges: 2 },
+      ]);
+    });
+
+    it('at the cap: invite refused, a pre-minted code refused at claim, remove still allowed', async () => {
+      const inv1 = await seatService.generateInvite(ownerId);
+      const seatA = await seatService.claimSeat(memberA, inv1.inviteCode);
+      const inv2 = await seatService.generateInvite(ownerId); // seat 3, minted while allowance remains
+      await seatService.removeSeat(ownerId, seatA.id); // used 1
+      const inv3 = await seatService.generateInvite(ownerId); // still allowed at remaining 1
+      const seatB = await seatService.claimSeat(memberB, inv3.inviteCode);
+      await seatService.removeSeat(ownerId, seatB.id); // used 2 = cap
+
+      await expect(seatService.generateInvite(ownerId)).rejects.toMatchObject({
+        code: ERROR_CODES.SUBSCRIPTION_SEAT_CHANGES_EXHAUSTED,
+      });
+      // The code minted earlier must not slip through either.
+      await expect(seatService.claimSeat(memberA, inv2.inviteCode)).rejects.toMatchObject({
+        code: ERROR_CODES.SUBSCRIPTION_SEAT_CHANGES_EXHAUSTED,
+      });
+      // Nobody is seated, nothing to remove — but the cap never blocks a removal:
+      // the owner must always be able to kick an abuser (the price is the empty seat).
+      expect(await seatService.seatChangesOf(subId)).toMatchObject({ used: 2, remaining: 0 });
+    });
+
+    it('renewal resets the counter for the new term', async () => {
+      const inv = await seatService.generateInvite(ownerId);
+      const seat = await seatService.claimSeat(memberA, inv.inviteCode);
+      await seatService.removeSeat(ownerId, seat.id);
+      expect((await seatService.seatChangesOf(subId)).used).toBe(1);
+
+      await subscriptionService.activateFromPayment({
+        ownerId,
+        productId,
+        transactionId: randomUUID(),
+        source: 'xendit',
+      }); // same plan while ACTIVE = renewal
+      expect(await seatService.seatChangesOf(subId)).toMatchObject({ used: 0, remaining: 2 });
+      const reset = await prisma.subscriptionSeatEvent.findFirst({
+        where: { subscriptionId: subId, kind: 'reset' },
+      });
+      expect(reset).not.toBeNull();
+    });
   });
 
   it('a freed slot can be re-invited and claimed by someone else', async () => {

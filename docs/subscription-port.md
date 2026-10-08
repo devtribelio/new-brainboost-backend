@@ -218,3 +218,24 @@ GROUP BY p.tier ORDER BY MIN(p.sort_order);
 | Konfirmasi payload `PRODUCT_CHANGE` asli | QA sandbox | ❌ belum pernah ada sampelnya di prod |
 | Copy email reminder + landing repurchase | marketing | ❌ |
 | Investigasi 655 legacy paying member tanpa akun baru | backend | ❌ temuan BE-20 |
+
+
+## Seat changes — batas pergantian anggota per term (2026-10-08)
+
+**Ancaman.** Owner DUO menjual seat tamu di luar app, 3 bulan per orang: A → kick → B → kick → C → kick → D dalam satu term 12 bulan. Sebelum ini: tanpa batas, tanpa jejak (`subscription_seats` hanya menyimpan `claimed_at`; siapa yang pernah duduk hilang saat slot dikosongkan).
+
+**Aturan.**
+- Setiap seat tamu yang berubah terisi → kosong **oleh manusia** = +1 pada `member_subscriptions.seat_changes`: `removeSeat` oleh owner **dan** `leaveSeat` oleh member. Leave ikut dihitung — kalau tidak, owner cukup bilang "keluar sendiri ya". Konsekuensi diterima: tamu bisa menghabiskan jatah owner (leave–claim–leave); mitigasinya kode undangan sekali-pakai, tamu yang sudah keluar tidak bisa masuk sendiri.
+- Pengosongan oleh **sistem** tidak dihitung: eviction downgrade (`reconcileSeats`), expiry, cancel. Hanya dicatat sebagai event `evict`.
+- Gate di `generateInvite` **dan** `claimSeat` (kode yang sudah terlanjur dibuat sebelum habis tetap ditolak saat claim) → `400 SUBSCRIPTION_SEAT_CHANGES_EXHAUSTED`, `details = {used,max,remaining}`.
+- `removeSeat`/`leaveSeat` **tidak pernah** ditolak. Owner harus selalu bisa mengeluarkan penyalahguna, member harus selalu bisa pergi. Harganya seat kosong sampai renewal — itu deterrent-nya.
+- Reset ke 0 oleh `renew` dan `changePlan` (per term; upgrade me-restart term jadi ikut reset). Event `reset` dicatat bila term sebelumnya punya pergantian.
+- `max` = `subscription_plans.max_seat_changes` (NULL) → `app_settings` `subscription.maxSeatChanges` (seed **2**, fallback kode `MAX_SEAT_CHANGES_DEFAULT = 2`).
+
+**Memilih angka.** Penghuni maksimal per seat tamu per term = `1 + max/(seatCount−1)` bila owner memusatkan jatah ke satu seat. DUO: `max=1` → 2 penghuni (resale 6-bulanan), `max=2` → 3 (4-bulanan; 3-bulanan mati), `max=3` → skenario fraud lolos. Default 2 memberi ruang satu kesalahan jujur (kode undangan bocor ke orang salah) + satu pergantian nyata.
+
+**Yang tidak tertutup.** Resale satu term penuh (1 penghuni/seat — tak terbedakan dari keluarga), jual akun owner, dan dengan `max=2` resale 4-bulanan. Counter menaikkan granularitas minimum, tidak meniadakan. Lapisan kedua: `subscription_seat_events` + flag di backoffice untuk sub dengan `used ≥ 2` (belum dibangun di backoffice-bb).
+
+**Audit.** `subscription_seat_events` append-only: `claim | remove | leave | evict | reset`, `seat_no`, `member_id` (penghuni), `actor_id` (pelaku; null = sistem), `seat_changes` (nilai counter SETELAH event). uuid polos tanpa FK — baris audit harus selamat apa pun nasib baris member.
+
+**Kontrak.** `GET /subscription/me` (owner saja) `+ seatChanges {used,max,remaining}`; `DELETE /subscription/seats/:id` → `{removed, seatChanges}`. FE: dialog konfirmasi sebelum remove saat `remaining === 1`. Detail: `docs/subscription-seat-changes-contract.md`. Migrasi `20261008130000_subscription_seat_changes`.

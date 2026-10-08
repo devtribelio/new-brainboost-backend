@@ -24,6 +24,7 @@ import {
   PlanItemDto,
   PlanQuoteDto,
   SeatItemDto,
+  RemoveSeatResponseDto,
   SubscriptionMeDto,
 } from './dto/subscription.dto';
 import {
@@ -96,7 +97,9 @@ export class SubscriptionController {
         pending = serializePendingChange(sub, pendingPlan, claimed);
       }
     }
-    return ok(res, serializeMe(req.user.id, sub, seats, pending));
+    const seatChanges =
+      sub.ownerId === req.user.id ? await this.seatService.seatChangesOf(sub.id) : null;
+    return ok(res, serializeMe(req.user.id, sub, seats, pending, seatChanges));
   };
 
   @ApiBearerAuth()
@@ -194,11 +197,15 @@ export class SubscriptionController {
   };
 
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Kick a member off a seat (owner only; not seat 1)' })
-  @ApiResponse({ status: 200 })
+  @ApiOperation({
+    summary: 'Kick a member off a seat (owner only; not seat 1)',
+    description:
+      'Counts as a seat change. Never refused for the cap — the owner must always be able to remove someone; the cost is that invite/claim are refused once `seatChanges.remaining` hits 0, until renewal.',
+  })
+  @ApiResponse({ status: 200, type: () => RemoveSeatResponseDto })
   removeSeat = async (req: AuthenticatedRequest, res: Response) => {
     if (!req.user) throw new UnauthorizedException();
-    const { memberId, subscription: sub } = await this.seatService.removeSeat(
+    const { memberId, subscription: sub, seatChanges } = await this.seatService.removeSeat(
       req.user.id,
       req.params.seatId,
     );
@@ -212,7 +219,7 @@ export class SubscriptionController {
       source: sub.source,
       memberId,
     });
-    return ok(res, { removed: true });
+    return ok(res, { removed: true, seatChanges });
   };
 
   @ApiBearerAuth()

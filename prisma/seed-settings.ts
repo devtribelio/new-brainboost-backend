@@ -147,6 +147,12 @@ const SETTINGS: Array<{ key: string; value: string; description: string }> = [
       'Days of grace after a subscription expires before access is cut (graceUntil = expiresAt + this).',
   },
   {
+    key: 'subscription.maxSeatChanges',
+    value: '2',
+    description:
+      'Seat-resale deterrent: guest-seat vacates (owner remove + member leave) an owner may make per term before invite/claim is refused. subscription_plans.max_seat_changes overrides per plan.',
+  },
+  {
     key: 'subscription.reminderDaysBefore',
     value: '7,3,1',
     description: 'Comma-separated H-minus buckets for the renewal reminder job (email + push).',

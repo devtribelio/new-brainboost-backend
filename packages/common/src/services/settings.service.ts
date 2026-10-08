@@ -82,6 +82,10 @@ export const SETTING_KEYS = {
   kycMinBalance: 'kyc.minBalance',
   subscriptionGraceDays: 'subscription.graceDays',
   subscriptionReminderDaysBefore: 'subscription.reminderDaysBefore',
+  // Seat-resale deterrent: guest-seat vacates (owner remove + member leave) an
+  // owner may make per term before invite/claim is refused. A plan row may
+  // override it (`subscription_plans.max_seat_changes`); this is the fallback.
+  subscriptionMaxSeatChanges: 'subscription.maxSeatChanges',
   notificationUnopenedPushLimit: 'notification.unopenedPushLimit',
   notificationDigestEnabled: 'notification.digestEnabled',
   notificationDigestHour: 'notification.digestHour',

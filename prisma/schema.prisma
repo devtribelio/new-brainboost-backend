@@ -1886,6 +1886,10 @@ model SubscriptionPlan {
   seatCount            Int      @map("seat_count") // seat 1 = owner
   affiliateRate        Int      @map("affiliate_rate") // % flat L1 commission on first sale (40)
   renewalAffiliateRate Int      @map("renewal_affiliate_rate") // % on renewals AND tier changes (10, COO 2026-08-24); runtime-editable
+  /// Per-term cap on guest-seat vacates (owner remove + member leave) before
+  /// invite/claim is refused — the seat-resale deterrent (2026-10-08). NULL =
+  /// app_settings `subscription.maxSeatChanges`.
+  maxSeatChanges       Int?     @map("max_seat_changes")
   isActive             Boolean  @default(true) @map("is_active")
   sortOrder            Int      @default(0) @map("sort_order")
   createdAt            DateTime @default(now()) @map("created_at")
@@ -1917,6 +1921,10 @@ model MemberSubscription {
   pendingEffectiveAt  DateTime?          @map("pending_effective_at") // = expiresAt when declared
   pendingSource       String?            @map("pending_source") // revenuecat | web — who owns the cancel path
   pendingDeclaredAt   DateTime?          @map("pending_declared_at")
+  /// Guest-seat vacates by a person (owner remove / member leave) in the CURRENT
+  /// term. Reset to 0 by renewal and plan change. System vacates (downgrade
+  /// eviction, expiry) do not count. Gate: invite/claim refused at the plan cap.
+  seatChanges         Int                @default(0) @map("seat_changes")
   source              String // xendit | revenuecat | granted
   providerRef         String?            @map("provider_ref") // RC original_transaction_id — EXPIRATION/CANCELLATION webhook lookup
   latestTransactionId String?            @map("latest_transaction_id") @db.Uuid
@@ -1926,6 +1934,7 @@ model MemberSubscription {
   owner        Member                    @relation("MemberSubscriptionOwner", fields: [ownerId], references: [id])
   plan         SubscriptionPlan          @relation(fields: [planId], references: [id])
   seats        SubscriptionSeat[]
+  seatEvents   SubscriptionSeatEvent[]
   activations  SubscriptionActivation[]
   reminderLogs SubscriptionReminderLog[]
 
@@ -1960,6 +1969,27 @@ model SubscriptionSeat {
   @@unique([subscriptionId, seatNo])
   @@index([memberId])
   @@map("subscription_seats")
+}
+
+/// Append-only audit of who sat where: the counter alone cannot answer "who was
+/// rotated through this seat", which is what CS needs on a resale complaint and
+/// what ops reviews before a manual reset. memberId/actorId are plain uuids, no
+/// FK: an audit row must survive whatever happens to the member row.
+model SubscriptionSeatEvent {
+  id             String   @id @default(uuid(7)) @db.Uuid
+  subscriptionId String   @map("subscription_id") @db.Uuid
+  seatNo         Int      @map("seat_no")
+  kind           String // claim | remove | leave | evict | reset
+  memberId       String?  @map("member_id") @db.Uuid // the seat's occupant the event is about
+  actorId        String?  @map("actor_id") @db.Uuid // who did it (owner on remove, the member on leave/claim); null = system
+  /// Counter value AFTER this event (0 on reset). Lets a timeline be read without replaying it.
+  seatChanges    Int      @map("seat_changes")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  subscription MemberSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  @@index([subscriptionId, createdAt])
+  @@map("subscription_seat_events")
 }
 
 /// Idempotency ledger + audit trail: one append-only row per expiry-affecting change.

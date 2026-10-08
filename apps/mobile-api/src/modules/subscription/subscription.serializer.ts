@@ -1,3 +1,4 @@
+import type { SeatChanges } from '@bb/domain/subscription/seat.service';
 import type {
   MemberSubscription,
   SubscriptionPlan,
@@ -95,6 +96,7 @@ export function serializeMe(
   sub: MemberSubscription & { plan: SubscriptionPlan },
   seats: SeatWithMember[],
   pendingChange?: PendingChangeDto | null,
+  seatChanges?: SeatChanges | null,
 ): SubscriptionMeDto {
   const role = sub.ownerId === callerId ? 'owner' : 'member';
   const base: SubscriptionMeDto = {
@@ -111,6 +113,8 @@ export function serializeMe(
   };
   if (role === 'owner') {
     base.seats = seats.map((s) => serializeSeat(s, callerId));
+    // Owner only: the allowance is theirs to spend, a guest has nothing to do with it.
+    if (seatChanges) base.seatChanges = seatChanges;
   } else {
     // A guest doesn't get the household roster — only their own seat, and
     // without the owner's pending decisions (see serializeSeat). The scheduled

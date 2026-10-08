@@ -11,7 +11,30 @@ import {
   BadRequestException,
   ForbiddenException,
   NotFoundException,
+  badRequest,
+  ERROR_CODES,
 } from '@bb/common/exceptions';
+import { settingsService, SETTING_KEYS } from '@bb/common/services/settings.service';
+
+/** Fallback for `subscription.maxSeatChanges` when the setting row is absent. */
+export const MAX_SEAT_CHANGES_DEFAULT = 2;
+
+/**
+ * Seat-resale deterrent (2026-10-08). An owner selling the guest seat in
+ * 3-month slices needs to rotate occupants; each rotation is a VACATE (owner
+ * remove or member leave — leave counts too, or "just leave by yourself" makes
+ * the rule hollow). The counter lives on the subscription for the current term,
+ * resets with renewal/plan change, and gates invite + claim at the cap. It never
+ * gates remove/leave: an owner must always be able to kick an abuser and a
+ * member must always be able to walk away — the price is an empty seat until
+ * renewal, which is the deterrent. System vacates (downgrade eviction, expiry)
+ * do not count.
+ */
+export interface SeatChanges {
+  used: number;
+  max: number;
+  remaining: number;
+}
 
 // Shared manually (WA/chat) — no ambiguous chars (0/O/1/I).
 const INVITE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
@@ -21,6 +44,8 @@ export interface RemovedSeat {
   /** The member who just lost the seat. */
   memberId: string;
   subscription: MemberSubscription & { plan: SubscriptionPlan };
+  /** Counter after this removal — the number the owner's screen must show next. */
+  seatChanges: SeatChanges;
 }
 
 export interface InviteResult {
@@ -46,6 +71,7 @@ export class SeatService {
    */
   async generateInvite(ownerId: string): Promise<InviteResult> {
     const sub = await this.activeSubOrThrow(ownerId);
+    await this.assertSeatChangesLeft(sub);
 
     // `seatNo <= plan.seatCount` is the allowance, not the row count: a tier
     // change can leave MORE rows than the new plan allows, because `changePlan`
@@ -78,7 +104,9 @@ export class SeatService {
   async claimSeat(memberId: string, code: string): Promise<SubscriptionSeat> {
     const seat = await prisma.subscriptionSeat.findUnique({
       where: { inviteCode: code },
-      include: { subscription: { include: { plan: { select: { seatCount: true } } } } },
+      include: {
+        subscription: { include: { plan: { select: { seatCount: true, maxSeatChanges: true } } } },
+      },
     });
     if (!seat) throw new BadRequestException('Kode undangan tidak valid');
 
@@ -97,6 +125,8 @@ export class SeatService {
     if (sub.ownerId === memberId) {
       throw new BadRequestException('Kamu adalah pemilik subscription ini (sudah menempati seat 1)');
     }
+    // A code minted before the cap was hit must not slip through.
+    await this.assertSeatChangesLeft(sub);
 
     // Release the claimer's zombie seat (on an expired/canceled sub) first — it
     // grants nothing but would trip uniq_active_seat_per_member below.
@@ -122,6 +152,16 @@ export class SeatService {
     }
     if (claimed === 0) throw new BadRequestException('Kode undangan sudah dipakai');
 
+    await prisma.subscriptionSeatEvent.create({
+      data: {
+        subscriptionId: sub.id,
+        seatNo: seat.seatNo,
+        kind: 'claim',
+        memberId,
+        actorId: memberId,
+        seatChanges: sub.seatChanges,
+      },
+    });
     logger.info(
       { memberId, subscriptionId: sub.id, seatNo: seat.seatNo },
       '[subscription] seat claimed',
@@ -200,12 +240,12 @@ export class SeatService {
     if (seat.seatNo === 1) throw new BadRequestException('Seat owner tidak bisa dihapus');
     if (!seat.memberId) throw new BadRequestException('Seat ini kosong');
 
-    await this.freeSeat(seat.id, seat.subscriptionId, seat.memberId);
+    const seatChanges = await this.freeSeat(seat, { kind: 'remove', actorId: ownerId });
     logger.info(
-      { ownerId, seatId, removedMemberId: seat.memberId },
+      { ownerId, seatId, removedMemberId: seat.memberId, seatChanges: seatChanges.used },
       '[subscription] seat removed by owner',
     );
-    return { memberId: seat.memberId, subscription: seat.subscription };
+    return { memberId: seat.memberId, subscription: seat.subscription, seatChanges };
   }
 
   /** Member walks away from their seat. The owner's exit path is cancel, not leave. */
@@ -221,8 +261,20 @@ export class SeatService {
       );
     }
 
-    await this.freeSeat(seat.id, seat.subscriptionId, memberId);
-    logger.info({ memberId, seatId: seat.id }, '[subscription] member left seat');
+    const seatChanges = await this.freeSeat(seat, { kind: 'leave', actorId: memberId });
+    logger.info(
+      { memberId, seatId: seat.id, seatChanges: seatChanges.used },
+      '[subscription] member left seat',
+    );
+  }
+
+  /** The owner's counter for the term, as `/me` and the remove response render it. */
+  async seatChangesOf(subscriptionId: string): Promise<SeatChanges> {
+    const sub = await prisma.memberSubscription.findUniqueOrThrow({
+      where: { id: subscriptionId },
+      select: { seatChanges: true, plan: { select: { maxSeatChanges: true } } },
+    });
+    return this.toSeatChanges(sub);
   }
 
   // --- internals ------------------------------------------------------------------
@@ -232,24 +284,65 @@ export class SeatService {
    * their lazy enrollments on this sub get expired_date = now (retail rows —
    * via_subscription_id NULL — are never touched, per the sacred BE-06 rule).
    */
-  private async freeSeat(seatId: string, subscriptionId: string, memberId: string): Promise<void> {
+  private async freeSeat(
+    seat: { id: string; subscriptionId: string; seatNo: number; memberId: string | null },
+    by: { kind: 'remove' | 'leave'; actorId: string },
+  ): Promise<SeatChanges> {
     const now = new Date();
-    await prisma.$transaction([
-      prisma.subscriptionSeat.update({
-        where: { id: seatId },
+    const memberId = seat.memberId as string;
+    const bumped = await prisma.$transaction(async (tx) => {
+      await tx.subscriptionSeat.update({
+        where: { id: seat.id },
         data: { memberId: null, claimedAt: null, inviteCode: null },
-      }),
-      prisma.courseEnrollment.updateMany({
-        where: { viaSubscriptionId: subscriptionId, memberId },
+      });
+      await tx.courseEnrollment.updateMany({
+        where: { viaSubscriptionId: seat.subscriptionId, memberId },
         data: { expiredDate: now },
-      }),
-    ]);
+      });
+      // Counter + audit row in the same tx as the vacate: a vacate that is not
+      // counted is exactly the loophole this exists to close.
+      const sub = await tx.memberSubscription.update({
+        where: { id: seat.subscriptionId },
+        data: { seatChanges: { increment: 1 } },
+        select: { seatChanges: true, plan: { select: { maxSeatChanges: true } } },
+      });
+      await tx.subscriptionSeatEvent.create({
+        data: {
+          subscriptionId: seat.subscriptionId,
+          seatNo: seat.seatNo,
+          kind: by.kind,
+          memberId,
+          actorId: by.actorId,
+          seatChanges: sub.seatChanges,
+        },
+      });
+      return sub;
+    });
+    return this.toSeatChanges(bumped);
+  }
+
+  private async assertSeatChangesLeft(sub: {
+    seatChanges: number;
+    plan: { maxSeatChanges: number | null };
+  }): Promise<void> {
+    const c = await this.toSeatChanges(sub);
+    if (c.remaining <= 0) throw badRequest(ERROR_CODES.SUBSCRIPTION_SEAT_CHANGES_EXHAUSTED, c);
+  }
+
+  private async toSeatChanges(sub: {
+    seatChanges: number;
+    plan: { maxSeatChanges: number | null };
+  }): Promise<SeatChanges> {
+    const max =
+      sub.plan.maxSeatChanges ??
+      (await settingsService.getNumber(SETTING_KEYS.subscriptionMaxSeatChanges, MAX_SEAT_CHANGES_DEFAULT));
+    return { used: sub.seatChanges, max, remaining: Math.max(0, max - sub.seatChanges) };
   }
 
   private async activeSubOrThrow(ownerId: string) {
     const sub = await prisma.memberSubscription.findFirst({
       where: { ownerId, status: 'ACTIVE' },
-      include: { plan: { select: { seatCount: true } } },
+      include: { plan: { select: { seatCount: true, maxSeatChanges: true } } },
     });
     if (!sub || (sub.graceUntil ?? sub.expiresAt) <= new Date()) {
       throw new BadRequestException('Subscription tidak aktif');

@@ -245,6 +245,32 @@ export class SubscriptionMeDto {
     description: 'A scheduled tier change. Absent when there is none.',
   })
   pendingChange?: PendingChangeDto | null;
+
+  @ApiPropertyOptional({
+    type: () => SeatChangesDto,
+    description:
+      'Owner only. Guest-seat changes (owner remove + member leave) spent this term. Warn before a remove when `remaining === 1`; invite/claim answer 400 SUBSCRIPTION_SEAT_CHANGES_EXHAUSTED at 0. Resets on renewal / plan change.',
+  })
+  seatChanges?: SeatChangesDto;
+}
+
+export class SeatChangesDto {
+  @ApiProperty({ example: 1, description: 'Vacates counted this term.' })
+  used!: number;
+
+  @ApiProperty({ example: 2, description: 'Cap for this plan (plan override, else `subscription.maxSeatChanges`).' })
+  max!: number;
+
+  @ApiProperty({ example: 1, description: 'max − used, never below 0. 1 = "the next remove/leave is the last".' })
+  remaining!: number;
+}
+
+export class RemoveSeatResponseDto {
+  @ApiProperty({ example: true })
+  removed!: boolean;
+
+  @ApiProperty({ type: () => SeatChangesDto, description: 'Counter after this removal.' })
+  seatChanges!: SeatChangesDto;
 }
 
 export class InviteResponseDto {

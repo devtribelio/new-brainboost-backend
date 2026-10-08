@@ -687,8 +687,10 @@ export class SubscriptionService {
         source: meta.source,
         providerRef: meta.providerRef ?? sub.providerRef,
         latestTransactionId: meta.transactionId ?? sub.latestTransactionId,
+        seatChanges: 0, // new term, fresh seat-change allowance
       },
     });
+    await this.logSeatReset(tx, sub);
     await this.bumpLazyEnrollments(tx, sub.id, expiresAt);
     return updated;
   }
@@ -754,8 +756,10 @@ export class SubscriptionService {
         pendingEffectiveAt: null,
         pendingSource: null,
         pendingDeclaredAt: null,
+        seatChanges: 0, // new term, fresh seat-change allowance
       },
     });
+    await this.logSeatReset(tx, sub);
 
     // Bump BEFORE reconciling: the bump moves every lazy enrollment on this sub
     // to the new expiry, evicted members included, so running it after would
@@ -855,6 +859,21 @@ export class SubscriptionService {
       where: { viaSubscriptionId: subscriptionId, memberId: { in: evictedMemberIds } },
       data: { expiredDate: new Date() },
     });
+    // Audit only — a system eviction is not a seat change the owner made.
+    if (evictedMemberIds.length) {
+      await tx.subscriptionSeatEvent.createMany({
+        data: claimed
+          .filter((s) => !keptIds.has(s.id))
+          .map((s) => ({
+            subscriptionId,
+            seatNo: s.seatNo,
+            kind: 'evict',
+            memberId: s.memberId,
+            actorId: null,
+            seatChanges: 0,
+          })),
+      });
+    }
     logger.info(
       { subscriptionId, seatCount, evicted: evictedMemberIds.length },
       '[subscription] plan change evicted seats over the new allowance',
@@ -863,6 +882,17 @@ export class SubscriptionService {
   }
 
   // --- shared -------------------------------------------------------------------
+
+  /** Audit row for the per-term seat-change reset; nothing to log if the term had none. */
+  private async logSeatReset(
+    tx: Prisma.TransactionClient,
+    sub: { id: string; seatChanges: number },
+  ): Promise<void> {
+    if (sub.seatChanges === 0) return;
+    await tx.subscriptionSeatEvent.create({
+      data: { subscriptionId: sub.id, seatNo: 0, kind: 'reset', seatChanges: 0 },
+    });
+  }
 
   /**
    * Renewal/plan-change moves every lazy enrollment of this sub to the new expiry.
