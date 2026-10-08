@@ -87,6 +87,15 @@ describe('ProductService.batchAudios (real Postgres)', () => {
     await prisma.lesson.create({
       data: {
         sectionId: s1.id,
+        name: 'Preview',
+        order: 0,
+        isPreview: true,
+        slidesData: [{ id: 'aud-preview', type: 'AudioTemplate', data: { guid: 'gp', title: 'Cuplikan' } }],
+      },
+    });
+    await prisma.lesson.create({
+      data: {
+        sectionId: s1.id,
         name: 'Archived',
         order: 3,
         lessonStatus: 'ARCHIVED',
@@ -103,7 +112,7 @@ describe('ProductService.batchAudios (real Postgres)', () => {
     await prisma.product.deleteMany({ where: { id: { in: productIds } } });
   });
 
-  it('lists addable audio per product in section/lesson/slide order, lesson name as title fallback', async () => {
+  it('lists addable audio per product in section/lesson/slide order, skipping preview + archived lessons, lesson name as title fallback', async () => {
     const map = await svc.batchAudios([withAudio, withoutAudio]);
     expect(map.get(withAudio)).toEqual([
       { id: 'aud-s1a', title: 'Satu', durationSec: 10 },

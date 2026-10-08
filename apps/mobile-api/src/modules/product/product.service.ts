@@ -388,13 +388,18 @@ export class ProductService {
    * whole page, filtered in memory with the same slide rules the course page
    * applies — not a per-product loop, and not part of `list()`, so the three
    * list paths (plain / purchased / raw) stay untouched and the catalog never
-   * pays for it. Order = section.order, lesson.order, slide order.
+   * pays for it. Preview lessons are left out — same set the course page's
+   * "Tambah ke playlist" offers. Order = section.order, lesson.order, slide order.
    */
   async batchAudios(productIds: string[]): Promise<Map<string, ProductAudio[]>> {
     const map = new Map<string, ProductAudio[]>();
     if (productIds.length === 0) return map;
     const lessons = await prisma.lesson.findMany({
-      where: { lessonStatus: 'ACTIVE', section: { course: { productId: { in: productIds } } } },
+      where: {
+        lessonStatus: 'ACTIVE',
+        isPreview: false,
+        section: { course: { productId: { in: productIds } } },
+      },
       orderBy: [{ section: { order: 'asc' } }, { order: 'asc' }],
       select: {
         name: true,

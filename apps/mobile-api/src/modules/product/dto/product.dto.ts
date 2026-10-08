@@ -134,7 +134,7 @@ export class ProductDto {
   @ApiPropertyOptional({
     type: () => [ProductAudioDto],
     description:
-      'Only with `include=audios` on the signed-in list. The course\'s addable audio slides in lesson order — `AudioTemplate`, playable, not bonus. Empty array when it has none. Listed for every returned course, locked ones included: access is still `isPurchased` / `viaSubscription`, and the playlist add endpoint does not gate on course access.',
+      'Only with `include=audios` on the signed-in list. The course\'s addable audio slides in lesson order — `AudioTemplate`, playable, not bonus, not from a preview lesson. Empty array when it has none. Listed for every returned course, locked ones included: access is still `isPurchased` / `viaSubscription`, and the playlist add endpoint does not gate on course access.',
   })
   audios?: ProductAudioDto[];
 }
