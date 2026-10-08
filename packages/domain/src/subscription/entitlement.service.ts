@@ -1,8 +1,25 @@
-import type { CourseEnrollment, MemberSubscription, SubscriptionPlan } from '@prisma/client';
+import type { CourseEnrollment, MemberSubscription, Prisma, SubscriptionPlan } from '@prisma/client';
 import { prisma } from '@bb/db';
 import { forbidden, ERROR_CODES } from '@bb/common/exceptions';
 
 export type ActiveSubscription = MemberSubscription & { plan: SubscriptionPlan };
+
+/**
+ * Product types the subscription unlocks (decided 2026-10-08): full courses
+ * only. A `mini_course` carries a `courses` row too, so "has a course" is NOT
+ * the predicate — every gate below keys on `products.type` through this one
+ * constant, and the Prisma/SQL list filters mirror it.
+ */
+export const SUBSCRIPTION_PRODUCT_TYPES = ['course'] as const;
+
+export function isSubscriptionCoveredType(type: string): boolean {
+  return (SUBSCRIPTION_PRODUCT_TYPES as readonly string[]).includes(type);
+}
+
+/** Prisma filter for "a product the subscription covers". */
+export function subscriptionCoveredProduct(): Prisma.ProductWhereInput {
+  return { type: { in: [...SUBSCRIPTION_PRODUCT_TYPES] } };
+}
 
 /**
  * Subscription entitlement + lazy enrollment (PRD BE-06).
@@ -86,6 +103,16 @@ export class EntitlementService {
     // Coded, not free-form: the media/bonus gates both answer COURSE_NOT_ENROLLED,
     // and the client branches on `error.code`.
     if (!sub) throw forbidden(ERROR_CODES.COURSE_NOT_ENROLLED);
+
+    // All-access covers full courses only: a mini_course (or any other type that
+    // happens to carry a courses row) is still a retail purchase.
+    const course = await prisma.course.findUnique({
+      where: { id: courseId },
+      select: { product: { select: { type: true } } },
+    });
+    if (!course || !isSubscriptionCoveredType(course.product.type)) {
+      throw forbidden(ERROR_CODES.COURSE_NOT_ENROLLED);
+    }
 
     await prisma.courseEnrollment.upsert({
       where: { memberId_courseId: { memberId, courseId } },

@@ -1,7 +1,10 @@
 import type { Request, Response } from 'express';
 import { ProductService } from './product.service';
 import type { AffiliatorService } from '@bb/domain/affiliate/affiliator.service';
-import { EntitlementService } from '@bb/domain/subscription/entitlement.service';
+import {
+  EntitlementService,
+  isSubscriptionCoveredType,
+} from '@bb/domain/subscription/entitlement.service';
 import { ok, okPaginated } from '@bb/common/utils/response.util';
 import { badRequest, ERROR_CODES } from '@bb/common/exceptions';
 import { parsePagination } from '@bb/common/utils/pagination.util';
@@ -154,7 +157,9 @@ export class ProductController {
           enrollment!.viaSubscriptionId === null &&
           enrollment!.viaVoucherId === null;
         isPurchase =
-          validEnrollment || (await this.entitlement.hasActiveSubscription(memberId));
+          validEnrollment ||
+          (isSubscriptionCoveredType(product.type) &&
+            (await this.entitlement.hasActiveSubscription(memberId)));
         viaSubscription = isPurchase && !validRetail;
       }
     }

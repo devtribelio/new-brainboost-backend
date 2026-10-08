@@ -5,6 +5,7 @@ import { BadRequestException } from '@bb/common/exceptions';
 import { settingsService, SETTING_KEYS } from '@bb/common/services/settings.service';
 import { isDowngrade, isUpgrade } from './tier';
 import { computeProration } from './proration';
+import { subscriptionCoveredProduct } from './entitlement.service';
 import { computeTotals } from '../commerce/utils/compute-totals';
 import { resolveTaxRate } from '../commerce/tax';
 
@@ -863,14 +864,18 @@ export class SubscriptionService {
 
   // --- shared -------------------------------------------------------------------
 
-  /** Renewal/plan-change moves every lazy enrollment of this sub to the new expiry. */
+  /**
+   * Renewal/plan-change moves every lazy enrollment of this sub to the new expiry.
+   * Covered products only: a lazy row on a type the subscription no longer
+   * unlocks (mini_course, pre-2026-10-08) stays expired rather than coming back.
+   */
   private async bumpLazyEnrollments(
     tx: Prisma.TransactionClient,
     subscriptionId: string,
     expiresAt: Date,
   ): Promise<void> {
     await tx.courseEnrollment.updateMany({
-      where: { viaSubscriptionId: subscriptionId },
+      where: { viaSubscriptionId: subscriptionId, course: { product: subscriptionCoveredProduct() } },
       data: { expiredDate: expiresAt },
     });
   }

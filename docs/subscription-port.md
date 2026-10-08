@@ -7,7 +7,7 @@
 ## 1. Model ringkas
 
 4 tier annual (SOLO 1 seat 999K · DUO 2 1.499K · FAMILY 4 1.999K · PREMIUM 6 2.799K),
-akses penuh semua course. Plan = row `subscription_plans` **1:1 dengan `Product`
+akses penuh semua produk **`type='course'`** (BUKAN `mini_course` — keputusan 2026-10-08; gerbangnya `SUBSCRIPTION_PRODUCT_TYPES` di `entitlement.service.ts`, bukan "punya baris `courses`"). Plan = row `subscription_plans` **1:1 dengan `Product`
 `type='subscription'`** — harga tinggal di `products.price` sehingga checkout, voucher,
 dan verifikasi paid-amount Xendit memakai jalur commerce existing tanpa perubahan.
 Phase 2 (6 bulan) / Phase 3 (bulanan) = **tambah row plan baru, zero-code**.

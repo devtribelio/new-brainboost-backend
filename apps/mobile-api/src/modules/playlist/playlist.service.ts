@@ -4,7 +4,10 @@ import type { Playlist } from '@prisma/client';
 import { badRequest, forbidden, notFound, ERROR_CODES } from '@bb/common/exceptions';
 import { settingsService, SETTING_KEYS } from '@bb/common/services/settings.service';
 import { toPlainText } from '@bb/common/utils/plain-text.util';
-import { EntitlementService } from '@bb/domain/subscription/entitlement.service';
+import {
+  EntitlementService,
+  subscriptionCoveredProduct,
+} from '@bb/domain/subscription/entitlement.service';
 import { activeEnrollment } from '@bb/domain/commerce/enrollment';
 import {
   PLAYABLE_SLIDE_TYPES,
@@ -435,23 +438,30 @@ export class PlaylistService {
   /**
    * Which of these courses the viewer may play, in ONE query.
    *
-   * A subscriber holds all of them — the subscription is all-access — so the
-   * per-course lookup is skipped entirely. Only when the kill-switch has opened
-   * the feature to non-subscribers does it fall through to enrollments, and then
-   * the filter is `activeEnrollment()` ("may consume the content now", trial
-   * included) — NOT `OWNED_FOR_PURCHASE`, which answers a different question and
-   * would lock subscribers out of audio `/media/stream` happily serves.
+   * A subscriber holds every COVERED course (full courses — the subscription is
+   * all-access over `products.type = 'course'` only) plus whatever they bought
+   * retail. The enrollment filter is `activeEnrollment()` ("may consume the
+   * content now", trial included) — NOT `OWNED_FOR_PURCHASE`, which answers a
+   * different question and would lock members out of audio `/media/stream`
+   * happily serves.
    */
   private async unlockedCourseIds(memberId: string, courseIds: string[]): Promise<Set<string>> {
     const unique = [...new Set(courseIds)];
     if (unique.length === 0) return new Set();
-    if (await this.entitlement.hasActiveSubscription(memberId)) return new Set(unique);
-
     const rows = await prisma.courseEnrollment.findMany({
       where: { memberId, courseId: { in: unique }, ...activeEnrollment() },
       select: { courseId: true },
     });
-    return new Set(rows.map((r) => r.courseId));
+    const unlocked = new Set(rows.map((r) => r.courseId));
+    if (await this.entitlement.hasActiveSubscription(memberId)) {
+      // All-access covers full courses only; a mini_course still needs its own row.
+      const covered = await prisma.course.findMany({
+        where: { id: { in: unique }, product: subscriptionCoveredProduct() },
+        select: { id: true },
+      });
+      for (const c of covered) unlocked.add(c.id);
+    }
+    return unlocked;
   }
 
   /**

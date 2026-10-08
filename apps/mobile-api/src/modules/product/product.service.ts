@@ -5,7 +5,12 @@ import { listAddableAudios } from '@/modules/media/media-asset.util';
 import { notFound, ERROR_CODES } from '@bb/common/exceptions';
 import { activeEnrollment } from '@bb/domain/commerce/enrollment';
 import type { PaginationParams } from '@bb/common/utils/pagination.util';
-import { EntitlementService } from '@bb/domain/subscription/entitlement.service';
+import {
+  EntitlementService,
+  SUBSCRIPTION_PRODUCT_TYPES,
+  isSubscriptionCoveredType,
+  subscriptionCoveredProduct,
+} from '@bb/domain/subscription/entitlement.service';
 import { LISTABLE_PRODUCT_TYPES } from './dto/list-query.dto';
 import type { Ownership, ProductMedia, ProductSort } from './dto/list-query.dto';
 
@@ -81,14 +86,18 @@ export class ProductService {
       // Note this is deliberately NOT `OWNED_FOR_PURCHASE`: that one answers "is it
       // paid for" and is the checkout guard's job, so buying stays possible mid-trial
       // even though the product is not listed here.
+      const notEnrolled: Prisma.ProductWhereInput = {
+        course: { enrollments: { none: { memberId: q.memberId, ...activeEnrollment() } } },
+      };
       if (await this.entitlement.hasActiveSubscription(q.memberId)) {
-        // Subscribers own every course-backed product → only course-less ones remain.
-        where.course = null;
-      } else {
+        // Subscribers own every COVERED course-backed product; what remains is
+        // course-less rows and uncovered types (mini_course) they never bought.
         where.OR = [
           { course: null },
-          { course: { enrollments: { none: { memberId: q.memberId, ...activeEnrollment() } } } },
+          { type: { notIn: [...SUBSCRIPTION_PRODUCT_TYPES] }, ...notEnrolled },
         ];
+      } else {
+        where.OR = [{ course: null }, notEnrolled];
       }
     }
     const [rows, total] = await Promise.all([
@@ -142,21 +151,26 @@ export class ProductService {
         : Prisma.sql`p.type IN (${Prisma.join([...LISTABLE_PRODUCT_TYPES])})`,
     );
     if (q.ownership === 'not_purchased' && q.memberId) {
-      if (await this.entitlement.hasActiveSubscription(q.memberId)) {
-        // Subscribers own every course-backed product → only course-less ones remain.
-        conds.push(Prisma.sql`NOT EXISTS (SELECT 1 FROM courses c WHERE c.product_id = p.id)`);
-      } else {
-        // Only VALID enrollments count (raw-SQL mirror of `activeEnrollment()`):
-        // not refunded, and a time-boxed grant only while `expired_date` is future.
-        // Keyed on the date alone, exactly as the Prisma predicate is — a resynced
-        // legacy trial carries no grant marker to key on.
-        conds.push(Prisma.sql`NOT EXISTS (
+      // Only VALID enrollments count (raw-SQL mirror of `activeEnrollment()`):
+      // not refunded, and a time-boxed grant only while `expired_date` is future.
+      // Keyed on the date alone, exactly as the Prisma predicate is — a resynced
+      // legacy trial carries no grant marker to key on.
+      const notEnrolled = Prisma.sql`NOT EXISTS (
           SELECT 1 FROM courses c
           JOIN course_enrollment ce ON ce.course_id = c.id
           WHERE c.product_id = p.id AND ce.member_id = ${q.memberId}::uuid
             AND ce.is_canceled = false
             AND (ce.expired_date IS NULL OR ce.expired_date > now())
+        )`;
+      if (await this.entitlement.hasActiveSubscription(q.memberId)) {
+        // Subscribers own every COVERED course-backed product; what remains is
+        // course-less rows and uncovered types they never bought.
+        conds.push(Prisma.sql`(
+          NOT EXISTS (SELECT 1 FROM courses c WHERE c.product_id = p.id)
+          OR (p.type NOT IN (${Prisma.join([...SUBSCRIPTION_PRODUCT_TYPES])}) AND ${notEnrolled})
         )`);
+      } else {
+        conds.push(notEnrolled);
       }
     }
     if (q.media && q.media.length > 0) {
@@ -247,12 +261,16 @@ export class ProductService {
     memberId: string,
     filter: { keyword?: string; type?: string },
   ) {
-    // A subscriber "owns" EVERY course-backed product (all-access) — drive the
-    // query off products, not enrollments, so unopened courses show up too.
+    // A subscriber "owns" EVERY covered course-backed product (all-access) plus
+    // whatever they bought retail — drive the query off products, not
+    // enrollments, so unopened courses show up too.
     if (await this.entitlement.hasActiveSubscription(memberId)) {
       const where: Prisma.ProductWhereInput = {
         isActive: true,
-        course: { isNot: null },
+        OR: [
+          { ...subscriptionCoveredProduct(), course: { isNot: null } },
+          { course: { enrollments: { some: { memberId, ...activeEnrollment() } } } },
+        ],
         ...(filter.keyword
           ? { title: { contains: filter.keyword, mode: 'insensitive' as const } }
           : {}),
@@ -367,18 +385,19 @@ export class ProductService {
       enrollments.filter((e) => e.viaSubscriptionId === null).map((e) => e.course.productId),
     );
 
-    // All-access: an active subscription marks every course-backed row purchased.
-    if (await this.entitlement.hasActiveSubscription(memberId)) {
-      for (const id of courseProductIds) {
-        purchasedProductIds.add(id);
-        if (!retailOwned.has(id)) viaSubscriptionIds.add(id);
-      }
-      return result;
-    }
-
     for (const e of enrollments) {
       purchasedProductIds.add(e.course.productId);
       if (e.viaSubscriptionId !== null) viaSubscriptionIds.add(e.course.productId);
+    }
+
+    // All-access: an active subscription marks every COVERED course-backed row
+    // purchased; an uncovered type (mini_course) still needs its own enrollment.
+    if (await this.entitlement.hasActiveSubscription(memberId)) {
+      for (const r of rows) {
+        if (!courseProductIds.includes(r.id) || !isSubscriptionCoveredType(r.type)) continue;
+        purchasedProductIds.add(r.id);
+        if (!retailOwned.has(r.id)) viaSubscriptionIds.add(r.id);
+      }
     }
     return result;
   }

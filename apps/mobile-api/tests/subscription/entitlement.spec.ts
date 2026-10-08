@@ -140,6 +140,30 @@ describe('EntitlementService', () => {
     ).toBe(0);
   });
 
+  it('subscriber is NOT let into a mini_course — all-access covers type=course only', async () => {
+    const miniProduct = await prisma.product.create({
+      data: { type: 'mini_course', code: `TST-ENT-MINI-${uniq}`, title: 'Ent mini', price: 50 },
+    });
+    const mini = await prisma.course.create({ data: { productId: miniProduct.id } });
+    try {
+      await activateSub();
+      await expect(entitlement.assertCourseAccess(ownerId, mini.id)).rejects.toThrow(
+        ForbiddenException,
+      );
+      // No lazy row is minted for an uncovered product.
+      expect(
+        await prisma.courseEnrollment.count({ where: { memberId: ownerId, courseId: mini.id } }),
+      ).toBe(0);
+      // A retail purchase of the same mini_course still opens it.
+      await prisma.courseEnrollment.create({ data: { memberId: ownerId, courseId: mini.id } });
+      await expect(entitlement.assertCourseAccess(ownerId, mini.id)).resolves.toBeUndefined();
+    } finally {
+      await prisma.courseEnrollment.deleteMany({ where: { courseId: mini.id } });
+      await prisma.course.delete({ where: { id: mini.id } });
+      await prisma.product.delete({ where: { id: miniProduct.id } });
+    }
+  });
+
   it('subscriber access lazily creates a marked enrollment mirroring sub expiry', async () => {
     const sub = await activateSub();
     await entitlement.assertCourseAccess(ownerId, courseId);
