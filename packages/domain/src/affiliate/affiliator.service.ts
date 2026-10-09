@@ -337,19 +337,20 @@ export class AffiliatorService {
    * PLAN (not the recipient's mode): affiliateRate on the first sale,
    * renewalAffiliateRate on renewals.
    *
-   * Renewal detection: the provider flag (RC RENEWAL) OR any OTHER non-null
-   * transactionId in the activation ledger for the buyer's ACTIVE sub.
-   * "Other" makes it listener-order independent (this event's own activation may
-   * or may not have landed yet); "non-null" excludes grants — the first PAID
-   * purchase after a granted sub is the affiliate's first sale → full rate.
+   * Renewal detection: the provider flag (RC RENEWAL) OR the buyer has EVER
+   * paid for a subscription — any OTHER non-null, non-refunded transactionId in
+   * the activation ledger of ANY sub they own, whatever its status. "Other"
+   * makes it listener-order independent (this event's own activation may or may
+   * not have landed yet); "non-null" excludes grants — the first PAID purchase
+   * after a granted sub is the affiliate's first sale → full rate.
    *
-   * Scoped to the SUBSCRIPTION, not to the plan. A tier change keeps the same
-   * `member_subscriptions` row and only flips `planId`, so a per-plan lookup
-   * found an empty ledger for the new tier and billed a plain renewal at the
-   * first-sale rate — 40% instead of 20%, on both the upgrade and the downgrade.
-   * Scoping to the ACTIVE sub still treats a repurchase after EXPIRED as a first
-   * sale, because that lands on a NEW subscription row (the old one is no longer
-   * ACTIVE, so its ledger is out of scope).
+   * Scoped to the OWNER, not to the plan or the ACTIVE sub. A tier change keeps
+   * the same row and only flips `planId` (a per-plan lookup billed it at the
+   * first-sale rate), and a repurchase after EXPIRED/CANCELED lands on a NEW
+   * row — scoping to the ACTIVE sub paid the first-sale rate on it again.
+   * A REFUNDED purchase does not count as having paid: refund then rebuy is a
+   * first sale. `transaction_id` has no relation to CommerceTransaction, hence
+   * the second lookup.
    */
   private async commitFlatSubscriptionCommission(
     input: {
@@ -388,17 +389,7 @@ export class AffiliatorService {
     });
     if (!recipient) return { committed: 0 };
 
-    const isRenewal =
-      input.isRenewal === true ||
-      (await prisma.subscriptionActivation.count({
-        where: {
-          subscription: { ownerId: input.buyerMemberId, status: 'ACTIVE' },
-          AND: [
-            { transactionId: { not: null } },
-            ...(input.transactionId ? [{ NOT: { transactionId: input.transactionId } }] : []),
-          ],
-        },
-      })) > 0;
+    const isRenewal = input.isRenewal === true || (await this.hasPaidSubscriptionBefore(input));
 
     const rate = isRenewal ? plan.renewalAffiliateRate : plan.affiliateRate;
     const amount = computeAmount(input.productPrice, input.voucherAmount, rate);
@@ -452,6 +443,28 @@ export class AffiliatorService {
       );
       return { committed: 0 };
     }
+  }
+
+  private async hasPaidSubscriptionBefore(input: {
+    buyerMemberId: string;
+    transactionId?: string | null;
+  }): Promise<boolean> {
+    const paid = await prisma.subscriptionActivation.findMany({
+      where: {
+        subscription: { ownerId: input.buyerMemberId },
+        AND: [
+          { transactionId: { not: null } },
+          ...(input.transactionId ? [{ NOT: { transactionId: input.transactionId } }] : []),
+        ],
+      },
+      select: { transactionId: true },
+      distinct: ['transactionId'],
+    });
+    if (paid.length === 0) return false;
+    const refunded = await prisma.commerceTransaction.count({
+      where: { id: { in: paid.map((a) => a.transactionId!) }, status: 'REFUNDED' },
+    });
+    return paid.length > refunded;
   }
 
   private async resolveRate(

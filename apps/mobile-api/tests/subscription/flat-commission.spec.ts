@@ -43,6 +43,7 @@ function commit(over: Partial<Parameters<AffiliatorService['commitCommissionsFor
 }
 
 async function cleanup() {
+  await prisma.commerceTransaction.deleteMany({ where: { code: { contains: uniq } } });
   await prisma.affiliateCommission.deleteMany({
     where: { recipient: { email: { contains: uniq } } },
   });
@@ -75,13 +76,14 @@ beforeAll(async () => {
       periodMonths: 12,
       seatCount: 1,
       affiliateRate: 40,
-      renewalAffiliateRate: 20,
+      renewalAffiliateRate: 10,
       sortOrder: 99,
     },
   });
 });
 
 beforeEach(async () => {
+  await prisma.commerceTransaction.deleteMany({ where: { code: { contains: uniq } } });
   await prisma.affiliateCommission.deleteMany({
     where: { recipient: { email: { contains: uniq } } },
   });
@@ -142,8 +144,8 @@ describe('flat subscription commission (BE-09)', () => {
     await commit({ transactionId: renewTx });
 
     const all = await rows();
-    expect(all.map((r) => r.commissionRate)).toEqual([40, 20]);
-    expect(all[1].amount).toBe(199_800); // floor(999000 * 20 / 100)
+    expect(all.map((r) => r.commissionRate)).toEqual([40, 10]);
+    expect(all[1].amount).toBe(99_900); // floor(999000 * 10 / 100)
   });
 
   it('a tier change is a renewal, not a fresh first sale', async () => {
@@ -166,7 +168,7 @@ describe('flat subscription commission (BE-09)', () => {
         periodMonths: 12,
         seatCount: 4,
         affiliateRate: 40,
-        renewalAffiliateRate: 20,
+        renewalAffiliateRate: 10,
         sortOrder: 99,
       },
     });
@@ -194,7 +196,7 @@ describe('flat subscription commission (BE-09)', () => {
       where: { recipientId: inviterId },
       orderBy: { createdAt: 'asc' },
     });
-    expect(all.map((r) => r.commissionRate)).toEqual([40, 20]);
+    expect(all.map((r) => r.commissionRate)).toEqual([40, 10]);
   });
 
   it('order-independent: commission listener running BEFORE activation still pays first-sale rate', async () => {
@@ -207,11 +209,73 @@ describe('flat subscription commission (BE-09)', () => {
 
   it('provider flag isRenewal=true forces the renewal rate (RC path)', async () => {
     await commit({ isRenewal: true });
-    expect((await rows())[0].commissionRate).toBe(20);
+    expect((await rows())[0].commissionRate).toBe(10);
   });
 
   it('a grant does NOT count as a prior sale — first payment after grant pays 40%', async () => {
     await subscriptionService.grant(buyerId, planCode);
+    const txId = randomUUID();
+    await subscriptionService.activateFromPayment({
+      ownerId: buyerId,
+      productId,
+      transactionId: txId,
+      source: 'xendit',
+    });
+    await commit({ transactionId: txId });
+    expect((await rows())[0].commissionRate).toBe(40);
+  });
+
+  it('repurchase after the old sub EXPIRED is a renewal — any paid sub ever counts', async () => {
+    const firstTx = randomUUID();
+    const first = await subscriptionService.activateFromPayment({
+      ownerId: buyerId,
+      productId,
+      transactionId: firstTx,
+      source: 'xendit',
+    });
+    await commit({ transactionId: firstTx });
+    // Lapsed past grace: the old row is no longer ACTIVE, so the repurchase
+    // lands on a NEW member_subscriptions row.
+    await prisma.memberSubscription.update({
+      where: { id: first.subscription!.id },
+      data: { status: 'EXPIRED', expiresAt: new Date(Date.now() - 86_400_000) },
+    });
+
+    const againTx = randomUUID();
+    const again = await subscriptionService.activateFromPayment({
+      ownerId: buyerId,
+      productId,
+      transactionId: againTx,
+      source: 'xendit',
+    });
+    expect(again.outcome).toBe('initial');
+    expect(again.subscription!.id).not.toBe(first.subscription!.id);
+    await commit({ transactionId: againTx });
+
+    expect((await rows()).map((r) => r.commissionRate)).toEqual([40, 10]);
+  });
+
+  it('a REFUNDED purchase does not count as having paid — rebuy pays 40%', async () => {
+    const refundedTx = await prisma.commerceTransaction.create({
+      data: {
+        code: `TST-FLAT-RF-${uniq}`,
+        memberId: buyerId,
+        productId,
+        amount: PRICE,
+        status: 'REFUNDED',
+      },
+    });
+    const first = await subscriptionService.activateFromPayment({
+      ownerId: buyerId,
+      productId,
+      transactionId: refundedTx.id,
+      source: 'xendit',
+    });
+    await prisma.memberSubscription.update({
+      where: { id: first.subscription!.id },
+      data: { status: 'CANCELED' },
+    });
+
     const txId = randomUUID();
     await subscriptionService.activateFromPayment({
       ownerId: buyerId,
