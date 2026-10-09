@@ -6,7 +6,7 @@ import { shopBaseUrl } from './shop-base-url';
 /**
  * Shortlink resolution for `GET /s/:slug`.
  *
- * The stored row holds the ingredients (product, UTM, voucher), never the final
+ * The stored row holds the ingredients (product or promo, UTM, voucher), never the final
  * URL: the shop origin is a runtime setting and the product's public reference
  * can change, so a frozen URL would rot silently and every already-shared link
  * would keep pointing at the stale target.
@@ -45,8 +45,9 @@ export class TrackingLinkService {
   /**
    * Resolve a slug to its destination.
    *
-   * An unknown slug, an inactive link, or a product with no public reference all
-   * resolve to the shop home with `linkId: null`. A 404 during a live webinar is
+   * An unknown slug or an inactive link resolves to the shop home with
+   * `linkId: null`; a product with no public reference or a deleted promo goes
+   * there too, still counted against the link. A 404 during a live webinar is
    * a lost participant; the miss is logged instead so a typo still surfaces.
    */
   async resolve(slug: string): Promise<ShortlinkTarget> {
@@ -60,6 +61,7 @@ export class TrackingLinkService {
         id: true,
         isActive: true,
         productId: true,
+        promoId: true,
         utmSource: true,
         utmMedium: true,
         utmCampaign: true,
@@ -73,8 +75,47 @@ export class TrackingLinkService {
       return { url: base, linkId: null };
     }
 
+    const path = link.promoId
+      ? await this.promoPath(link.promoId)
+      : await this.productPath(link.productId);
+    if (!path) {
+      logger.warn(
+        { slug: clean, productId: link.productId, promoId: link.promoId },
+        link.promoId ? 'shortlink.promo_unusable' : 'shortlink.product_unusable',
+      );
+      return { url: base, linkId: link.id };
+    }
+
+    const params = new URLSearchParams();
+    params.set('utm_source', link.utmSource);
+    if (link.utmMedium) params.set('utm_medium', link.utmMedium);
+    params.set('utm_campaign', link.utmCampaign);
+    if (link.utmContent) params.set('utm_content', link.utmContent);
+    if (link.utmTerm) params.set('utm_term', link.utmTerm);
+    if (link.voucherCode) params.set('voucher', link.voucherCode);
+
+    return {
+      url: `${base}${path}?${params.toString()}`,
+      linkId: link.id,
+    };
+  }
+
+  /**
+   * Landing path for a promo link. The promo page is served whether or not the
+   * promo is still running — an ended promo shows its own "not found" notice
+   * with a way into the catalog, and the UTM tag is captured on arrival either
+   * way — so only a deleted promo falls back to the shop home.
+   */
+  private async promoPath(promoId: string): Promise<string | null> {
+    const promo = await prisma.promo.findUnique({ where: { id: promoId }, select: { slug: true } });
+    return promo ? `/promo/${encodeURIComponent(promo.slug)}` : null;
+  }
+
+  /** Landing path for a product link, or null when the product has no public reference. */
+  private async productPath(productId: string | null): Promise<string | null> {
+    if (!productId) return null;
     const product = await prisma.product.findUnique({
-      where: { id: link.productId },
+      where: { id: productId },
       select: {
         code: true,
         slug: true,
@@ -92,33 +133,14 @@ export class TrackingLinkService {
       product?.type === EVENT_TICKET_PRODUCT_TYPE
         ? (product.eventTicketType?.event.slug ?? null)
         : null;
+    if (eventSlug) return `/event/${encodeURIComponent(eventSlug)}`;
+
     // Same preference order the shop route and the visit resolver accept:
-    // code -> slug -> legacyId.
+    // code -> slug -> legacyId. An event ticket whose type row is missing falls
+    // through to the product path rather than to the shop home: a half-wired
+    // link should still land the visitor somewhere they can buy.
     const ref = product?.code ?? product?.slug ?? (product?.legacyId?.toString() || null);
-    // An event ticket whose type row is missing falls through to the product
-    // path rather than to the shop home: a half-wired link should still land the
-    // visitor somewhere they can buy, and the miss is logged either way.
-    if (!eventSlug && !ref) {
-      logger.warn({ slug: clean, productId: link.productId }, 'shortlink.product_unusable');
-      return { url: base, linkId: link.id };
-    }
-
-    const params = new URLSearchParams();
-    params.set('utm_source', link.utmSource);
-    if (link.utmMedium) params.set('utm_medium', link.utmMedium);
-    params.set('utm_campaign', link.utmCampaign);
-    if (link.utmContent) params.set('utm_content', link.utmContent);
-    if (link.utmTerm) params.set('utm_term', link.utmTerm);
-    if (link.voucherCode) params.set('voucher', link.voucherCode);
-
-    const path = eventSlug
-      ? `/event/${encodeURIComponent(eventSlug)}`
-      : `/product/${encodeURIComponent(ref as string)}`;
-
-    return {
-      url: `${base}${path}?${params.toString()}`,
-      linkId: link.id,
-    };
+    return ref ? `/product/${encodeURIComponent(ref)}` : null;
   }
 
   /**

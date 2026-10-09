@@ -1730,10 +1730,15 @@ model TrackingLink {
   /// `utmCampaign` which is only unique per source — `webinar/limitless` and
   /// `email/limitless` are both legal campaigns but cannot share a slug.
   slug         String   @unique
-  /// Scalar, no relation and no FK — deliberately, exactly like AffiliateVisit
+  /// Where the link lands: exactly one of `productId` / `promoId` is set
+  /// (CHECK `tracking_links_target_check`). A promo spans several products, so
+  /// a promo link has no product — it lands on `/promo/{slug}`.
+  ///
+  /// Scalars, no relation and no FK — deliberately, exactly like AffiliateVisit
   /// and ShopVisit: a campaign that happened is a record, and deleting a product
-  /// must neither fail nor erase the link's history.
-  productId    String   @map("product_id") @db.Uuid
+  /// or a promo must neither fail nor erase the link's history.
+  productId    String?  @map("product_id") @db.Uuid
+  promoId      String?  @map("promo_id") @db.Uuid
   utmSource    String   @map("utm_source")
   utmMedium    String?  @map("utm_medium")
   /// The report groups on (utmSource, utmCampaign), so the pair is UNIQUE: two
@@ -1760,6 +1765,7 @@ model TrackingLink {
 
   @@unique([utmSource, utmCampaign])
   @@index([productId])
+  @@index([promoId])
   @@index([createdAt])
   @@map("tracking_links")
 }

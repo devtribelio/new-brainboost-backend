@@ -43,7 +43,8 @@ describe('GET /s/:slug', () => {
 
   async function mkLink(opts: {
     slug: string;
-    productId: string;
+    productId?: string | null;
+    promoId?: string | null;
     isActive?: boolean;
     voucherCode?: string | null;
     utmMedium?: string | null;
@@ -52,7 +53,8 @@ describe('GET /s/:slug', () => {
       data: {
         name: `${TAG}-${opts.slug}`,
         slug: opts.slug,
-        productId: opts.productId,
+        productId: opts.productId ?? null,
+        promoId: opts.promoId ?? null,
         utmSource: 'webinar',
         utmMedium: opts.utmMedium ?? null,
         utmCampaign: opts.slug,
@@ -93,6 +95,8 @@ describe('GET /s/:slug', () => {
 
   afterAll(async () => {
     if (linkIds.length) await prisma.trackingLink.deleteMany({ where: { id: { in: linkIds } } });
+    await prisma.promo.deleteMany({ where: { slug: { startsWith: TAG } } });
+    await prisma.voucher.deleteMany({ where: { code: { startsWith: TAG.toUpperCase() } } });
     await prisma.product.deleteMany({ where: { title: { startsWith: TAG } } });
     await prisma.appSetting.deleteMany({ where: { key: SETTING_KEYS.shopBaseUrl } });
     SettingsService.clearCache();
@@ -140,6 +144,54 @@ describe('GET /s/:slug', () => {
     const res = await request(app).get(`/s/${activeSlug.toUpperCase()}`);
     expect(res.status).toBe(302);
     expect(res.headers.location).toContain('/product/');
+  });
+
+  describe('promo links', () => {
+    async function mkPromo(slug: string): Promise<string> {
+      const voucher = await prisma.voucher.create({
+        data: { code: `${TAG.toUpperCase()}-${slug}`, type: 'PERCENT', value: 20 },
+      });
+      const promo = await prisma.promo.create({
+        data: { slug: `${TAG}-${slug}`, title: `${TAG} ${slug}`, voucherId: voucher.id },
+      });
+      return promo.id;
+    }
+
+    it('lands on the promo page with the UTM set and no voucher param', async () => {
+      const promoId = await mkPromo('oktober');
+      const slug = `${TAG}-promo-wa`;
+      await mkLink({ slug, promoId });
+
+      const res = await request(app).get(`/s/${slug}`);
+      expect(res.status).toBe(302);
+      const target = new URL(res.headers.location);
+      expect(target.origin).toBe(SHOP);
+      expect(target.pathname).toBe(`/promo/${TAG}-oktober`);
+      expect(target.searchParams.get('utm_source')).toBe('webinar');
+      expect(target.searchParams.get('utm_campaign')).toBe(slug);
+      // The promo page carries its own voucher onto every product link.
+      expect(target.searchParams.get('voucher')).toBeNull();
+    });
+
+    it('sends a link whose promo was deleted to the shop home', async () => {
+      const promoId = await mkPromo('dihapus');
+      const slug = `${TAG}-promo-hilang`;
+      await mkLink({ slug, promoId });
+      await prisma.promo.delete({ where: { id: promoId } });
+
+      const res = await request(app).get(`/s/${slug}`);
+      expect(res.status).toBe(302);
+      expect(res.headers.location).toBe(SHOP);
+    });
+
+    it('rejects a link that targets both a product and a promo', async () => {
+      const promoId = await mkPromo('ganda');
+      await expect(mkLink({ slug: `${TAG}-ganda`, productId, promoId })).rejects.toThrow();
+    });
+
+    it('rejects a link that targets nothing', async () => {
+      await expect(mkLink({ slug: `${TAG}-kosong` })).rejects.toThrow();
+    });
   });
 
   describe('click counting', () => {
