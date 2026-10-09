@@ -84,7 +84,7 @@ beforeAll(async () => {
       periodMonths: 12,
       seatCount: 2,
       affiliateRate: 40,
-      renewalAffiliateRate: 20,
+      renewalAffiliateRate: 10,
       sortOrder: 99,
     },
   });

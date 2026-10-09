@@ -50,7 +50,7 @@ async function makePlan(tag: string, seatCount: number): Promise<{ productId: st
       periodMonths: 12,
       seatCount,
       affiliateRate: 40,
-      renewalAffiliateRate: 20,
+      renewalAffiliateRate: 10,
       sortOrder: 99,
     },
   });

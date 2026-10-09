@@ -126,7 +126,7 @@ beforeAll(async () => {
       periodMonths: 12,
       seatCount: 1,
       affiliateRate: 40,
-      renewalAffiliateRate: 20,
+      renewalAffiliateRate: 10,
       sortOrder: 99,
     },
   });
@@ -225,7 +225,7 @@ describe('RC subscription flow (BE-12/BE-13)', () => {
 
     await waitFor(async () => ((await commissions()).length === 2 ? true : null));
     const all = await commissions();
-    expect(all.map((c) => c.commissionRate)).toEqual([40, 20]); // renewal rate via per-period claim
+    expect(all.map((c) => c.commissionRate)).toEqual([40, 10]); // renewal rate via per-period claim
 
     // Redelivered RENEWAL (same transaction_id) → duplicate; nothing changes.
     const replay = await post(body);

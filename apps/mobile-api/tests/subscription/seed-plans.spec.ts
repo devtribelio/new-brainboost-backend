@@ -62,7 +62,7 @@ describe('seedSubscriptionPlans (BE-02)', () => {
   });
 
   it('re-run creates nothing and preserves operator-tuned values', async () => {
-    // Simulate runtime ops changes: COO decides the renewal rate, ops reprices.
+    // Simulate runtime ops changes: ops retunes the renewal rate and reprices.
     await prisma.subscriptionPlan.update({
       where: { code: 'SOLO_12M' },
       data: { renewalAffiliateRate: 25 },

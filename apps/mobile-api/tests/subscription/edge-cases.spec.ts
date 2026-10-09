@@ -55,7 +55,7 @@ async function makePlanProduct(tag: string, seatCount: number): Promise<string> 
       periodMonths: 12,
       seatCount,
       affiliateRate: 40,
-      renewalAffiliateRate: 20,
+      renewalAffiliateRate: 10,
       sortOrder: 99,
     },
   });

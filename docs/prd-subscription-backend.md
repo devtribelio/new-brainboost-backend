@@ -24,7 +24,7 @@ Phase 2 (6 bulan, Q4 2026) dan Phase 3 (bulanan, Q2 2027) **harus zero-code**: h
 2. **Device limit:** tidak ada enforcement baru — login mobile sudah me-revoke sesi mobile lama (1 sesi mobile aktif per akun). N seat × 1 sesi = N device.
 3. **Web renewal TANPA auto-charge (v1):** reminder email H-7/H-3/H-1 berisi link repurchase plan yang sama; pembayaran sukses meng-extend expiry. Auto-charge kartu (Xendit PaymentRequest/tokenisasi) = fase berikutnya; kolom `CommercePayment.xenditPaymentMethodId` dkk sudah tersedia.
 4. **IAP:** subscription juga dijual sebagai App Store/Play auto-renewing subscription via RevenueCat (webhook sudah ada). RC memegang auto-renew + expiry otoritatif.
-5. **Komisi affiliate FLAT, level-1 only** (tanpa tier PERFORMANCE, tanpa upline GROWTH): penjualan pertama 40%; **renewal tetap dapat komisi dengan rate lebih kecil** — angka final belum diputuskan COO → kolom per-plan `renewalAffiliateRate` (placeholder 20%, editable runtime).
+5. **Komisi affiliate FLAT, level-1 only** (tanpa tier PERFORMANCE, tanpa upline GROWTH): penjualan pertama **40%**; **renewal (tahun ke-2 dst) 10%** (keputusan COO, 24 Agu 2026 — Solo renewal = IDR 99.900). Disimpan di kolom per-plan `renewalAffiliateRate` (editable runtime tanpa deploy).
 6. **Upgrade claim:** buyer dengan total pembelian historis > IDR 2.000.000 dapat di-GRANT 1 tahun Solo gratis (script admin, `source='granted'`, tanpa transaksi).
 7. Beli tier berbeda saat masih ACTIVE → tolak 400 (upgrade/proration = Phase 2). Repurchase plan sama = extension.
 8. Harga tinggal di `Product.price` (plan 1:1 dengan Product `type='subscription'`) — checkout, voucher, dan verifikasi paid-amount Xendit memakai jalur commerce existing tanpa perubahan.
@@ -71,8 +71,7 @@ Phase 2 (6 bulan, Q4 2026) dan Phase 3 (bulanan, Q2 2027) **harus zero-code**: h
 
 1. **bb-comms:** template `SubscriptionRenewalReminder`, `SubscriptionActivated`, `SubscriptionRenewed`.
 2. **App Store / Play Store:** buat produk auto-renewing subscription 4 tier (annual) + isi SKU asli ke Product (`iosProductId`/`androidProductId`) + konfigurasi entitlement/offering RevenueCat.
-3. **Keputusan COO:** angka final `renewalAffiliateRate` (placeholder 20%).
-4. **Marketing:** copy email reminder + landing page (link repurchase).
+3. **Marketing:** copy email reminder + landing page (link repurchase).
 
 ## 6. Out of Scope (v1)
 

@@ -71,7 +71,7 @@ async function makePlanProduct(tag: string, seatCount: number, sortOrder: number
       periodMonths: 12,
       seatCount,
       affiliateRate: 40,
-      renewalAffiliateRate: 20,
+      renewalAffiliateRate: 10,
       sortOrder,
     },
   });

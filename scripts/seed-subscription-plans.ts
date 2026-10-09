@@ -2,9 +2,8 @@
 /**
  * Seed the 4 annual subscription Products + SubscriptionPlans (Phase 1).
  * Idempotent — an existing row (matched by unique code) is NEVER touched:
- * operators may have tuned Product.price or plan rates at runtime (e.g. the
- * final renewalAffiliateRate once the COO decides), and a re-run must not
- * revert that. See docs/prd-subscription-backend.md (BE-02).
+ * operators may have tuned Product.price or plan rates at runtime, and a
+ * re-run must not revert that. See docs/prd-subscription-backend.md (BE-02).
  *
  *   pnpm seed:subscription-plans            (apply)
  *   pnpm seed:subscription-plans --dry-run  (report only)
@@ -38,8 +37,7 @@ export interface SubscriptionPlanSeed {
 
 const PERIOD_MONTHS = 12;
 const AFFILIATE_RATE = 40; // % flat L1, first sale (PRD locked)
-// % on renewals AND tier changes. Decided by the COO 2026-08-24 (was a 20%
-// placeholder). Runtime-editable per plan via subscription_plans.renewal_affiliate_rate
+// % on renewals AND tier changes. Decided by the COO 2026-08-24. Runtime-editable per plan via subscription_plans.renewal_affiliate_rate
 // — this constant only seeds NEW rows, it never overwrites a tuned one.
 const RENEWAL_AFFILIATE_RATE = 10;
 

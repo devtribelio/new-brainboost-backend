@@ -213,8 +213,8 @@ GROUP BY p.tier ORDER BY MIN(p.sort_order);
 |---|---|---|
 | ~~3 template email di bb-comms~~ | tim bb-comms | ✅ **selesai** (BB-111, commit bb-comms `0b5f561`, sudah di `main`): `subscription_activated` / `subscription_renewed` / `subscription_renewal_reminder`, ketiganya terdaftar di `internal/handler/handler.go`. Baris ini sempat tertinggal ❌ berbulan-bulan setelah template-nya ada |
 | SKU asli App Store/Play + entitlement RC | mobile/ops | ❌ placeholder di DB |
-| Angka final `renewal_affiliate_rate` | COO | ❌ placeholder 20% |
-| Basis + rate komisi **upgrade** tier | COO | ❌ default sekarang: kredit mengurangi basis, rate = renewal |
+| ~~Angka final `renewal_affiliate_rate`~~ | COO | ✅ **10%** (COO 2026-08-24), di-seed per plan |
+| ~~Basis + rate komisi **upgrade** tier~~ | COO | ✅ (COO 2026-08-24): basis = harga paket (kredit prorata TIDAK mengurangi), rate = renewal 10% |
 | Konfirmasi payload `PRODUCT_CHANGE` asli | QA sandbox | ❌ belum pernah ada sampelnya di prod |
 | Copy email reminder + landing repurchase | marketing | ❌ |
 | Investigasi 655 legacy paying member tanpa akun baru | backend | ❌ temuan BE-20 |
