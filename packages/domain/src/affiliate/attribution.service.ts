@@ -3,6 +3,19 @@ import { settingsService, SETTING_KEYS } from '@bb/common/services/settings.serv
 import { AFFILIATE_COOKIE_DAYS_DEFAULT } from './constants';
 
 /**
+ * Which visits may attribute a purchase of `productId`. Strict per product (B-5),
+ * except that every `type='subscription'` product is ONE group (decided
+ * 2026-10-09): the buyer is shown all tiers, so a click on any plan attributes
+ * a purchase of any plan. Shared by both visit readers (this service + checkout's
+ * program metadata) so they cannot disagree.
+ */
+export async function attributionProductScope(productId: string): Promise<string | { in: string[] }> {
+  const plans = await prisma.product.findMany({ where: { type: 'subscription' }, select: { id: true } });
+  const ids = plans.map((p) => p.id);
+  return ids.includes(productId) ? { in: ids } : productId;
+}
+
+/**
  * Resolves the per-purchase commission "override" affiliator (last-touch), shared by web
  * checkout and 3rd-party ingestion so attribution is consistent across channels.
  *
@@ -10,7 +23,8 @@ import { AFFILIATE_COOKIE_DAYS_DEFAULT } from './constants';
  *   1. explicit affiliate code for THIS purchase (web cookie / app deeplink param / provider metadata)
  *   2. most-recent AffiliateVisit within the configurable window (app_settings: affiliate.cookieDays).
  *      STRICT per-product (B-5): when `productId` is given, ONLY a visit scoped to that exact product
- *      attributes. Product-less visits (productId IS NULL) and visits for a DIFFERENT product are
+ *      attributes — subscription plans count as one product (`attributionProductScope`).
+ *      Product-less visits (productId IS NULL) and visits for a DIFFERENT product are
  *      ignored — closing both the "click link for X, buy Y" leak and the product-less last-touch leak.
  *   3. null → engine then falls back to the buyer's permanent inviterId
  *
@@ -63,7 +77,8 @@ export class AttributionService {
       // Product-less visits (productId IS NULL — legacy pre-B5, web/program links,
       // or app builds that don't yet send productCode) and other-product visits are
       // intentionally IGNORED. No match → null → engine falls back to buyer inviter.
-      return pickVisit({ productId });
+      // Subscription plans are one group: a visit on any plan attributes any plan.
+      return pickVisit({ productId: await attributionProductScope(productId) });
     }
 
     // No product context at all (caller didn't supply productId) → latest visit of

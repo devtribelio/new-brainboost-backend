@@ -10,6 +10,8 @@ import { badRequest, ERROR_CODES } from '@bb/common/exceptions';
 import { parsePagination } from '@bb/common/utils/pagination.util';
 import { serializeProduct, serializeCourseDetailLegacy } from './product.serializer';
 import { prisma } from '@bb/db';
+import { shopBaseUrl } from '@bb/domain/shop/shop-base-url';
+import { SUBSCRIPTION_LINK_REF, VisitService } from '@bb/domain/affiliate/visit.service';
 import {
   ApiBearerAuth,
   ApiOperation,
@@ -177,11 +179,16 @@ export class ProductController {
   @ApiOperation({ summary: 'Generate a share link for a course' })
   @ApiResponse({ status: 200, type: () => ProductShareDto })
   shareCourse = async (req: Request, res: Response) => {
-    const code = (req.body?.code as string) ?? '';
+    let code = (req.body?.code as string) ?? '';
     if (!code) throw badRequest(ERROR_CODES.PRODUCT_CODE_REQUIRED);
+    // `subscription` = the plans as one offer: share the default plan (the link
+    // itself is the group link, below). The plans list carries no product code.
+    if (code.toLowerCase() === SUBSCRIPTION_LINK_REF) {
+      code = (await new VisitService().resolveProduct(code))?.code ?? code;
+    }
     const product = await prisma.product.findUnique({
       where: { code },
-      select: { id: true, code: true, slug: true, title: true, marketingLink: true },
+      select: { id: true, code: true, slug: true, title: true, marketingLink: true, type: true },
     });
     if (!product) throw badRequest(ERROR_CODES.PRODUCT_NOT_FOUND, { code });
     const memberId = (req as { user?: { id?: string } }).user?.id;
@@ -197,6 +204,14 @@ export class ProductController {
     const slug = product.slug ?? product.code ?? product.id;
     const productUrl = product.marketingLink ?? `${baseUrl}/p/${slug}`;
     const shareUrl = affiliateCode ? `${productUrl}?affCode=${affiliateCode}` : productUrl;
-    return ok(res, { code: product.code, shareUrl });
+    // Clickable affiliate link served through the shop's /api rewrite, so the bb_aff
+    // cookie lands on the shop host (see affiliate followLink). A subscription plan
+    // shares the GROUP link: the buyer picks any tier and the click attributes it.
+    const linkRef = product.type === 'subscription' ? SUBSCRIPTION_LINK_REF : product.code;
+    const affiliateLinkUrl =
+      affiliateCode && linkRef
+        ? `${await shopBaseUrl()}/api/member/affiliate/link/${encodeURIComponent(affiliateCode)}/${encodeURIComponent(linkRef)}`
+        : null;
+    return ok(res, { code: product.code, shareUrl, affiliateLinkUrl });
   };
 }

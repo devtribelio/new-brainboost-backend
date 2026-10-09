@@ -9,6 +9,7 @@ import { DisbursementService } from '@bb/domain/affiliate/disbursement.service';
 import { AffiliateLeaderboardService } from '@bb/domain/affiliate/leaderboard.service';
 import { authGuard, optionalAuthGuard } from '@bb/common/middlewares/auth.middleware';
 import { validateDto } from '@bb/common/middlewares/validation.middleware';
+import { affiliateLinkRateLimiter } from '@bb/common/middlewares/rate-limit.middleware';
 import { bindRoute } from '@bb/common/openapi/route-binder';
 import { RequestDisbursementDto, SetBankAccountDto, SubmitKycDto } from './dto/affiliate-request.dto';
 
@@ -38,6 +39,8 @@ export function affiliateRoutes(): Router {
 
   // Visit + attribution (visit endpoint is public/optional-auth, attribution requires auth)
   bindRoute({ router, controller: ctrl, method: 'post', path: '/affiliate/visits', handlerKey: 'logVisit', middlewares: [optionalAuthGuard] });
+  // Clickable link (browser / OneLink af_web_dp): visit + bb_aff cookie + 302 to the shop. Never 4xx.
+  bindRoute({ router, controller: ctrl, method: 'get', path: '/affiliate/link/:affCode/:product', handlerKey: 'followLink', middlewares: [affiliateLinkRateLimiter, optionalAuthGuard] });
   bindRoute({ router, controller: ctrl, method: 'post', path: '/affiliate/attribution', handlerKey: 'logAttribution', middlewares: [authGuard] });
 
   // Bank account (payout destination)

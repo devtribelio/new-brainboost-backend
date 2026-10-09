@@ -483,3 +483,22 @@ export const shopVisitRateLimiter: RequestHandler = rateLimit({
   },
   skip: skipInTest,
 });
+
+// --- Affiliate link redirect (`GET /affiliate/link/:affCode/:product`) — PUBLIC
+//     browser navigation, keyed per-IP. Same contract as the `/s/:slug` shortlink:
+//     over budget the visitor is STILL redirected, only without a counted visit or
+//     cookie (`res.locals.affiliateLinkThrottled`). A 429 page shown to someone
+//     who clicked a shared link is a lost buyer; the throttle bounds writes only.
+export const affiliateLinkRateLimiter: RequestHandler = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: clientIp,
+  ...storeOption('affiliate-link'),
+  handler: (_req, res, next) => {
+    res.locals.affiliateLinkThrottled = true;
+    next();
+  },
+  skip: skipInTest,
+});

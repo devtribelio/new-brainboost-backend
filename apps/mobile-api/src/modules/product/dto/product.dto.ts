@@ -395,4 +395,13 @@ export class ProductShareDto {
 
   @ApiProperty({ example: 'https://brainboost.com/p/react-fundamentals' })
   shareUrl!: string;
+
+  @ApiProperty({
+    nullable: true,
+    example: 'https://brainboost.id/api/member/affiliate/link/AB12CD/react-fundamentals',
+    description:
+      'Clickable affiliate link (logs the visit, sets the bb_aff cookie, 302 to the shop product page). ' +
+      'Null when the caller has no affiliate code. Use as the OneLink `af_web_dp`.',
+  })
+  affiliateLinkUrl!: string | null;
 }

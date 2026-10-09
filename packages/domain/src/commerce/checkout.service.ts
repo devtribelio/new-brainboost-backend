@@ -10,7 +10,7 @@ import {
 import { computeTotals } from './utils/compute-totals';
 import { generateOrderCode } from './utils/generate-order-code';
 import { VoucherService } from './voucher.service';
-import { attributionService } from '@bb/domain/affiliate/attribution.service';
+import { attributionService, attributionProductScope } from '@bb/domain/affiliate/attribution.service';
 import { OWNED_FOR_PURCHASE } from './enrollment';
 import { isUpgrade } from '../subscription/tier';
 import { computeProration } from '../subscription/proration';
@@ -348,7 +348,7 @@ export class CheckoutService {
         memberId,
         affiliatorMemberId: { not: memberId }, // an own-code click attributes nothing
         createdAt: { gte: since },
-        program: { productId },
+        program: { productId: await attributionProductScope(productId) }, // subscription plans = one group
       },
       orderBy: { createdAt: 'desc' },
       select: { affiliatorMemberId: true, programId: true },

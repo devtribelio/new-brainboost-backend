@@ -51,6 +51,9 @@ const ALLOWED_HEADER_NAMES = new Set([
   'x-app-version',
 ]);
 
+/** Affiliate-link product ref meaning "the subscription offer" (all plans, one group). */
+export const SUBSCRIPTION_LINK_REF = 'subscription';
+
 export class VisitService {
   /**
    * Log a visit event. Critical: never throws — marketing ad links cannot
@@ -147,29 +150,45 @@ export class VisitService {
   }
 
   /**
-   * Resolve an affiliate-link product reference (B-5) to a Product.id. Accepts the
-   * same forms the product detail route does — legacyId (strict numeric) → code →
-   * slug — so OneLinks built from any of them attribute correctly. Returns null on
+   * Resolve an affiliate-link product reference (B-5). Accepts the same forms the
+   * product detail route does — legacyId (strict numeric) → code → slug — so
+   * OneLinks built from any of them attribute correctly. Returns null on
    * absent/unknown input (→ product-less visit; never rejects the click).
+   *
+   * The literal `subscription` (any case) is the group link for every plan: it
+   * resolves to the default plan — the active plan with the fewest seats, lower
+   * price on a tie. Which plan the click is stored against does not matter for
+   * attribution (`attributionProductScope` treats all plans as one product).
    */
-  private async resolveProductId(productCode?: string): Promise<string | null> {
+  async resolveProduct(
+    productCode?: string,
+  ): Promise<{ id: string; code: string | null; slug: string | null; legacyId: number | null } | null> {
     const input = productCode?.trim();
     if (!input) return null;
+    const select = { id: true, code: true, slug: true, legacyId: true } as const;
+
+    if (input.toLowerCase() === SUBSCRIPTION_LINK_REF) {
+      const plan = await prisma.subscriptionPlan.findFirst({
+        where: { isActive: true },
+        orderBy: [{ seatCount: 'asc' }, { product: { price: 'asc' } }],
+        select: { product: { select } },
+      });
+      return plan?.product ?? null;
+    }
 
     const legacyId = Number.parseInt(input, 10);
     if (Number.isFinite(legacyId) && input === String(legacyId)) {
-      const byLegacy = await prisma.product.findUnique({ where: { legacyId }, select: { id: true } });
-      if (byLegacy) return byLegacy.id;
+      const byLegacy = await prisma.product.findUnique({ where: { legacyId }, select });
+      if (byLegacy) return byLegacy;
     }
-    const byCode = await prisma.product.findUnique({ where: { code: input }, select: { id: true } });
-    if (byCode) return byCode.id;
+    const byCode = await prisma.product.findUnique({ where: { code: input }, select });
+    if (byCode) return byCode;
     // slug is not unique → first active match, deterministic (UUID v7 time-ordered).
-    const bySlug = await prisma.product.findFirst({
-      where: { slug: input },
-      orderBy: { id: 'asc' },
-      select: { id: true },
-    });
-    return bySlug?.id ?? null;
+    return prisma.product.findFirst({ where: { slug: input }, orderBy: { id: 'asc' }, select });
+  }
+
+  private async resolveProductId(productCode?: string): Promise<string | null> {
+    return (await this.resolveProduct(productCode))?.id ?? null;
   }
 
   /**

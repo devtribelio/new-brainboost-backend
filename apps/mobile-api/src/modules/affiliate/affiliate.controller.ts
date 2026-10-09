@@ -20,6 +20,9 @@ import {
   AFFILIATE_COOKIE_DAYS_DEFAULT,
 } from '@bb/domain/affiliate/constants';
 import { settingsService, SETTING_KEYS } from '@bb/common/services/settings.service';
+import { logger } from '@bb/common/config/logger';
+import { shopBaseUrl, SHOP_BASE_URL_FALLBACK } from '@bb/domain/shop/shop-base-url';
+import { BOT_UA } from '@bb/domain/shop/visit.rules';
 import {
   ApiBearerAuth,
   ApiBody,
@@ -252,26 +255,74 @@ export class AffiliateController {
       clientEventId: body.clientEventId as string | undefined,
     });
 
-    // Legacy parity: drop a last-touch attribution cookie (web flow). Latest click wins
-    // (sticky until overwritten/expired). Apps ignore this and pass affiliateCode explicitly.
-    // Duration is runtime-configurable via app_settings (affiliate.cookieDays).
+    // Legacy parity: drop the last-touch attribution cookie (web flow).
     // Not on an own-code click: checkout reads this cookie as the explicit code, so
     // writing it would replace a real affiliator's cookie with one checkout rejects.
     if (affiliatorCode && result.status !== 'skipped') {
-      const cookieDays = await settingsService.getNumber(
-        SETTING_KEYS.affiliateCookieDays,
-        AFFILIATE_COOKIE_DAYS_DEFAULT,
-      );
-      res.cookie(AFFILIATE_COOKIE_NAME, affiliatorCode, {
-        maxAge: cookieDays * 24 * 60 * 60 * 1000,
-        httpOnly: true,
-        sameSite: 'lax',
-        path: '/',
-        secure: process.env.NODE_ENV === 'production',
-      });
+      await setAffiliateCookie(res, affiliatorCode);
     }
 
     return ok(res, result);
+  };
+
+  @ApiOperation({
+    summary: 'Clickable affiliate link: log the visit, set the bb_aff cookie, 302 to the shop product page',
+    description:
+      'Browser-facing (AppsFlyer OneLink `af_web_dp`, or shared directly). Reach it through the shop host ' +
+      '(`https://<shop>/api/member/affiliate/link/<affCode>/<product>`) so the cookie lands where checkout reads it. ' +
+      '`product` = legacyId | code | slug. `utm_*` / gclid / fbclid / ttclid query params are recorded on the visit. ' +
+      'Never answers 4xx/5xx: unknown product → `/products`; unknown affiliate code → redirect with no cookie and no visit; ' +
+      'bot/unfurl user agents and over-budget IPs → redirect only.',
+  })
+  @ApiResponse({ status: 302, description: 'Redirect to the shop product page', envelope: 'none' })
+  followLink = async (req: AuthenticatedRequest, res: Response) => {
+    let target: string | null = null;
+    try {
+      const base = await shopBaseUrl();
+      target = `${base}/products`;
+      const affiliatorCode = String(req.params.affCode ?? '').trim();
+      const productRef = String(req.params.product ?? '').trim();
+
+      const product = await this.visitService.resolveProduct(productRef);
+      // Same preference order the shortlink redirect uses: code -> slug -> legacyId.
+      const ref = product?.code ?? product?.slug ?? (product?.legacyId?.toString() || null);
+      if (ref) target = `${base}/product/${encodeURIComponent(ref)}`;
+      else logger.warn({ productRef }, 'affiliate.link.unknown_product');
+
+      const userAgent = req.headers['user-agent'];
+      // Unfurlers (WhatsApp/Slack previews, mail scanners) are not visitors, and a
+      // throttled IP still gets its redirect — neither writes a visit or a cookie.
+      if ((userAgent && BOT_UA.test(userAgent)) || res.locals.affiliateLinkThrottled) {
+        return res.redirect(302, target);
+      }
+
+      const queryParsed = VisitService.parseQuery(req.query as Record<string, unknown>);
+      const result = await this.visitService.logVisit({
+        affiliatorCode,
+        productCode: product ? productRef : undefined,
+        memberId: req.user?.id ?? null,
+        ...queryParsed,
+        ipAddress: extractIp(req),
+        userAgent,
+        referer: req.headers.referer,
+        rawQueryString: req.url.includes('?') ? req.url.slice(req.url.indexOf('?') + 1) : undefined,
+        rawHeaders: VisitService.sanitizeHeaders(
+          req.headers as Record<string, string | string[] | undefined>,
+        ),
+      });
+
+      // Cookie only for a code that resolved to a real affiliator: `invalid` (unknown
+      // code) would plant a cookie checkout can never honour, `skipped` (own code)
+      // would overwrite a real affiliator's cookie.
+      if (result.status === 'logged' || result.status === 'duplicate') {
+        await setAffiliateCookie(res, affiliatorCode);
+      } else if (result.status !== 'skipped') {
+        logger.warn({ affiliatorCode, status: result.status, reason: result.reason }, 'affiliate.link.visit_not_logged');
+      }
+    } catch (err) {
+      logger.warn({ err }, 'affiliate.link.failed');
+    }
+    return res.redirect(302, target ?? `${SHOP_BASE_URL_FALLBACK}/products`);
   };
 
   @ApiBearerAuth()
@@ -433,6 +484,26 @@ export class AffiliateController {
     const session = await this.disbursementService.createDiditSession(req.user.id);
     return ok(res, session);
   };
+}
+
+/**
+ * Last-touch web attribution cookie (legacy parity) — the ONE cookie policy for
+ * every affiliate click endpoint. Checkout reads it as the explicit code. Latest
+ * click wins; duration is runtime-configurable via app_settings
+ * (affiliate.cookieDays). Apps ignore it and pass affiliateCode explicitly.
+ */
+async function setAffiliateCookie(res: Response, affiliatorCode: string): Promise<void> {
+  const cookieDays = await settingsService.getNumber(
+    SETTING_KEYS.affiliateCookieDays,
+    AFFILIATE_COOKIE_DAYS_DEFAULT,
+  );
+  res.cookie(AFFILIATE_COOKIE_NAME, affiliatorCode, {
+    maxAge: cookieDays * 24 * 60 * 60 * 1000,
+    httpOnly: true,
+    sameSite: 'lax',
+    path: '/',
+    secure: process.env.NODE_ENV === 'production',
+  });
 }
 
 function extractIp(req: Request): string | undefined {
